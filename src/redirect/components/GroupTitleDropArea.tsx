@@ -26,12 +26,14 @@ export default function GroupTitleDropArea({
   return (
     <div ref={setNodeRef} className="group-title-drop-area">
       <div className="group-title-drop-area-inner">
-        <Switch
-          size="small"
-          checked={group.enabled}
-          disabled={disabled}
-          onChange={(checked) => onToggle(group.id, checked)}
-        />
+        <span onPointerDownCapture={(event) => event.stopPropagation()}>
+          <Switch
+            size="small"
+            checked={group.enabled}
+            disabled={disabled}
+            onChange={(checked) => onToggle(group.id, checked)}
+          />
+        </span>
         <span style={{ display: 'inline-flex', alignItems: 'center', lineHeight: '20px', fontWeight: 600 }}>
           {group.name}
         </span>

@@ -32,4 +32,9 @@ export type GroupDropData = {
   groupId: string;
 };
 
+export type GroupSortDragData = {
+  type: 'group-sort';
+  groupId: string;
+};
+
 export type DragData = RuleDragData | GroupDropData;

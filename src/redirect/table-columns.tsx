@@ -260,7 +260,10 @@ export function buildGroupColumns({
       render: (_: unknown, g: RedirectGroup) => {
         const count = groupRuleCountMap.get(g.id) ?? 0;
         return (
-          <div style={{ height: 32, display: 'flex', alignItems: 'center' }}>
+          <div
+            style={{ height: 32, display: 'flex', alignItems: 'center' }}
+            onPointerDownCapture={(event) => event.stopPropagation()}
+          >
             <Space size={6}>
               <Button
                 size="small"
