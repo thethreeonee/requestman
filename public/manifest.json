@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "ASAP Network Utils",
+  "version": "0.0.1",
+  "devtools_page": "devtools/index.html",
+  "background": {
+    "service_worker": "background/index.js",
+    "type": "module"
+  },
+  "permissions": [
+    "scripting",
+    "storage",
+    "declarativeNetRequest",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "injected.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content/index.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "injected.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "icons": {
+    "16": "icons/16.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  }
+}
