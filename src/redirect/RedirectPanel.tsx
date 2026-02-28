@@ -68,25 +68,29 @@ const MATCH_MODE_OPTIONS: { label: string; value: MatchMode }[] = [
   { label: '正则', value: 'regex' },
 ];
 
-function SortableGroupContainer({
+function SortableGroupHeader({
   id,
   children,
 }: {
   id: string;
-  children: (dnd: { attributes: Record<string, unknown>; listeners: Record<string, unknown> }) => React.ReactNode;
+  children: (dnd: { attributes: Record<string, unknown>; listeners: Record<string, unknown>; isDragging: boolean }) => React.ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: toGroupSortDndId(id),
     data: { type: 'group-sort', groupId: id },
   });
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
 
   return (
-    <div ref={setNodeRef} style={style} className={isDragging ? 'simple-group-card simple-group-card-dragging' : 'simple-group-card'}>
-      {children({ attributes: attributes as Record<string, unknown>, listeners: listeners as Record<string, unknown> })}
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={isDragging ? 'simple-group-head simple-group-card-dragging' : 'simple-group-head'}
+    >
+      {children({
+        attributes: attributes as Record<string, unknown>,
+        listeners: listeners as Record<string, unknown>,
+        isDragging,
+      })}
     </div>
   );
 }
@@ -547,59 +551,53 @@ function RedirectPanel() {
           <DndContext sensors={sensors} collisionDetection={ruleDropCollisionDetection} onDragEnd={handleDragEnd}>
             <div ref={listScrollRef} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
               <SortableContext items={groups.map((group) => toGroupSortDndId(group.id))} strategy={verticalListSortingStrategy}>
-                {groups.map((group) => {
-                  const groupRules = rulesByGroup.get(group.id) ?? [];
-                  const activeCount = groupRules.filter((rule) => isRuleEffectivelyEnabled(rule, groupEnabledMap)).length;
-                  const collapsed = collapsedGroupIds.includes(group.id);
-                  return (
-                    <SortableGroupContainer key={group.id} id={group.id}>
-                      {({ attributes, listeners }) => (
-                        <Collapse
-                          bordered={false}
-                          className="simple-group-collapse"
-                          activeKey={collapsed ? [] : ['rules']}
-                          onChange={(keys) => {
-                            const nextKeys = Array.isArray(keys) ? keys : [keys];
-                            const isOpen = nextKeys.includes('rules');
-                            setCollapsedGroupIds((prev) => (
-                              isOpen
-                                ? prev.filter((id) => id !== group.id)
-                                : [...prev, group.id]
-                            ));
-                          }}
-                          items={[
-                            {
-                              key: 'rules',
-                              label: (
-                                <div className="simple-group-head" {...attributes} {...listeners}>
-                                  <Space size={8}>
-                                    <Switch checked={group.enabled && redirectEnabled} onChange={(checked) => toggleGroupEnabled(group.id, checked)} />
-                                    <Typography.Text strong>{group.name}</Typography.Text>
-                                    <Typography.Text type="secondary">{activeCount}/{groupRules.length}</Typography.Text>
-                                  </Space>
-                                </div>
-                              ),
-                              extra: (
-                                <Space size={6} onClick={(e) => e.stopPropagation()}>
-                                  <Button icon={<PlusOutlined />} onClick={() => addRule(group.id)} />
-                                  <Button icon={<EditOutlined />} onClick={() => openEditGroupModal(group.id)} />
-                                  <Popconfirm title="删除分组？" description="该分组下规则会一并删除" onConfirm={() => removeGroup(group.id)}>
-                                    <Button danger icon={<DeleteOutlined />} />
-                                  </Popconfirm>
-                                </Space>
-                              ),
-                              children: groupRules.length === 0 ? (
-                                <Typography.Text type="secondary">暂无规则，点击右上角 + 添加规则。</Typography.Text>
-                              ) : (
-                                <SortableContext items={groupRules.map((rule) => rule.id)} strategy={verticalListSortingStrategy}>
-                                  <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                                    {groupRules.map((rule) => {
-                                      const dirty = isRuleFieldDirty(rule, 'expression') || isRuleFieldDirty(rule, 'redirectUrl');
-                                      return (
-                                        <SortableRuleCard key={rule.id} rule={rule}>
-                                          {({ attributes, listeners }) => (
-                                            <>
-                                              <div className={`simple-rule-card-content ${highlightedRuleId === rule.id ? 'simple-rule-card-highlighted' : ''}`}>
+                <Collapse
+                  bordered={false}
+                  className="simple-group-collapse"
+                  activeKey={groups.filter((group) => !collapsedGroupIds.includes(group.id)).map((group) => group.id)}
+                  onChange={(keys) => {
+                    const openKeys = (Array.isArray(keys) ? keys : [keys]).map((key) => String(key));
+                    setCollapsedGroupIds(groups.filter((group) => !openKeys.includes(group.id)).map((group) => group.id));
+                  }}
+                  items={groups.map((group) => {
+                    const groupRules = rulesByGroup.get(group.id) ?? [];
+                    const activeCount = groupRules.filter((rule) => isRuleEffectivelyEnabled(rule, groupEnabledMap)).length;
+                    return {
+                      key: group.id,
+                      label: (
+                        <SortableGroupHeader id={group.id}>
+                          {({ attributes, listeners }) => (
+                            <div {...attributes} {...listeners}>
+                              <Space size={8}>
+                                <Switch checked={group.enabled && redirectEnabled} onChange={(checked) => toggleGroupEnabled(group.id, checked)} />
+                                <Typography.Text strong>{group.name}</Typography.Text>
+                                <Typography.Text type="secondary">{activeCount}/{groupRules.length}</Typography.Text>
+                              </Space>
+                            </div>
+                          )}
+                        </SortableGroupHeader>
+                      ),
+                      extra: (
+                        <Space size={6} onClick={(e) => e.stopPropagation()}>
+                          <Button icon={<PlusOutlined />} onClick={() => addRule(group.id)} />
+                          <Button icon={<EditOutlined />} onClick={() => openEditGroupModal(group.id)} />
+                          <Popconfirm title="删除分组？" description="该分组下规则会一并删除" onConfirm={() => removeGroup(group.id)}>
+                            <Button danger icon={<DeleteOutlined />} />
+                          </Popconfirm>
+                        </Space>
+                      ),
+                      children: groupRules.length === 0 ? (
+                        <Typography.Text type="secondary">暂无规则，点击右上角 + 添加规则。</Typography.Text>
+                      ) : (
+                        <SortableContext items={groupRules.map((rule) => rule.id)} strategy={verticalListSortingStrategy}>
+                          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                            {groupRules.map((rule) => {
+                              const dirty = isRuleFieldDirty(rule, 'expression') || isRuleFieldDirty(rule, 'redirectUrl');
+                              return (
+                                <SortableRuleCard key={rule.id} rule={rule}>
+                                  {({ attributes, listeners }) => (
+                                    <>
+                                      <div className={`simple-rule-card-content ${highlightedRuleId === rule.id ? 'simple-rule-card-highlighted' : ''}`}>
                                           <div className="simple-rule-top-row">
                                             <Space wrap size={8}>
                                               <Button type="text" size="small" icon={<HolderOutlined />} className="simple-rule-drag-handle" {...attributes} {...listeners} />
@@ -689,22 +687,18 @@ function RedirectPanel() {
                                           <div className="simple-rule-save-row">
                                             {dirty ? <Typography.Text type="warning">有未保存修改</Typography.Text> : null}
                                           </div>
-                                              </div>
-                                            </>
-                                          )}
-                                        </SortableRuleCard>
-                                      );
-                                    })}
-                                  </Space>
-                                </SortableContext>
-                              ),
-                            },
-                          ]}
-                        />
-                      )}
-                    </SortableGroupContainer>
-                  );
-                })}
+                                      </div>
+                                    </>
+                                  )}
+                                </SortableRuleCard>
+                              );
+                            })}
+                          </Space>
+                        </SortableContext>
+                      ),
+                    };
+                  })}
+                />
               </SortableContext>
             </div>
           </DndContext>
