@@ -545,7 +545,17 @@ function RedirectPanel() {
               return;
             }
             const ignored = Number(resp.ignoredCount || 0);
+            const hasIncompleteRules = nextRules.some(
+              (rule) =>
+                !rule.expression.trim()
+                || !rule.redirectUrl.trim()
+                || !nextGroups.find((group) => group.id === rule.groupId),
+            );
             if (ignored > 0) {
+              if (hasIncompleteRules) {
+                opts?.onSuccess?.(resp.activeCount);
+                return;
+              }
               message.warning(`已生效 ${resp.activeCount} 条，忽略 ${ignored} 条`);
               opts?.onSuccess?.(resp.activeCount);
               return;
