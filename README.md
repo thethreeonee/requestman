@@ -2,6 +2,13 @@
 
 一个 Chrome Manifest V3 插件示例：在 DevTools 新增 `Redirect Rules` 面板，支持按规则组管理请求重定向。
 
+## 技术栈
+
+- 构建工具：Vite
+- UI 框架：React + Ant Design
+- 拖拽能力：@dnd-kit
+- 网络重定向：Chrome `declarativeNetRequest`
+
 ## 功能
 
 - 在开发者工具新增自定义 Tab（`Redirect Rules`）。
@@ -15,6 +22,15 @@
   - 规则排序
   - 规则拖到其他组
 - 删除规则或规则组需要二次确认。
+
+## 开发
+
+```bash
+npm install
+npm run build
+```
+
+构建产物会输出到 `src/devtools/panel-bundle`，DevTools 面板会直接加载该目录下的 `index.html`。
 
 ## 安装
 
