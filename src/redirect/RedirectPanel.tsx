@@ -18,6 +18,7 @@ import {
   DownloadOutlined,
 } from '@ant-design/icons';
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from '@dnd-kit/core';
+import './index.css';
 import {
   DndContext,
   DragOverlay,
