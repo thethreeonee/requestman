@@ -26,22 +26,6 @@ import {
   Typography
 } from 'antd';
 
-const createGroup = (count) => ({
-  id: uid('group'),
-  name: `规则组 ${count + 1}`,
-  enabled: true,
-  rules: []
-});
-
-const createRule = () => ({
-  id: uid('rule'),
-  enabled: true,
-  scope: 'url',
-  matchType: 'contains',
-  pattern: '',
-  redirectTo: ''
-});
-
 export function App() {
   const [groups, setGroups] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -262,9 +246,26 @@ function RuleItem({ group, rule, onChange, onDelete }) {
   );
 }
 
+
 function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+const createGroup = (count) => ({
+  id: uid('group'),
+  name: `规则组 ${count + 1}`,
+  enabled: true,
+  rules: []
+});
+
+const createRule = () => ({
+  id: uid('rule'),
+  enabled: true,
+  scope: 'url',
+  matchType: 'contains',
+  pattern: '',
+  redirectTo: ''
+});
 
 function sendMessage(payload) {
   return new Promise((resolve) => {
