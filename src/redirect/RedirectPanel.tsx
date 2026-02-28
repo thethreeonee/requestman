@@ -506,7 +506,7 @@ function RedirectPanel() {
             </Space>
             <Space size={8}>
               <Dropdown menu={actionsMenu} trigger={['hover']}>
-                <Button icon={<EllipsisOutlined />} />
+                <Button type="text" icon={<EllipsisOutlined />} aria-label="更多操作" />
               </Dropdown>
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateGroupModalOpen(true)}>创建分组</Button>
             </Space>
