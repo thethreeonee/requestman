@@ -20,6 +20,7 @@ import {
   HolderOutlined,
   PlusOutlined,
   SaveOutlined,
+  SwapOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
 import {
@@ -602,26 +603,43 @@ function RedirectPanel() {
                                               />
                                             </Space>
                                             <Space size={6}>
-                                              <Select
-                                                style={{ width: 160 }}
-                                                value={rule.groupId}
-                                                options={groups.map((g) => ({ label: g.name, value: g.id }))}
-                                                onChange={(value) => {
-                                                  applySourceRef.current = 'non_input';
-                                                  updateRule(rule.id, 'groupId', value);
+                                              <Dropdown
+                                                trigger={['click']}
+                                                disabled={groups.length <= 1}
+                                                menu={{
+                                                  items: groups
+                                                    .filter((group) => group.id !== rule.groupId)
+                                                    .map((group) => ({ key: group.id, label: group.name })),
+                                                  onClick: ({ key }) => {
+                                                    applySourceRef.current = 'non_input';
+                                                    updateRule(rule.id, 'groupId', String(key));
+                                                  },
                                                 }}
-                                              />
+                                              >
+                                                <Button
+                                                  type="text"
+                                                  icon={<SwapOutlined />}
+                                                  title="移动到其他分组"
+                                                  aria-label="移动到其他分组"
+                                                />
+                                              </Dropdown>
                                               <Button
-                                                type="primary"
+                                                type="text"
                                                 icon={<SaveOutlined />}
+                                                title="保存规则"
+                                                aria-label="保存规则"
                                                 disabled={!dirty}
                                                 onClick={() => saveRuleDraft(rule)}
-                                              >
-                                                保存
-                                              </Button>
-                                              <Button icon={<CopyOutlined />} onClick={() => duplicateRule(rule.id)} />
+                                              />
+                                              <Button
+                                                type="text"
+                                                icon={<CopyOutlined />}
+                                                title="复制规则"
+                                                aria-label="复制规则"
+                                                onClick={() => duplicateRule(rule.id)}
+                                              />
                                               <Popconfirm title="删除规则？" onConfirm={() => removeRule(rule.id)}>
-                                                <Button danger icon={<DeleteOutlined />} />
+                                                <Button type="text" danger icon={<DeleteOutlined />} title="删除规则" aria-label="删除规则" />
                                               </Popconfirm>
                                             </Space>
                                           </div>
