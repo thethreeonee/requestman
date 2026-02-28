@@ -66,7 +66,13 @@ const MATCH_MODE_OPTIONS: { label: string; value: MatchMode }[] = [
   { label: '正则', value: 'regex' },
 ];
 
-function SortableGroupContainer({ id, children }: { id: string; children: React.ReactNode }) {
+function SortableGroupContainer({
+  id,
+  children,
+}: {
+  id: string;
+  children: (dnd: { attributes: Record<string, unknown>; listeners: Record<string, unknown> }) => React.ReactNode;
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: toGroupSortDndId(id),
     data: { type: 'group-sort', groupId: id },
@@ -78,8 +84,7 @@ function SortableGroupContainer({ id, children }: { id: string; children: React.
 
   return (
     <div ref={setNodeRef} style={style} className={isDragging ? 'simple-group-card simple-group-card-dragging' : 'simple-group-card'}>
-      {children}
-      <Button type="text" size="small" className="simple-group-drag-handle" icon={<HolderOutlined />} {...attributes} {...listeners} />
+      {children({ attributes: attributes as Record<string, unknown>, listeners: listeners as Record<string, unknown> })}
     </div>
   );
 }
@@ -123,6 +128,7 @@ function RedirectPanel() {
   const [testUrl, setTestUrl] = useState('');
   const [testTrigger, setTestTrigger] = useState(0);
   const [highlightedRuleId, setHighlightedRuleId] = useState<string | null>(null);
+  const [collapsedGroupIds, setCollapsedGroupIds] = useState<string[]>([]);
   const applySourceRef = useRef<'init' | 'input' | 'non_input' | 'add' | 'group_toggle'>('init');
   const highlightTimerRef = useRef<number | null>(null);
   const listScrollRef = useRef<HTMLDivElement | null>(null);
@@ -542,10 +548,35 @@ function RedirectPanel() {
                 {groups.map((group) => {
                   const groupRules = rulesByGroup.get(group.id) ?? [];
                   const activeCount = groupRules.filter((rule) => isRuleEffectivelyEnabled(rule, groupEnabledMap)).length;
+                  const collapsed = collapsedGroupIds.includes(group.id);
                   return (
                     <SortableGroupContainer key={group.id} id={group.id}>
+                      {({ attributes, listeners }) => (
+                        <>
                       <div className="simple-group-head">
                         <Space size={8}>
+                          <Button
+                            type="text"
+                            size="small"
+                            className="simple-group-collapse-btn"
+                            onClick={() => {
+                              setCollapsedGroupIds((prev) => (
+                                prev.includes(group.id)
+                                  ? prev.filter((id) => id !== group.id)
+                                  : [...prev, group.id]
+                              ));
+                            }}
+                          >
+                            {collapsed ? '展开' : '收起'}
+                          </Button>
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<HolderOutlined />}
+                            className="simple-group-drag-handle"
+                            {...attributes}
+                            {...listeners}
+                          />
                           <Switch checked={group.enabled && redirectEnabled} onChange={(checked) => toggleGroupEnabled(group.id, checked)} />
                           <Typography.Text strong>{group.name}</Typography.Text>
                           <Typography.Text type="secondary">{activeCount}/{groupRules.length}</Typography.Text>
@@ -559,7 +590,7 @@ function RedirectPanel() {
                         </Space>
                       </div>
 
-                      <div style={{ marginTop: 10 }}>
+                      <div style={{ marginTop: 10, display: collapsed ? 'none' : 'block' }}>
                         {groupRules.length === 0 ? (
                           <Typography.Text type="secondary">暂无规则，点击右上角 + 添加规则。</Typography.Text>
                         ) : (
@@ -654,6 +685,8 @@ function RedirectPanel() {
                           </SortableContext>
                         )}
                       </div>
+                        </>
+                      )}
                     </SortableGroupContainer>
                   );
                 })}

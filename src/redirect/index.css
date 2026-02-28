@@ -28,11 +28,12 @@
 }
 
 .simple-group-drag-handle {
-  position: absolute;
-  right: 6px;
-  top: 6px;
   color: rgba(0, 0, 0, 0.45);
   cursor: grab;
+}
+
+.simple-group-collapse-btn {
+  padding-inline: 4px;
 }
 
 .simple-rule-card {
