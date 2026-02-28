@@ -94,7 +94,11 @@ export default function RuleGroupsCollapse({
           label: (
             <div className="simple-group-head">
               <Space size={8}>
-                <Switch checked={group.enabled && redirectEnabled} onChange={(checked) => toggleGroupEnabled(group.id, checked)} />
+                <Switch
+                  checked={group.enabled}
+                  disabled={!redirectEnabled}
+                  onChange={(checked) => toggleGroupEnabled(group.id, checked)}
+                />
                 <Typography.Text strong>{group.name}</Typography.Text>
                 <Typography.Text type="secondary">{activeCount}/{groupRules.length}</Typography.Text>
               </Space>
@@ -123,7 +127,11 @@ export default function RuleGroupsCollapse({
                           <div className="simple-rule-top-row">
                             <Space wrap size={8}>
                               <Button type="text" size="small" icon={<HolderOutlined />} className="simple-rule-drag-handle" {...attributes} {...listeners} />
-                              <Switch checked={rule.enabled && group.enabled && redirectEnabled} onChange={(checked) => updateRuleEnabled(rule.id, checked)} />
+                              <Switch
+                                checked={rule.enabled}
+                                disabled={!redirectEnabled || !group.enabled}
+                                onChange={(checked) => updateRuleEnabled(rule.id, checked)}
+                              />
                               <Select style={{ width: 120 }} value={rule.matchTarget} options={MATCH_TARGET_OPTIONS} onChange={(value) => updateRuleMatchTarget(rule.id, value)} />
                               <Select style={{ width: 120 }} value={rule.matchMode} options={MATCH_MODE_OPTIONS} onChange={(value) => updateRuleMatchMode(rule.id, value)} />
                             </Space>
