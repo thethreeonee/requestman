@@ -573,8 +573,17 @@ function RedirectPanel() {
                       label: (
                         <SortableGroupHeader id={group.id}>
                           {({ attributes, listeners }) => (
-                            <div {...attributes} {...listeners}>
+                            <div>
                               <Space size={8}>
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  icon={<HolderOutlined />}
+                                  className="simple-group-drag-handle"
+                                  onClick={(e) => e.stopPropagation()}
+                                  {...attributes}
+                                  {...listeners}
+                                />
                                 <Switch checked={group.enabled && redirectEnabled} onChange={(checked) => toggleGroupEnabled(group.id, checked)} />
                                 <Typography.Text strong>{group.name}</Typography.Text>
                                 <Typography.Text type="secondary">{activeCount}/{groupRules.length}</Typography.Text>
