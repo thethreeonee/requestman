@@ -84,7 +84,6 @@ function RedirectPanel() {
   const highlightTimerRef = useRef<number | null>(null);
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
-  const expandedBeforeGroupDragRef = useRef<string[] | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   useEffect(() => {
@@ -300,15 +299,9 @@ function RedirectPanel() {
   const handleDragEnd = (evt: DragEndEvent) => {
     if (draggingGroupId) {
       setDraggingGroupId(null);
-      const previousExpanded = expandedBeforeGroupDragRef.current;
-      expandedBeforeGroupDragRef.current = null;
 
       const activeGroupId = parseGroupSortDndId(String(evt.active.id));
       const overGroupId = evt.over ? parseGroupSortDndId(String(evt.over.id)) : null;
-      if (previousExpanded) {
-        const visible = new Set(groups.map((g) => g.id));
-        setExpandedGroupIds(previousExpanded.filter((id) => visible.has(id)));
-      }
       if (!activeGroupId || !overGroupId || activeGroupId === overGroupId) return;
 
       const oldIndex = groups.findIndex((g) => g.id === activeGroupId);
@@ -366,10 +359,6 @@ function RedirectPanel() {
 
     if (activeData.type === 'group-sort') {
       setDraggingGroupId(activeData.groupId);
-      if (expandedBeforeGroupDragRef.current === null) {
-        expandedBeforeGroupDragRef.current = expandedGroupIds;
-      }
-      setExpandedGroupIds([]);
       setDraggingRuleId(null);
       setDraggingRuleWidth(null);
       setHoveredGroupId(null);
@@ -886,11 +875,6 @@ function RedirectPanel() {
             onDragEnd={handleDragEnd}
             onDragCancel={() => {
               setDraggingGroupId(null);
-              if (expandedBeforeGroupDragRef.current) {
-                const visible = new Set(groups.map((g) => g.id));
-                setExpandedGroupIds(expandedBeforeGroupDragRef.current.filter((id) => visible.has(id)));
-                expandedBeforeGroupDragRef.current = null;
-              }
               setDraggingRuleId(null);
               setDraggingRuleWidth(null);
               setHoveredGroupId(null);
