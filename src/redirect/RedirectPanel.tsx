@@ -481,7 +481,17 @@ function RedirectPanel() {
   };
 
   return (
-    <div style={{ width: '100vw', height: '100vh', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+    <div
+      style={{
+        width: '100vw',
+        height: '100vh',
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        border: '1px solid #f0f0f0',
+        borderRadius: 0,
+      }}
+    >
       <div style={{ flex: 1, minHeight: 0, padding: 12, boxSizing: 'border-box' }}>
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
