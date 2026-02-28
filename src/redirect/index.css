@@ -27,6 +27,10 @@
   padding-inline: 4px;
 }
 
+.simple-group-action-btn {
+  color: rgba(0, 0, 0, 0.65);
+}
+
 .simple-rule-card {
   border-radius: 10px;
   background: #fff;
