@@ -31,7 +31,7 @@ import {
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import './index.css';
 import {
@@ -49,10 +49,8 @@ import {
   simulateRedirect,
 } from './rule-utils';
 import {
-  parseGroupSortDndId,
   projectRulesByDragTarget,
   ruleDropCollisionDetection,
-  toGroupSortDndId,
 } from './dnd-utils';
 import type { DragData, MatchMode, MatchTarget, RedirectGroup, RedirectRule, RuleDraft, RuleDragData } from './types';
 
@@ -67,33 +65,6 @@ const MATCH_MODE_OPTIONS: { label: string; value: MatchMode }[] = [
   { label: '通配符', value: 'wildcard' },
   { label: '正则', value: 'regex' },
 ];
-
-function SortableGroupHeader({
-  id,
-  children,
-}: {
-  id: string;
-  children: (dnd: { attributes: Record<string, unknown>; listeners: Record<string, unknown>; isDragging: boolean }) => React.ReactNode;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: toGroupSortDndId(id),
-    data: { type: 'group-sort', groupId: id },
-  });
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={isDragging ? 'simple-group-head simple-group-card-dragging' : 'simple-group-head'}
-    >
-      {children({
-        attributes: attributes as Record<string, unknown>,
-        listeners: listeners as Record<string, unknown>,
-        isDragging,
-      })}
-    </div>
-  );
-}
 
 function SortableRuleCard({
   rule,
@@ -434,20 +405,6 @@ function RedirectPanel() {
   }, [testResult]);
 
   const handleDragEnd = (evt: DragEndEvent) => {
-    const activeDragData = evt.active.data.current as DragData | { type?: string } | undefined;
-    if (activeDragData?.type === 'group-sort') {
-      const activeGroupId = parseGroupSortDndId(String(evt.active.id));
-      const overGroupId = evt.over ? parseGroupSortDndId(String(evt.over.id)) : null;
-      if (!activeGroupId || !overGroupId || activeGroupId === overGroupId) return;
-      const oldIndex = groups.findIndex((g) => g.id === activeGroupId);
-      const newIndex = groups.findIndex((g) => g.id === overGroupId);
-      if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return;
-      applySourceRef.current = 'non_input';
-      setGroups((prev) => arrayMove(prev, oldIndex, newIndex));
-      message.success('已更新分组顺序');
-      return;
-    }
-
     const { active, over } = evt;
     if (!over) return;
     const activeData = active.data.current as RuleDragData | undefined;
@@ -553,44 +510,30 @@ function RedirectPanel() {
           />
 
           <Typography.Paragraph type="secondary" style={{ marginTop: 0, marginBottom: 8 }}>
-            提示：可拖拽规则或分组调整顺序；文本修改后点击“保存”才会生效。
+            提示：可拖拽规则调整顺序；文本修改后点击“保存”才会生效。
           </Typography.Paragraph>
 
           <DndContext sensors={sensors} collisionDetection={ruleDropCollisionDetection} onDragEnd={handleDragEnd}>
             <div ref={listScrollRef} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-              <SortableContext items={groups.map((group) => toGroupSortDndId(group.id))} strategy={verticalListSortingStrategy}>
-                <Collapse
-                  activeKey={groups.filter((group) => !collapsedGroupIds.includes(group.id)).map((group) => group.id)}
-                  onChange={(keys) => {
-                    const openKeys = (Array.isArray(keys) ? keys : [keys]).map((key) => String(key));
-                    setCollapsedGroupIds(groups.filter((group) => !openKeys.includes(group.id)).map((group) => group.id));
-                  }}
-                  items={groups.map((group) => {
+              <Collapse
+                activeKey={groups.filter((group) => !collapsedGroupIds.includes(group.id)).map((group) => group.id)}
+                onChange={(keys) => {
+                  const openKeys = (Array.isArray(keys) ? keys : [keys]).map((key) => String(key));
+                  setCollapsedGroupIds(groups.filter((group) => !openKeys.includes(group.id)).map((group) => group.id));
+                }}
+                items={groups.map((group) => {
                     const groupRules = rulesByGroup.get(group.id) ?? [];
                     const activeCount = groupRules.filter((rule) => isRuleEffectivelyEnabled(rule, groupEnabledMap)).length;
                     return {
                       key: group.id,
                       label: (
-                        <SortableGroupHeader id={group.id}>
-                          {({ attributes, listeners }) => (
-                            <div>
-                              <Space size={8}>
-                                <Button
-                                  type="text"
-                                  size="small"
-                                  icon={<HolderOutlined />}
-                                  className="simple-group-drag-handle"
-                                  onClick={(e) => e.stopPropagation()}
-                                  {...attributes}
-                                  {...listeners}
-                                />
-                                <Switch checked={group.enabled && redirectEnabled} onChange={(checked) => toggleGroupEnabled(group.id, checked)} />
-                                <Typography.Text strong>{group.name}</Typography.Text>
-                                <Typography.Text type="secondary">{activeCount}/{groupRules.length}</Typography.Text>
-                              </Space>
-                            </div>
-                          )}
-                        </SortableGroupHeader>
+                        <div className="simple-group-head">
+                          <Space size={8}>
+                            <Switch checked={group.enabled && redirectEnabled} onChange={(checked) => toggleGroupEnabled(group.id, checked)} />
+                            <Typography.Text strong>{group.name}</Typography.Text>
+                            <Typography.Text type="secondary">{activeCount}/{groupRules.length}</Typography.Text>
+                          </Space>
+                        </div>
                       ),
                       extra: (
                         <Space size={6} onClick={(e) => e.stopPropagation()}>
@@ -732,9 +675,8 @@ function RedirectPanel() {
                         </SortableContext>
                       ),
                     };
-                  })}
-                />
-              </SortableContext>
+                })}
+              />
             </div>
           </DndContext>
 
