@@ -1,4 +1,4 @@
-import type { CollisionDetection } from '@dnd-kit/core';
+import type { CollisionDetection, CollisionDetectionArgs, DroppableContainer } from '@dnd-kit/core';
 import { pointerWithin, rectIntersection } from '@dnd-kit/core';
 import { arrayMove } from '@dnd-kit/sortable';
 import type { DragData, RedirectRule } from './types';
@@ -13,10 +13,27 @@ export function parseGroupSortDndId(id: string) {
   return id.startsWith(GROUP_SORT_DND_PREFIX) ? id.slice(GROUP_SORT_DND_PREFIX.length) : null;
 }
 
-export const ruleDropCollisionDetection: CollisionDetection = (args) => {
-  const pointerHits = pointerWithin(args);
+function runCollisionDetection(
+  args: CollisionDetectionArgs,
+  droppableContainers: DroppableContainer[],
+) {
+  const detectionArgs: CollisionDetectionArgs = { ...args, droppableContainers };
+  const pointerHits = pointerWithin(detectionArgs);
   if (pointerHits.length > 0) return pointerHits;
-  return rectIntersection(args);
+  return rectIntersection(detectionArgs);
+}
+
+export const ruleDropCollisionDetection: CollisionDetection = (args) => {
+  const activeData = args.active.data.current as DragData | { type?: string } | undefined;
+
+  if (activeData?.type === 'group-sort') {
+    const groupSortContainers = args.droppableContainers.filter((container) =>
+      parseGroupSortDndId(String(container.id)),
+    );
+    return runCollisionDetection(args, groupSortContainers);
+  }
+
+  return runCollisionDetection(args, args.droppableContainers);
 };
 
 export function moveRuleToGroup(
