@@ -28,7 +28,6 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
-  type DragStartEvent,
 } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -124,7 +123,6 @@ function RedirectPanel() {
   const [testUrl, setTestUrl] = useState('');
   const [testTrigger, setTestTrigger] = useState(0);
   const [highlightedRuleId, setHighlightedRuleId] = useState<string | null>(null);
-  const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null);
   const applySourceRef = useRef<'init' | 'input' | 'non_input' | 'add' | 'group_toggle'>('init');
   const highlightTimerRef = useRef<number | null>(null);
   const listScrollRef = useRef<HTMLDivElement | null>(null);
@@ -423,17 +421,9 @@ function RedirectPanel() {
     target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [testResult]);
 
-  const handleDragStart = (evt: DragStartEvent) => {
-    const activeData = evt.active.data.current as RuleDragData | { type: 'group-sort'; groupId: string } | undefined;
-    if (!activeData) return;
-    if (activeData.type === 'group-sort') {
-      setDraggingGroupId(activeData.groupId);
-    }
-  };
-
   const handleDragEnd = (evt: DragEndEvent) => {
-    if (draggingGroupId) {
-      setDraggingGroupId(null);
+    const activeDragData = evt.active.data.current as DragData | { type?: string } | undefined;
+    if (activeDragData?.type === 'group-sort') {
       const activeGroupId = parseGroupSortDndId(String(evt.active.id));
       const overGroupId = evt.over ? parseGroupSortDndId(String(evt.over.id)) : null;
       if (!activeGroupId || !overGroupId || activeGroupId === overGroupId) return;
@@ -546,7 +536,7 @@ function RedirectPanel() {
             提示：可拖拽规则或分组调整顺序；文本修改后点击“保存”才会生效。
           </Typography.Paragraph>
 
-          <DndContext sensors={sensors} collisionDetection={ruleDropCollisionDetection} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <DndContext sensors={sensors} collisionDetection={ruleDropCollisionDetection} onDragEnd={handleDragEnd}>
             <div ref={listScrollRef} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
               <SortableContext items={groups.map((group) => toGroupSortDndId(group.id))} strategy={verticalListSortingStrategy}>
                 {groups.map((group) => {
@@ -561,10 +551,10 @@ function RedirectPanel() {
                           <Typography.Text type="secondary">{activeCount}/{groupRules.length}</Typography.Text>
                         </Space>
                         <Space size={6}>
-                          <Button size="small" icon={<PlusOutlined />} onClick={() => addRule(group.id)} />
-                          <Button size="small" icon={<EditOutlined />} onClick={() => openEditGroupModal(group.id)} />
+                          <Button icon={<PlusOutlined />} onClick={() => addRule(group.id)} />
+                          <Button icon={<EditOutlined />} onClick={() => openEditGroupModal(group.id)} />
                           <Popconfirm title="删除分组？" description="该分组下规则会一并删除" onConfirm={() => removeGroup(group.id)}>
-                            <Button size="small" danger icon={<DeleteOutlined />} />
+                            <Button danger icon={<DeleteOutlined />} />
                           </Popconfirm>
                         </Space>
                       </div>
@@ -621,6 +611,14 @@ function RedirectPanel() {
                                                   updateRule(rule.id, 'groupId', value);
                                                 }}
                                               />
+                                              <Button
+                                                type="primary"
+                                                icon={<SaveOutlined />}
+                                                disabled={!dirty}
+                                                onClick={() => saveRuleDraft(rule)}
+                                              >
+                                                保存
+                                              </Button>
                                               <Button icon={<CopyOutlined />} onClick={() => duplicateRule(rule.id)} />
                                               <Popconfirm title="删除规则？" onConfirm={() => removeRule(rule.id)}>
                                                 <Button danger icon={<DeleteOutlined />} />
@@ -644,8 +642,7 @@ function RedirectPanel() {
                                             />
                                           </div>
                                           <div className="simple-rule-save-row">
-                                            {dirty ? <Typography.Text type="warning">有未保存修改</Typography.Text> : <span />}
-                                            <Button type="primary" icon={<SaveOutlined />} disabled={!dirty} onClick={() => saveRuleDraft(rule)}>保存</Button>
+                                            {dirty ? <Typography.Text type="warning">有未保存修改</Typography.Text> : null}
                                           </div>
                                         </div>
                                       </>
