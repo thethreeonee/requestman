@@ -12,8 +12,8 @@
     "<all_urls>"
   ],
   "background": {
-    "service_worker": "src/background.js",
+    "service_worker": "background.js",
     "type": "module"
   },
-  "devtools_page": "src/devtools/devtools.html"
+  "devtools_page": "devtools/devtools.html"
 }
