@@ -15,7 +15,7 @@ export default defineConfig({
       input: {
         panel: resolve(__dirname, 'src/panel/index.html'),
         devtools: resolve(__dirname, 'src/devtools/index.html'),
-        background: resolve(__dirname, 'src/background.js')
+        background: resolve(__dirname, 'src/background/index.ts')
       },
       output: {
         entryFileNames: (chunk) => {
