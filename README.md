@@ -30,14 +30,22 @@ npm install
 npm run build
 ```
 
-构建产物会输出到 `src/devtools/panel-bundle`，DevTools 面板会直接加载该目录下的 `index.html`。
+构建产物会统一输出到 `dist` 目录：
+
+- `dist/manifest.json`
+- `dist/background.js`
+- `dist/devtools/devtools.html`
+- `dist/devtools/devtools.js`
+- `dist/panel-bundle/*`
+
+DevTools 面板会加载 `dist/panel-bundle/index.html`。
 
 ## 安装
 
 1. 打开 `chrome://extensions/`
 2. 开启「开发者模式」
 3. 点击「加载已解压的扩展程序」
-4. 选择本项目目录 `/workspace/requestman`
+4. 选择构建后的目录 `/workspace/requestman/dist`
 
 ## 使用
 

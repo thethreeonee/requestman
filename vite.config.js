@@ -5,7 +5,7 @@ export default defineConfig({
   root: 'src/panel',
   plugins: [react()],
   build: {
-    outDir: '../devtools/panel-bundle',
+    outDir: '../../dist/panel-bundle',
     emptyOutDir: true
   }
 });
