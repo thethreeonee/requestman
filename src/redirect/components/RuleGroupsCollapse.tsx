@@ -97,6 +97,7 @@ export default function RuleGroupsCollapse({
                 <Switch
                   checked={group.enabled}
                   disabled={!redirectEnabled}
+                  onClick={(_, e) => e.stopPropagation()}
                   onChange={(checked) => toggleGroupEnabled(group.id, checked)}
                 />
                 <Typography.Text strong>{group.name}</Typography.Text>
