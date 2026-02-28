@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "ASAP Network Utils",
+  "name": "Requestman",
   "version": "0.0.1",
   "devtools_page": "devtools/index.html",
   "background": {
