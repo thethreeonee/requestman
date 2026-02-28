@@ -488,8 +488,6 @@ function RedirectPanel() {
         boxSizing: 'border-box',
         display: 'flex',
         flexDirection: 'column',
-        border: '1px solid #f0f0f0',
-        borderRadius: 0,
       }}
     >
       <div style={{ flex: 1, minHeight: 0, padding: 12, boxSizing: 'border-box' }}>
