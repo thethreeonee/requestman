@@ -14,7 +14,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         panel: resolve(__dirname, 'src/panel/index.html'),
-        devtools: resolve(__dirname, 'src/devtools/devtools.html'),
+        devtools: resolve(__dirname, 'src/devtools/index.html'),
         background: resolve(__dirname, 'src/background.js')
       },
       output: {
