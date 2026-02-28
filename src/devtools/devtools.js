@@ -1,1 +1,1 @@
-chrome.devtools.panels.create('Redirect Rules', '', 'panel-bundle/index.html', () => {});
+chrome.devtools.panels.create('Redirect Rules', '', 'panel/index.html', () => {});
