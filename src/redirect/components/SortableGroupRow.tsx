@@ -15,14 +15,42 @@ export default function SortableGroupRow(props: React.HTMLAttributes<HTMLTableRo
     id: toGroupSortDndId(rowKey),
     data: { type: 'group-sort', groupId } as GroupSortDragData,
   });
+  const translated = CSS.Transform.toString(transform);
+
+  const bindRowRef = React.useCallback(
+    (node: HTMLTableRowElement | null) => {
+      setNodeRef(node);
+      if (!node) return;
+
+      const expandedRow = node.nextElementSibling;
+      if (!(expandedRow instanceof HTMLTableRowElement)) return;
+      if (!expandedRow.classList.contains('ant-table-expanded-row')) return;
+
+      expandedRow.style.transform = translated;
+      expandedRow.style.transition = transition;
+      expandedRow.classList.toggle('group-expanded-row-dragging', isDragging);
+    },
+    [isDragging, setNodeRef, transition, translated],
+  );
+
+  React.useEffect(() => () => {
+    const row = document.querySelector(`tr[data-row-key="${rowKey}"]`);
+    if (!(row instanceof HTMLTableRowElement)) return;
+    const expandedRow = row.nextElementSibling;
+    if (!(expandedRow instanceof HTMLTableRowElement)) return;
+    if (!expandedRow.classList.contains('ant-table-expanded-row')) return;
+    expandedRow.style.transform = '';
+    expandedRow.style.transition = '';
+    expandedRow.classList.remove('group-expanded-row-dragging');
+  }, [rowKey]);
 
   return (
     <tr
       {...props}
-      ref={setNodeRef}
+      ref={bindRowRef}
       style={{
         ...props.style,
-        transform: CSS.Transform.toString(transform),
+        transform: translated,
         transition,
       }}
       className={`${props.className ?? ''} sortable-group-row${isDragging ? ' group-row-dragging' : ''}`}
