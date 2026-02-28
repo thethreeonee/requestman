@@ -560,8 +560,6 @@ function RedirectPanel() {
             <div ref={listScrollRef} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
               <SortableContext items={groups.map((group) => toGroupSortDndId(group.id))} strategy={verticalListSortingStrategy}>
                 <Collapse
-                  bordered={false}
-                  className="simple-group-collapse"
                   activeKey={groups.filter((group) => !collapsedGroupIds.includes(group.id)).map((group) => group.id)}
                   onChange={(keys) => {
                     const openKeys = (Array.isArray(keys) ? keys : [keys]).map((key) => String(key));
@@ -692,9 +690,11 @@ function RedirectPanel() {
                                               onChange={(e) => updateRuleDraft(rule, 'redirectUrl', e.target.value)}
                                             />
                                           </div>
-                                          <div className="simple-rule-save-row">
-                                            {dirty ? <Typography.Text type="warning">有未保存修改</Typography.Text> : null}
-                                          </div>
+                                          {dirty ? (
+                                            <div className="simple-rule-save-row">
+                                              <Typography.Text type="warning">有未保存修改</Typography.Text>
+                                            </div>
+                                          ) : null}
                                       </div>
                                     </>
                                   )}

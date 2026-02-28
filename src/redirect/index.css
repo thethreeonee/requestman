@@ -11,25 +11,6 @@
   z-index: 20;
 }
 
-.simple-group-collapse {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  background: #fff;
-}
-
-.simple-group-collapse .ant-collapse-item {
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.simple-group-collapse .ant-collapse-item:last-child {
-  border-bottom: none;
-}
-
-.simple-group-collapse .ant-collapse-header {
-  background: #fafafa;
-  border-bottom: 1px solid #f0f0f0;
-}
-
 .simple-group-head {
   display: flex;
   align-items: center;
@@ -92,7 +73,6 @@
 
 .simple-rule-save-row {
   margin-top: 10px;
-  min-height: 22px;
   display: flex;
   align-items: center;
 }
