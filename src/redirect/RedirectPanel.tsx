@@ -12,13 +12,26 @@ import {
   Typography,
 } from 'antd';
 import {
+  CopyOutlined,
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
   EllipsisOutlined,
+  HolderOutlined,
   PlusOutlined,
+  SaveOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core';
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import './index.css';
 import {
   DEFAULT_GROUP_ID,
@@ -27,8 +40,20 @@ import {
   REDIRECT_GROUPS_KEY,
   REDIRECT_RULES_KEY,
 } from './constants';
-import { genId, isRuleEffectivelyEnabled, normalizeGroups, normalizeRules, simulateRedirect } from './rule-utils';
-import type { MatchMode, MatchTarget, RedirectGroup, RedirectRule } from './types';
+import {
+  genId,
+  isRuleEffectivelyEnabled,
+  normalizeGroups,
+  normalizeRules,
+  simulateRedirect,
+} from './rule-utils';
+import {
+  parseGroupSortDndId,
+  projectRulesByDragTarget,
+  ruleDropCollisionDetection,
+  toGroupSortDndId,
+} from './dnd-utils';
+import type { DragData, MatchMode, MatchTarget, RedirectGroup, RedirectRule, RuleDraft, RuleDragData } from './types';
 
 const MATCH_TARGET_OPTIONS: { label: string; value: MatchTarget }[] = [
   { label: 'URL', value: 'url' },
@@ -42,10 +67,53 @@ const MATCH_MODE_OPTIONS: { label: string; value: MatchMode }[] = [
   { label: '正则', value: 'regex' },
 ];
 
+function SortableGroupContainer({ id, children }: { id: string; children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: toGroupSortDndId(id),
+    data: { type: 'group-sort', groupId: id },
+  });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className={isDragging ? 'simple-group-card simple-group-card-dragging' : 'simple-group-card'}>
+      {children}
+      <Button type="text" size="small" className="simple-group-drag-handle" icon={<HolderOutlined />} {...attributes} {...listeners} />
+    </div>
+  );
+}
+
+function SortableRuleCard({
+  rule,
+  children,
+}: {
+  rule: RedirectRule;
+  children: (dnd: { attributes: Record<string, unknown>; listeners: Record<string, unknown>; isDragging: boolean }) => React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: rule.id,
+    data: { type: 'rule', groupId: rule.groupId } as RuleDragData,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={isDragging ? 'simple-rule-card simple-rule-card-dragging' : 'simple-rule-card'}
+      data-rule-id={rule.id}
+    >
+      {children({ attributes: attributes as Record<string, unknown>, listeners: listeners as Record<string, unknown>, isDragging })}
+    </div>
+  );
+}
+
 function RedirectPanel() {
   const { message } = App.useApp();
   const [groups, setGroups] = useState<RedirectGroup[]>([]);
   const [rules, setRules] = useState<RedirectRule[]>([]);
+  const [ruleDrafts, setRuleDrafts] = useState<Record<string, RuleDraft>>({});
   const [newGroupName, setNewGroupName] = useState('');
   const [createGroupModalOpen, setCreateGroupModalOpen] = useState(false);
   const [editGroupModalOpen, setEditGroupModalOpen] = useState(false);
@@ -56,10 +124,12 @@ function RedirectPanel() {
   const [testUrl, setTestUrl] = useState('');
   const [testTrigger, setTestTrigger] = useState(0);
   const [highlightedRuleId, setHighlightedRuleId] = useState<string | null>(null);
+  const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null);
   const applySourceRef = useRef<'init' | 'input' | 'non_input' | 'add' | 'group_toggle'>('init');
   const highlightTimerRef = useRef<number | null>(null);
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   useEffect(() => {
     chrome.storage.local.get([REDIRECT_RULES_KEY, REDIRECT_ENABLED_KEY, REDIRECT_GROUPS_KEY], (res) => {
@@ -93,6 +163,11 @@ function RedirectPanel() {
   const removeRule = (id: string) => {
     applySourceRef.current = 'non_input';
     setRules((prev) => prev.filter((r) => r.id !== id));
+    setRuleDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
     message.success('已删除规则');
   };
 
@@ -163,6 +238,41 @@ function RedirectPanel() {
     setEditingGroupName('');
     message.success(`已更新分组名称为：${nextName}`);
     return true;
+  };
+
+  const getRuleFieldValue = (row: RedirectRule, key: 'expression' | 'redirectUrl') => {
+    const draft = ruleDrafts[row.id];
+    if (!draft) return row[key];
+    const v = draft[key];
+    return typeof v === 'string' ? v : row[key];
+  };
+
+  const isRuleFieldDirty = (row: RedirectRule, key: 'expression' | 'redirectUrl') => {
+    const draft = ruleDrafts[row.id];
+    if (!draft || typeof draft[key] !== 'string') return false;
+    return draft[key] !== row[key];
+  };
+
+  const updateRuleDraft = (row: RedirectRule, key: 'expression' | 'redirectUrl', value: string) => {
+    setRuleDrafts((prev) => ({ ...prev, [row.id]: { ...(prev[row.id] ?? {}), [key]: value } }));
+  };
+
+  const saveRuleDraft = (row: RedirectRule) => {
+    const expression = getRuleFieldValue(row, 'expression');
+    const redirectUrl = getRuleFieldValue(row, 'redirectUrl');
+    if (!expression.trim() || !redirectUrl.trim()) {
+      message.warning('请先补全匹配表达式和重定向 URL');
+      return;
+    }
+    if (!isRuleFieldDirty(row, 'expression') && !isRuleFieldDirty(row, 'redirectUrl')) return;
+    applySourceRef.current = 'non_input';
+    setRules((prev) => prev.map((r) => (r.id === row.id ? { ...r, expression, redirectUrl } : r)));
+    setRuleDrafts((prev) => {
+      const next = { ...prev };
+      delete next[row.id];
+      return next;
+    });
+    message.success('规则已保存并生效');
   };
 
   const exportRules = () => {
@@ -240,6 +350,7 @@ function RedirectPanel() {
       setGroups(importedGroups);
       setRules(importedRules);
       setRedirectEnabled(importedEnabled);
+      setRuleDrafts({});
       message.success(`导入成功，共 ${importedRules.length} 条规则`);
     } catch (err) {
       message.error(`导入失败: ${String((err as Error)?.message || err)}`);
@@ -312,6 +423,40 @@ function RedirectPanel() {
     target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [testResult]);
 
+  const handleDragStart = (evt: DragStartEvent) => {
+    const activeData = evt.active.data.current as RuleDragData | { type: 'group-sort'; groupId: string } | undefined;
+    if (!activeData) return;
+    if (activeData.type === 'group-sort') {
+      setDraggingGroupId(activeData.groupId);
+    }
+  };
+
+  const handleDragEnd = (evt: DragEndEvent) => {
+    if (draggingGroupId) {
+      setDraggingGroupId(null);
+      const activeGroupId = parseGroupSortDndId(String(evt.active.id));
+      const overGroupId = evt.over ? parseGroupSortDndId(String(evt.over.id)) : null;
+      if (!activeGroupId || !overGroupId || activeGroupId === overGroupId) return;
+      const oldIndex = groups.findIndex((g) => g.id === activeGroupId);
+      const newIndex = groups.findIndex((g) => g.id === overGroupId);
+      if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return;
+      applySourceRef.current = 'non_input';
+      setGroups((prev) => arrayMove(prev, oldIndex, newIndex));
+      message.success('已更新分组顺序');
+      return;
+    }
+
+    const { active, over } = evt;
+    if (!over) return;
+    const activeData = active.data.current as RuleDragData | undefined;
+    const overData = over.data.current as DragData | undefined;
+    if (!activeData || activeData.type !== 'rule' || !overData) return;
+    const nextRules = projectRulesByDragTarget(rules, groups.map((g) => g.id), String(active.id), String(over.id), overData);
+    if (nextRules === rules) return;
+    applySourceRef.current = 'non_input';
+    setRules(nextRules);
+  };
+
   const actionsMenu = {
     items: [
       { key: 'import', label: '导入配置', icon: <UploadOutlined /> },
@@ -337,7 +482,7 @@ function RedirectPanel() {
     <div style={{ width: '100vw', height: '100vh', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
       <div style={{ flex: 1, minHeight: 0, padding: 12, boxSizing: 'border-box' }}>
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <Space size={8}>
               <Typography.Title level={5} style={{ margin: 0 }}>请求重定向规则</Typography.Title>
               <Switch
@@ -397,115 +542,127 @@ function RedirectPanel() {
             }}
           />
 
-          <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-            简化为卡片编辑模式：每个分组下直接编辑规则，不再使用表格。
+          <Typography.Paragraph type="secondary" style={{ marginTop: 0, marginBottom: 8 }}>
+            提示：可拖拽规则或分组调整顺序；文本修改后点击“保存”才会生效。
           </Typography.Paragraph>
 
-          <div ref={listScrollRef} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-            {groups.map((group) => {
-              const groupRules = rulesByGroup.get(group.id) ?? [];
-              const activeCount = groupRules.filter((rule) => isRuleEffectivelyEnabled(rule, groupEnabledMap)).length;
-              return (
-                <div key={group.id} className="simple-group-card">
-                  <div className="simple-group-head">
-                    <Space>
-                      <Typography.Text strong>{group.name}</Typography.Text>
-                      <Typography.Text type="secondary">{activeCount}/{groupRules.length} 启用</Typography.Text>
-                    </Space>
-                    <Space>
-                      <Switch checked={group.enabled && redirectEnabled} onChange={(checked) => toggleGroupEnabled(group.id, checked)} />
-                      <Button size="small" icon={<EditOutlined />} onClick={() => openEditGroupModal(group.id)}>
-                        编辑
-                      </Button>
-                      <Popconfirm title="删除分组？" description="该分组下规则会一并删除" onConfirm={() => removeGroup(group.id)}>
-                        <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
-                      </Popconfirm>
-                      <Button size="small" type="primary" onClick={() => addRule(group.id)}>新增规则</Button>
-                    </Space>
-                  </div>
+          <DndContext sensors={sensors} collisionDetection={ruleDropCollisionDetection} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+            <div ref={listScrollRef} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+              <SortableContext items={groups.map((group) => toGroupSortDndId(group.id))} strategy={verticalListSortingStrategy}>
+                {groups.map((group) => {
+                  const groupRules = rulesByGroup.get(group.id) ?? [];
+                  const activeCount = groupRules.filter((rule) => isRuleEffectivelyEnabled(rule, groupEnabledMap)).length;
+                  return (
+                    <SortableGroupContainer key={group.id} id={group.id}>
+                      <div className="simple-group-head">
+                        <Space size={8}>
+                          <Switch checked={group.enabled && redirectEnabled} onChange={(checked) => toggleGroupEnabled(group.id, checked)} />
+                          <Typography.Text strong>{group.name}</Typography.Text>
+                          <Typography.Text type="secondary">{activeCount}/{groupRules.length}</Typography.Text>
+                        </Space>
+                        <Space size={6}>
+                          <Button size="small" icon={<PlusOutlined />} onClick={() => addRule(group.id)} />
+                          <Button size="small" icon={<EditOutlined />} onClick={() => openEditGroupModal(group.id)} />
+                          <Popconfirm title="删除分组？" description="该分组下规则会一并删除" onConfirm={() => removeGroup(group.id)}>
+                            <Button size="small" danger icon={<DeleteOutlined />} />
+                          </Popconfirm>
+                        </Space>
+                      </div>
 
-                  <Space direction="vertical" size={8} style={{ width: '100%', marginTop: 8 }}>
-                    {groupRules.length === 0 ? (
-                      <Typography.Text type="secondary">暂无规则，点击“新增规则”开始配置。</Typography.Text>
-                    ) : (
-                      groupRules.map((rule) => (
-                        <div
-                          key={rule.id}
-                          data-rule-id={rule.id}
-                          className={`simple-rule-card ${highlightedRuleId === rule.id ? 'simple-rule-card-highlighted' : ''}`}
-                        >
-                          <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                            <Space wrap>
-                              <Switch
-                                size="small"
-                                checked={rule.enabled && group.enabled && redirectEnabled}
-                                onChange={(checked) => {
-                                  applySourceRef.current = 'non_input';
-                                  updateRule(rule.id, 'enabled', checked);
-                                }}
-                              />
-                              <Select
-                                size="small"
-                                style={{ width: 100 }}
-                                value={rule.matchTarget}
-                                options={MATCH_TARGET_OPTIONS}
-                                onChange={(value) => {
-                                  applySourceRef.current = 'non_input';
-                                  updateRule(rule.id, 'matchTarget', value);
-                                }}
-                              />
-                              <Select
-                                size="small"
-                                style={{ width: 100 }}
-                                value={rule.matchMode}
-                                options={MATCH_MODE_OPTIONS}
-                                onChange={(value) => {
-                                  applySourceRef.current = 'non_input';
-                                  updateRule(rule.id, 'matchMode', value);
-                                }}
-                              />
-                              <Select
-                                size="small"
-                                style={{ width: 160 }}
-                                value={rule.groupId}
-                                options={groups.map((g) => ({ label: g.name, value: g.id }))}
-                                onChange={(value) => {
-                                  applySourceRef.current = 'non_input';
-                                  updateRule(rule.id, 'groupId', value);
-                                }}
-                              />
-                              <Button size="small" onClick={() => duplicateRule(rule.id)}>复制</Button>
-                              <Popconfirm title="删除规则？" onConfirm={() => removeRule(rule.id)}>
-                                <Button size="small" danger>删除</Button>
-                              </Popconfirm>
+                      <div style={{ marginTop: 10 }}>
+                        {groupRules.length === 0 ? (
+                          <Typography.Text type="secondary">暂无规则，点击右上角 + 添加规则。</Typography.Text>
+                        ) : (
+                          <SortableContext items={groupRules.map((rule) => rule.id)} strategy={verticalListSortingStrategy}>
+                            <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                              {groupRules.map((rule) => {
+                                const dirty = isRuleFieldDirty(rule, 'expression') || isRuleFieldDirty(rule, 'redirectUrl');
+                                return (
+                                  <SortableRuleCard key={rule.id} rule={rule}>
+                                    {({ attributes, listeners }) => (
+                                      <>
+                                        <div className={`simple-rule-card-content ${highlightedRuleId === rule.id ? 'simple-rule-card-highlighted' : ''}`}>
+                                          <div className="simple-rule-top-row">
+                                            <Space wrap size={8}>
+                                              <Button type="text" size="small" icon={<HolderOutlined />} className="simple-rule-drag-handle" {...attributes} {...listeners} />
+                                              <Switch
+                                                checked={rule.enabled && group.enabled && redirectEnabled}
+                                                onChange={(checked) => {
+                                                  applySourceRef.current = 'non_input';
+                                                  updateRule(rule.id, 'enabled', checked);
+                                                }}
+                                              />
+                                              <Select
+                                                style={{ width: 120 }}
+                                                value={rule.matchTarget}
+                                                options={MATCH_TARGET_OPTIONS}
+                                                onChange={(value) => {
+                                                  applySourceRef.current = 'non_input';
+                                                  updateRule(rule.id, 'matchTarget', value);
+                                                }}
+                                              />
+                                              <Select
+                                                style={{ width: 120 }}
+                                                value={rule.matchMode}
+                                                options={MATCH_MODE_OPTIONS}
+                                                onChange={(value) => {
+                                                  applySourceRef.current = 'non_input';
+                                                  updateRule(rule.id, 'matchMode', value);
+                                                }}
+                                              />
+                                            </Space>
+                                            <Space size={6}>
+                                              <Select
+                                                style={{ width: 160 }}
+                                                value={rule.groupId}
+                                                options={groups.map((g) => ({ label: g.name, value: g.id }))}
+                                                onChange={(value) => {
+                                                  applySourceRef.current = 'non_input';
+                                                  updateRule(rule.id, 'groupId', value);
+                                                }}
+                                              />
+                                              <Button icon={<CopyOutlined />} onClick={() => duplicateRule(rule.id)} />
+                                              <Popconfirm title="删除规则？" onConfirm={() => removeRule(rule.id)}>
+                                                <Button danger icon={<DeleteOutlined />} />
+                                              </Popconfirm>
+                                            </Space>
+                                          </div>
+                                          <div className="simple-rule-field">
+                                            <Typography.Text type="secondary">匹配表达式</Typography.Text>
+                                            <Input
+                                              value={getRuleFieldValue(rule, 'expression')}
+                                              placeholder="请输入用于匹配的表达式"
+                                              onChange={(e) => updateRuleDraft(rule, 'expression', e.target.value)}
+                                            />
+                                          </div>
+                                          <div className="simple-rule-field">
+                                            <Typography.Text type="secondary">重定向 URL</Typography.Text>
+                                            <Input
+                                              value={getRuleFieldValue(rule, 'redirectUrl')}
+                                              placeholder="请输入重定向目标 URL"
+                                              onChange={(e) => updateRuleDraft(rule, 'redirectUrl', e.target.value)}
+                                            />
+                                          </div>
+                                          <div className="simple-rule-save-row">
+                                            {dirty ? <Typography.Text type="warning">有未保存修改</Typography.Text> : <span />}
+                                            <Button type="primary" icon={<SaveOutlined />} disabled={!dirty} onClick={() => saveRuleDraft(rule)}>保存</Button>
+                                          </div>
+                                        </div>
+                                      </>
+                                    )}
+                                  </SortableRuleCard>
+                                );
+                              })}
                             </Space>
-                            <Input
-                              size="small"
-                              value={rule.expression}
-                              placeholder="匹配表达式"
-                              onChange={(e) => {
-                                applySourceRef.current = 'input';
-                                updateRule(rule.id, 'expression', e.target.value);
-                              }}
-                            />
-                            <Input
-                              size="small"
-                              value={rule.redirectUrl}
-                              placeholder="重定向 URL"
-                              onChange={(e) => {
-                                applySourceRef.current = 'input';
-                                updateRule(rule.id, 'redirectUrl', e.target.value);
-                              }}
-                            />
-                          </Space>
-                        </div>
-                      ))
-                    )}
-                  </Space>
-                </div>
-              );
-            })}
-          </div>
+                          </SortableContext>
+                        )}
+                      </div>
+                    </SortableGroupContainer>
+                  );
+                })}
+              </SortableContext>
+            </div>
+          </DndContext>
 
           <div style={{ marginTop: 10 }}>
             <Typography.Text type={invalidCount ? 'warning' : 'secondary'}>
