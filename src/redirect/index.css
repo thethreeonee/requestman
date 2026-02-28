@@ -135,3 +135,25 @@
   background: rgba(0, 0, 0, 0.06);
   border-radius: 6px;
 }
+
+.group-table .ant-table-tbody > tr.sortable-group-row > td {
+  cursor: move;
+}
+
+.group-table .ant-table-tbody > tr.sortable-group-row > td button,
+.group-table .ant-table-tbody > tr.sortable-group-row > td a,
+.group-table .ant-table-tbody > tr.sortable-group-row > td .ant-switch,
+.group-table .ant-table-tbody > tr.sortable-group-row > td input,
+.group-table .ant-table-tbody > tr.sortable-group-row > td .ant-select-selector {
+  cursor: pointer;
+}
+
+.group-drag-overlay {
+  pointer-events: none;
+  min-width: 180px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2);
+  font-weight: 600;
+}

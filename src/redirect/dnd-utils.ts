@@ -3,6 +3,16 @@ import { pointerWithin, rectIntersection } from '@dnd-kit/core';
 import { arrayMove } from '@dnd-kit/sortable';
 import type { DragData, RedirectRule } from './types';
 
+export const GROUP_SORT_DND_PREFIX = 'group-sort:';
+
+export function toGroupSortDndId(groupId: string) {
+  return `${GROUP_SORT_DND_PREFIX}${groupId}`;
+}
+
+export function parseGroupSortDndId(id: string) {
+  return id.startsWith(GROUP_SORT_DND_PREFIX) ? id.slice(GROUP_SORT_DND_PREFIX.length) : null;
+}
+
 export const ruleDropCollisionDetection: CollisionDetection = (args) => {
   const pointerHits = pointerWithin(args);
   if (pointerHits.length > 0) return pointerHits;

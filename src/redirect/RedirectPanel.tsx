@@ -26,6 +26,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
+import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import {
   DEFAULT_GROUP_ID,
   DEFAULT_GROUP_NAME,
@@ -41,10 +42,13 @@ import {
   simulateRedirect,
 } from './rule-utils';
 import {
+  parseGroupSortDndId,
   projectRulesByDragTarget,
   ruleDropCollisionDetection,
+  toGroupSortDndId,
 } from './dnd-utils';
 import GroupRulesTable from './components/GroupRulesTable';
+import SortableGroupRow from './components/SortableGroupRow';
 import { buildGroupColumns, buildRuleColumns } from './table-columns';
 import type {
   DragData,
@@ -71,6 +75,7 @@ function RedirectPanel() {
   const [testTrigger, setTestTrigger] = useState(0);
   const [highlightedRuleId, setHighlightedRuleId] = useState<string | null>(null);
   const [draggingRuleId, setDraggingRuleId] = useState<string | null>(null);
+  const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null);
   const [draggingRuleWidth, setDraggingRuleWidth] = useState<number | null>(null);
   const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
   const [dragPreviewRules, setDragPreviewRules] = useState<RedirectRule[] | null>(null);
@@ -79,6 +84,7 @@ function RedirectPanel() {
   const highlightTimerRef = useRef<number | null>(null);
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const expandedBeforeGroupDragRef = useRef<string[] | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   useEffect(() => {
@@ -291,7 +297,30 @@ function RedirectPanel() {
     message.success('规则已保存并生效');
   };
 
-  const handleRuleDragEnd = (evt: DragEndEvent) => {
+  const handleDragEnd = (evt: DragEndEvent) => {
+    if (draggingGroupId) {
+      setDraggingGroupId(null);
+      const previousExpanded = expandedBeforeGroupDragRef.current;
+      expandedBeforeGroupDragRef.current = null;
+
+      const activeGroupId = parseGroupSortDndId(String(evt.active.id));
+      const overGroupId = evt.over ? parseGroupSortDndId(String(evt.over.id)) : null;
+      if (previousExpanded) {
+        const visible = new Set(groups.map((g) => g.id));
+        setExpandedGroupIds(previousExpanded.filter((id) => visible.has(id)));
+      }
+      if (!activeGroupId || !overGroupId || activeGroupId === overGroupId) return;
+
+      const oldIndex = groups.findIndex((g) => g.id === activeGroupId);
+      const newIndex = groups.findIndex((g) => g.id === overGroupId);
+      if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return;
+
+      applySourceRef.current = 'non_input';
+      setGroups((prev) => arrayMove(prev, oldIndex, newIndex));
+      message.success('已更新分组顺序');
+      return;
+    }
+
     setDraggingRuleId(null);
     setDraggingRuleWidth(null);
     setHoveredGroupId(null);
@@ -331,9 +360,16 @@ function RedirectPanel() {
     message.success('已更新规则顺序');
   };
 
-  const handleRuleDragStart = (evt: DragStartEvent) => {
-    const activeData = evt.active.data.current as RuleDragData | undefined;
-    if (!activeData || activeData.type !== 'rule') {
+  const handleDragStart = (evt: DragStartEvent) => {
+    const activeData = evt.active.data.current as RuleDragData | { type: 'group-sort'; groupId: string } | undefined;
+    if (!activeData) return;
+
+    if (activeData.type === 'group-sort') {
+      setDraggingGroupId(activeData.groupId);
+      if (expandedBeforeGroupDragRef.current === null) {
+        expandedBeforeGroupDragRef.current = expandedGroupIds;
+      }
+      setExpandedGroupIds([]);
       setDraggingRuleId(null);
       setDraggingRuleWidth(null);
       setHoveredGroupId(null);
@@ -341,6 +377,17 @@ function RedirectPanel() {
       setDragPreviewRules((prev) => (prev === null ? prev : null));
       return;
     }
+
+    if (activeData.type !== 'rule') {
+      setDraggingRuleId(null);
+      setDraggingRuleWidth(null);
+      setHoveredGroupId(null);
+      dragPreviewRulesRef.current = null;
+      setDragPreviewRules((prev) => (prev === null ? prev : null));
+      return;
+    }
+
+    setDraggingGroupId(null);
     setDraggingRuleId(String(evt.active.id));
     const width = (evt.active.rect.current?.initial as { width?: number } | undefined)?.width;
     setDraggingRuleWidth(typeof width === 'number' && width > 0 ? width : null);
@@ -350,6 +397,7 @@ function RedirectPanel() {
   };
 
   const handleRuleDragOver = (evt: DragOverEvent) => {
+    if (draggingGroupId) return;
     const activeData = evt.active.data.current as RuleDragData | undefined;
     if (!activeData || activeData.type !== 'rule') {
       setHoveredGroupId((prev) => (prev === null ? prev : null));
@@ -833,10 +881,16 @@ function RedirectPanel() {
           <DndContext
             sensors={sensors}
             collisionDetection={ruleDropCollisionDetection}
-            onDragStart={handleRuleDragStart}
+            onDragStart={handleDragStart}
             onDragOver={handleRuleDragOver}
-            onDragEnd={handleRuleDragEnd}
+            onDragEnd={handleDragEnd}
             onDragCancel={() => {
+              setDraggingGroupId(null);
+              if (expandedBeforeGroupDragRef.current) {
+                const visible = new Set(groups.map((g) => g.id));
+                setExpandedGroupIds(expandedBeforeGroupDragRef.current.filter((id) => visible.has(id)));
+                expandedBeforeGroupDragRef.current = null;
+              }
               setDraggingRuleId(null);
               setDraggingRuleWidth(null);
               setHoveredGroupId(null);
@@ -845,17 +899,31 @@ function RedirectPanel() {
             }}
           >
             <div ref={listScrollRef} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-              <Table
-                className="group-table"
-                size="small"
-                rowKey="id"
-                pagination={false}
-                columns={groupColumns as any}
-                dataSource={groups}
-                rowClassName={(record) =>
-                  hoveredGroupId === (record as RedirectGroup).id ? 'group-drop-target' : ''
-                }
-                expandable={{
+              <SortableContext
+                items={groups.map((g) => toGroupSortDndId(g.id))}
+                strategy={verticalListSortingStrategy}
+              >
+                <Table
+                  className="group-table"
+                  size="small"
+                  rowKey="id"
+                  pagination={false}
+                  columns={groupColumns as any}
+                  dataSource={groups}
+                  components={{
+                    body: {
+                      row: SortableGroupRow,
+                    },
+                  }}
+                  onRow={(record) => ({
+                    'data-group-id': (record as RedirectGroup).id,
+                  })}
+                  rowClassName={(record) => {
+                    const groupId = (record as RedirectGroup).id;
+                    if (draggingGroupId === groupId) return 'group-row-dragging';
+                    return hoveredGroupId === groupId ? 'group-drop-target' : '';
+                  }}
+                  expandable={{
                   columnWidth: 24,
                   expandedRowKeys: expandedGroupIds,
                   expandedRowRender: (group) => renderGroupRulesTable(group as RedirectGroup),
@@ -885,11 +953,16 @@ function RedirectPanel() {
                     </span>
                   ),
                 }}
-                locale={{ emptyText: '暂无分组，点击右上角创建分组' }}
-              />
+                  locale={{ emptyText: '暂无分组，点击右上角创建分组' }}
+                />
+              </SortableContext>
             </div>
             <DragOverlay>
-              {draggingRule ? (
+              {draggingGroupId ? (
+                <div className="group-drag-overlay">
+                  {groups.find((group) => group.id === draggingGroupId)?.name || '未命名分组'}
+                </div>
+              ) : draggingRule ? (
                 <div
                   className="rule-drag-overlay"
                   style={draggingRuleWidth ? { width: draggingRuleWidth } : undefined}
