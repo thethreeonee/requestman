@@ -690,9 +690,11 @@ function RedirectPanel() {
                                               onChange={(e) => updateRuleDraft(rule, 'redirectUrl', e.target.value)}
                                             />
                                           </div>
-                                          <div className="simple-rule-save-row">
-                                            {dirty ? <Typography.Text type="warning">有未保存修改</Typography.Text> : null}
-                                          </div>
+                                          {dirty ? (
+                                            <div className="simple-rule-save-row">
+                                              <Typography.Text type="warning">有未保存修改</Typography.Text>
+                                            </div>
+                                          ) : null}
                                         </div>
                                       </>
                                     )}
