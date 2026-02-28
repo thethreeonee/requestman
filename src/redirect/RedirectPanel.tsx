@@ -585,10 +585,28 @@ function RedirectPanel() {
                       ),
                       extra: (
                         <Space size={6} onClick={(e) => e.stopPropagation()}>
-                          <Button icon={<PlusOutlined />} onClick={() => addRule(group.id)} />
-                          <Button icon={<EditOutlined />} onClick={() => openEditGroupModal(group.id)} />
+                          <Button
+                            type="text"
+                            size="small"
+                            className="simple-group-action-btn"
+                            icon={<PlusOutlined />}
+                            onClick={() => addRule(group.id)}
+                          />
+                          <Button
+                            type="text"
+                            size="small"
+                            className="simple-group-action-btn"
+                            icon={<EditOutlined />}
+                            onClick={() => openEditGroupModal(group.id)}
+                          />
                           <Popconfirm title="删除分组？" description="该分组下规则会一并删除" onConfirm={() => removeGroup(group.id)}>
-                            <Button danger icon={<DeleteOutlined />} />
+                            <Button
+                              type="text"
+                              size="small"
+                              className="simple-group-action-btn"
+                              danger
+                              icon={<DeleteOutlined />}
+                            />
                           </Popconfirm>
                         </Space>
                       ),
