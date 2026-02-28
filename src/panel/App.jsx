@@ -26,21 +26,8 @@ import {
   Typography
 } from 'antd';
 
-const createGroup = (count) => ({
-  id: uid('group'),
-  name: `规则组 ${count + 1}`,
-  enabled: true,
-  rules: []
-});
-
-const createRule = () => ({
-  id: uid('rule'),
-  enabled: true,
-  scope: 'url',
-  matchType: 'contains',
-  pattern: '',
-  redirectTo: ''
-});
+import { createGroup, createRule } from '../redirect/config';
+import { sendRedirectMessage } from '../redirect/messaging';
 
 export function App() {
   const [groups, setGroups] = useState([]);
@@ -50,7 +37,7 @@ export function App() {
 
   useEffect(() => {
     (async () => {
-      const response = await sendMessage({ type: 'redirect:getConfig' });
+      const response = await sendRedirectMessage({ type: 'redirect:getConfig' });
       if (response?.ok && response.config?.groups) {
         setGroups(response.config.groups);
       }
@@ -60,7 +47,7 @@ export function App() {
 
   useEffect(() => {
     if (!loaded) return;
-    sendMessage({ type: 'redirect:saveConfig', config: { groups } });
+    sendRedirectMessage({ type: 'redirect:saveConfig', config: { groups } });
   }, [groups, loaded]);
 
   const groupIds = useMemo(() => groups.map((group) => group.id), [groups]);
@@ -262,12 +249,3 @@ function RuleItem({ group, rule, onChange, onDelete }) {
   );
 }
 
-function uid(prefix) {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function sendMessage(payload) {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage(payload, (resp) => resolve(resp));
-  });
-}
