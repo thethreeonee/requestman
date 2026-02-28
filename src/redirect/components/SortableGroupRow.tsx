@@ -26,8 +26,8 @@ export default function SortableGroupRow(props: React.HTMLAttributes<HTMLTableRo
       if (!(expandedRow instanceof HTMLTableRowElement)) return;
       if (!expandedRow.classList.contains('ant-table-expanded-row')) return;
 
-      expandedRow.style.transform = translated;
-      expandedRow.style.transition = transition;
+      expandedRow.style.transform = translated ?? '';
+      expandedRow.style.transition = transition ?? '';
       expandedRow.classList.toggle('group-expanded-row-dragging', isDragging);
     },
     [isDragging, setNodeRef, transition, translated],
