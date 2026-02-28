@@ -1,0 +1,97 @@
+:root {
+  color-scheme: light dark;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 12px;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 18px;
+}
+
+#groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.group {
+  border: 1px solid #80808055;
+  border-radius: 8px;
+  padding: 10px;
+  background: #8080800d;
+}
+
+.group-header,
+.rule-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.group-header {
+  margin-bottom: 10px;
+}
+
+.group-name,
+.pattern,
+.redirect {
+  flex: 1;
+  min-width: 0;
+  padding: 6px;
+}
+
+.rules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.rule {
+  border: 1px solid #80808066;
+  border-radius: 6px;
+  padding: 8px;
+  background: #fff;
+}
+
+@media (prefers-color-scheme: dark) {
+  .rule {
+    background: #111;
+  }
+}
+
+.drag-handle {
+  cursor: grab;
+  user-select: none;
+}
+
+button {
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.danger {
+  color: #cc2b2b;
+}
+
+.group.drag-over,
+.rule.drag-over {
+  outline: 2px dashed #3399ff;
+}
+
+.group.disabled .rule-enabled {
+  pointer-events: none;
+}
