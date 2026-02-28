@@ -551,7 +551,12 @@ function RedirectPanel() {
                             icon={<EditOutlined />}
                             onClick={() => openEditGroupModal(group.id)}
                           />
-                          <Popconfirm title="删除分组？" description="该分组下规则会一并删除" onConfirm={() => removeGroup(group.id)}>
+                          <Popconfirm
+                            title="删除分组？"
+                            description="该分组下规则会一并删除"
+                            okButtonProps={{ danger: true, type: 'default' }}
+                            onConfirm={() => removeGroup(group.id)}
+                          >
                             <Button
                               type="text"
                               size="small"
@@ -639,7 +644,11 @@ function RedirectPanel() {
                                                 aria-label="复制规则"
                                                 onClick={() => duplicateRule(rule.id)}
                                               />
-                                              <Popconfirm title="删除规则？" onConfirm={() => removeRule(rule.id)}>
+                                              <Popconfirm
+                                                title="删除规则？"
+                                                okButtonProps={{ danger: true, type: 'default' }}
+                                                onConfirm={() => removeRule(rule.id)}
+                                              >
                                                 <Button type="text" danger icon={<DeleteOutlined />} title="删除规则" aria-label="删除规则" />
                                               </Popconfirm>
                                             </Space>
