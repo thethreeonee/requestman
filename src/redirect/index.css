@@ -25,6 +25,11 @@
   border-bottom: none;
 }
 
+.simple-group-collapse .ant-collapse-header {
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+}
+
 .simple-group-head {
   display: flex;
   align-items: center;
