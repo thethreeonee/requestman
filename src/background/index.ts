@@ -44,6 +44,10 @@ function buildUrlRegex(mode: MatchMode, expression: string) {
   return `^${escapeRegex(expression)}$`;
 }
 
+function normalizeRegexSubstitution(redirectUrl: string) {
+  return redirectUrl.replace(/\$(\d+)/g, '\\$1');
+}
+
 function toDnrRule(
   rule: RedirectRule,
   groupEnabled: ReadonlyMap<string, boolean>,
@@ -84,7 +88,7 @@ function toDnrRule(
     type: 'redirect',
     redirect:
       matchMode === 'regex'
-        ? { regexSubstitution: redirectUrl }
+        ? { regexSubstitution: normalizeRegexSubstitution(redirectUrl) }
         : { url: redirectUrl },
   };
 
