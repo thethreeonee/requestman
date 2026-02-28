@@ -15,5 +15,5 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "devtools_page": "devtools/devtools.html"
+  "devtools_page": "devtools/index.html"
 }
