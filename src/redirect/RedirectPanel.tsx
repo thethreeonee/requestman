@@ -545,18 +545,8 @@ function RedirectPanel() {
               return;
             }
             const ignored = Number(resp.ignoredCount || 0);
-            const hasIncompleteRules = nextRules.some(
-              (rule) =>
-                !rule.expression.trim()
-                || !rule.redirectUrl.trim()
-                || !nextGroups.find((group) => group.id === rule.groupId),
-            );
             if (ignored > 0) {
-              if (hasIncompleteRules) {
-                opts?.onSuccess?.(resp.activeCount);
-                return;
-              }
-              message.warning(`已生效 ${resp.activeCount} 条，忽略 ${ignored} 条`);
+              // 具体操作本身会给出单独提示，这里避免重复弹出“已生效/忽略”提示。
               opts?.onSuccess?.(resp.activeCount);
               return;
             }
