@@ -8,13 +8,7 @@
     "type": "module"
   },
   "permissions": [
-    "scripting",
-    "storage",
-    "declarativeNetRequest",
-    "tabs"
-  ],
-  "host_permissions": [
-    "<all_urls>"
+    "storage"
   ],
   "content_scripts": [
     {
@@ -25,15 +19,6 @@
         "injected.js"
       ],
       "world": "MAIN",
-      "run_at": "document_start"
-    },
-    {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "content/index.js"
-      ],
       "run_at": "document_start"
     }
   ],
@@ -46,10 +31,5 @@
         "<all_urls>"
       ]
     }
-  ],
-  "icons": {
-    "16": "icons/16.png",
-    "48": "icons/48.png",
-    "128": "icons/128.png"
-  }
+  ]
 }
