@@ -20,6 +20,7 @@ export default defineConfig({
     outDir: resolve(__dirname, 'dist'),
     emptyOutDir: true,
     cssCodeSplit: true,
+    chunkSizeWarningLimit: 1000,
 
     rollupOptions: {
       // ✅ 注意：这里的路径是相对于 root=src 的
