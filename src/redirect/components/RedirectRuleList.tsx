@@ -97,7 +97,6 @@ export default function RedirectRuleList({
     </div>
     <Table<TableRow>
       className="rules-list-table"
-      bordered
       pagination={false}
       dataSource={tableData}
       rowKey="key"
