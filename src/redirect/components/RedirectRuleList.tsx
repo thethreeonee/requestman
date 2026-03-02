@@ -16,6 +16,7 @@ import {
   EditOutlined,
   FolderOpenOutlined,
   CaretRightOutlined,
+  RetweetOutlined,
   EllipsisOutlined,
 } from '@ant-design/icons';
 import { genId } from '../rule-utils';
@@ -34,7 +35,7 @@ type Props = {
   setCollapsedGroupIds: React.Dispatch<React.SetStateAction<string[]>>;
   setGroupModal: React.Dispatch<React.SetStateAction<GroupModalState>>;
   setGroupInput: React.Dispatch<React.SetStateAction<string>>;
-  createRule: () => void;
+  createRule: (ruleType: RedirectRule['type']) => void;
   openRuleDetail: (ruleId: string) => void;
   duplicateGroup: (groupId: string) => void;
   deleteGroup: (groupId: string) => void;
@@ -49,6 +50,10 @@ type TableRow = GroupRow | RuleRow;
 
 const RULE_TYPE_LABEL_MAP: Record<RedirectRule['type'], string> = {
   redirect_request: '重定向请求',
+};
+
+const RULE_TYPE_ICON_MAP: Record<RedirectRule['type'], React.ReactNode> = {
+  redirect_request: <RetweetOutlined />,
 };
 
 export default function RedirectRuleList({
@@ -93,7 +98,24 @@ export default function RedirectRuleList({
   return <div>
     <div className="detail-header">
       <Space><Typography.Title level={4} style={{ margin: 0 }}>重定向请求</Typography.Title><Switch checked={redirectEnabled} onChange={setRedirectEnabled} /></Space>
-      <Space><Button onClick={() => { setGroupModal({ open: true, mode: 'create' }); setGroupInput(''); }}>新建规则组</Button><Button type="primary" onClick={createRule}>新建规则</Button></Space>
+      <Space>
+        <Button onClick={() => { setGroupModal({ open: true, mode: 'create' }); setGroupInput(''); }}>新建规则组</Button>
+        <Dropdown
+          menu={{
+            items: [
+              {
+                key: 'redirect_request',
+                icon: RULE_TYPE_ICON_MAP.redirect_request,
+                label: RULE_TYPE_LABEL_MAP.redirect_request,
+                onClick: () => createRule('redirect_request'),
+              },
+            ],
+          }}
+          trigger={['click']}
+        >
+          <Button type="primary">新建规则</Button>
+        </Dropdown>
+      </Space>
     </div>
     <Table<TableRow>
       className="rules-list-table"
@@ -126,7 +148,11 @@ export default function RedirectRuleList({
         },
         {
           title: '类型',
-          render: (_, row) => row.rowType === 'rule' ? RULE_TYPE_LABEL_MAP[row.rule.type] : null,
+          width: 150,
+          render: (_, row) => {
+            if (row.rowType !== 'rule') return null;
+            return <Space size={6}>{RULE_TYPE_ICON_MAP[row.rule.type]}<span>{RULE_TYPE_LABEL_MAP[row.rule.type]}</span></Space>;
+          },
         },
         {
           title: '状态',

@@ -57,10 +57,17 @@ export default function RedirectPanel() {
     setPage({ type: 'detail', ruleId, isNew: false });
   };
 
-  const createRule = () => {
+  const createRule = (ruleType: RedirectRule['type']) => {
     const groupId = groups[0]?.id;
     if (!groupId) return;
-    const newRule: RedirectRule = { id: genId(), name: `新建规则 ${rules.length + 1}`, type: 'redirect_request', enabled: true, groupId, conditions: [createDefaultCondition()] };
+    const newRule: RedirectRule = {
+      id: genId(),
+      name: `新建规则 ${rules.length + 1}`,
+      type: ruleType,
+      enabled: true,
+      groupId,
+      conditions: [createDefaultCondition()],
+    };
     setWorkingRule(JSON.parse(JSON.stringify(newRule)));
     setOriginalRule(JSON.parse(JSON.stringify(newRule)));
     setPage({ type: 'detail', ruleId: newRule.id, isNew: true });
