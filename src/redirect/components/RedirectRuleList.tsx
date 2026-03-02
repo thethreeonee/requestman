@@ -231,6 +231,12 @@ export default function RedirectRuleList({
         {
           title: '名称',
           dataIndex: 'name',
+          onCell: (row) => row.rowType === 'group'
+            ? {
+              className: 'rule-group-name-cell',
+              onClick: () => toggleGroupCollapse(row.group.id),
+            }
+            : {},
           render: (_, row) => {
             if (row.rowType === 'group') {
               const isCollapsed = collapsedGroupIds.includes(row.group.id);
@@ -240,7 +246,10 @@ export default function RedirectRuleList({
                     type="text"
                     className="group-collapse-btn"
                     icon={<CaretRightOutlined className={isCollapsed ? '' : 'expanded'} />}
-                    onClick={() => toggleGroupCollapse(row.group.id)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleGroupCollapse(row.group.id);
+                    }}
                   />
                   <Typography.Text strong>{row.group.name}</Typography.Text>
                 </Space>

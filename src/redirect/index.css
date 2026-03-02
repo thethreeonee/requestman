@@ -20,6 +20,10 @@ body {
   transform: rotate(90deg);
 }
 
+.rules-list-table .ant-table-tbody > tr > td.rule-group-name-cell {
+  cursor: pointer;
+}
+
 .rules-list-table .ant-table-thead > tr > th {
   padding-block: 8px;
 }
