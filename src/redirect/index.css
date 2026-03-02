@@ -11,3 +11,11 @@ body {
   margin-bottom: 12px;
   gap: 12px;
 }
+
+.group-collapse-btn .anticon {
+  transition: transform 0.2s ease;
+}
+
+.group-collapse-btn .anticon.expanded {
+  transform: rotate(90deg);
+}
