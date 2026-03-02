@@ -232,6 +232,8 @@ export default function RedirectPanel() {
                   role="button"
                   tabIndex={0}
                   aria-label="删除条件"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
