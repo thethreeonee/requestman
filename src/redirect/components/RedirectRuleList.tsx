@@ -10,7 +10,14 @@ import {
   Table,
   Typography,
 } from 'antd';
-import { CaretRightOutlined, EllipsisOutlined } from '@ant-design/icons';
+import {
+  CopyOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  FolderOpenOutlined,
+  CaretRightOutlined,
+  EllipsisOutlined,
+} from '@ant-design/icons';
 import { genId } from '../rule-utils';
 import type { RedirectGroup, RedirectRule } from '../types';
 
@@ -90,6 +97,7 @@ export default function RedirectRuleList({
     </div>
     <Table<TableRow>
       className="rules-list-table"
+      bordered
       pagination={false}
       dataSource={tableData}
       rowKey="key"
@@ -122,6 +130,7 @@ export default function RedirectRuleList({
         },
         {
           title: '状态',
+          width: 90,
           render: (_, row) => {
             if (row.rowType === 'group') {
               return <Switch size="small" checked={row.group.enabled} disabled={!redirectEnabled} onChange={(v) => setGroups((prev) => prev.map((g) => g.id === row.group.id ? { ...g, enabled: v } : g))} />;
@@ -141,16 +150,16 @@ export default function RedirectRuleList({
           render: (_, row) => {
             if (row.rowType === 'group') {
               return <Dropdown menu={{ items: [
-                { key: 'rename', label: '重命名', onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: row.group.id }); setGroupInput(row.group.name); } },
-                { key: 'copy', label: '复制', onClick: () => duplicateGroup(row.group.id) },
-                { key: 'delete', label: '删除', danger: true, onClick: () => deleteGroup(row.group.id) },
+                { key: 'rename', label: '重命名', icon: <EditOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: row.group.id }); setGroupInput(row.group.name); } },
+                { key: 'copy', label: '复制', icon: <CopyOutlined />, onClick: () => duplicateGroup(row.group.id) },
+                { key: 'delete', label: '删除', icon: <DeleteOutlined />, danger: true, onClick: () => deleteGroup(row.group.id) },
               ] }}><Button type="text" icon={<EllipsisOutlined />} /></Dropdown>;
             }
             return (
               <Dropdown menu={{ items: [
-                { key: 'move', label: '修改规则组', onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: row.rule.id }); setGroupInput(groupNameMap.get(row.rule.groupId) ?? ''); } },
-                { key: 'copy', label: '复制', onClick: () => setRules((prev) => { const idx = prev.findIndex((r) => r.id === row.rule.id); const next = [...prev]; next.splice(idx + 1, 0, { ...row.rule, id: genId(), name: `${row.rule.name} 副本` }); return next; }) },
-                { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => setRules((prev) => prev.filter((r) => r.id !== row.rule.id)) }) },
+                { key: 'move', label: '修改规则组', icon: <FolderOpenOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: row.rule.id }); setGroupInput(groupNameMap.get(row.rule.groupId) ?? ''); } },
+                { key: 'copy', label: '复制', icon: <CopyOutlined />, onClick: () => setRules((prev) => { const idx = prev.findIndex((r) => r.id === row.rule.id); const next = [...prev]; next.splice(idx + 1, 0, { ...row.rule, id: genId(), name: `${row.rule.name} 副本` }); return next; }) },
+                { key: 'delete', label: '删除', icon: <DeleteOutlined />, danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => setRules((prev) => prev.filter((r) => r.id !== row.rule.id)) }) },
               ] }}>
                 <Button type="text" icon={<EllipsisOutlined />} />
               </Dropdown>
