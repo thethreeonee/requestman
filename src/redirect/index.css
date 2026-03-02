@@ -47,11 +47,74 @@ body {
 }
 
 
-.rules-list-table .ant-table-tbody > tr.rule-row-dragging > td {
-  opacity: 0.6;
-  background: #eef4ff;
+.rules-list-table .ant-table-tbody > tr.rule-group-area-drop-target > td {
+  background: rgba(22, 119, 255, 0.12) !important;
 }
 
-.rules-list-table .ant-table-tbody > tr.rule-group-row-drop-over > td {
-  background: #e6f4ff;
+.rules-list-table .ant-table-tbody > tr.rule-group-area-drop-target:hover > td,
+.rules-list-table .ant-table-tbody > tr.rule-group-area-drop-target > td.ant-table-cell-row-hover {
+  background: rgba(22, 119, 255, 0.16) !important;
+}
+
+.rules-list-table .ant-table-tbody > tr.rule-group-area-drop-target > td:first-child {
+  border-left: 1px solid rgba(22, 119, 255, 0.45);
+}
+
+.rules-list-table .ant-table-tbody > tr.rule-group-area-drop-target > td:last-child {
+  border-right: 1px solid rgba(22, 119, 255, 0.45);
+}
+
+.rules-list-table .ant-table-tbody > tr.rule-group-area-drop-target-start > td {
+  border-top: 1px solid rgba(22, 119, 255, 0.45);
+}
+
+.rules-list-table .ant-table-tbody > tr.rule-group-area-drop-target:not(.rule-group-area-drop-target-end) > td {
+  border-bottom-color: transparent;
+}
+
+.rules-list-table .ant-table-tbody > tr.rule-group-area-drop-target-end > td {
+  border-bottom: 1px solid rgba(22, 119, 255, 0.45);
+}
+
+.rules-list-table .ant-table-tbody > tr.rule-group-area-drop-target-table-end > td:first-child {
+  border-bottom-left-radius: 8px;
+}
+
+.rules-list-table .ant-table-tbody > tr.rule-group-area-drop-target-table-end > td:last-child {
+  border-bottom-right-radius: 8px;
+}
+
+.rules-list-table .ant-table-tbody > tr.rule-row-dragging > td {
+  background: rgba(22, 119, 255, 0.10);
+}
+
+.rules-list-table .ant-table-tbody > tr.rule-row-dragging {
+  position: relative;
+  z-index: 10;
+}
+
+.rule-drag-overlay {
+  min-width: 240px;
+  max-width: 360px;
+  padding: 10px 12px;
+  border: 1px solid rgba(22, 119, 255, 0.32);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(6px);
+}
+
+.rule-drag-overlay-name {
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.4;
+}
+
+.rule-drag-overlay-type {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #475569;
+  font-size: 12px;
 }
