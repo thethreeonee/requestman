@@ -12,7 +12,7 @@ import RedirectRuleDetail from './components/RedirectRuleDetail';
 import RedirectRuleList from './components/RedirectRuleList';
 import './index.css';
 
-type PageState = { type: 'list' } | { type: 'detail'; ruleId: string };
+type PageState = { type: 'list' } | { type: 'detail'; ruleId: string; isNew: boolean };
 
 export default function RedirectPanel() {
   const { message } = App.useApp();
@@ -54,15 +54,16 @@ export default function RedirectPanel() {
     if (!found) return;
     setWorkingRule(JSON.parse(JSON.stringify(found)));
     setOriginalRule(JSON.parse(JSON.stringify(found)));
-    setPage({ type: 'detail', ruleId });
+    setPage({ type: 'detail', ruleId, isNew: false });
   };
 
   const createRule = () => {
     const groupId = groups[0]?.id;
     if (!groupId) return;
     const newRule: RedirectRule = { id: genId(), name: `新建规则 ${rules.length + 1}`, type: 'redirect_request', enabled: true, groupId, conditions: [createDefaultCondition()] };
-    setRules((prev) => [newRule, ...prev]);
-    openRuleDetail(newRule.id);
+    setWorkingRule(JSON.parse(JSON.stringify(newRule)));
+    setOriginalRule(JSON.parse(JSON.stringify(newRule)));
+    setPage({ type: 'detail', ruleId: newRule.id, isNew: true });
   };
 
   const onBack = () => {
@@ -79,10 +80,18 @@ export default function RedirectPanel() {
   };
 
   const saveDetailRule = () => {
-    if (!workingRule) return;
+    if (!workingRule || page.type !== 'detail') return;
     const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !c.redirectTarget.trim());
     if (invalid) return message.warning('还有条件配置未输入完整');
-    setRules((prev) => prev.map((r) => (r.id === workingRule.id ? workingRule : r)));
+    setRules((prev) => {
+      if (page.isNew && !prev.some((r) => r.id === workingRule.id)) {
+        return [workingRule, ...prev];
+      }
+      return prev.map((r) => (r.id === workingRule.id ? workingRule : r));
+    });
+    if (page.isNew) {
+      setPage({ type: 'detail', ruleId: workingRule.id, isNew: false });
+    }
     setOriginalRule(JSON.parse(JSON.stringify(workingRule)));
     message.success('规则已保存');
   };
