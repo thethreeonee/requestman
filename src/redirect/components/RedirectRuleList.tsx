@@ -165,6 +165,14 @@ function moveRuleWithDropTarget(list: RedirectRule[], groupOrder: string[], acti
   return next;
 }
 
+function isSameRuleOrder(left: RedirectRule[], right: RedirectRule[]) {
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i].id !== right[i].id || left[i].groupId !== right[i].groupId) return false;
+  }
+  return true;
+}
+
 const RULE_TYPE_LABEL_MAP: Record<RedirectRule['type'], string> = {
   redirect_request: '重定向请求',
   rewrite_string: '重写字符串',
@@ -252,11 +260,16 @@ export default function RedirectRuleList({
       return;
     }
 
-    const sourceRules = dragPreviewRules ?? rules;
-    const nextPreview = moveRuleWithDropTarget(sourceRules, groups.map((group) => group.id), activeId, overId);
+    const nextPreview = moveRuleWithDropTarget(rules, groups.map((group) => group.id), activeId, overId);
+    if (isSameRuleOrder(nextPreview, rules)) {
+      setDragPreviewRules(null);
+      return;
+    }
 
-    if (nextPreview === sourceRules) return;
-    setDragPreviewRules(nextPreview);
+    setDragPreviewRules((prev) => {
+      if (prev && isSameRuleOrder(prev, nextPreview)) return prev;
+      return nextPreview;
+    });
   };
 
   const handleDragCancel = () => {
@@ -267,6 +280,12 @@ export default function RedirectRuleList({
   const handleDragEnd = (event: DragEndEvent) => {
     const activeId = String(event.active.id);
     const overId = event.over ? String(event.over.id) : '';
+
+    if (!overId) {
+      setDragPreviewRules(null);
+      setActiveDragGroupId(null);
+      return;
+    }
 
     let reordered = false;
     if (dragPreviewRules) {
