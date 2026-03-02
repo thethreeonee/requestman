@@ -10,10 +10,11 @@ type Props = {
   setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
   onBack: () => void;
   saveDetailRule: () => void;
+  toggleDetailRuleEnabled: (ruleId: string, enabled: boolean) => void;
   setPageToList: () => void;
 };
 
-export default function UserAgentRuleDetail({ groups, workingRule, originalRule, setWorkingRule, setRules, onBack, saveDetailRule, setPageToList }: Props) {
+export default function UserAgentRuleDetail({ groups, workingRule, originalRule, setWorkingRule, setRules, onBack, saveDetailRule, toggleDetailRuleEnabled, setPageToList }: Props) {
   return <RuleDetailPlaceholder
     groups={groups}
     workingRule={workingRule}
@@ -22,6 +23,7 @@ export default function UserAgentRuleDetail({ groups, workingRule, originalRule,
     setRules={setRules}
     onBack={onBack}
     saveDetailRule={saveDetailRule}
+    toggleDetailRuleEnabled={toggleDetailRuleEnabled}
     setPageToList={setPageToList}
     title="User-Agent"
   />;

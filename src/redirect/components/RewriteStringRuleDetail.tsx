@@ -34,6 +34,7 @@ type Props = {
   setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
   onBack: () => void;
   saveDetailRule: () => void;
+  toggleDetailRuleEnabled: (ruleId: string, enabled: boolean) => void;
   setPageToList: () => void;
   messageApi: { warning: (content: string) => void };
 };
@@ -46,13 +47,16 @@ export default function RewriteStringRuleDetail({
   setRules,
   onBack,
   saveDetailRule,
+  toggleDetailRuleEnabled,
   setPageToList,
   messageApi,
 }: Props) {
   const [editRuleName, setEditRuleName] = useState(false);
   const [filterModal, setFilterModal] = useState<{ open: boolean; conditionId?: string }>({ open: false });
 
-  const dirty = originalRule && JSON.stringify(workingRule) !== JSON.stringify(originalRule);
+  const { enabled: _workingEnabled, ...workingRuleWithoutEnabled } = workingRule;
+  const { enabled: _originalEnabled, ...originalRuleWithoutEnabled } = originalRule ?? workingRule;
+  const dirty = originalRule && JSON.stringify(workingRuleWithoutEnabled) !== JSON.stringify(originalRuleWithoutEnabled);
 
   const updateCondition = (conditionId: string, patch: Partial<RedirectCondition>) => {
     setWorkingRule((prev) => (prev
@@ -78,7 +82,7 @@ export default function RewriteStringRuleDetail({
       enabled={workingRule.enabled}
       dirty={!!dirty}
       onBack={onBack}
-      onEnabledChange={(v) => setWorkingRule({ ...workingRule, enabled: v })}
+      onEnabledChange={(v) => toggleDetailRuleEnabled(workingRule.id, v)}
       onGroupChange={(v) => setWorkingRule({ ...workingRule, groupId: v })}
       onTest={() => undefined}
       onSave={saveDetailRule}

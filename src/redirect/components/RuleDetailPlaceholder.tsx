@@ -12,6 +12,7 @@ type Props = {
   setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
   onBack: () => void;
   saveDetailRule: () => void;
+  toggleDetailRuleEnabled: (ruleId: string, enabled: boolean) => void;
   setPageToList: () => void;
   title: string;
 };
@@ -24,10 +25,13 @@ export default function RuleDetailPlaceholder({
   setRules,
   onBack,
   saveDetailRule,
+  toggleDetailRuleEnabled,
   setPageToList,
   title,
 }: Props) {
-  const dirty = originalRule && JSON.stringify(workingRule) !== JSON.stringify(originalRule);
+  const { enabled: _workingEnabled, ...workingRuleWithoutEnabled } = workingRule;
+  const { enabled: _originalEnabled, ...originalRuleWithoutEnabled } = originalRule ?? workingRule;
+  const dirty = originalRule && JSON.stringify(workingRuleWithoutEnabled) !== JSON.stringify(originalRuleWithoutEnabled);
 
   return <div>
     <RuleDetailToolbar
@@ -36,7 +40,7 @@ export default function RuleDetailPlaceholder({
       enabled={workingRule.enabled}
       dirty={!!dirty}
       onBack={onBack}
-      onEnabledChange={(v) => setWorkingRule({ ...workingRule, enabled: v })}
+      onEnabledChange={(v) => toggleDetailRuleEnabled(workingRule.id, v)}
       onGroupChange={(v) => setWorkingRule({ ...workingRule, groupId: v })}
       onTest={() => undefined}
       onSave={saveDetailRule}

@@ -84,7 +84,9 @@ export default function RedirectPanel() {
 
   const onBack = () => {
     if (!workingRule || !originalRule) return setPage({ type: 'list' });
-    if (JSON.stringify(workingRule) !== JSON.stringify(originalRule)) {
+    const { enabled: _workingEnabled, ...workingRuleWithoutEnabled } = workingRule;
+    const { enabled: _originalEnabled, ...originalRuleWithoutEnabled } = originalRule;
+    if (JSON.stringify(workingRuleWithoutEnabled) !== JSON.stringify(originalRuleWithoutEnabled)) {
       Modal.confirm({
         title: '存在未保存修改',
         content: '修改不会被保存，确认返回吗？',
@@ -116,6 +118,12 @@ export default function RedirectPanel() {
     }
     setOriginalRule(JSON.parse(JSON.stringify(workingRule)));
     message.success('规则已保存');
+  };
+
+  const toggleDetailRuleEnabled = (ruleId: string, enabled: boolean) => {
+    setRules((prev) => prev.map((rule) => (rule.id === ruleId ? { ...rule, enabled } : rule)));
+    setWorkingRule((prev) => (prev?.id === ruleId ? { ...prev, enabled } : prev));
+    setOriginalRule((prev) => (prev?.id === ruleId ? { ...prev, enabled } : prev));
   };
 
   const moveRuleToGroup = () => {
@@ -259,6 +267,7 @@ export default function RedirectPanel() {
       setRules,
       onBack,
       saveDetailRule,
+      toggleDetailRuleEnabled,
       setPageToList: () => setPage({ type: 'list' }),
     };
 
