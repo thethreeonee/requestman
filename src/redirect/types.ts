@@ -41,6 +41,7 @@ export type RedirectCondition = {
 export type RedirectRule = {
   id: string;
   name: string;
+  type: 'redirect_request';
   enabled: boolean;
   groupId: string;
   conditions: RedirectCondition[];
