@@ -14,11 +14,14 @@ type RedirectCondition = {
   expression?: string;
   redirectType?: 'url' | 'file';
   redirectTarget?: string;
+  rewriteFrom?: string;
+  rewriteTo?: string;
   filter?: RedirectFilter;
 };
 
 export type RedirectRule = {
   id?: string;
+  type?: 'redirect_request' | 'rewrite_string';
   enabled?: boolean;
   groupId?: string;
   conditions?: RedirectCondition[];
@@ -50,9 +53,10 @@ function buildUrlRegex(mode: MatchMode, expression: string) {
   if (mode === 'regex') return expression;
   return `^${escapeRegex(expression)}$`;
 }
-function normalizeRegexSubstitution(redirectUrl: string) { return redirectUrl.replace(/\$(\d+)/g, '\\$1'); }
+function normalizeRegexSubstitution(value: string) { return value.replace(/\$(\d+)/g, '\\$1'); }
+function escapeRegexReplacement(value: string) { return value.replace(/\\/g, '\\\\').replace(/\$/g, '$$$$'); }
 
-function toOneRule(condition: RedirectCondition, groupId: string, index: number): chrome.declarativeNetRequest.Rule | null {
+function toOneRule(condition: RedirectCondition, index: number): chrome.declarativeNetRequest.Rule | null {
   const expression = typeof condition.expression === 'string' ? condition.expression.trim() : '';
   const redirectTarget = typeof condition.redirectTarget === 'string'
     ? condition.redirectTarget.trim()
@@ -70,6 +74,37 @@ function toOneRule(condition: RedirectCondition, groupId: string, index: number)
   const action: chrome.declarativeNetRequest.RuleAction = {
     type: 'redirect',
     redirect: matchMode === 'regex' ? { regexSubstitution: normalizeRegexSubstitution(redirectTarget) } : { url: redirectTarget },
+  };
+
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other'] };
+  const filter = condition.filter ?? {};
+  if (typeof filter.pageDomain === 'string' && filter.pageDomain.trim()) conditionRule.initiatorDomains = [filter.pageDomain.trim()];
+  if (typeof filter.resourceType === 'string' && filter.resourceType !== 'all') conditionRule.resourceTypes = [filter.resourceType as chrome.declarativeNetRequest.ResourceType];
+  if (typeof filter.requestMethod === 'string' && filter.requestMethod !== 'all') conditionRule.requestMethods = [filter.requestMethod.toUpperCase() as chrome.declarativeNetRequest.RequestMethod];
+
+  return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
+}
+
+function toRewriteRule(condition: RedirectCondition, index: number): chrome.declarativeNetRequest.Rule | null {
+  const expression = typeof condition.expression === 'string' ? condition.expression.trim() : '';
+  const from = typeof condition.rewriteFrom === 'string' ? condition.rewriteFrom : '';
+  const to = typeof condition.rewriteTo === 'string' ? condition.rewriteTo : '';
+  if (!expression || !from) return null;
+  const id = REDIRECT_RULE_ID_BASE + index;
+  if (id > REDIRECT_RULE_ID_MAX) return null;
+
+  const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
+  const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
+  const conditionBody = matchTarget === 'host'
+    ? buildHostRegex(matchMode, expression).replace(/^\^/, '').replace(/\$$/, '')
+    : buildUrlRegex(matchMode, expression).replace(/^\^/, '').replace(/\$$/, '');
+  const fromBody = matchMode === 'regex' ? from : escapeRegex(from);
+  const regexFilter = `^(.*${conditionBody}.*)${fromBody}(.*)$`;
+  try { new RegExp(regexFilter); } catch { return null; }
+
+  const action: chrome.declarativeNetRequest.RuleAction = {
+    type: 'redirect',
+    redirect: { regexSubstitution: `\\1${normalizeRegexSubstitution(escapeRegexReplacement(to))}\\2` },
   };
 
   const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other'] };
@@ -101,7 +136,7 @@ async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: R
         ? rule.conditions
         : [{ expression: rule.expression, redirectTarget: rule.redirectUrl, matchMode: rule.matchMode, matchTarget: rule.matchTarget }];
       for (const c of conditions) {
-        const dnr = toOneRule(c, groupId, index);
+        const dnr = rule.type === 'rewrite_string' ? toRewriteRule(c, index) : toOneRule(c, index);
         index += 1;
         if (dnr) nextRules.push(dnr);
       }
