@@ -248,8 +248,11 @@ export default function RedirectRuleList({
       return;
     }
 
-    const nextPreview = moveRuleWithDropTarget(rules, groups.map((group) => group.id), activeId, overId);
-    setDragPreviewRules(nextPreview === rules ? null : nextPreview);
+    const sourceRules = dragPreviewRules ?? rules;
+    const nextPreview = moveRuleWithDropTarget(sourceRules, groups.map((group) => group.id), activeId, overId);
+
+    if (nextPreview === sourceRules) return;
+    setDragPreviewRules(nextPreview);
   };
 
   const handleDragCancel = () => {
