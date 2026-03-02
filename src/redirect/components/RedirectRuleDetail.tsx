@@ -66,6 +66,10 @@ export default function RedirectRuleDetail({
     setWorkingRule({ ...workingRule, conditions: workingRule.conditions.filter((c) => c.id !== conditionId) });
   };
 
+  const isFilterConfigured = (condition: RedirectCondition) => !!condition.filter.pageDomain.trim()
+    || condition.filter.resourceType !== 'all'
+    || condition.filter.requestMethod !== 'all';
+
   const activeCondition = workingRule.conditions.find((c) => c.id === filterModal.conditionId);
 
   return <div>
@@ -127,7 +131,10 @@ export default function RedirectRuleDetail({
               <Select value={c.matchTarget} options={MATCH_TARGET_OPTIONS as never} style={{ width: 90 }} onChange={(v) => updateCondition(c.id, { matchTarget: v })} />
               <Select value={c.matchMode} options={MATCH_MODE_OPTIONS as never} style={{ width: 110 }} onChange={(v) => updateCondition(c.id, { matchMode: v })} />
               <Input style={{ flex: 1, minWidth: 0 }} value={c.expression} onChange={(e) => updateCondition(c.id, { expression: e.target.value })} />
-              <Button icon={<FilterOutlined />} onClick={() => setFilterModal({ open: true, conditionId: c.id })} />
+              <Button
+                icon={<FilterOutlined style={isFilterConfigured(c) ? { color: '#1677ff' } : undefined} />}
+                onClick={() => setFilterModal({ open: true, conditionId: c.id })}
+              />
             </Space.Compact>
             <Radio.Group value={c.redirectType} onChange={(e) => updateCondition(c.id, { redirectType: e.target.value })}><Radio value="url">另一个URL</Radio><Radio value="file">本地文件</Radio></Radio.Group>
             <Input value={c.redirectTarget} onChange={(e) => updateCondition(c.id, { redirectTarget: e.target.value })} placeholder="重定向目标" />
