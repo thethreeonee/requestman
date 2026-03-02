@@ -11,7 +11,7 @@ import {
   Typography,
 } from 'antd';
 import { DndContext, PointerSensor, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
-import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
   CopyOutlined,
@@ -60,7 +60,8 @@ type Props = {
 
 type GroupRow = { key: string; rowType: 'group'; group: RedirectGroup };
 type RuleRow = { key: string; rowType: 'rule'; rule: RedirectRule };
-type TableRow = GroupRow | RuleRow;
+type GroupEmptyRow = { key: string; rowType: 'group-empty'; group: RedirectGroup };
+type TableRow = GroupRow | RuleRow | GroupEmptyRow;
 
 type RowProps = React.HTMLAttributes<HTMLTableRowElement> & {
   'data-row-key'?: string;
@@ -139,6 +140,13 @@ function moveRuleWithDropTarget(list: RedirectRule[], groupOrder: string[], acti
   if (!overRule) return list;
   if (activeRuleId === overId) return list;
 
+  if (active.groupId === overRule.groupId) {
+    const activeIndex = list.findIndex((rule) => rule.id === activeRuleId);
+    const overIndex = list.findIndex((rule) => rule.id === overId);
+    if (activeIndex < 0 || overIndex < 0 || activeIndex === overIndex) return list;
+    return arrayMove(list, activeIndex, overIndex);
+  }
+
   const withoutActive = list.filter((rule) => rule.id !== activeRuleId);
   const overIndex = withoutActive.findIndex((rule) => rule.id === overId);
   if (overIndex < 0) return list;
@@ -204,6 +212,9 @@ export default function RedirectRuleList({
     const ruleRows: RuleRow[] = rules
       .filter((rule) => rule.groupId === group.id)
       .map((rule) => ({ key: `rule-${rule.id}`, rowType: 'rule', rule }));
+    if (ruleRows.length === 0) {
+      return [groupRow, { key: `group-empty-${group.id}`, rowType: 'group-empty', group }];
+    }
     return [groupRow, ...ruleRows];
   });
 
@@ -297,7 +308,7 @@ export default function RedirectRuleList({
           rowKey="key"
           onRow={(row) => ({
             'data-row-type': row.rowType,
-            'data-group-id': row.rowType === 'group' ? row.group.id : row.rule.groupId,
+            'data-group-id': row.rowType === 'rule' ? row.rule.groupId : row.group.id,
             'data-rule-id': row.rowType === 'rule' ? row.rule.id : undefined,
           })}
           components={{ body: { row: SortableTableRow } }}
@@ -321,6 +332,9 @@ export default function RedirectRuleList({
                 </Space>
               );
             }
+            if (row.rowType === 'group-empty') {
+              return <Typography.Text type="secondary" style={{ marginLeft: 40 }}>该规则组暂无规则</Typography.Text>;
+            }
             return <Button type="link" style={{ paddingInline: 0, marginLeft: 40 }} onClick={() => openRuleDetail(row.rule.id)}>{row.rule.name}</Button>;
           },
         },
@@ -339,6 +353,7 @@ export default function RedirectRuleList({
             if (row.rowType === 'group') {
               return <Switch size="small" checked={row.group.enabled} disabled={!redirectEnabled} onChange={(v) => setGroups((prev) => prev.map((g) => g.id === row.group.id ? { ...g, enabled: v } : g))} />;
             }
+            if (row.rowType === 'group-empty') return null;
             return (
               <Switch
                 size="small"
@@ -360,6 +375,7 @@ export default function RedirectRuleList({
                 { key: 'delete', label: '删除', icon: <DeleteOutlined />, danger: true, onClick: () => deleteGroup(row.group.id) },
               ] }}><Button type="text" icon={<EllipsisOutlined />} /></Dropdown>;
             }
+            if (row.rowType === 'group-empty') return null;
             return (
               <Dropdown menu={{ items: [
                 { key: 'move', label: '修改规则组', icon: <FolderOpenOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: row.rule.id }); setGroupInput(groupNameMap.get(row.rule.groupId) ?? ''); } },
