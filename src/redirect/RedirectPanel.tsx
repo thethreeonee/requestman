@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   App,
   AutoComplete,
@@ -61,6 +61,7 @@ export default function RedirectPanel() {
   const [testUrl, setTestUrl] = useState('');
   const [testResult, setTestResult] = useState('');
   const [filterModal, setFilterModal] = useState<{ open: boolean; conditionId?: string }>({ open: false });
+  const hasInitializedStorageSync = useRef(false);
 
   useEffect(() => {
     chrome.storage.local.get([REDIRECT_RULES_KEY, REDIRECT_ENABLED_KEY, REDIRECT_GROUPS_KEY], (res) => {
@@ -75,6 +76,10 @@ export default function RedirectPanel() {
 
   useEffect(() => {
     if (!rulesLoaded) return;
+    if (!hasInitializedStorageSync.current) {
+      hasInitializedStorageSync.current = true;
+      return;
+    }
     chrome.storage.local.set({ [REDIRECT_GROUPS_KEY]: groups, [REDIRECT_RULES_KEY]: rules, [REDIRECT_ENABLED_KEY]: redirectEnabled });
     chrome.runtime.sendMessage({ type: 'redirectRules/apply', groups, rules, enabled: redirectEnabled });
   }, [groups, rules, redirectEnabled, rulesLoaded]);
