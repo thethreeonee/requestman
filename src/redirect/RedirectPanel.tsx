@@ -20,6 +20,7 @@ import {
 } from 'antd';
 import {
   ArrowLeftOutlined,
+  DeleteOutlined,
   EditOutlined,
   EllipsisOutlined,
   FilterOutlined,
@@ -190,7 +191,7 @@ export default function RedirectPanel() {
           <Dropdown menu={{ items: [
             { key: 'copy', label: '复制', onClick: () => setWorkingRule({ ...workingRule, id: genId(), name: `${workingRule.name} 副本` }) },
             { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => { setRules((prev) => prev.filter((r) => r.id !== workingRule.id)); setPage({ type: 'list' }); } }) },
-          ] }}><Button type="text" icon={<EllipsisOutlined />} /></Dropdown>
+          ] }}><Button icon={<EllipsisOutlined />} /></Dropdown>
           <Select
             value={workingRule.groupId}
             style={{ width: 220 }}
@@ -213,7 +214,7 @@ export default function RedirectPanel() {
           items={[{
             key: c.id,
             label: `如果请求 ${index + 1}`,
-            extra: <Button type="text" danger onClick={(e) => { e.stopPropagation(); removeCondition(c.id); }}>删除</Button>,
+            extra: <Button type="text" danger icon={<DeleteOutlined />} onClick={(e) => { e.stopPropagation(); removeCondition(c.id); }} aria-label="删除条件" />,
             children: <Space direction="vertical" style={{ width: '100%' }}>
               <Space.Compact style={{ width: '100%' }}>
                 <Select value={c.matchTarget} options={MATCH_TARGET_OPTIONS as never} style={{ width: 90 }} onChange={(v) => updateCondition(c.id, { matchTarget: v })} />
@@ -269,24 +270,29 @@ export default function RedirectPanel() {
         },
         expandedRowRender: (row: any) => {
           const groupRules = rules.filter((r) => r.groupId === row.group.id);
+          if (groupRules.length === 0) {
+            return <Typography.Text type="secondary">当前规则组暂无规则</Typography.Text>;
+          }
+
           return (
-            <Table
-              size="small"
-              pagination={false}
-              dataSource={groupRules}
-              rowKey="id"
-              columns={[
-                { title: '规则', dataIndex: 'name', render: (name: string, rule: RedirectRule) => <Button type="link" style={{ paddingInline: 0 }} onClick={() => openRuleDetail(rule.id)}>{name}</Button> },
-                { title: '类型', render: () => <Tag>重定向请求</Tag> },
-                { title: '状态', render: (_: unknown, rule: RedirectRule) => <Switch checked={rule.enabled} disabled={!redirectEnabled || !currentGroupEnabled.get(rule.groupId)} onChange={(v) => setRules((prev) => prev.map((r) => r.id === rule.id ? { ...r, enabled: v } : r))} /> },
-                { title: '操作', render: (_: unknown, rule: RedirectRule) => <Dropdown menu={{ items: [
-                  { key: 'move', label: '修改规则组', onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: rule.id }); setGroupInput(groupNameMap.get(rule.groupId) ?? ''); } },
-                  { key: 'copy', label: '复制', onClick: () => setRules((prev) => { const idx = prev.findIndex((r) => r.id === rule.id); const next = [...prev]; next.splice(idx + 1, 0, { ...rule, id: genId(), name: `${rule.name} 副本` }); return next; }) },
-                  { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => setRules((prev) => prev.filter((r) => r.id !== rule.id)) }) },
-                ] }}><Button type="text" icon={<EllipsisOutlined />} /></Dropdown> },
-              ]}
-              locale={{ emptyText: '当前规则组暂无规则' }}
-            />
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              {groupRules.map((rule) => (
+                <div key={rule.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <Space size={12} wrap>
+                    <Button type="link" style={{ paddingInline: 0 }} onClick={() => openRuleDetail(rule.id)}>{rule.name}</Button>
+                    <Tag>重定向请求</Tag>
+                    <Switch checked={rule.enabled} disabled={!redirectEnabled || !currentGroupEnabled.get(rule.groupId)} onChange={(v) => setRules((prev) => prev.map((r) => r.id === rule.id ? { ...r, enabled: v } : r))} />
+                  </Space>
+                  <Dropdown menu={{ items: [
+                    { key: 'move', label: '修改规则组', onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: rule.id }); setGroupInput(groupNameMap.get(rule.groupId) ?? ''); } },
+                    { key: 'copy', label: '复制', onClick: () => setRules((prev) => { const idx = prev.findIndex((r) => r.id === rule.id); const next = [...prev]; next.splice(idx + 1, 0, { ...rule, id: genId(), name: `${rule.name} 副本` }); return next; }) },
+                    { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => setRules((prev) => prev.filter((r) => r.id !== rule.id)) }) },
+                  ] }}>
+                    <Button type="text" icon={<EllipsisOutlined />} />
+                  </Dropdown>
+                </div>
+              ))}
+            </Space>
           );
         },
       }}
