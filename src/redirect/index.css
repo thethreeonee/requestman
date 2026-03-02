@@ -31,3 +31,9 @@ body {
 .rules-list-table .ant-table-tbody > .rule-group-row > td {
   background: #f5f5f5;
 }
+
+.rules-list-table .ant-table.ant-table-bordered > .ant-table-container table > thead > tr > th,
+.rules-list-table .ant-table.ant-table-bordered > .ant-table-container table > tbody > tr > th,
+.rules-list-table .ant-table.ant-table-bordered > .ant-table-container table > tbody > tr > td {
+  border-inline-end: none;
+}
