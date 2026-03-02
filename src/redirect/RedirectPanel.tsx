@@ -124,6 +124,7 @@ export default function RedirectPanel() {
     setRules((prev) => prev.map((rule) => (rule.id === ruleId ? { ...rule, enabled } : rule)));
     setWorkingRule((prev) => (prev?.id === ruleId ? { ...prev, enabled } : prev));
     setOriginalRule((prev) => (prev?.id === ruleId ? { ...prev, enabled } : prev));
+    message.success(enabled ? '规则已启用' : '规则已停用');
   };
 
   const moveRuleToGroup = () => {
