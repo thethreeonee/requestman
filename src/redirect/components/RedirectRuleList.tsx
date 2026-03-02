@@ -67,7 +67,15 @@ type PointerDragState = DragState & {
   startY: number;
   clientX: number;
   clientY: number;
+  previewOffsetX: number;
+  previewOffsetY: number;
   isDragging: boolean;
+};
+type DragPreviewState = {
+  rowHtml: string;
+  rowClassName: string;
+  cellWidths: number[];
+  width: number;
 };
 type DropState = { targetRuleId: string; position: 'before' | 'after' };
 type GroupDropState = { groupId: string };
@@ -245,6 +253,7 @@ export default function RedirectRuleList({
   const tableWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const [dragState, setDragState] = React.useState<DragState | null>(null);
   const [pointerDragState, setPointerDragState] = React.useState<PointerDragState | null>(null);
+  const [dragPreviewState, setDragPreviewState] = React.useState<DragPreviewState | null>(null);
   const [dropState, setDropState] = React.useState<DropState | null>(null);
   const [groupDropState, setGroupDropState] = React.useState<GroupDropState | null>(null);
   const [groupOverlayRect, setGroupOverlayRect] = React.useState<GroupOverlayRect | null>(null);
@@ -259,11 +268,6 @@ export default function RedirectRuleList({
     () => buildTableData(groups, collapsedGroupIds, rules),
     [collapsedGroupIds, groups, rules],
   );
-  const draggedRule = React.useMemo(
-    () => dragState ? rules.find((rule) => rule.id === dragState.ruleId) ?? null : null,
-    [dragState, rules],
-  );
-  const draggedRuleGroupEnabled = draggedRule ? currentGroupEnabled.get(draggedRule.groupId) !== false : false;
   const lastVisibleGroupId = React.useMemo(() => {
     const groupRows = tableData.filter((row): row is GroupRow => row.rowType === 'group');
     return groupRows[groupRows.length - 1]?.group.id ?? null;
@@ -365,6 +369,7 @@ export default function RedirectRuleList({
     setPointerDragStateWithRef(null);
     setDropStateWithRef(null);
     setGroupDropStateWithRef(null);
+    setDragPreviewState(null);
     setGroupOverlayRect(null);
   };
 
@@ -478,6 +483,15 @@ export default function RedirectRuleList({
 
   const handleRulePointerDown = (event: React.PointerEvent<HTMLTableRowElement>, rule: RedirectRule) => {
     if (event.button !== 0 || isInteractiveDragTarget(event.target)) return;
+    const rowRect = event.currentTarget.getBoundingClientRect();
+    const cellWidths = Array.from(event.currentTarget.children)
+      .map((cell) => (cell as HTMLElement).getBoundingClientRect().width);
+    setDragPreviewState({
+      rowHtml: event.currentTarget.innerHTML,
+      rowClassName: event.currentTarget.className,
+      cellWidths,
+      width: rowRect.width,
+    });
     setPointerDragStateWithRef({
       pointerId: event.pointerId,
       ruleId: rule.id,
@@ -486,6 +500,8 @@ export default function RedirectRuleList({
       startY: event.clientY,
       clientX: event.clientX,
       clientY: event.clientY,
+      previewOffsetX: event.clientX - rowRect.left,
+      previewOffsetY: event.clientY - rowRect.top,
       isDragging: false,
     });
   };
@@ -493,32 +509,25 @@ export default function RedirectRuleList({
   const getRowGroupId = (row: TableRow) => (row.rowType === 'rule' ? row.rule.groupId : row.group.id);
 
   return <div>
-    {pointerDragState?.isDragging && draggedRule ? (
+    {pointerDragState?.isDragging && dragPreviewState ? (
       <div
         className="rule-drag-preview"
         style={{
-          top: pointerDragState.clientY + 12,
-          left: pointerDragState.clientX + 12,
+          top: pointerDragState.clientY - pointerDragState.previewOffsetY,
+          left: pointerDragState.clientX - pointerDragState.previewOffsetX,
         }}
       >
-        <div className="rule-drag-preview__cell rule-drag-preview__cell--name">
-          <Typography.Text ellipsis>{draggedRule.name}</Typography.Text>
-        </div>
-        <div className="rule-drag-preview__cell rule-drag-preview__cell--type">
-          <Space size={6}>{RULE_TYPE_ICON_MAP[draggedRule.type]}<span>{RULE_TYPE_LABEL_MAP[draggedRule.type]}</span></Space>
-        </div>
-        <div className="rule-drag-preview__cell rule-drag-preview__cell--status">
-          <Tooltip title={getRuleEffectiveHint(redirectEnabled, draggedRuleGroupEnabled, draggedRule.enabled)}>
-            <Switch
-              size="small"
-              checked={draggedRule.enabled}
-              disabled
+        <table className="rules-list-table rule-drag-preview__table" style={{ width: dragPreviewState.width }}>
+          <colgroup>
+            {dragPreviewState.cellWidths.map((width, index) => <col key={index} style={{ width }} />)}
+          </colgroup>
+          <tbody className="ant-table-tbody">
+            <tr
+              className={dragPreviewState.rowClassName}
+              dangerouslySetInnerHTML={{ __html: dragPreviewState.rowHtml }}
             />
-          </Tooltip>
-        </div>
-        <div className="rule-drag-preview__cell rule-drag-preview__cell--actions">
-          <Button type="text" icon={<EllipsisOutlined />} disabled />
-        </div>
+          </tbody>
+        </table>
       </div>
     ) : null}
     <div className="detail-header">
