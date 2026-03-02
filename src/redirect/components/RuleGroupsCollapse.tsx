@@ -109,7 +109,7 @@ export default function RuleGroupsCollapse({
             <Space size={6} onClick={(e) => e.stopPropagation()}>
               <Button type="text" size="small" className="simple-group-action-btn" icon={<PlusOutlined />} onClick={() => addRule(group.id)} />
               <Button type="text" size="small" className="simple-group-action-btn" icon={<EditOutlined />} onClick={() => openEditGroupModal(group.id)} />
-              <Popconfirm title="删除分组？" description="该分组下规则会一并删除" okButtonProps={{ danger: true, type: 'default' }} onConfirm={() => removeGroup(group.id)}>
+              <Popconfirm title="删除分组？" description="该分组下规则会一并删除" okButtonProps={{ danger: true, type: 'primary' }} onConfirm={() => removeGroup(group.id)}>
                 <Button type="text" size="small" className="simple-group-action-btn" danger icon={<DeleteOutlined />} />
               </Popconfirm>
             </Space>
@@ -149,7 +149,7 @@ export default function RuleGroupsCollapse({
                               </Dropdown>
                               <Button type="text" icon={<SaveOutlined />} title="Save rule" aria-label="Save rule" disabled={!dirty} onClick={() => saveRuleDraft(rule)} />
                               <Button type="text" icon={<CopyOutlined />} title="Duplicate rule" aria-label="Duplicate rule" onClick={() => duplicateRule(rule.id)} />
-                              <Popconfirm title="Delete rule?" okButtonProps={{ danger: true, type: 'default' }} onConfirm={() => removeRule(rule.id)}>
+                              <Popconfirm title="Delete rule?" okButtonProps={{ danger: true, type: 'primary' }} onConfirm={() => removeRule(rule.id)}>
                                 <Button type="text" danger icon={<DeleteOutlined />} title="Delete rule" aria-label="Delete rule" />
                               </Popconfirm>
                             </Space>

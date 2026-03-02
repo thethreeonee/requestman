@@ -198,7 +198,7 @@ export function buildRuleColumns({
               title="确认删除这条规则？"
               okText="删除"
               cancelText="取消"
-              okButtonProps={{ danger: true }}
+              okButtonProps={{ danger: true, type: 'primary' }}
               onConfirm={() => onRemoveRule(row.id)}
             >
               <Button
@@ -284,7 +284,7 @@ export function buildGroupColumns({
                 description={`确认后会删除该分组下的 ${count} 条规则，此操作不可恢复。`}
                 okText="确认删除"
                 cancelText="取消"
-                okButtonProps={{ danger: true }}
+                okButtonProps={{ danger: true, type: 'primary' }}
                 onConfirm={() => onRemoveGroup(g.id)}
               >
                 <Button
