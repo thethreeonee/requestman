@@ -1,108 +1,13 @@
-.rules-table .ant-table-thead > tr > th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: #fff;
+body {
+  margin: 0;
+  padding: 16px;
+  background: #f5f7fb;
 }
 
-.simple-group-card-dragging {
-  opacity: 0.75;
-  position: relative;
-  z-index: 20;
-}
-
-.simple-group-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.simple-group-drag-handle {
-  color: rgba(0, 0, 0, 0.45);
-  cursor: grab;
-}
-
-.simple-group-collapse-btn {
-  padding-inline: 4px;
-}
-
-.simple-group-action-btn {
-  color: rgba(0, 0, 0, 0.65);
-}
-
-.simple-rule-card {
-  border-radius: 10px;
-}
-
-.simple-rule-card + .simple-rule-card {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed #d9d9d9;
-}
-
-.simple-rule-card-content {
-  border: 1px solid #eef1f5;
-  border-radius: 10px;
-  padding: 12px;
-  background: #fff;
-}
-
-.simple-rule-card-highlighted {
-  border-color: #1677ff;
-  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12);
-}
-
-.simple-rule-card-dragging {
-  opacity: 0.85;
-  position: relative;
-  z-index: 30;
-}
-
-.simple-rule-top-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.simple-rule-drag-handle {
-  cursor: grab;
-  color: rgba(0, 0, 0, 0.45);
-}
-
-.simple-rule-field {
-  margin-top: 10px;
-}
-
-.simple-rule-field .ant-typography {
-  display: block;
-  margin-bottom: 6px;
-}
-
-.simple-rule-save-row {
-  margin-top: 10px;
-  display: flex;
-  align-items: center;
-}
-
-
-.redirect-header {
+.detail-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
-  padding: 12px;
-  border: 1px solid #e6e8ee;
-  border-radius: 10px;
-  background: #fff;
-}
-
-.redirect-test-panel {
-  flex: 0 0 auto;
-  padding: 12px;
-  box-sizing: border-box;
-  background: #f8fafc;
-  border-top: 1px solid #e6e8ee;
+  gap: 12px;
 }

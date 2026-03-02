@@ -1,14 +1,49 @@
 export type MatchTarget = 'url' | 'host';
 export type MatchMode = 'equals' | 'contains' | 'regex' | 'wildcard';
+export type ResourceTypeFilter =
+  | 'all'
+  | 'xmlhttprequest'
+  | 'script'
+  | 'stylesheet'
+  | 'image'
+  | 'media'
+  | 'font'
+  | 'websocket'
+  | 'main_frame'
+  | 'sub_frame';
 
-export type RedirectRule = {
+export type RequestMethodFilter =
+  | 'all'
+  | 'get'
+  | 'post'
+  | 'put'
+  | 'patch'
+  | 'delete'
+  | 'head'
+  | 'options';
+
+export type RedirectFilter = {
+  pageDomain: string;
+  resourceType: ResourceTypeFilter;
+  requestMethod: RequestMethodFilter;
+};
+
+export type RedirectCondition = {
   id: string;
-  enabled: boolean;
-  groupId: string;
   matchTarget: MatchTarget;
   matchMode: MatchMode;
   expression: string;
-  redirectUrl: string;
+  redirectType: 'url' | 'file';
+  redirectTarget: string;
+  filter: RedirectFilter;
+};
+
+export type RedirectRule = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  groupId: string;
+  conditions: RedirectCondition[];
 };
 
 export type RedirectGroup = {
@@ -16,25 +51,3 @@ export type RedirectGroup = {
   name: string;
   enabled: boolean;
 };
-
-export type RuleDraft = {
-  expression?: string;
-  redirectUrl?: string;
-};
-
-export type RuleDragData = {
-  type: 'rule';
-  groupId: string;
-};
-
-export type GroupDropData = {
-  type: 'group';
-  groupId: string;
-};
-
-export type GroupSortDragData = {
-  type: 'group-sort';
-  groupId: string;
-};
-
-export type DragData = RuleDragData | GroupDropData;

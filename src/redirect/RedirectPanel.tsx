@@ -1,536 +1,261 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { App, Button, Dropdown, Input, Modal, Space, Switch, Typography } from 'antd';
-import { DownloadOutlined, EllipsisOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  DndContext,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core';
-import './index.css';
+  App,
+  AutoComplete,
+  Button,
+  Collapse,
+  Drawer,
+  Dropdown,
+  Form,
+  Input,
+  Modal,
+  Radio,
+  Select,
+  Space,
+  Switch,
+  Table,
+  Tag,
+  Tooltip,
+  Typography,
+} from 'antd';
+import {
+  ArrowLeftOutlined,
+  EditOutlined,
+  EllipsisOutlined,
+  FilterOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import {
   DEFAULT_GROUP_ID,
   DEFAULT_GROUP_NAME,
+  MATCH_MODE_OPTIONS,
+  MATCH_TARGET_OPTIONS,
   REDIRECT_ENABLED_KEY,
   REDIRECT_GROUPS_KEY,
   REDIRECT_RULES_KEY,
+  REQUEST_METHOD_OPTIONS,
+  RESOURCE_TYPE_OPTIONS,
 } from './constants';
-import {
-  genId,
-  normalizeGroups,
-  normalizeRules,
-  simulateRedirect,
-} from './rule-utils';
-import {
-  projectRulesByDragTarget,
-  ruleDropCollisionDetection,
-} from './dnd-utils';
-import RuleGroupsCollapse from './components/RuleGroupsCollapse';
-import RuleTestPanel from './components/RuleTestPanel';
-import type { DragData, RedirectGroup, RedirectRule, RuleDraft, RuleDragData } from './types';
+import { createDefaultCondition, genId, normalizeGroups, normalizeRules, simulateRedirect } from './rule-utils';
+import type { RedirectCondition, RedirectGroup, RedirectRule } from './types';
+import './index.css';
 
-function RedirectPanel() {
+type PageState = { type: 'list' } | { type: 'detail'; ruleId: string };
+
+export default function RedirectPanel() {
   const { message } = App.useApp();
   const [groups, setGroups] = useState<RedirectGroup[]>([]);
   const [rules, setRules] = useState<RedirectRule[]>([]);
-  const [ruleDrafts, setRuleDrafts] = useState<Record<string, RuleDraft>>({});
-  const [newGroupName, setNewGroupName] = useState('');
-  const [createGroupModalOpen, setCreateGroupModalOpen] = useState(false);
-  const [editGroupModalOpen, setEditGroupModalOpen] = useState(false);
-  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
-  const [editingGroupName, setEditingGroupName] = useState('');
   const [redirectEnabled, setRedirectEnabled] = useState(true);
   const [rulesLoaded, setRulesLoaded] = useState(false);
-  const [testUrl, setTestUrl] = useState('');
-  const [testTrigger, setTestTrigger] = useState(0);
-  const [highlightedRuleId, setHighlightedRuleId] = useState<string | null>(null);
   const [collapsedGroupIds, setCollapsedGroupIds] = useState<string[]>([]);
-  const applySourceRef = useRef<'init' | 'input' | 'non_input' | 'add' | 'group_toggle'>('init');
-  const highlightTimerRef = useRef<number | null>(null);
-  const listScrollRef = useRef<HTMLDivElement | null>(null);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+  const [groupModal, setGroupModal] = useState<{ open: boolean; mode: 'create' | 'rename' | 'move'; groupId?: string; ruleId?: string }>({ open: false, mode: 'create' });
+  const [groupInput, setGroupInput] = useState('');
+  const [page, setPage] = useState<PageState>({ type: 'list' });
+  const [editRuleName, setEditRuleName] = useState(false);
+  const [workingRule, setWorkingRule] = useState<RedirectRule | null>(null);
+  const [originalRule, setOriginalRule] = useState<RedirectRule | null>(null);
+  const [testDrawerOpen, setTestDrawerOpen] = useState(false);
+  const [testUrl, setTestUrl] = useState('');
+  const [testResult, setTestResult] = useState('');
+  const [filterModal, setFilterModal] = useState<{ open: boolean; conditionId?: string }>({ open: false });
 
   useEffect(() => {
     chrome.storage.local.get([REDIRECT_RULES_KEY, REDIRECT_ENABLED_KEY, REDIRECT_GROUPS_KEY], (res) => {
       const normalizedGroups = normalizeGroups(res?.[REDIRECT_GROUPS_KEY]);
       const groupIds = new Set(normalizedGroups.map((g) => g.id));
-      const fallbackGroupId = normalizedGroups[0]?.id ?? DEFAULT_GROUP_ID;
       setGroups(normalizedGroups);
-      setRules(normalizeRules(res?.[REDIRECT_RULES_KEY], groupIds, fallbackGroupId));
+      setRules(normalizeRules(res?.[REDIRECT_RULES_KEY], groupIds, normalizedGroups[0]?.id ?? DEFAULT_GROUP_ID));
       setRedirectEnabled(res?.[REDIRECT_ENABLED_KEY] !== false);
       setRulesLoaded(true);
     });
   }, []);
 
-  const addRule = (groupId: string) => {
-    applySourceRef.current = 'add';
-    setRules((prev) => [{
-      id: genId(),
-      enabled: true,
-      groupId,
-      matchTarget: 'url',
-      matchMode: 'contains',
-      expression: '',
-      redirectUrl: '',
-    }, ...prev]);
-  };
-
-  const createRuleFromHeader = () => {
-    const targetGroupId = groups[0]?.id;
-    if (!targetGroupId) {
-      message.warning('请先创建规则组');
-      return;
-    }
-    addRule(targetGroupId);
-    message.success('已新建规则');
-  };
-
-  const updateRule = <K extends keyof RedirectRule>(id: string, key: K, value: RedirectRule[K]) => {
-    setRules((prev) => prev.map((r) => (r.id === id ? { ...r, [key]: value } : r)));
-  };
-
-  const removeRule = (id: string) => {
-    applySourceRef.current = 'non_input';
-    setRules((prev) => prev.filter((r) => r.id !== id));
-    setRuleDrafts((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-    message.success('已删除规则');
-  };
-
-  const duplicateRule = (id: string) => {
-    applySourceRef.current = 'non_input';
-    setRules((prev) => {
-      const idx = prev.findIndex((r) => r.id === id);
-      if (idx < 0) return prev;
-      const next = [...prev];
-      next.splice(idx + 1, 0, { ...next[idx], id: genId() });
-      return next;
-    });
-    message.success('已复制规则');
-  };
-
-  const createGroup = () => {
-    const name = newGroupName.trim();
-    if (!name) {
-      message.warning('请输入分组名称');
-      return false;
-    }
-    applySourceRef.current = 'non_input';
-    const next: RedirectGroup = { id: genId(), name, enabled: true };
-    setGroups((prev) => [next, ...prev]);
-    setNewGroupName('');
-    message.success(`已创建分组：${name}`);
-    return true;
-  };
-
-  const toggleGroupEnabled = (id: string, enabled: boolean) => {
-    applySourceRef.current = 'group_toggle';
-    const groupName = groups.find((g) => g.id === id)?.name || '未命名分组';
-    setGroups((prev) => prev.map((g) => (g.id === id ? { ...g, enabled } : g)));
-    enabled ? message.success(`已开启分组：${groupName}`) : message.warning(`已关闭分组：${groupName}`);
-  };
-
-  const removeGroup = (groupId: string) => {
-    const groupName = groups.find((g) => g.id === groupId)?.name || '未命名分组';
-    applySourceRef.current = 'non_input';
-    setGroups((prev) => {
-      const next = prev.filter((g) => g.id !== groupId);
-      if (next.length > 0) return next;
-      return [{ id: DEFAULT_GROUP_ID, name: DEFAULT_GROUP_NAME, enabled: true }];
-    });
-    setRules((prev) => prev.filter((r) => r.groupId !== groupId));
-    message.success(`已删除分组：${groupName}`);
-  };
-
-  const openEditGroupModal = (groupId: string) => {
-    const group = groups.find((g) => g.id === groupId);
-    if (!group) return;
-    setEditingGroupId(groupId);
-    setEditingGroupName(group.name);
-    setEditGroupModalOpen(true);
-  };
-
-  const submitEditGroupName = () => {
-    if (!editingGroupId) return false;
-    const nextName = editingGroupName.trim();
-    if (!nextName) {
-      message.warning('请输入分组名称');
-      return false;
-    }
-    applySourceRef.current = 'non_input';
-    setGroups((prev) => prev.map((g) => (g.id === editingGroupId ? { ...g, name: nextName } : g)));
-    setEditGroupModalOpen(false);
-    setEditingGroupId(null);
-    setEditingGroupName('');
-    message.success(`已更新分组名称为：${nextName}`);
-    return true;
-  };
-
-  const getRuleFieldValue = (row: RedirectRule, key: 'expression' | 'redirectUrl') => {
-    const draft = ruleDrafts[row.id];
-    if (!draft) return row[key];
-    const v = draft[key];
-    return typeof v === 'string' ? v : row[key];
-  };
-
-  const isRuleFieldDirty = (row: RedirectRule, key: 'expression' | 'redirectUrl') => {
-    const draft = ruleDrafts[row.id];
-    if (!draft || typeof draft[key] !== 'string') return false;
-    return draft[key] !== row[key];
-  };
-
-  const updateRuleDraft = (row: RedirectRule, key: 'expression' | 'redirectUrl', value: string) => {
-    setRuleDrafts((prev) => ({ ...prev, [row.id]: { ...(prev[row.id] ?? {}), [key]: value } }));
-  };
-
-  const saveRuleDraft = (row: RedirectRule) => {
-    const expression = getRuleFieldValue(row, 'expression');
-    const redirectUrl = getRuleFieldValue(row, 'redirectUrl');
-    if (!expression.trim() || !redirectUrl.trim()) {
-      message.warning('请先补全匹配表达式和重定向 URL');
-      return;
-    }
-    if (!isRuleFieldDirty(row, 'expression') && !isRuleFieldDirty(row, 'redirectUrl')) return;
-    applySourceRef.current = 'non_input';
-    setRules((prev) => prev.map((r) => (r.id === row.id ? { ...r, expression, redirectUrl } : r)));
-    setRuleDrafts((prev) => {
-      const next = { ...prev };
-      delete next[row.id];
-      return next;
-    });
-    message.success('规则已保存并生效');
-  };
-
-  const exportRules = () => {
-    try {
-      const grouped = groups.map((g) => ({
-        id: g.id,
-        name: g.name,
-        enabled: g.enabled,
-        rules: rules.filter((r) => r.groupId === g.id),
-      }));
-      const payload = { version: 2, enabled: redirectEnabled, groups: grouped };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `asap-redirect-rules-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      message.success('导出成功');
-    } catch (err) {
-      message.error(`导出失败: ${String((err as Error)?.message || err)}`);
-    }
-  };
-
-  const importRulesFromFile = async (file: File) => {
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text) as unknown;
-      let importedGroups = groups;
-      let importedRules: RedirectRule[] = [];
-      let importedEnabled = redirectEnabled;
-
-      if (Array.isArray(parsed)) {
-        const groupIds = new Set(importedGroups.map((g) => g.id));
-        importedRules = normalizeRules(parsed, groupIds, importedGroups[0]?.id ?? DEFAULT_GROUP_ID);
-      } else if (parsed && typeof parsed === 'object') {
-        const obj = parsed as Record<string, unknown>;
-        const groupedInput = Array.isArray(obj.groups) ? obj.groups : [];
-        const hasNestedRules = groupedInput.some(
-          (it) => it && typeof it === 'object' && Array.isArray((it as Record<string, unknown>).rules),
-        );
-
-        if (hasNestedRules) {
-          importedGroups = normalizeGroups(
-            groupedInput.map((it) => {
-              const x = (it && typeof it === 'object' ? it : {}) as Record<string, unknown>;
-              return { id: x.id, name: x.name, enabled: x.enabled };
-            }),
-          );
-          const flatRules: unknown[] = [];
-          for (const g of groupedInput) {
-            if (!g || typeof g !== 'object') continue;
-            const gx = g as Record<string, unknown>;
-            if (!Array.isArray(gx.rules) || typeof gx.id !== 'string') continue;
-            for (const r of gx.rules) {
-              if (!r || typeof r !== 'object') continue;
-              flatRules.push({ ...(r as Record<string, unknown>), groupId: gx.id });
-            }
-          }
-          const groupIds = new Set(importedGroups.map((g) => g.id));
-          importedRules = normalizeRules(flatRules, groupIds, importedGroups[0]?.id ?? DEFAULT_GROUP_ID);
-        } else {
-          importedGroups = normalizeGroups(obj.groups);
-          const groupIds = new Set(importedGroups.map((g) => g.id));
-          importedRules = normalizeRules(obj.rules, groupIds, importedGroups[0]?.id ?? DEFAULT_GROUP_ID);
-        }
-        if (typeof obj.enabled === 'boolean') importedEnabled = obj.enabled;
-      } else {
-        throw new Error('文件内容格式不正确');
-      }
-
-      applySourceRef.current = 'non_input';
-      setGroups(importedGroups);
-      setRules(importedRules);
-      setRedirectEnabled(importedEnabled);
-      setRuleDrafts({});
-      message.success(`导入成功，共 ${importedRules.length} 条规则`);
-    } catch (err) {
-      message.error(`导入失败: ${String((err as Error)?.message || err)}`);
-    } finally {
-      if (importInputRef.current) importInputRef.current.value = '';
-    }
-  };
-
-  const persistRules = (nextGroups: RedirectGroup[], nextRules: RedirectRule[], enabled: boolean) => {
-    chrome.storage.local.set(
-      { [REDIRECT_GROUPS_KEY]: nextGroups, [REDIRECT_RULES_KEY]: nextRules, [REDIRECT_ENABLED_KEY]: enabled },
-      () => {
-        chrome.runtime.sendMessage({ type: 'redirectRules/apply', groups: nextGroups, rules: nextRules, enabled }, () => {
-          if (chrome.runtime.lastError) {
-            message.error(`应用失败: ${chrome.runtime.lastError.message}`);
-          }
-        });
-      },
-    );
-  };
-
   useEffect(() => {
     if (!rulesLoaded) return;
-    const timer = window.setTimeout(() => {
-      persistRules(groups, rules, redirectEnabled);
-      applySourceRef.current = 'input';
-    }, 100);
-    return () => window.clearTimeout(timer);
+    chrome.storage.local.set({ [REDIRECT_GROUPS_KEY]: groups, [REDIRECT_RULES_KEY]: rules, [REDIRECT_ENABLED_KEY]: redirectEnabled });
+    chrome.runtime.sendMessage({ type: 'redirectRules/apply', groups, rules, enabled: redirectEnabled });
   }, [groups, rules, redirectEnabled, rulesLoaded]);
 
-  const groupEnabledMap = useMemo(() => new Map(groups.map((g) => [g.id, g.enabled] as const)), [groups]);
-  const groupNameMap = useMemo(() => new Map(groups.map((g) => [g.id, g.name] as const)), [groups]);
+  const groupNameMap = useMemo(() => new Map(groups.map((g) => [g.id, g.name])), [groups]);
+  const groupsOptions = groups.map((g) => ({ value: g.name }));
 
-  const rulesByGroup = useMemo(() => {
-    const m = new Map<string, RedirectRule[]>();
-    for (const g of groups) m.set(g.id, []);
-    for (const rule of rules) {
-      const list = m.get(rule.groupId);
-      if (list) list.push(rule);
+  const openRuleDetail = (ruleId: string) => {
+    const found = rules.find((r) => r.id === ruleId);
+    if (!found) return;
+    setWorkingRule(JSON.parse(JSON.stringify(found)));
+    setOriginalRule(JSON.parse(JSON.stringify(found)));
+    setEditRuleName(false);
+    setPage({ type: 'detail', ruleId });
+  };
+
+  const createRule = () => {
+    const groupId = groups[0]?.id;
+    if (!groupId) return;
+    const newRule: RedirectRule = { id: genId(), name: `新建规则 ${rules.length + 1}`, enabled: true, groupId, conditions: [createDefaultCondition()] };
+    setRules((prev) => [newRule, ...prev]);
+    openRuleDetail(newRule.id);
+  };
+
+  const onBack = () => {
+    if (!workingRule || !originalRule) return setPage({ type: 'list' });
+    if (JSON.stringify(workingRule) !== JSON.stringify(originalRule)) {
+      Modal.confirm({
+        title: '存在未保存修改',
+        content: '修改不会被保存，确认返回吗？',
+        onOk: () => setPage({ type: 'list' }),
+      });
+      return;
     }
-    return m;
-  }, [groups, rules]);
-
-  const invalidCount = useMemo(
-    () => rules.filter((r) => !r.expression.trim() || !r.redirectUrl.trim() || !groups.find((g) => g.id === r.groupId)).length,
-    [groups, rules],
-  );
-
-  const testResult = useMemo(() => {
-    if (testTrigger === 0) return null;
-    const t = testUrl.trim();
-    if (!t) return null;
-    return simulateRedirect(t, rules, groupEnabledMap);
-  }, [groupEnabledMap, rules, testTrigger, testUrl]);
-
-  useEffect(() => {
-    if (!testResult?.ok) return;
-    const ruleId = testResult.matchedRule.id;
-    setHighlightedRuleId(ruleId);
-
-    if (highlightTimerRef.current != null) window.clearTimeout(highlightTimerRef.current);
-    highlightTimerRef.current = window.setTimeout(() => {
-      setHighlightedRuleId((cur) => (cur === ruleId ? null : cur));
-    }, 2000);
-
-    const container = listScrollRef.current;
-    if (!container) return;
-    const target = container.querySelector(`[data-rule-id="${ruleId}"]`) as HTMLDivElement | null;
-    if (!target) return;
-    target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }, [testResult]);
-
-  const handleDragEnd = (evt: DragEndEvent) => {
-    const { active, over } = evt;
-    if (!over) return;
-    const activeData = active.data.current as RuleDragData | undefined;
-    const overData = over.data.current as DragData | undefined;
-    if (!activeData || activeData.type !== 'rule' || !overData) return;
-    const nextRules = projectRulesByDragTarget(rules, groups.map((g) => g.id), String(active.id), String(over.id), overData);
-    if (nextRules === rules) return;
-    applySourceRef.current = 'non_input';
-    setRules(nextRules);
+    setPage({ type: 'list' });
   };
 
-  const actionsMenu = {
-    items: [
-      { key: 'import', label: '导入配置', icon: <UploadOutlined /> },
-      { key: 'export', label: '导出配置', icon: <DownloadOutlined /> },
-    ],
-    onClick: ({ key }: { key: string }) => {
-      if (key === 'import') {
-        Modal.confirm({
-          title: '确认导入配置？',
-          content: '导入后将覆盖当前所有分组和规则配置，此操作不可撤销。',
-          okText: '确认导入',
-          cancelText: '取消',
-          okButtonProps: { danger: true },
-          onOk: () => importInputRef.current?.click(),
-        });
-        return;
-      }
-      if (key === 'export') exportRules();
-    },
+  const saveDetailRule = () => {
+    if (!workingRule) return;
+    const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !c.redirectTarget.trim());
+    if (invalid) return message.warning('还有条件配置未输入完整');
+    setRules((prev) => prev.map((r) => (r.id === workingRule.id ? workingRule : r)));
+    setOriginalRule(JSON.parse(JSON.stringify(workingRule)));
+    message.success('规则已保存');
   };
 
-  const addMenu = {
-    items: [
-      { key: 'new-rule', label: '新建规则' },
-    ],
-    onClick: ({ key }: { key: string }) => {
-      if (key === 'new-rule') createRuleFromHeader();
-    },
+  const moveRuleToGroup = () => {
+    if (!groupModal.ruleId) return;
+    const name = groupInput.trim();
+    if (!name) return;
+    let target = groups.find((g) => g.name === name);
+    if (!target) {
+      target = { id: genId(), name, enabled: true };
+      setGroups((prev) => [...prev, target!]);
+    }
+    setRules((prev) => prev.map((r) => (r.id === groupModal.ruleId ? { ...r, groupId: target!.id } : r)));
+    setGroupModal({ open: false, mode: 'create' });
+    setGroupInput('');
   };
 
-  return (
-    <div style={{ width: '100vw', height: '100vh', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ flex: 1, minHeight: 0, padding: 12, boxSizing: 'border-box' }}>
-        <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <div className="redirect-header">
-            <Space size={8}>
-              <Typography.Title level={5} style={{ margin: 0 }}>Redirect Rules</Typography.Title>
-              <Switch
-                checked={redirectEnabled}
-                onChange={(checked) => {
-                  applySourceRef.current = 'non_input';
-                  setRedirectEnabled(checked);
-                  checked ? message.success('已开启重定向') : message.warning('已关闭重定向');
-                }}
-              />
-            </Space>
-            <Space size={8}>
-              <Dropdown menu={actionsMenu} trigger={['hover']}>
-                <Button type="text" icon={<EllipsisOutlined />} aria-label="更多操作" />
-              </Dropdown>
-              <Button onClick={() => setCreateGroupModalOpen(true)}>新建规则组</Button>
-              <Dropdown menu={addMenu} trigger={['click']}>
-                <Button type="primary" icon={<PlusOutlined />}>添加</Button>
-              </Dropdown>
-            </Space>
-          </div>
+  const confirmGroupModal = () => {
+    if (groupModal.mode === 'move') return moveRuleToGroup();
+    const name = groupInput.trim();
+    if (!name) return;
+    if (groupModal.mode === 'create') setGroups((prev) => [{ id: genId(), name, enabled: true }, ...prev]);
+    if (groupModal.mode === 'rename' && groupModal.groupId) setGroups((prev) => prev.map((g) => (g.id === groupModal.groupId ? { ...g, name } : g)));
+    setGroupModal({ open: false, mode: 'create' });
+    setGroupInput('');
+  };
 
-          <Modal
-            title="创建分组"
-            open={createGroupModalOpen}
-            onCancel={() => setCreateGroupModalOpen(false)}
-            onOk={() => { if (createGroup()) setCreateGroupModalOpen(false); }}
-            okText="创建"
-            cancelText="取消"
-            destroyOnClose
-          >
-            <Input
-              value={newGroupName}
-              placeholder="请输入分组名称"
-              onChange={(e) => setNewGroupName(e.target.value)}
-              onPressEnter={() => { if (createGroup()) setCreateGroupModalOpen(false); }}
-            />
-          </Modal>
+  const deleteGroup = (groupId: string) => {
+    Modal.confirm({ title: '确认删除该规则组？', okButtonProps: { danger: true }, onOk: () => {
+      setGroups((prev) => prev.filter((g) => g.id !== groupId));
+      setRules((prev) => prev.filter((r) => r.groupId !== groupId));
+    } });
+  };
 
-          <Modal
-            title="编辑分组"
-            open={editGroupModalOpen}
-            onCancel={() => {
-              setEditGroupModalOpen(false);
-              setEditingGroupId(null);
-              setEditingGroupName('');
-            }}
-            onOk={() => { submitEditGroupName(); }}
-            okText="保存"
-            cancelText="取消"
-            destroyOnClose
-          >
-            <Input value={editingGroupName} placeholder="请输入新的分组名称" onChange={(e) => setEditingGroupName(e.target.value)} />
-          </Modal>
+  const duplicateGroup = (groupId: string) => {
+    const group = groups.find((g) => g.id === groupId);
+    if (!group) return;
+    const newGroupId = genId();
+    setGroups((prev) => {
+      const idx = prev.findIndex((g) => g.id === groupId);
+      const cp = { ...group, id: newGroupId, name: `${group.name} 副本` };
+      const next = [...prev]; next.splice(idx + 1, 0, cp); return next;
+    });
+    setRules((prev) => {
+      const selected = prev.filter((r) => r.groupId === groupId).map((r) => ({ ...r, id: genId(), groupId: newGroupId, name: `${r.name} 副本` }));
+      return [...prev, ...selected];
+    });
+  };
 
-          <input
-            ref={importInputRef}
-            type="file"
-            accept=".json,application/json"
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              void importRulesFromFile(file);
-            }}
-          />
+  const tableData = groups.flatMap((group) => {
+    const groupRow = { key: `group-${group.id}`, rowType: 'group' as const, group };
+    if (collapsedGroupIds.includes(group.id)) return [groupRow];
+    const children = rules.filter((r) => r.groupId === group.id).map((rule) => ({ key: `rule-${rule.id}`, rowType: 'rule' as const, rule, group }));
+    return [groupRow, ...children];
+  });
 
-          <Typography.Paragraph type="secondary" style={{ marginTop: 0, marginBottom: 12 }}>
-            Use drag & drop to reorder rules. Text edits only take effect after clicking Save.
-          </Typography.Paragraph>
+  const currentGroupEnabled = useMemo(() => new Map(groups.map((g) => [g.id, g.enabled])), [groups]);
 
-          <DndContext sensors={sensors} collisionDetection={ruleDropCollisionDetection} onDragEnd={handleDragEnd}>
-            <div ref={listScrollRef} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-              <RuleGroupsCollapse
-                groups={groups}
-                rulesByGroup={rulesByGroup}
-                groupEnabledMap={groupEnabledMap}
-                redirectEnabled={redirectEnabled}
-                highlightedRuleId={highlightedRuleId}
-                collapsedGroupIds={collapsedGroupIds}
-                setCollapsedGroupIds={setCollapsedGroupIds}
-                addRule={addRule}
-                openEditGroupModal={openEditGroupModal}
-                removeGroup={removeGroup}
-                toggleGroupEnabled={toggleGroupEnabled}
-                moveRuleGroup={(ruleId, groupId) => {
-                  applySourceRef.current = 'non_input';
-                  updateRule(ruleId, 'groupId', groupId);
-                }}
-                updateRuleEnabled={(ruleId, enabled) => {
-                  applySourceRef.current = 'non_input';
-                  updateRule(ruleId, 'enabled', enabled);
-                }}
-                updateRuleMatchTarget={(ruleId, value) => {
-                  applySourceRef.current = 'non_input';
-                  updateRule(ruleId, 'matchTarget', value);
-                }}
-                updateRuleMatchMode={(ruleId, value) => {
-                  applySourceRef.current = 'non_input';
-                  updateRule(ruleId, 'matchMode', value);
-                }}
-                saveRuleDraft={saveRuleDraft}
-                duplicateRule={duplicateRule}
-                removeRule={removeRule}
-                getRuleFieldValue={getRuleFieldValue}
-                updateRuleDraft={updateRuleDraft}
-                isRuleFieldDirty={isRuleFieldDirty}
-              />
-            </div>
-          </DndContext>
+  if (page.type === 'detail' && workingRule) {
+    const dirty = originalRule && JSON.stringify(workingRule) !== JSON.stringify(originalRule);
+    const updateCondition = (conditionId: string, patch: Partial<RedirectCondition>) => {
+      setWorkingRule((prev) => prev ? { ...prev, conditions: prev.conditions.map((c) => (c.id === conditionId ? { ...c, ...patch } : c)) } : prev);
+    };
+    const openFilter = (conditionId: string) => setFilterModal({ open: true, conditionId });
+    const activeCondition = workingRule.conditions.find((c) => c.id === filterModal.conditionId);
 
-          <div style={{ marginTop: 10 }}>
-            <Typography.Text type={invalidCount ? 'warning' : 'secondary'}>
-              {invalidCount
-                ? `有 ${invalidCount} 条规则缺少表达式或目标 URL，请先补全。`
-                : '提示：正则模式使用 RE2 语法（Chrome DNR），重定向目标支持 $1/$2... 捕获组。'}
-            </Typography.Text>
-          </div>
-        </div>
+    return <div>
+      <div className="detail-header">
+        <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack}>返回</Button>
+        <Space>
+          <Switch checked={workingRule.enabled} onChange={(v) => setWorkingRule({ ...workingRule, enabled: v })} />
+          <Dropdown menu={{ items: [
+            { key: 'copy', label: '复制', onClick: () => setWorkingRule({ ...workingRule, id: genId(), name: `${workingRule.name} 副本` }) },
+            { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => { setRules((prev) => prev.filter((r) => r.id !== workingRule.id)); setPage({ type: 'list' }); } }) },
+          ] }}><Button icon={<EllipsisOutlined />} /></Dropdown>
+          <Select value={workingRule.groupId} style={{ width: 180 }} options={groups.map((g) => ({ value: g.id, label: g.name }))} onChange={(v) => setWorkingRule({ ...workingRule, groupId: v })} />
+          <Button onClick={() => setTestDrawerOpen(true)}>测试</Button>
+          <Button type="primary" onClick={saveDetailRule}>{dirty ? '* 保存规则' : '保存规则'}</Button>
+        </Space>
       </div>
+      <Space align="center" style={{ marginBottom: 16 }}>
+        {editRuleName ? <Input value={workingRule.name} onChange={(e) => setWorkingRule({ ...workingRule, name: e.target.value })} onBlur={() => setEditRuleName(false)} /> : <Typography.Title level={4} style={{ margin: 0 }}>{workingRule.name}</Typography.Title>}
+        <Button type="text" icon={<EditOutlined />} onClick={() => setEditRuleName(true)} />
+      </Space>
+      <Collapse accordion={false} items={workingRule.conditions.map((c, index) => ({
+        key: c.id,
+        label: `如果请求 ${index + 1}`,
+        children: <Space direction="vertical" style={{ width: '100%' }}>
+          <Input addonBefore={<Space><Select value={c.matchTarget} options={MATCH_TARGET_OPTIONS as never} style={{ width: 90 }} onChange={(v) => updateCondition(c.id, { matchTarget: v })} /><Select value={c.matchMode} options={MATCH_MODE_OPTIONS as never} style={{ width: 110 }} onChange={(v) => updateCondition(c.id, { matchMode: v })} /></Space>} value={c.expression} onChange={(e) => updateCondition(c.id, { expression: e.target.value })} addonAfter={<Button icon={<FilterOutlined />} onClick={() => openFilter(c.id)} />} />
+          <Radio.Group value={c.redirectType} onChange={(e) => updateCondition(c.id, { redirectType: e.target.value })}><Radio value="url">另一个URL</Radio><Radio value="file">本地文件</Radio></Radio.Group>
+          <Input value={c.redirectTarget} onChange={(e) => updateCondition(c.id, { redirectTarget: e.target.value })} placeholder="重定向目标" />
+        </Space>,
+      }))} />
+      <Button style={{ marginTop: 12 }} icon={<PlusOutlined />} onClick={() => setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, createDefaultCondition()] })}>添加新条件配置</Button>
+      <Drawer title="测试规则" placement="bottom" open={testDrawerOpen} height={260} onClose={() => setTestDrawerOpen(false)}>
+        <Space.Compact style={{ width: '100%' }}>
+          <Input value={testUrl} onChange={(e) => setTestUrl(e.target.value)} placeholder="输入测试URL" />
+          <Button onClick={() => {
+            const res = simulateRedirect(testUrl, [workingRule], currentGroupEnabled);
+            setTestResult(res.ok ? `命中：${res.matchedRule.name} -> ${res.redirectedUrl}` : res.reason);
+          }}>测试</Button>
+        </Space.Compact>
+        <div style={{ marginTop: 12 }}>{testResult}</div>
+      </Drawer>
+      <Modal open={filterModal.open} title="过滤条件" onCancel={() => setFilterModal({ open: false })} onOk={() => setFilterModal({ open: false })}>
+        {activeCondition && <Form layout="vertical">
+          <Form.Item label="页面域名"><Input value={activeCondition.filter.pageDomain} onChange={(e) => updateCondition(activeCondition.id, { filter: { ...activeCondition.filter, pageDomain: e.target.value } })} /></Form.Item>
+          <Form.Item label="资源类型"><Select value={activeCondition.filter.resourceType} options={RESOURCE_TYPE_OPTIONS as never} onChange={(v) => updateCondition(activeCondition.id, { filter: { ...activeCondition.filter, resourceType: v } })} /></Form.Item>
+          <Form.Item label="请求方法"><Select value={activeCondition.filter.requestMethod} options={REQUEST_METHOD_OPTIONS as never} onChange={(v) => updateCondition(activeCondition.id, { filter: { ...activeCondition.filter, requestMethod: v } })} /></Form.Item>
+        </Form>}
+      </Modal>
+    </div>;
+  }
 
-      <RuleTestPanel
-        testUrl={testUrl}
-        setTestUrl={setTestUrl}
-        triggerTest={() => setTestTrigger((n) => n + 1)}
-        testResult={testResult}
-        groupNameMap={groupNameMap}
-      />
+  return <div>
+    <div className="detail-header">
+      <Space><Typography.Title level={4} style={{ margin: 0 }}>重定向请求</Typography.Title><Switch checked={redirectEnabled} onChange={setRedirectEnabled} /></Space>
+      <Space><Button onClick={() => { setGroupModal({ open: true, mode: 'create' }); setGroupInput(''); }}>新建规则组</Button><Button type="primary" onClick={createRule}>新建规则</Button></Space>
     </div>
-  );
+    <Table
+      pagination={false}
+      dataSource={tableData}
+      rowKey="key"
+      columns={[
+        { title: '规则', dataIndex: 'rule', render: (_, row: any) => row.rowType === 'group' ? <Space><Button type="text" onClick={() => setCollapsedGroupIds((prev) => prev.includes(row.group.id) ? prev.filter((id) => id !== row.group.id) : [...prev, row.group.id])}>{collapsedGroupIds.includes(row.group.id) ? '+' : '-'}</Button><Typography.Text strong>{row.group.name}</Typography.Text></Space> : <Button type="link" onClick={() => openRuleDetail(row.rule.id)}>{row.rule.name}</Button> },
+        { title: '类型', render: (_, row: any) => row.rowType === 'group' ? '-' : <Tag>重定向请求</Tag> },
+        { title: '状态', render: (_, row: any) => row.rowType === 'group' ? <Switch checked={row.group.enabled} disabled={!redirectEnabled} onChange={(v) => setGroups((prev) => prev.map((g) => g.id === row.group.id ? { ...g, enabled: v } : g))} /> : <Switch checked={row.rule.enabled} disabled={!redirectEnabled || !currentGroupEnabled.get(row.rule.groupId)} onChange={(v) => setRules((prev) => prev.map((r) => r.id === row.rule.id ? { ...r, enabled: v } : r))} /> },
+        { title: '操作', render: (_, row: any) => row.rowType === 'group' ? <Dropdown menu={{ items: [
+          { key: 'rename', label: '重命名', onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: row.group.id }); setGroupInput(row.group.name); } },
+          { key: 'copy', label: '复制', onClick: () => duplicateGroup(row.group.id) },
+          { key: 'delete', label: '删除', danger: true, onClick: () => deleteGroup(row.group.id) },
+        ] }}><Button icon={<EllipsisOutlined />} /></Dropdown> : <Dropdown menu={{ items: [
+          { key: 'move', label: '修改规则组', onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: row.rule.id }); setGroupInput(groupNameMap.get(row.rule.groupId) ?? ''); } },
+          { key: 'copy', label: '复制', onClick: () => setRules((prev) => { const idx = prev.findIndex((r) => r.id === row.rule.id); const next = [...prev]; next.splice(idx + 1, 0, { ...row.rule, id: genId(), name: `${row.rule.name} 副本` }); return next; }) },
+          { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => setRules((prev) => prev.filter((r) => r.id !== row.rule.id)) }) },
+        ] }}><Button icon={<EllipsisOutlined />} /></Dropdown> },
+      ]}
+    />
+    <Modal open={groupModal.open} title={groupModal.mode === 'create' ? '新建规则组' : groupModal.mode === 'rename' ? '重命名规则组' : '修改规则组'} onCancel={() => setGroupModal({ open: false, mode: 'create' })} onOk={confirmGroupModal}>
+      {groupModal.mode === 'move' ? <AutoComplete options={groupsOptions} value={groupInput} onChange={setGroupInput} placeholder="请选择或输入新规则组" /> : <Input value={groupInput} onChange={(e) => setGroupInput(e.target.value)} placeholder="请输入名称" />}
+    </Modal>
+  </div>;
 }
-
-export default RedirectPanel;

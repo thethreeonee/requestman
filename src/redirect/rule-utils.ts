@@ -1,10 +1,26 @@
 import { DEFAULT_GROUP_ID, DEFAULT_GROUP_NAME } from './constants';
-import type { MatchMode, RedirectGroup, RedirectRule } from './types';
+import type { MatchMode, RedirectCondition, RedirectGroup, RedirectRule } from './types';
 
 export function genId() {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
     : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+export function createDefaultCondition(): RedirectCondition {
+  return {
+    id: genId(),
+    matchTarget: 'url',
+    matchMode: 'regex',
+    expression: '',
+    redirectType: 'url',
+    redirectTarget: '',
+    filter: {
+      pageDomain: '',
+      resourceType: 'all',
+      requestMethod: 'all',
+    },
+  };
 }
 
 export function normalizeGroups(input: unknown): RedirectGroup[] {
@@ -19,178 +35,83 @@ export function normalizeGroups(input: unknown): RedirectGroup[] {
       const rawId = typeof obj.id === 'string' && obj.id.trim() ? obj.id.trim() : genId();
       if (seen.has(rawId)) return null;
       seen.add(rawId);
-      const name = typeof obj.name === 'string' ? obj.name.trim() : '';
       return {
         id: rawId,
-        name: name || '未命名分组',
+        name: typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim() : '未命名分组',
         enabled: obj.enabled !== false,
       };
     })
     .filter(Boolean) as RedirectGroup[];
 
-  if (groups.length > 0) return groups;
-  return [{ id: DEFAULT_GROUP_ID, name: DEFAULT_GROUP_NAME, enabled: true }];
+  return groups.length ? groups : [{ id: DEFAULT_GROUP_ID, name: DEFAULT_GROUP_NAME, enabled: true }];
 }
 
-export function normalizeRules(
-  input: unknown,
-  groupIds: Set<string>,
-  fallbackGroupId: string,
-): RedirectRule[] {
+export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGroupId: string): RedirectRule[] {
   if (!Array.isArray(input)) return [];
+  const modeSet = new Set<MatchMode>(['equals', 'contains', 'regex', 'wildcard']);
   return input
-    .map((it): RedirectRule | null => {
+    .map((it, idx): RedirectRule | null => {
       if (!it || typeof it !== 'object') return null;
       const obj = it as Record<string, unknown>;
-      const matchTarget = obj.matchTarget === 'host' ? 'host' : 'url';
-      const modeSet = new Set<MatchMode>(['equals', 'contains', 'regex', 'wildcard']);
-      const matchMode = modeSet.has(obj.matchMode as MatchMode)
-        ? (obj.matchMode as MatchMode)
-        : 'contains';
+      const conditionsInput = Array.isArray(obj.conditions) ? obj.conditions : null;
+      const conditions = (conditionsInput ?? [obj])
+        .map((cond): RedirectCondition | null => {
+          if (!cond || typeof cond !== 'object') return null;
+          const c = cond as Record<string, unknown>;
+          const filterObj = c.filter && typeof c.filter === 'object' ? (c.filter as Record<string, unknown>) : {};
+          return {
+            id: typeof c.id === 'string' && c.id ? c.id : genId(),
+            matchTarget: c.matchTarget === 'host' ? 'host' : 'url',
+            matchMode: modeSet.has(c.matchMode as MatchMode) ? (c.matchMode as MatchMode) : 'regex',
+            expression: typeof c.expression === 'string' ? c.expression : '',
+            redirectType: c.redirectType === 'file' ? 'file' : 'url',
+            redirectTarget: typeof c.redirectTarget === 'string'
+              ? c.redirectTarget
+              : typeof c.redirectUrl === 'string'
+                ? c.redirectUrl
+                : '',
+            filter: {
+              pageDomain: typeof filterObj.pageDomain === 'string' ? filterObj.pageDomain : '',
+              resourceType: typeof filterObj.resourceType === 'string' ? (filterObj.resourceType as RedirectCondition['filter']['resourceType']) : 'all',
+              requestMethod: typeof filterObj.requestMethod === 'string' ? (filterObj.requestMethod as RedirectCondition['filter']['requestMethod']) : 'all',
+            },
+          };
+        })
+        .filter(Boolean) as RedirectCondition[];
+
       return {
         id: typeof obj.id === 'string' && obj.id ? obj.id : genId(),
+        name: typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim() : `规则 ${idx + 1}`,
         enabled: obj.enabled !== false,
-        groupId:
-          typeof obj.groupId === 'string' && groupIds.has(obj.groupId)
-            ? obj.groupId
-            : fallbackGroupId,
-        matchTarget,
-        matchMode,
-        expression: typeof obj.expression === 'string' ? obj.expression : '',
-        redirectUrl: typeof obj.redirectUrl === 'string' ? obj.redirectUrl : '',
+        groupId: typeof obj.groupId === 'string' && groupIds.has(obj.groupId) ? obj.groupId : fallbackGroupId,
+        conditions: conditions.length ? conditions : [createDefaultCondition()],
       };
     })
     .filter(Boolean) as RedirectRule[];
 }
 
-function escapeRegex(s: string) {
-  return s.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
-}
+function escapeRegex(s: string) { return s.replace(/[|\\{}()[\]^$+?.]/g, '\\$&'); }
+function wildcardToRegexBody(pattern: string) { return escapeRegex(pattern).replace(/\*/g, '.*'); }
 
-function wildcardToRegexBody(pattern: string) {
-  return escapeRegex(pattern).replace(/\*/g, '.*');
-}
-
-function parseUrl(raw: string) {
-  try {
-    return new URL(raw);
-  } catch {
-    try {
-      return new URL(raw, 'http://localhost');
-    } catch {
-      return null;
-    }
-  }
-}
-
-function buildHostRegex(mode: MatchMode, expression: string) {
-  if (mode === 'contains') return `^https?://[^/]*${escapeRegex(expression)}[^/]*(?:/|$)`;
-  if (mode === 'regex') return `^https?://(?:${expression})(?:/|$)`;
-  if (mode === 'wildcard') return `^https?://${wildcardToRegexBody(expression)}(?:/|$)`;
-  return `^https?://${escapeRegex(expression)}(?:/|$)`;
-}
-
-function replaceByGroups(redirectUrl: string, groups: RegExpExecArray | null) {
-  return redirectUrl.replace(/\$(\d+)/g, (_m, idx) => groups?.[Number(idx)] ?? '');
-}
-
-export function isRuleEffectivelyEnabled(
-  rule: RedirectRule,
-  groupEnabledMap: ReadonlyMap<string, boolean>,
-) {
-  return rule.enabled && groupEnabledMap.get(rule.groupId) !== false;
-}
-
-export function simulateRedirect(
-  inputUrl: string,
-  rules: RedirectRule[],
-  groupEnabledMap: ReadonlyMap<string, boolean>,
-) {
-  const parsed = parseUrl(inputUrl);
-  if (!parsed) {
-    return { ok: false as const, reason: 'URL 格式无效' };
-  }
-
-  const fullUrl = parsed.toString();
-  const host = parsed.host;
-
-  for (let i = 0; i < rules.length; i += 1) {
-    const rule = rules[i];
-    if (!isRuleEffectivelyEnabled(rule, groupEnabledMap)) continue;
-    const expression = rule.expression.trim();
-    const redirectUrl = rule.redirectUrl.trim();
-    if (!expression || !redirectUrl) continue;
-
-    if (rule.matchTarget === 'url') {
-      if (rule.matchMode === 'equals' && fullUrl !== expression) continue;
-      if (rule.matchMode === 'contains' && !fullUrl.includes(expression)) continue;
-      if (rule.matchMode === 'wildcard') {
-        let re: RegExp;
-        try {
-          re = new RegExp(`^${wildcardToRegexBody(expression)}$`);
-        } catch {
-          continue;
-        }
-        if (!re.test(fullUrl)) continue;
-      }
-      if (rule.matchMode === 'regex') {
-        let re: RegExp;
-        try {
-          re = new RegExp(expression);
-        } catch {
-          continue;
-        }
-        const groups = re.exec(fullUrl);
-        if (!groups) continue;
-        return {
-          ok: true as const,
-          matchedIndex: i,
-          matchedRule: rule,
-          redirectedUrl: /\$\d+/.test(redirectUrl)
-            ? replaceByGroups(redirectUrl, groups)
-            : redirectUrl,
-        };
-      }
-
-      return {
-        ok: true as const,
-        matchedIndex: i,
-        matchedRule: rule,
-        redirectedUrl: redirectUrl,
-      };
-    }
-
-    if (rule.matchMode === 'equals' && host !== expression) continue;
-    if (rule.matchMode === 'contains' && !host.includes(expression)) continue;
-
-    const hostRegexPattern = buildHostRegex(rule.matchMode, expression);
-    if (rule.matchMode === 'wildcard' || rule.matchMode === 'regex') {
+export function simulateRedirect(inputUrl: string, rules: RedirectRule[], groupEnabledMap: ReadonlyMap<string, boolean>) {
+  for (const rule of rules) {
+    if (!rule.enabled || groupEnabledMap.get(rule.groupId) === false) continue;
+    for (const c of rule.conditions) {
+      const expression = c.expression.trim();
+      const redirectTarget = c.redirectTarget.trim();
+      if (!expression || !redirectTarget) continue;
       let re: RegExp;
       try {
-        re = new RegExp(hostRegexPattern);
-      } catch {
-        continue;
-      }
-      const groups = re.exec(fullUrl);
+        if (c.matchMode === 'contains') re = new RegExp(escapeRegex(expression));
+        else if (c.matchMode === 'equals') re = new RegExp(`^${escapeRegex(expression)}$`);
+        else if (c.matchMode === 'wildcard') re = new RegExp(`^${wildcardToRegexBody(expression)}$`);
+        else re = new RegExp(expression);
+      } catch { continue; }
+      const target = c.matchTarget === 'host' ? (new URL(inputUrl)).host : inputUrl;
+      const groups = re.exec(target);
       if (!groups) continue;
-      return {
-        ok: true as const,
-        matchedIndex: i,
-        matchedRule: rule,
-        redirectedUrl:
-          rule.matchMode === 'regex' && /\$\d+/.test(redirectUrl)
-            ? replaceByGroups(redirectUrl, groups)
-            : redirectUrl,
-      };
+      return { ok: true as const, matchedRule: rule, redirectedUrl: redirectTarget.replace(/\$(\d+)/g, (_m, i) => groups[Number(i)] ?? '') };
     }
-
-    return {
-      ok: true as const,
-      matchedIndex: i,
-      matchedRule: rule,
-      redirectedUrl: redirectUrl,
-    };
   }
-
   return { ok: false as const, reason: '未命中任何启用规则' };
 }
