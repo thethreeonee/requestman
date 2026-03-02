@@ -263,7 +263,7 @@ export default function RedirectPanel() {
       ))}
       <Button
         type="dashed"
-        style={{ marginTop: 12, width: '100%', height: 40 }}
+        style={{ marginTop: 12, width: '100%', height: 40, background: 'transparent' }}
         icon={<PlusOutlined />}
         onClick={() => setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, createDefaultCondition()] })}
       >
