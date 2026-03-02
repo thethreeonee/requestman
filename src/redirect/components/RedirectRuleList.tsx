@@ -1,5 +1,5 @@
 import React from 'react';
-import { AutoComplete, Button, Dropdown, Input, Modal, Space, Switch, Table, Tag, Typography } from 'antd';
+import { AutoComplete, Button, Dropdown, Input, Modal, Space, Switch, Table, Typography } from 'antd';
 import { EllipsisOutlined } from '@ant-design/icons';
 import { genId } from '../rule-utils';
 import type { RedirectGroup, RedirectRule } from '../types';
@@ -77,24 +77,45 @@ export default function RedirectRuleList({
           }
 
           return (
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              {groupRules.map((rule) => (
-                <div key={rule.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                  <Space size={12} wrap>
-                    <Button type="link" style={{ paddingInline: 0 }} onClick={() => openRuleDetail(rule.id)}>{rule.name}</Button>
-                    <Tag>重定向请求</Tag>
-                    <Switch checked={rule.enabled} disabled={!redirectEnabled || !currentGroupEnabled.get(rule.groupId)} onChange={(v) => setRules((prev) => prev.map((r) => r.id === rule.id ? { ...r, enabled: v } : r))} />
-                  </Space>
-                  <Dropdown menu={{ items: [
-                    { key: 'move', label: '修改规则组', onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: rule.id }); setGroupInput(groupNameMap.get(rule.groupId) ?? ''); } },
-                    { key: 'copy', label: '复制', onClick: () => setRules((prev) => { const idx = prev.findIndex((r) => r.id === rule.id); const next = [...prev]; next.splice(idx + 1, 0, { ...rule, id: genId(), name: `${rule.name} 副本` }); return next; }) },
-                    { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => setRules((prev) => prev.filter((r) => r.id !== rule.id)) }) },
-                  ] }}>
-                    <Button type="text" icon={<EllipsisOutlined />} />
-                  </Dropdown>
-                </div>
-              ))}
-            </Space>
+            <Table
+              size="small"
+              pagination={false}
+              dataSource={groupRules}
+              rowKey="id"
+              columns={[
+                {
+                  title: '名称',
+                  dataIndex: 'name',
+                  render: (_, rule) => <Button type="link" style={{ paddingInline: 0 }} onClick={() => openRuleDetail(rule.id)}>{rule.name}</Button>,
+                },
+                {
+                  title: '类型',
+                  render: () => '重定向请求',
+                },
+                {
+                  title: '状态',
+                  render: (_, rule) => (
+                    <Switch
+                      checked={rule.enabled}
+                      disabled={!redirectEnabled || !currentGroupEnabled.get(rule.groupId)}
+                      onChange={(v) => setRules((prev) => prev.map((r) => r.id === rule.id ? { ...r, enabled: v } : r))}
+                    />
+                  ),
+                },
+                {
+                  title: '操作',
+                  render: (_, rule) => (
+                    <Dropdown menu={{ items: [
+                      { key: 'move', label: '修改规则组', onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: rule.id }); setGroupInput(groupNameMap.get(rule.groupId) ?? ''); } },
+                      { key: 'copy', label: '复制', onClick: () => setRules((prev) => { const idx = prev.findIndex((r) => r.id === rule.id); const next = [...prev]; next.splice(idx + 1, 0, { ...rule, id: genId(), name: `${rule.name} 副本` }); return next; }) },
+                      { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => setRules((prev) => prev.filter((r) => r.id !== rule.id)) }) },
+                    ] }}>
+                      <Button type="text" icon={<EllipsisOutlined />} />
+                    </Dropdown>
+                  ),
+                },
+              ]}
+            />
           );
         },
       }}
