@@ -85,7 +85,7 @@ export default function RedirectRuleDetail({
       ]}
     />
     <Space align="center" style={{ marginBottom: 16 }}>
-      {editRuleName ? <Input value={workingRule.name} onChange={(e) => setWorkingRule({ ...workingRule, name: e.target.value })} onBlur={() => setEditRuleName(false)} /> : <Typography.Title level={4} style={{ margin: 0 }}>{workingRule.name}</Typography.Title>}
+      {editRuleName ? <Input value={workingRule.name} onChange={(e) => setWorkingRule({ ...workingRule, name: e.target.value })} onBlur={() => setEditRuleName(false)} onPressEnter={() => setEditRuleName(false)} /> : <Typography.Title level={4} style={{ margin: 0 }}>{workingRule.name}</Typography.Title>}
       <Button type="text" icon={<EditOutlined />} onClick={() => setEditRuleName(true)} />
     </Space>
     {workingRule.conditions.map((c) => (
