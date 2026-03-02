@@ -25,6 +25,8 @@ export function createDefaultCondition(): RedirectCondition {
     matchTarget: 'url',
     matchMode: 'regex',
     expression: '',
+    rewriteFrom: '',
+    rewriteTo: '',
     redirectType: 'url',
     redirectTarget: '',
     filter: {
@@ -76,6 +78,8 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
             matchTarget: c.matchTarget === 'host' ? 'host' : 'url',
             matchMode: modeSet.has(c.matchMode as MatchMode) ? (c.matchMode as MatchMode) : 'regex',
             expression: typeof c.expression === 'string' ? c.expression : '',
+            rewriteFrom: typeof c.rewriteFrom === 'string' ? c.rewriteFrom : '',
+            rewriteTo: typeof c.rewriteTo === 'string' ? c.rewriteTo : '',
             redirectType: c.redirectType === 'file' ? 'file' : 'url',
             redirectTarget: typeof c.redirectTarget === 'string'
               ? c.redirectTarget

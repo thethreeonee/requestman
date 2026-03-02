@@ -101,6 +101,10 @@ export default function RedirectPanel() {
       const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !c.redirectTarget.trim());
       if (invalid) return message.warning('还有条件配置未输入完整');
     }
+    if (workingRule.type === 'rewrite_string') {
+      const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !c.rewriteFrom.trim());
+      if (invalid) return message.warning('还有条件配置未输入完整');
+    }
     setRules((prev) => {
       if (page.isNew && !prev.some((r) => r.id === workingRule.id)) {
         return [workingRule, ...prev];
@@ -261,7 +265,7 @@ export default function RedirectPanel() {
     if (currentRule.type === 'redirect_request') {
       return <RedirectRuleDetail {...detailProps} messageApi={message} />;
     }
-    if (currentRule.type === 'rewrite_string') return <RewriteStringRuleDetail {...detailProps} />;
+    if (currentRule.type === 'rewrite_string') return <RewriteStringRuleDetail {...detailProps} messageApi={message} />;
     if (currentRule.type === 'query_params') return <QueryParamsRuleDetail {...detailProps} />;
     if (currentRule.type === 'modify_request_body') return <ModifyRequestBodyRuleDetail {...detailProps} />;
     if (currentRule.type === 'modify_response_body') return <ModifyResponseBodyRuleDetail {...detailProps} />;

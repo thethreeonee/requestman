@@ -33,6 +33,8 @@ export type RedirectCondition = {
   matchTarget: MatchTarget;
   matchMode: MatchMode;
   expression: string;
+  rewriteFrom: string;
+  rewriteTo: string;
   redirectType: 'url' | 'file';
   redirectTarget: string;
   filter: RedirectFilter;
