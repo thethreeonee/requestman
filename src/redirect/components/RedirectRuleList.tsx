@@ -268,14 +268,16 @@ export default function RedirectRuleList({
       return;
     }
 
-    const nextPreview = moveRuleWithDropTarget(rules, groups.map((group) => group.id), activeId, overId);
-    if (isSameRuleOrder(nextPreview, rules)) {
-      setDragPreviewRules(null);
-      return;
-    }
-
     setDragPreviewRules((prev) => {
-      if (prev && isSameRuleOrder(prev, nextPreview)) return prev;
+      const baseRules = prev ?? rules;
+      const nextPreview = moveRuleWithDropTarget(baseRules, groups.map((group) => group.id), activeId, overId);
+
+      if (isSameRuleOrder(nextPreview, rules)) {
+        return null;
+      }
+      if (prev && isSameRuleOrder(prev, nextPreview)) {
+        return prev;
+      }
       return nextPreview;
     });
   };
