@@ -99,7 +99,11 @@ function toRewriteRule(condition: RedirectCondition, index: number): chrome.decl
     ? buildHostRegex(matchMode, expression).replace(/^\^/, '').replace(/\$$/, '')
     : buildUrlRegex(matchMode, expression).replace(/^\^/, '').replace(/\$$/, '');
   const fromBody = matchMode === 'regex' ? from : escapeRegex(from);
-  const regexFilter = `^(.*${conditionBody}.*)${fromBody}(.*)$`;
+  // Regex matching mode often already embeds `rewriteFrom` inside `expression`.
+  // Avoid appending conditionBody before rewriteFrom, or we may require the token twice.
+  const regexFilter = matchMode === 'regex'
+    ? `^(.*)${fromBody}(.*)$`
+    : `^(.*${conditionBody}.*)${fromBody}(.*)$`;
   try { new RegExp(regexFilter); } catch { return null; }
 
   const action: chrome.declarativeNetRequest.RuleAction = {
