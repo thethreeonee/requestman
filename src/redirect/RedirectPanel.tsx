@@ -24,7 +24,6 @@ import {
   EllipsisOutlined,
   FilterOutlined,
   PlusOutlined,
-  RightOutlined,
 } from '@ant-design/icons';
 import {
   DEFAULT_GROUP_ID,
@@ -166,12 +165,7 @@ export default function RedirectPanel() {
     });
   };
 
-  const tableData = groups.flatMap((group) => {
-    const groupRow = { key: `group-${group.id}`, rowType: 'group' as const, group };
-    if (collapsedGroupIds.includes(group.id)) return [groupRow];
-    const children = rules.filter((r) => r.groupId === group.id).map((rule) => ({ key: `rule-${rule.id}`, rowType: 'rule' as const, rule, group }));
-    return [groupRow, ...children];
-  });
+  const tableData = groups.map((group) => ({ key: `group-${group.id}`, group }));
 
   const currentGroupEnabled = useMemo(() => new Map(groups.map((g) => [g.id, g.enabled])), [groups]);
 
@@ -221,7 +215,12 @@ export default function RedirectPanel() {
             label: `如果请求 ${index + 1}`,
             extra: <Button type="text" danger onClick={(e) => { e.stopPropagation(); removeCondition(c.id); }}>删除</Button>,
             children: <Space direction="vertical" style={{ width: '100%' }}>
-              <Input addonBefore={<Space><Select value={c.matchTarget} options={MATCH_TARGET_OPTIONS as never} style={{ width: 90 }} onChange={(v) => updateCondition(c.id, { matchTarget: v })} /><Select value={c.matchMode} options={MATCH_MODE_OPTIONS as never} style={{ width: 110 }} onChange={(v) => updateCondition(c.id, { matchMode: v })} /></Space>} value={c.expression} onChange={(e) => updateCondition(c.id, { expression: e.target.value })} addonAfter={<Button type="text" icon={<FilterOutlined />} onClick={() => openFilter(c.id)} />} />
+              <Space.Compact style={{ width: '100%' }}>
+                <Select value={c.matchTarget} options={MATCH_TARGET_OPTIONS as never} style={{ width: 90 }} onChange={(v) => updateCondition(c.id, { matchTarget: v })} />
+                <Select value={c.matchMode} options={MATCH_MODE_OPTIONS as never} style={{ width: 110 }} onChange={(v) => updateCondition(c.id, { matchMode: v })} />
+                <Input style={{ flex: 1, minWidth: 0 }} value={c.expression} onChange={(e) => updateCondition(c.id, { expression: e.target.value })} />
+                <Button icon={<FilterOutlined />} onClick={() => openFilter(c.id)} />
+              </Space.Compact>
               <Radio.Group value={c.redirectType} onChange={(e) => updateCondition(c.id, { redirectType: e.target.value })}><Radio value="url">另一个URL</Radio><Radio value="file">本地文件</Radio></Radio.Group>
               <Input value={c.redirectTarget} onChange={(e) => updateCondition(c.id, { redirectTarget: e.target.value })} placeholder="重定向目标" />
             </Space>,
@@ -259,18 +258,45 @@ export default function RedirectPanel() {
       pagination={false}
       dataSource={tableData}
       rowKey="key"
+      expandable={{
+        expandedRowKeys: groups.filter((group) => !collapsedGroupIds.includes(group.id)).map((group) => `group-${group.id}`),
+        onExpand: (expanded, row: any) => {
+          setCollapsedGroupIds((prev) => {
+            if (expanded) return prev.filter((id) => id !== row.group.id);
+            if (prev.includes(row.group.id)) return prev;
+            return [...prev, row.group.id];
+          });
+        },
+        expandedRowRender: (row: any) => {
+          const groupRules = rules.filter((r) => r.groupId === row.group.id);
+          return (
+            <Table
+              size="small"
+              pagination={false}
+              dataSource={groupRules}
+              rowKey="id"
+              columns={[
+                { title: '规则', dataIndex: 'name', render: (name: string, rule: RedirectRule) => <Button type="link" style={{ paddingInline: 0 }} onClick={() => openRuleDetail(rule.id)}>{name}</Button> },
+                { title: '类型', render: () => <Tag>重定向请求</Tag> },
+                { title: '状态', render: (_: unknown, rule: RedirectRule) => <Switch checked={rule.enabled} disabled={!redirectEnabled || !currentGroupEnabled.get(rule.groupId)} onChange={(v) => setRules((prev) => prev.map((r) => r.id === rule.id ? { ...r, enabled: v } : r))} /> },
+                { title: '操作', render: (_: unknown, rule: RedirectRule) => <Dropdown menu={{ items: [
+                  { key: 'move', label: '修改规则组', onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: rule.id }); setGroupInput(groupNameMap.get(rule.groupId) ?? ''); } },
+                  { key: 'copy', label: '复制', onClick: () => setRules((prev) => { const idx = prev.findIndex((r) => r.id === rule.id); const next = [...prev]; next.splice(idx + 1, 0, { ...rule, id: genId(), name: `${rule.name} 副本` }); return next; }) },
+                  { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => setRules((prev) => prev.filter((r) => r.id !== rule.id)) }) },
+                ] }}><Button type="text" icon={<EllipsisOutlined />} /></Dropdown> },
+              ]}
+              locale={{ emptyText: '当前规则组暂无规则' }}
+            />
+          );
+        },
+      }}
       columns={[
-        { title: '规则', dataIndex: 'rule', render: (_, row: any) => row.rowType === 'group' ? <Space><Button type="text" className="group-collapse-btn" onClick={() => setCollapsedGroupIds((prev) => prev.includes(row.group.id) ? prev.filter((id) => id !== row.group.id) : [...prev, row.group.id])}><RightOutlined className={collapsedGroupIds.includes(row.group.id) ? '' : 'expanded'} /></Button><Typography.Text strong>{row.group.name}</Typography.Text></Space> : <Button type="link" style={{ marginLeft: 32, paddingInline: 0 }} onClick={() => openRuleDetail(row.rule.id)}>{row.rule.name}</Button> },
-        { title: '类型', render: (_, row: any) => row.rowType === 'group' ? '-' : <Tag>重定向请求</Tag> },
-        { title: '状态', render: (_, row: any) => row.rowType === 'group' ? <Switch checked={row.group.enabled} disabled={!redirectEnabled} onChange={(v) => setGroups((prev) => prev.map((g) => g.id === row.group.id ? { ...g, enabled: v } : g))} /> : <Switch checked={row.rule.enabled} disabled={!redirectEnabled || !currentGroupEnabled.get(row.rule.groupId)} onChange={(v) => setRules((prev) => prev.map((r) => r.id === row.rule.id ? { ...r, enabled: v } : r))} /> },
-        { title: '操作', render: (_, row: any) => row.rowType === 'group' ? <Dropdown menu={{ items: [
+        { title: '规则组', dataIndex: 'group', render: (group: RedirectGroup) => <Typography.Text strong>{group.name}</Typography.Text> },
+        { title: '状态', render: (_, row: any) => <Switch checked={row.group.enabled} disabled={!redirectEnabled} onChange={(v) => setGroups((prev) => prev.map((g) => g.id === row.group.id ? { ...g, enabled: v } : g))} /> },
+        { title: '操作', render: (_, row: any) => <Dropdown menu={{ items: [
           { key: 'rename', label: '重命名', onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: row.group.id }); setGroupInput(row.group.name); } },
           { key: 'copy', label: '复制', onClick: () => duplicateGroup(row.group.id) },
           { key: 'delete', label: '删除', danger: true, onClick: () => deleteGroup(row.group.id) },
-        ] }}><Button type="text" icon={<EllipsisOutlined />} /></Dropdown> : <Dropdown menu={{ items: [
-          { key: 'move', label: '修改规则组', onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: row.rule.id }); setGroupInput(groupNameMap.get(row.rule.groupId) ?? ''); } },
-          { key: 'copy', label: '复制', onClick: () => setRules((prev) => { const idx = prev.findIndex((r) => r.id === row.rule.id); const next = [...prev]; next.splice(idx + 1, 0, { ...row.rule, id: genId(), name: `${row.rule.name} 副本` }); return next; }) },
-          { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => setRules((prev) => prev.filter((r) => r.id !== row.rule.id)) }) },
         ] }}><Button type="text" icon={<EllipsisOutlined />} /></Dropdown> },
       ]}
     />
