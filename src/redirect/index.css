@@ -45,3 +45,13 @@ body {
 .nested-rules-table .ant-table-tbody > tr:last-child > td {
   border-bottom: none;
 }
+
+
+.rules-list-table .ant-table-tbody > tr.rule-row-dragging > td {
+  opacity: 0.6;
+  background: #eef4ff;
+}
+
+.rules-list-table .ant-table-tbody > tr.rule-group-row-drop-over > td {
+  background: #e6f4ff;
+}
