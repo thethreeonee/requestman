@@ -173,9 +173,12 @@ export default function RedirectPanel() {
   }, [page, workingRule]);
 
   const exportConfig = () => {
+    const now = new Date();
+    const pad = (value: number) => String(value).padStart(2, '0');
+    const exportTime = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
     const payload = {
       version: 1,
-      exportedAt: new Date().toISOString(),
+      exportedAt: now.toISOString(),
       groups,
       rules,
     };
@@ -183,7 +186,7 @@ export default function RedirectPanel() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `requestman-rules-${Date.now()}.json`;
+    a.download = `requestman-rules-${exportTime}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
