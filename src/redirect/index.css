@@ -33,13 +33,27 @@
 
 .simple-rule-card {
   border-radius: 10px;
-  background: #fff;
+}
+
+.simple-rule-card + .simple-rule-card {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #d9d9d9;
+}
+
+.simple-rule-stack {
+  width: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 10px;
 }
 
 .simple-rule-card-content {
-  border: 1px solid #e5e7eb;
+  border: 1px solid #eef1f5;
   border-radius: 10px;
   padding: 12px;
+  background: #fff;
 }
 
 .simple-rule-card-highlighted {
