@@ -60,7 +60,7 @@ export default function RedirectPanel() {
   const createRule = () => {
     const groupId = groups[0]?.id;
     if (!groupId) return;
-    const newRule: RedirectRule = { id: genId(), name: `新建规则 ${rules.length + 1}`, enabled: true, groupId, conditions: [createDefaultCondition()] };
+    const newRule: RedirectRule = { id: genId(), name: `新建规则 ${rules.length + 1}`, type: 'redirect_request', enabled: true, groupId, conditions: [createDefaultCondition()] };
     setRules((prev) => [newRule, ...prev]);
     openRuleDetail(newRule.id);
   };

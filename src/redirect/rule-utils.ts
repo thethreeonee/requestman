@@ -82,6 +82,7 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
       return {
         id: typeof obj.id === 'string' && obj.id ? obj.id : genId(),
         name: typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim() : `规则 ${idx + 1}`,
+        type: 'redirect_request',
         enabled: obj.enabled !== false,
         groupId: typeof obj.groupId === 'string' && groupIds.has(obj.groupId) ? obj.groupId : fallbackGroupId,
         conditions: conditions.length ? conditions : [createDefaultCondition()],
