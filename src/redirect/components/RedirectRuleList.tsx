@@ -10,7 +10,15 @@ import {
   Table,
   Typography,
 } from 'antd';
-import { DndContext, PointerSensor, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import {
+  DndContext,
+  PointerSensor,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragOverEvent,
+} from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
@@ -89,8 +97,8 @@ function SortableTableRow(props: RowProps) {
   const style = rowType === 'rule'
     ? {
       ...props.style,
-      transform: sortable.isDragging ? CSS.Transform.toString(sortable.transform) : undefined,
-      transition: sortable.isDragging ? sortable.transition : undefined,
+      transform: CSS.Transform.toString(sortable.transform),
+      transition: sortable.transition,
       cursor: 'grab',
     }
     : props.style;
@@ -202,6 +210,9 @@ export default function RedirectRuleList({
   importConfig,
 }: Props) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+  const [dragPreviewRules, setDragPreviewRules] = React.useState<RedirectRule[] | null>(null);
+  const displayRules = dragPreviewRules ?? rules;
+
   const currentGroupEnabled = new Map(groups.map((g) => [g.id, g.enabled]));
   const groupNameMap = new Map(groups.map((g) => [g.id, g.name]));
   const groupsOptions = groups.map((g) => ({ value: g.name }));
@@ -209,7 +220,7 @@ export default function RedirectRuleList({
   const tableData: TableRow[] = groups.flatMap((group) => {
     const groupRow: GroupRow = { key: `group-${group.id}`, rowType: 'group', group };
     if (collapsedGroupIds.includes(group.id)) return [groupRow];
-    const ruleRows: RuleRow[] = rules
+    const ruleRows: RuleRow[] = displayRules
       .filter((rule) => rule.groupId === group.id)
       .map((rule) => ({ key: `rule-${rule.id}`, rowType: 'rule', rule }));
     if (ruleRows.length === 0) {
@@ -225,16 +236,47 @@ export default function RedirectRuleList({
     });
   };
 
+  const handleDragStart = () => {
+    setDragPreviewRules(null);
+  };
+
+  const handleDragOver = (event: DragOverEvent) => {
+    const activeId = String(event.active.id);
+    const overId = event.over ? String(event.over.id) : '';
+    if (!overId) {
+      setDragPreviewRules(null);
+      return;
+    }
+
+    const nextPreview = moveRuleWithDropTarget(rules, groups.map((group) => group.id), activeId, overId);
+    setDragPreviewRules(nextPreview === rules ? null : nextPreview);
+  };
+
+  const handleDragCancel = () => {
+    setDragPreviewRules(null);
+  };
+
   const handleDragEnd = (event: DragEndEvent) => {
     const activeId = String(event.active.id);
     const overId = event.over ? String(event.over.id) : '';
-    if (!overId) return;
+
     let reordered = false;
-    setRules((prev) => {
-      const next = moveRuleWithDropTarget(prev, groups.map((group) => group.id), activeId, overId);
-      reordered = next !== prev;
-      return next;
-    });
+    if (dragPreviewRules) {
+      setRules((prev) => {
+        if (prev === dragPreviewRules) return prev;
+        reordered = true;
+        return dragPreviewRules;
+      });
+    } else if (overId) {
+      setRules((prev) => {
+        const next = moveRuleWithDropTarget(prev, groups.map((group) => group.id), activeId, overId);
+        reordered = next !== prev;
+        return next;
+      });
+    }
+
+    setDragPreviewRules(null);
+
     if (reordered) {
       messageApi.success('排序已更新');
     }
@@ -299,8 +341,14 @@ export default function RedirectRuleList({
         </Dropdown>
       </Space>
     </div>
-    <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-      <SortableContext items={rules.map((rule) => rule.id)} strategy={verticalListSortingStrategy}>
+    <DndContext
+      sensors={sensors}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragCancel={handleDragCancel}
+      onDragEnd={handleDragEnd}
+    >
+      <SortableContext items={displayRules.map((rule) => rule.id)} strategy={verticalListSortingStrategy}>
         <Table<TableRow>
           className="rules-list-table"
           pagination={false}
