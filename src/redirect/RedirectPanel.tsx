@@ -9,6 +9,7 @@ import {
   Form,
   Input,
   Modal,
+  Popconfirm,
   Radio,
   Select,
   Space,
@@ -214,7 +215,31 @@ export default function RedirectPanel() {
           items={[{
             key: c.id,
             label: `如果请求 ${index + 1}`,
-            extra: <Button type="text" danger icon={<DeleteOutlined />} onClick={(e) => { e.stopPropagation(); removeCondition(c.id); }} aria-label="删除条件" />,
+            extra: (
+              <Popconfirm
+                title="确认删除该条件配置？"
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true, type: 'primary' }}
+                onConfirm={() => removeCondition(c.id)}
+              >
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label="删除条件"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }
+                  }}
+                  style={{ color: '#ff4d4f', cursor: 'pointer', padding: '0 4px' }}
+                >
+                  <DeleteOutlined />
+                </span>
+              </Popconfirm>
+            ),
             children: <Space direction="vertical" style={{ width: '100%' }}>
               <Space.Compact style={{ width: '100%' }}>
                 <Select value={c.matchTarget} options={MATCH_TARGET_OPTIONS as never} style={{ width: 90 }} onChange={(v) => updateCondition(c.id, { matchTarget: v })} />
