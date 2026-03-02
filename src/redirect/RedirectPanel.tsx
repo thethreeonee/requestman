@@ -213,13 +213,13 @@ export default function RedirectPanel() {
         {editRuleName ? <Input value={workingRule.name} onChange={(e) => setWorkingRule({ ...workingRule, name: e.target.value })} onBlur={() => setEditRuleName(false)} /> : <Typography.Title level={4} style={{ margin: 0 }}>{workingRule.name}</Typography.Title>}
         <Button type="text" icon={<EditOutlined />} onClick={() => setEditRuleName(true)} />
       </Space>
-      {workingRule.conditions.map((c, index) => (
+      {workingRule.conditions.map((c) => (
         <Collapse
           key={c.id}
           defaultActiveKey={[c.id]}
           items={[{
             key: c.id,
-            label: `如果请求 ${index + 1}`,
+            label: '请求条件配置',
             extra: (
               <Popconfirm
                 title="确认删除该条件配置？"
