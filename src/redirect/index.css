@@ -37,3 +37,7 @@ body {
   border-radius: 8px;
   overflow: hidden;
 }
+
+.nested-rules-table .ant-table-tbody > tr:last-child > td {
+  border-bottom: none;
+}
