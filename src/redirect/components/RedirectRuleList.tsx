@@ -414,7 +414,7 @@ export default function RedirectRuleList({
         },
         {
           title: '类型',
-          width: 150,
+          width: 180,
           render: (_, row) => {
             if (row.rowType !== 'rule') return null;
             return <Space size={6}>{RULE_TYPE_ICON_MAP[row.rule.type]}<span>{RULE_TYPE_LABEL_MAP[row.rule.type]}</span></Space>;
@@ -422,7 +422,7 @@ export default function RedirectRuleList({
         },
         {
           title: '状态',
-          width: 180,
+          width: 100,
           render: (_, row) => {
             if (row.rowType === 'group') {
               return (
