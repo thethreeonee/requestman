@@ -237,6 +237,7 @@ export default function RedirectRuleList({
         },
         {
           title: '操作',
+          width: 80,
           render: (_, row) => {
             if (row.rowType === 'group') {
               return <Dropdown menu={{ items: [

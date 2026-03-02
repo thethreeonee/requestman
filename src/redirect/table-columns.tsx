@@ -166,7 +166,7 @@ export function buildRuleColumns({
     {
       title: '操作',
       key: 'action',
-      width: 130,
+      width: 80,
       render: (_: unknown, row: RedirectRule) => (
         <div
           style={{ height: 32, display: 'flex', alignItems: 'center' }}
@@ -256,7 +256,7 @@ export function buildGroupColumns({
     {
       title: '操作',
       key: 'action',
-      width: 130,
+      width: 80,
       render: (_: unknown, g: RedirectGroup) => {
         const count = groupRuleCountMap.get(g.id) ?? 0;
         return (
