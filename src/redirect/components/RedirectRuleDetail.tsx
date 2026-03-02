@@ -31,6 +31,7 @@ type Props = {
   setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
   onBack: () => void;
   saveDetailRule: () => void;
+  toggleDetailRuleEnabled: (ruleId: string, enabled: boolean) => void;
   setPageToList: () => void;
   messageApi: { warning: (content: string) => void };
 };
@@ -43,6 +44,7 @@ export default function RedirectRuleDetail({
   setRules,
   onBack,
   saveDetailRule,
+  toggleDetailRuleEnabled,
   setPageToList,
   messageApi,
 }: Props) {
@@ -52,7 +54,9 @@ export default function RedirectRuleDetail({
   const [testResult, setTestResult] = useState('');
   const [filterModal, setFilterModal] = useState<{ open: boolean; conditionId?: string }>({ open: false });
 
-  const dirty = originalRule && JSON.stringify(workingRule) !== JSON.stringify(originalRule);
+  const { enabled: _workingEnabled, ...workingRuleWithoutEnabled } = workingRule;
+  const { enabled: _originalEnabled, ...originalRuleWithoutEnabled } = originalRule ?? workingRule;
+  const dirty = originalRule && JSON.stringify(workingRuleWithoutEnabled) !== JSON.stringify(originalRuleWithoutEnabled);
   const currentGroupEnabled = useMemo(() => new Map(groups.map((g) => [g.id, g.enabled])), [groups]);
 
   const updateCondition = (conditionId: string, patch: Partial<RedirectCondition>) => {
@@ -79,7 +83,7 @@ export default function RedirectRuleDetail({
       enabled={workingRule.enabled}
       dirty={!!dirty}
       onBack={onBack}
-      onEnabledChange={(v) => setWorkingRule({ ...workingRule, enabled: v })}
+      onEnabledChange={(v) => toggleDetailRuleEnabled(workingRule.id, v)}
       onGroupChange={(v) => setWorkingRule({ ...workingRule, groupId: v })}
       onTest={() => setTestDrawerOpen(true)}
       onSave={saveDetailRule}

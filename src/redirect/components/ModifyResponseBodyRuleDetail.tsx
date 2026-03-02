@@ -10,10 +10,11 @@ type Props = {
   setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
   onBack: () => void;
   saveDetailRule: () => void;
+  toggleDetailRuleEnabled: (ruleId: string, enabled: boolean) => void;
   setPageToList: () => void;
 };
 
-export default function ModifyResponseBodyRuleDetail({ groups, workingRule, originalRule, setWorkingRule, setRules, onBack, saveDetailRule, setPageToList }: Props) {
+export default function ModifyResponseBodyRuleDetail({ groups, workingRule, originalRule, setWorkingRule, setRules, onBack, saveDetailRule, toggleDetailRuleEnabled, setPageToList }: Props) {
   return <RuleDetailPlaceholder
     groups={groups}
     workingRule={workingRule}
@@ -22,6 +23,7 @@ export default function ModifyResponseBodyRuleDetail({ groups, workingRule, orig
     setRules={setRules}
     onBack={onBack}
     saveDetailRule={saveDetailRule}
+    toggleDetailRuleEnabled={toggleDetailRuleEnabled}
     setPageToList={setPageToList}
     title="修改请求响应"
   />;
