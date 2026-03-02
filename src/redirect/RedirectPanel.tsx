@@ -77,6 +77,16 @@ function RedirectPanel() {
     }, ...prev]);
   };
 
+  const createRuleFromHeader = () => {
+    const targetGroupId = groups[0]?.id;
+    if (!targetGroupId) {
+      message.warning('请先创建规则组');
+      return;
+    }
+    addRule(targetGroupId);
+    message.success('已新建规则');
+  };
+
   const updateRule = <K extends keyof RedirectRule>(id: string, key: K, value: RedirectRule[K]) => {
     setRules((prev) => prev.map((r) => (r.id === id ? { ...r, [key]: value } : r)));
   };
@@ -377,6 +387,15 @@ function RedirectPanel() {
     },
   };
 
+  const addMenu = {
+    items: [
+      { key: 'new-rule', label: '新建规则' },
+    ],
+    onClick: ({ key }: { key: string }) => {
+      if (key === 'new-rule') createRuleFromHeader();
+    },
+  };
+
   return (
     <div style={{ width: '100vw', height: '100vh', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
       <div style={{ flex: 1, minHeight: 0, padding: 12, boxSizing: 'border-box' }}>
@@ -397,7 +416,10 @@ function RedirectPanel() {
               <Dropdown menu={actionsMenu} trigger={['hover']}>
                 <Button type="text" icon={<EllipsisOutlined />} aria-label="更多操作" />
               </Dropdown>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateGroupModalOpen(true)}>New Rule Group</Button>
+              <Button onClick={() => setCreateGroupModalOpen(true)}>新建规则组</Button>
+              <Dropdown menu={addMenu} trigger={['click']}>
+                <Button type="primary" icon={<PlusOutlined />}>添加</Button>
+              </Dropdown>
             </Space>
           </div>
 
@@ -410,7 +432,12 @@ function RedirectPanel() {
             cancelText="取消"
             destroyOnClose
           >
-            <Input value={newGroupName} placeholder="请输入分组名称" onChange={(e) => setNewGroupName(e.target.value)} />
+            <Input
+              value={newGroupName}
+              placeholder="请输入分组名称"
+              onChange={(e) => setNewGroupName(e.target.value)}
+              onPressEnter={() => { if (createGroup()) setCreateGroupModalOpen(false); }}
+            />
           </Modal>
 
           <Modal
