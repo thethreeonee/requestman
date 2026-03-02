@@ -273,7 +273,7 @@ export default function RedirectPanel() {
 
   return <>
     <input ref={importInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={onImportFileChange} />
-    <RedirectRuleList
+      <RedirectRuleList
       groups={groups}
       rules={rules}
       redirectEnabled={redirectEnabled}
@@ -289,10 +289,11 @@ export default function RedirectPanel() {
       duplicateGroup={duplicateGroup}
       deleteGroup={deleteGroup}
       confirmGroupModal={confirmGroupModal}
-      setRules={setRules}
-      setGroups={setGroups}
-      exportConfig={exportConfig}
-      importConfig={importConfig}
-    />
+        setRules={setRules}
+        setGroups={setGroups}
+        messageApi={message}
+        exportConfig={exportConfig}
+        importConfig={importConfig}
+      />
   </>;
 }
