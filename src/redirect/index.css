@@ -86,3 +86,23 @@
   display: flex;
   align-items: center;
 }
+
+
+.redirect-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #e6e8ee;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.redirect-test-panel {
+  flex: 0 0 auto;
+  padding: 12px;
+  box-sizing: border-box;
+  background: #f8fafc;
+  border-top: 1px solid #e6e8ee;
+}

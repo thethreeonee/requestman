@@ -381,9 +381,9 @@ function RedirectPanel() {
     <div style={{ width: '100vw', height: '100vh', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
       <div style={{ flex: 1, minHeight: 0, padding: 12, boxSizing: 'border-box' }}>
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div className="redirect-header">
             <Space size={8}>
-              <Typography.Title level={5} style={{ margin: 0 }}>请求重定向规则</Typography.Title>
+              <Typography.Title level={5} style={{ margin: 0 }}>Redirect Rules</Typography.Title>
               <Switch
                 checked={redirectEnabled}
                 onChange={(checked) => {
@@ -397,7 +397,7 @@ function RedirectPanel() {
               <Dropdown menu={actionsMenu} trigger={['hover']}>
                 <Button type="text" icon={<EllipsisOutlined />} aria-label="更多操作" />
               </Dropdown>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateGroupModalOpen(true)}>创建分组</Button>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateGroupModalOpen(true)}>New Rule Group</Button>
             </Space>
           </div>
 
@@ -441,8 +441,8 @@ function RedirectPanel() {
             }}
           />
 
-          <Typography.Paragraph type="secondary" style={{ marginTop: 0, marginBottom: 8 }}>
-            提示：可拖拽规则调整顺序；文本修改后点击“保存”才会生效。
+          <Typography.Paragraph type="secondary" style={{ marginTop: 0, marginBottom: 12 }}>
+            Use drag & drop to reorder rules. Text edits only take effect after clicking Save.
           </Typography.Paragraph>
 
           <DndContext sensors={sensors} collisionDetection={ruleDropCollisionDetection} onDragEnd={handleDragEnd}>
