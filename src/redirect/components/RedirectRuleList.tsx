@@ -8,6 +8,7 @@ import {
   Space,
   Switch,
   Table,
+  Tooltip,
   Typography,
 } from 'antd';
 import {
@@ -71,6 +72,13 @@ type GroupRow = { key: string; rowType: 'group'; group: RedirectGroup };
 type RuleRow = { key: string; rowType: 'rule'; rule: RedirectRule };
 type GroupEmptyRow = { key: string; rowType: 'group-empty'; group: RedirectGroup };
 type TableRow = GroupRow | RuleRow | GroupEmptyRow;
+
+function getRuleEffectiveHint(redirectEnabled: boolean, groupEnabled: boolean, ruleEnabled: boolean) {
+  if (!redirectEnabled) return '总开关关闭，当前规则不会生效';
+  if (!groupEnabled) return '规则组已关闭，当前规则不会生效';
+  if (!ruleEnabled) return '规则已关闭，不会生效';
+  return '规则已开启，当前规则会生效';
+}
 
 type RowProps = React.HTMLAttributes<HTMLTableRowElement> & {
   'data-row-key'?: string;
@@ -424,19 +432,34 @@ export default function RedirectRuleList({
         },
         {
           title: '状态',
-          width: 90,
+          width: 180,
           render: (_, row) => {
             if (row.rowType === 'group') {
-              return <Switch size="small" checked={row.group.enabled} disabled={!redirectEnabled} onChange={(v) => setGroups((prev) => prev.map((g) => g.id === row.group.id ? { ...g, enabled: v } : g))} />;
+              const groupEffective = redirectEnabled && row.group.enabled;
+              return (
+                <Space size={6}>
+                  <Tooltip title={groupEffective ? '规则组已开启，组内规则可生效' : (redirectEnabled ? '规则组已关闭，组内规则不会生效' : '总开关关闭，组内规则不会生效')}>
+                    <Switch size="small" checked={row.group.enabled} disabled={!redirectEnabled} onChange={(v) => setGroups((prev) => prev.map((g) => g.id === row.group.id ? { ...g, enabled: v } : g))} />
+                  </Tooltip>
+                  <Typography.Text type={groupEffective ? 'success' : 'secondary'}>{groupEffective ? '生效中' : '未生效'}</Typography.Text>
+                </Space>
+              );
             }
             if (row.rowType === 'group-empty') return null;
+            const groupEnabled = currentGroupEnabled.get(row.rule.groupId) !== false;
+            const effective = redirectEnabled && groupEnabled && row.rule.enabled;
             return (
-              <Switch
-                size="small"
-                checked={row.rule.enabled}
-                disabled={!redirectEnabled || !currentGroupEnabled.get(row.rule.groupId)}
-                onChange={(v) => setRules((prev) => prev.map((r) => r.id === row.rule.id ? { ...r, enabled: v } : r))}
-              />
+              <Space size={6}>
+                <Tooltip title={getRuleEffectiveHint(redirectEnabled, groupEnabled, row.rule.enabled)}>
+                  <Switch
+                    size="small"
+                    checked={row.rule.enabled}
+                    disabled={!redirectEnabled || !groupEnabled}
+                    onChange={(v) => setRules((prev) => prev.map((r) => r.id === row.rule.id ? { ...r, enabled: v } : r))}
+                  />
+                </Tooltip>
+                <Typography.Text type={effective ? 'success' : 'secondary'}>{effective ? '生效中' : '未生效'}</Typography.Text>
+              </Space>
             );
           },
         },
