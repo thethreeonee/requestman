@@ -12,19 +12,6 @@ import {
   Typography,
 } from 'antd';
 import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  useDroppable,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type DragOverEvent,
-  type DragStartEvent,
-} from '@dnd-kit/core';
-import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import {
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
@@ -73,79 +60,12 @@ type GroupRow = { key: string; rowType: 'group'; group: RedirectGroup };
 type RuleRow = { key: string; rowType: 'rule'; rule: RedirectRule };
 type GroupEmptyRow = { key: string; rowType: 'group-empty'; group: RedirectGroup };
 type TableRow = GroupRow | RuleRow | GroupEmptyRow;
-type DragState = {
-  activeGroupId: string | null;
-  activeRuleId: string | null;
-  hoveredGroupId: string | null;
-  previewOverId: string | null;
-};
 
 function getRuleEffectiveHint(redirectEnabled: boolean, groupEnabled: boolean, ruleEnabled: boolean) {
   if (!redirectEnabled) return '总开关关闭，当前规则不会生效';
   if (!groupEnabled) return '规则组已关闭，当前规则不会生效';
   if (!ruleEnabled) return '规则已关闭，不会生效';
   return '规则已开启，当前规则会生效';
-}
-
-type RowProps = React.HTMLAttributes<HTMLTableRowElement> & {
-  'data-row-key'?: string;
-  'data-row-type'?: TableRow['rowType'];
-  'data-group-id'?: string;
-  'data-rule-id'?: string;
-};
-
-function SortableTableRow(props: RowProps & {
-  activeDragGroupId: string | null;
-  activeDragRuleId: string | null;
-  hoveredDropGroupId: string | null;
-}) {
-  const rowType = props['data-row-type'];
-  const rowKey = props['data-row-key'];
-  const groupId = props['data-group-id'];
-  const ruleId = props['data-rule-id'];
-
-  const sortable = useSortable({
-    id: rowType === 'rule' && ruleId ? ruleId : `noop-${String(rowKey ?? '')}`,
-    disabled: rowType !== 'rule' || !ruleId,
-    data: rowType === 'rule' && groupId ? { type: 'rule', groupId } : undefined,
-  });
-  const droppable = useDroppable({
-    id: rowType === 'group' && groupId ? `group-drop:${groupId}` : `noop-group-${String(rowKey ?? '')}`,
-    data: rowType === 'group' && groupId ? { type: 'group', groupId } : undefined,
-    disabled: rowType !== 'group' || !groupId || groupId === props.activeDragGroupId,
-  });
-
-  const isDraggingRule = rowType === 'rule' && sortable.isDragging;
-
-  const style = rowType === 'rule'
-    ? {
-      ...props.style,
-      transform: undefined,
-      transition: undefined,
-      cursor: 'grab',
-      opacity: isDraggingRule ? (props.hoveredDropGroupId ? 0.22 : 0.32) : props.style?.opacity,
-    }
-    : props.style;
-
-  const className = [
-    props.className,
-    isDraggingRule ? 'rule-row-dragging' : '',
-  ].filter(Boolean).join(' ');
-
-  return (
-    <tr
-      {...props}
-      ref={rowType === 'rule' ? sortable.setNodeRef : rowType === 'group' ? droppable.setNodeRef : undefined}
-      style={style}
-      className={className}
-      {...(rowType === 'rule' ? sortable.attributes : undefined)}
-      {...(rowType === 'rule' ? sortable.listeners : undefined)}
-    />
-  );
-}
-
-function getRowGroupId(row: TableRow) {
-  return row.rowType === 'rule' ? row.rule.groupId : row.group.id;
 }
 
 function buildTableData(groups: RedirectGroup[], collapsedGroupIds: string[], displayRules: RedirectRule[]): TableRow[] {
@@ -163,125 +83,6 @@ function buildTableData(groups: RedirectGroup[], collapsedGroupIds: string[], di
 
     return [groupRow, ...ruleRows];
   });
-}
-
-function moveRuleWithDropTarget(list: RedirectRule[], groupOrder: string[], activeRuleId: string, overId: string) {
-  const active = list.find((rule) => rule.id === activeRuleId);
-  if (!active) return list;
-
-  if (overId.startsWith('group-drop:')) {
-    const targetGroupId = overId.replace('group-drop:', '');
-    if (!targetGroupId || active.groupId === targetGroupId) return list;
-    const withoutActive = list.filter((rule) => rule.id !== activeRuleId);
-    const next = [...withoutActive];
-    let lastInTargetGroup = -1;
-    for (let index = withoutActive.length - 1; index >= 0; index -= 1) {
-      if (withoutActive[index].groupId === targetGroupId) {
-        lastInTargetGroup = index;
-        break;
-      }
-    }
-
-    if (lastInTargetGroup >= 0) {
-      next.splice(lastInTargetGroup + 1, 0, { ...active, groupId: targetGroupId });
-      return next;
-    }
-
-    const targetGroupIndex = groupOrder.findIndex((id) => id === targetGroupId);
-    const nextGroupIds = new Set(groupOrder.slice(targetGroupIndex + 1));
-    const insertIndex = withoutActive.findIndex((rule) => nextGroupIds.has(rule.groupId));
-    next.splice(insertIndex >= 0 ? insertIndex : next.length, 0, { ...active, groupId: targetGroupId });
-    return next;
-  }
-
-  const overRule = list.find((rule) => rule.id === overId);
-  if (!overRule) return list;
-  if (activeRuleId === overId) return list;
-
-  if (active.groupId === overRule.groupId) {
-    const activeIndex = list.findIndex((rule) => rule.id === activeRuleId);
-    const overIndex = list.findIndex((rule) => rule.id === overId);
-    if (activeIndex < 0 || overIndex < 0 || activeIndex === overIndex) return list;
-    return arrayMove(list, activeIndex, overIndex);
-  }
-
-  const withoutActive = list.filter((rule) => rule.id !== activeRuleId);
-  const overIndex = withoutActive.findIndex((rule) => rule.id === overId);
-  if (overIndex < 0) return list;
-  const next = [...withoutActive];
-  next.splice(overIndex, 0, { ...active, groupId: overRule.groupId });
-  return next;
-}
-
-function resolveDropTargetId(
-  list: RedirectRule[],
-  event: Pick<DragOverEvent | DragEndEvent, 'active' | 'collisions' | 'over'>,
-) {
-  const activeGroupId = event.active.data.current?.groupId;
-  const activeRuleId = String(event.active.id);
-  const collisionIds = (event.collisions ?? []).map((collision) => String(collision.id));
-  const sameGroupRuleId = collisionIds.find((id) => {
-    const hitRule = list.find((rule) => rule.id === id);
-    return hitRule && hitRule.id !== activeRuleId && hitRule.groupId === activeGroupId;
-  });
-  const crossGroupDropId = collisionIds.find((id) => id.startsWith('group-drop:') && id.replace('group-drop:', '') !== activeGroupId);
-  const crossGroupRuleId = collisionIds.find((id) => {
-    const hitRule = list.find((rule) => rule.id === id);
-    return hitRule && hitRule.id !== activeRuleId && hitRule.groupId !== activeGroupId;
-  });
-
-  if (sameGroupRuleId) return sameGroupRuleId;
-  if (crossGroupDropId) return crossGroupDropId;
-  if (crossGroupRuleId) return crossGroupRuleId;
-  if (event.over) return String(event.over.id);
-  return collisionIds[0] ?? '';
-}
-
-function getTargetGroupIdFromOverId(list: RedirectRule[], overId: string) {
-  if (overId.startsWith('group-drop:')) {
-    return overId.replace('group-drop:', '');
-  }
-
-  return list.find((rule) => rule.id === overId)?.groupId ?? null;
-}
-
-function projectDragState(
-  originalRules: RedirectRule[],
-  activeGroupId: string | null,
-  overId: string | null,
-): Pick<DragState, 'hoveredGroupId' | 'previewOverId'> {
-  if (!overId) {
-    return { hoveredGroupId: null, previewOverId: null };
-  }
-
-  const targetGroupId = getTargetGroupIdFromOverId(originalRules, overId);
-  if (!targetGroupId) {
-    return { hoveredGroupId: null, previewOverId: null };
-  }
-
-  if (targetGroupId !== activeGroupId) {
-    return { hoveredGroupId: targetGroupId, previewOverId: null };
-  }
-
-  return {
-    hoveredGroupId: null,
-    previewOverId: overId,
-  };
-}
-
-function getFinalDraggedRules(
-  originalRules: RedirectRule[],
-  groupOrder: string[],
-  activeId: string,
-  overId: string | null,
-  hoveredGroupId: string | null,
-) {
-  if (hoveredGroupId) {
-    return moveRuleWithDropTarget(originalRules, groupOrder, activeId, `group-drop:${hoveredGroupId}`);
-  }
-
-  if (!overId) return originalRules;
-  return moveRuleWithDropTarget(originalRules, groupOrder, activeId, overId);
 }
 
 const RULE_TYPE_LABEL_MAP: Record<RedirectRule['type'], string> = {
@@ -308,18 +109,6 @@ const RULE_TYPE_ICON_MAP: Record<RedirectRule['type'], React.ReactNode> = {
   request_delay: <ClockCircleOutlined />,
 };
 
-function DragRuleOverlay({ rule }: { rule: RedirectRule }) {
-  return (
-    <div className="rule-drag-overlay">
-      <div className="rule-drag-overlay-name">{rule.name}</div>
-      <div className="rule-drag-overlay-type">
-        <span>{RULE_TYPE_ICON_MAP[rule.type]}</span>
-        <span>{RULE_TYPE_LABEL_MAP[rule.type]}</span>
-      </div>
-    </div>
-  );
-}
-
 export default function RedirectRuleList({
   groups,
   rules,
@@ -342,38 +131,14 @@ export default function RedirectRuleList({
   exportConfig,
   importConfig,
 }: Props) {
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
-  const [dragState, setDragState] = React.useState<DragState>({
-    activeGroupId: null,
-    activeRuleId: null,
-    hoveredGroupId: null,
-    previewOverId: null,
-  });
-  const dragStartRulesRef = React.useRef<RedirectRule[] | null>(null);
-  const groupOrder = React.useMemo(() => groups.map((group) => group.id), [groups]);
-  const displayRules = rules;
-  const activeDragRule = React.useMemo(
-    () => rules.find((rule) => rule.id === dragState.activeRuleId) ?? null,
-    [dragState.activeRuleId, rules],
-  );
-
   const currentGroupEnabled = new Map(groups.map((g) => [g.id, g.enabled]));
   const groupNameMap = new Map(groups.map((g) => [g.id, g.name]));
   const groupsOptions = groups.map((g) => ({ value: g.name }));
 
   const tableData = React.useMemo(
-    () => buildTableData(groups, collapsedGroupIds, displayRules),
-    [collapsedGroupIds, displayRules, groups],
+    () => buildTableData(groups, collapsedGroupIds, rules),
+    [collapsedGroupIds, groups, rules],
   );
-  const hoveredGroupVisibleRowKeys = React.useMemo(() => {
-    if (!dragState.hoveredGroupId) return new Set<string>();
-
-    return new Set(
-      tableData
-        .filter((row) => getRowGroupId(row) === dragState.hoveredGroupId)
-        .map((row) => row.key),
-    );
-  }, [dragState.hoveredGroupId, tableData]);
 
   const toggleGroupCollapse = (groupId: string) => {
     setCollapsedGroupIds((prev) => {
@@ -395,74 +160,6 @@ export default function RedirectRuleList({
   const handleRuleEnabledChange = (rule: RedirectRule, value: boolean) => {
     setRules((prev) => prev.map((r) => r.id === rule.id ? { ...r, enabled: value } : r));
     messageApi.success(`规则「${rule.name}」已${value ? '开启' : '关闭'}`);
-  };
-
-  const handleDragStart = (event: DragStartEvent) => {
-    dragStartRulesRef.current = rules;
-    setDragState({
-      activeGroupId: event.active.data.current?.groupId ?? null,
-      activeRuleId: String(event.active.id),
-      hoveredGroupId: null,
-      previewOverId: null,
-    });
-  };
-
-  const handleDragOver = (event: DragOverEvent) => {
-    const originalRules = dragStartRulesRef.current ?? rules;
-    const resolvedOverId = resolveDropTargetId(originalRules, event);
-    setDragState((prev) => {
-      const overId = (
-        resolvedOverId && resolvedOverId !== prev.activeRuleId
-          ? resolvedOverId
-          : prev.hoveredGroupId === null
-            ? prev.previewOverId
-            : null
-      );
-      const next = {
-        activeGroupId: prev.activeGroupId,
-        activeRuleId: prev.activeRuleId,
-        ...projectDragState(originalRules, prev.activeGroupId, overId),
-      };
-
-      if (
-        prev.activeGroupId === next.activeGroupId &&
-        prev.activeRuleId === next.activeRuleId &&
-        prev.hoveredGroupId === next.hoveredGroupId &&
-        prev.previewOverId === next.previewOverId
-      ) {
-        return prev;
-      }
-
-      return next;
-    });
-  };
-
-  const handleDragCancel = () => {
-    setDragState({ activeGroupId: null, activeRuleId: null, hoveredGroupId: null, previewOverId: null });
-    dragStartRulesRef.current = null;
-  };
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const activeId = String(event.active.id);
-    const originalRules = dragStartRulesRef.current ?? rules;
-    const overId = resolveDropTargetId(originalRules, event);
-    const finalRules = getFinalDraggedRules(
-      originalRules,
-      groupOrder,
-      activeId,
-      dragState.hoveredGroupId ? overId : dragState.previewOverId ?? overId,
-      dragState.hoveredGroupId,
-    );
-    const reordered = finalRules !== originalRules;
-
-    if (reordered) setRules(finalRules);
-
-    setDragState({ activeGroupId: null, activeRuleId: null, hoveredGroupId: null, previewOverId: null });
-    dragStartRulesRef.current = null;
-
-    if (reordered) {
-      messageApi.success('排序已更新');
-    }
   };
 
   return <div>
@@ -524,44 +221,13 @@ export default function RedirectRuleList({
         </Dropdown>
       </Space>
     </div>
-    <DndContext
-      sensors={sensors}
-      onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
-      onDragCancel={handleDragCancel}
-      onDragEnd={handleDragEnd}
-    >
-      <SortableContext items={displayRules.map((rule) => rule.id)} strategy={verticalListSortingStrategy}>
-        <Table<TableRow>
-          className="rules-list-table"
-          pagination={false}
-          dataSource={tableData}
-          rowKey="key"
-          onRow={(row) => ({
-            'data-row-type': row.rowType,
-            'data-group-id': row.rowType === 'rule' ? row.rule.groupId : row.group.id,
-            'data-rule-id': row.rowType === 'rule' ? row.rule.id : undefined,
-          })}
-          components={{ body: { row: (props: RowProps) => <SortableTableRow {...props} activeDragGroupId={dragState.activeGroupId} activeDragRuleId={dragState.activeRuleId} hoveredDropGroupId={dragState.hoveredGroupId} /> } }}
-          rowClassName={(row, index) => {
-            const classNames = [row.rowType === 'group' ? 'rule-group-row' : 'rule-item-row'];
-
-            if (hoveredGroupVisibleRowKeys.has(row.key)) {
-              classNames.push('rule-group-area-drop-target');
-              if (index === 0 || !hoveredGroupVisibleRowKeys.has(tableData[index - 1]?.key ?? '')) {
-                classNames.push('rule-group-area-drop-target-start');
-              }
-              if (index === tableData.length - 1 || !hoveredGroupVisibleRowKeys.has(tableData[index + 1]?.key ?? '')) {
-                classNames.push('rule-group-area-drop-target-end');
-                if (index === tableData.length - 1) {
-                  classNames.push('rule-group-area-drop-target-table-end');
-                }
-              }
-            }
-
-            return classNames.join(' ');
-          }}
-          columns={[
+    <Table<TableRow>
+      className="rules-list-table"
+      pagination={false}
+      dataSource={tableData}
+      rowKey="key"
+      rowClassName={(row) => row.rowType === 'group' ? 'rule-group-row' : 'rule-item-row'}
+      columns={[
         {
           title: '名称',
           dataIndex: 'name',
@@ -646,13 +312,8 @@ export default function RedirectRuleList({
             );
           },
         },
-          ]}
-        />
-      </SortableContext>
-      <DragOverlay>
-        {activeDragRule ? <DragRuleOverlay rule={activeDragRule} /> : null}
-      </DragOverlay>
-    </DndContext>
+      ]}
+    />
     <Modal open={groupModal.open} title={groupModal.mode === 'create' ? '新建规则组' : groupModal.mode === 'rename' ? '重命名规则组' : '修改规则组'} onCancel={() => setGroupModal({ open: false, mode: 'create' })} onOk={confirmGroupModal}>
       {groupModal.mode === 'move' ? <AutoComplete options={groupsOptions} value={groupInput} onChange={setGroupInput} placeholder="请选择或输入新规则组" /> : <Input value={groupInput} onChange={(e) => setGroupInput(e.target.value)} placeholder="请输入名称" />}
     </Modal>
