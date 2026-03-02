@@ -1,6 +1,18 @@
 import { DEFAULT_GROUP_ID, DEFAULT_GROUP_NAME } from './constants';
 import type { MatchMode, RedirectCondition, RedirectGroup, RedirectRule } from './types';
 
+const RULE_TYPES: RedirectRule['type'][] = [
+  'redirect_request',
+  'rewrite_string',
+  'query_params',
+  'modify_request_body',
+  'modify_response_body',
+  'modify_headers',
+  'user_agent',
+  'cancel_request',
+  'request_delay',
+];
+
 export function genId() {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -82,7 +94,7 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
       return {
         id: typeof obj.id === 'string' && obj.id ? obj.id : genId(),
         name: typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim() : `规则 ${idx + 1}`,
-        type: 'redirect_request',
+        type: RULE_TYPES.includes(obj.type as RedirectRule['type']) ? (obj.type as RedirectRule['type']) : 'redirect_request',
         enabled: obj.enabled !== false,
         groupId: typeof obj.groupId === 'string' && groupIds.has(obj.groupId) ? obj.groupId : fallbackGroupId,
         conditions: conditions.length ? conditions : [createDefaultCondition()],
