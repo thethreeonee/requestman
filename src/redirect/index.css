@@ -19,3 +19,15 @@ body {
 .group-collapse-btn .anticon.expanded {
   transform: rotate(90deg);
 }
+
+.rules-list-table .ant-table-thead > tr > th {
+  padding-block: 8px;
+}
+
+.rules-list-table .ant-table-tbody > tr > td {
+  padding-block: 8px;
+}
+
+.rules-list-table .ant-table-tbody > .rule-group-row > td {
+  background: #f5f5f5;
+}

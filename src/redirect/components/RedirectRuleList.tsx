@@ -89,6 +89,7 @@ export default function RedirectRuleList({
       <Space><Button onClick={() => { setGroupModal({ open: true, mode: 'create' }); setGroupInput(''); }}>新建规则组</Button><Button type="primary" onClick={createRule}>新建规则</Button></Space>
     </div>
     <Table<TableRow>
+      className="rules-list-table"
       pagination={false}
       dataSource={tableData}
       rowKey="key"
@@ -123,10 +124,11 @@ export default function RedirectRuleList({
           title: '状态',
           render: (_, row) => {
             if (row.rowType === 'group') {
-              return <Switch checked={row.group.enabled} disabled={!redirectEnabled} onChange={(v) => setGroups((prev) => prev.map((g) => g.id === row.group.id ? { ...g, enabled: v } : g))} />;
+              return <Switch size="small" checked={row.group.enabled} disabled={!redirectEnabled} onChange={(v) => setGroups((prev) => prev.map((g) => g.id === row.group.id ? { ...g, enabled: v } : g))} />;
             }
             return (
               <Switch
+                size="small"
                 checked={row.rule.enabled}
                 disabled={!redirectEnabled || !currentGroupEnabled.get(row.rule.groupId)}
                 onChange={(v) => setRules((prev) => prev.map((r) => r.id === row.rule.id ? { ...r, enabled: v } : r))}
