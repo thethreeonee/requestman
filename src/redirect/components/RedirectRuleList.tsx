@@ -89,8 +89,8 @@ function SortableTableRow(props: RowProps) {
   const style = rowType === 'rule'
     ? {
       ...props.style,
-      transform: CSS.Transform.toString(sortable.transform),
-      transition: sortable.transition,
+      transform: sortable.isDragging ? CSS.Transform.toString(sortable.transform) : undefined,
+      transition: sortable.isDragging ? sortable.transition : undefined,
       cursor: 'grab',
     }
     : props.style;
