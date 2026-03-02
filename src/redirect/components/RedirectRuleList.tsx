@@ -255,6 +255,21 @@ export default function RedirectRuleList({
     });
   };
 
+  const handleRedirectEnabledChange = (value: boolean) => {
+    setRedirectEnabled(value);
+    messageApi.success(value ? '总开关已开启' : '总开关已关闭');
+  };
+
+  const handleGroupEnabledChange = (group: RedirectGroup, value: boolean) => {
+    setGroups((prev) => prev.map((g) => g.id === group.id ? { ...g, enabled: value } : g));
+    messageApi.success(`规则组「${group.name}」已${value ? '开启' : '关闭'}`);
+  };
+
+  const handleRuleEnabledChange = (rule: RedirectRule, value: boolean) => {
+    setRules((prev) => prev.map((r) => r.id === rule.id ? { ...r, enabled: value } : r));
+    messageApi.success(`规则「${rule.name}」已${value ? '开启' : '关闭'}`);
+  };
+
   const handleDragStart = (event: DragStartEvent) => {
     setDragPreviewRules(null);
     setActiveDragGroupId(event.active.data.current?.groupId ?? null);
@@ -322,7 +337,7 @@ export default function RedirectRuleList({
 
   return <div>
     <div className="detail-header">
-      <Space><Typography.Title level={4} style={{ margin: 0 }}>重定向请求</Typography.Title><Switch checked={redirectEnabled} onChange={setRedirectEnabled} /></Space>
+      <Space><Typography.Title level={4} style={{ margin: 0 }}>重定向请求</Typography.Title><Switch checked={redirectEnabled} onChange={handleRedirectEnabledChange} /></Space>
       <Space>
         <Dropdown menu={{ items: [
           { key: 'export', label: '导出配置', onClick: exportConfig },
@@ -437,19 +452,16 @@ export default function RedirectRuleList({
           width: 180,
           render: (_, row) => {
             if (row.rowType === 'group') {
-              const groupEffective = redirectEnabled && row.group.enabled;
               return (
                 <Space size={6}>
-                  <Tooltip title={groupEffective ? '规则组已开启，组内规则可生效' : (redirectEnabled ? '规则组已关闭，组内规则不会生效' : '总开关关闭，组内规则不会生效')}>
-                    <Switch size="small" checked={row.group.enabled} disabled={!redirectEnabled} onChange={(v) => setGroups((prev) => prev.map((g) => g.id === row.group.id ? { ...g, enabled: v } : g))} />
+                  <Tooltip title={redirectEnabled ? (row.group.enabled ? '规则组已开启，组内规则可生效' : '规则组已关闭，组内规则不会生效') : '总开关关闭，组内规则不会生效'}>
+                    <Switch size="small" checked={row.group.enabled} disabled={!redirectEnabled} onChange={(v) => handleGroupEnabledChange(row.group, v)} />
                   </Tooltip>
-                  <Typography.Text type={groupEffective ? 'success' : 'secondary'}>{groupEffective ? '生效中' : '未生效'}</Typography.Text>
                 </Space>
               );
             }
             if (row.rowType === 'group-empty') return null;
             const groupEnabled = currentGroupEnabled.get(row.rule.groupId) !== false;
-            const effective = redirectEnabled && groupEnabled && row.rule.enabled;
             return (
               <Space size={6}>
                 <Tooltip title={getRuleEffectiveHint(redirectEnabled, groupEnabled, row.rule.enabled)}>
@@ -457,10 +469,9 @@ export default function RedirectRuleList({
                     size="small"
                     checked={row.rule.enabled}
                     disabled={!redirectEnabled || !groupEnabled}
-                    onChange={(v) => setRules((prev) => prev.map((r) => r.id === row.rule.id ? { ...r, enabled: v } : r))}
+                    onChange={(v) => handleRuleEnabledChange(row.rule, v)}
                   />
                 </Tooltip>
-                <Typography.Text type={effective ? 'success' : 'secondary'}>{effective ? '生效中' : '未生效'}</Typography.Text>
               </Space>
             );
           },
