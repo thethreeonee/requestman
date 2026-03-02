@@ -118,7 +118,7 @@ export default function RuleGroupsCollapse({
             <Typography.Text type="secondary">暂无规则，点击右上角 + 添加规则。</Typography.Text>
           ) : (
             <SortableContext items={groupRules.map((rule) => rule.id)} strategy={verticalListSortingStrategy}>
-              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+              <div className="simple-rule-stack">
                 {groupRules.map((rule) => {
                   const dirty = isRuleFieldDirty(rule, 'expression') || isRuleFieldDirty(rule, 'redirectUrl');
                   return (
@@ -172,7 +172,7 @@ export default function RuleGroupsCollapse({
                     </SortableRuleCard>
                   );
                 })}
-              </Space>
+              </div>
             </SortableContext>
           ),
         };
