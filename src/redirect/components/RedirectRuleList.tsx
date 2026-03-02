@@ -61,9 +61,19 @@ type RuleRow = { key: string; rowType: 'rule'; rule: RedirectRule };
 type GroupEmptyRow = { key: string; rowType: 'group-empty'; group: RedirectGroup };
 type TableRow = GroupRow | RuleRow | GroupEmptyRow;
 type DragState = { ruleId: string; groupId: string };
+type PointerDragState = DragState & {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  clientX: number;
+  clientY: number;
+  isDragging: boolean;
+};
 type DropState = { targetRuleId: string; position: 'before' | 'after' };
 type GroupDropState = { groupId: string };
 type GroupOverlayRect = { top: number; left: number; width: number; height: number; roundBottom: boolean };
+
+const POINTER_DRAG_THRESHOLD = 4;
 
 function getRuleEffectiveHint(redirectEnabled: boolean, groupEnabled: boolean, ruleEnabled: boolean) {
   if (!redirectEnabled) return '总开关关闭，当前规则不会生效';
@@ -165,6 +175,27 @@ function moveRuleToGroup(
   return nextRules;
 }
 
+function isInteractiveDragTarget(target: EventTarget | null) {
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest([
+    'button',
+    'a',
+    'input',
+    'textarea',
+    'select',
+    'label',
+    '[role="button"]',
+    '[data-no-drag="true"]',
+    '.ant-btn',
+    '.ant-switch',
+    '.ant-dropdown-trigger',
+    '.ant-dropdown-menu',
+    '.ant-input',
+    '.ant-input-affix-wrapper',
+    '.ant-select',
+  ].join(',')));
+}
+
 const RULE_TYPE_LABEL_MAP: Record<RedirectRule['type'], string> = {
   redirect_request: '重定向请求',
   rewrite_string: '重写字符串',
@@ -213,9 +244,13 @@ export default function RedirectRuleList({
 }: Props) {
   const tableWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const [dragState, setDragState] = React.useState<DragState | null>(null);
+  const [pointerDragState, setPointerDragState] = React.useState<PointerDragState | null>(null);
   const [dropState, setDropState] = React.useState<DropState | null>(null);
   const [groupDropState, setGroupDropState] = React.useState<GroupDropState | null>(null);
   const [groupOverlayRect, setGroupOverlayRect] = React.useState<GroupOverlayRect | null>(null);
+  const pointerDragStateRef = React.useRef<PointerDragState | null>(null);
+  const dropStateRef = React.useRef<DropState | null>(null);
+  const groupDropStateRef = React.useRef<GroupDropState | null>(null);
   const currentGroupEnabled = new Map(groups.map((g) => [g.id, g.enabled]));
   const groupNameMap = new Map(groups.map((g) => [g.id, g.name]));
   const groupsOptions = groups.map((g) => ({ value: g.name }));
@@ -224,10 +259,45 @@ export default function RedirectRuleList({
     () => buildTableData(groups, collapsedGroupIds, rules),
     [collapsedGroupIds, groups, rules],
   );
+  const draggedRule = React.useMemo(
+    () => dragState ? rules.find((rule) => rule.id === dragState.ruleId) ?? null : null,
+    [dragState, rules],
+  );
+  const draggedRuleGroupEnabled = draggedRule ? currentGroupEnabled.get(draggedRule.groupId) !== false : false;
   const lastVisibleGroupId = React.useMemo(() => {
     const groupRows = tableData.filter((row): row is GroupRow => row.rowType === 'group');
     return groupRows[groupRows.length - 1]?.group.id ?? null;
   }, [tableData]);
+
+  const setPointerDragStateWithRef = React.useCallback((value: React.SetStateAction<PointerDragState | null>) => {
+    setPointerDragState((prev) => {
+      const next = typeof value === 'function'
+        ? (value as (prev: PointerDragState | null) => PointerDragState | null)(prev)
+        : value;
+      pointerDragStateRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const setDropStateWithRef = React.useCallback((value: React.SetStateAction<DropState | null>) => {
+    setDropState((prev) => {
+      const next = typeof value === 'function'
+        ? (value as (prev: DropState | null) => DropState | null)(prev)
+        : value;
+      dropStateRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const setGroupDropStateWithRef = React.useCallback((value: React.SetStateAction<GroupDropState | null>) => {
+    setGroupDropState((prev) => {
+      const next = typeof value === 'function'
+        ? (value as (prev: GroupDropState | null) => GroupDropState | null)(prev)
+        : value;
+      groupDropStateRef.current = next;
+      return next;
+    });
+  }, []);
 
   React.useLayoutEffect(() => {
     if (!groupDropState || !tableWrapperRef.current) {
@@ -292,67 +362,165 @@ export default function RedirectRuleList({
 
   const clearDragState = () => {
     setDragState(null);
-    setDropState(null);
-    setGroupDropState(null);
+    setPointerDragStateWithRef(null);
+    setDropStateWithRef(null);
+    setGroupDropStateWithRef(null);
     setGroupOverlayRect(null);
   };
 
-  const handleRuleDragStart = (event: React.DragEvent<HTMLElement>, rule: RedirectRule) => {
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', rule.id);
-    setDragState({ ruleId: rule.id, groupId: rule.groupId });
-    setDropState(null);
-    setGroupDropState(null);
-  };
+  const updatePointerDropTarget = React.useCallback((clientX: number, clientY: number, activeDrag: DragState) => {
+    const hoveredElement = document.elementFromPoint(clientX, clientY);
+    const rowElement = hoveredElement?.closest<HTMLTableRowElement>('tr[data-row-type][data-group-id]');
+    const hoveredGroupId = rowElement?.dataset.groupId;
+    const hoveredRowType = rowElement?.dataset.rowType;
+    const hoveredRuleId = rowElement?.dataset.ruleId;
 
-  const handleRuleDragOver = (event: React.DragEvent<HTMLTableRowElement>, row: RuleRow) => {
-    if (!dragState || dragState.groupId !== row.rule.groupId || dragState.ruleId === row.rule.id) return;
-    event.preventDefault();
-    setGroupDropState(null);
-    const { top, height } = event.currentTarget.getBoundingClientRect();
-    const position = event.clientY - top < height / 2 ? 'before' : 'after';
-    const nextDropState = normalizeDropState(rules, dragState.ruleId, row.rule.id, position);
-    setDropState((prev) => (
-      prev?.targetRuleId === nextDropState.targetRuleId && prev.position === nextDropState.position
-        ? prev
-        : nextDropState
-    ));
-  };
-
-  const handleRuleDrop = (event: React.DragEvent<HTMLTableRowElement>, row: RuleRow) => {
-    if (!dragState || dragState.groupId !== row.rule.groupId || dragState.ruleId === row.rule.id) {
-      clearDragState();
+    if (!rowElement || !hoveredGroupId) {
+      setDropStateWithRef(null);
+      setGroupDropStateWithRef(null);
       return;
     }
-    event.preventDefault();
-    const { top, height } = event.currentTarget.getBoundingClientRect();
-    const position = event.clientY - top < height / 2 ? 'before' : 'after';
-    setRules((prev) => moveRuleWithinGroup(prev, dragState.ruleId, row.rule.id, position));
-    messageApi.success('规则排序已更新');
-    clearDragState();
-  };
 
-  const handleGroupDragOver = (event: React.DragEvent<HTMLTableRowElement>, groupId: string) => {
-    if (!dragState || dragState.groupId === groupId) return;
-    event.preventDefault();
-    setDropState(null);
-    setGroupDropState((prev) => prev?.groupId === groupId ? prev : { groupId });
-  };
-
-  const handleGroupDrop = (event: React.DragEvent<HTMLTableRowElement>, groupId: string) => {
-    if (!dragState || dragState.groupId === groupId) {
-      clearDragState();
+    if (hoveredRowType === 'rule' && hoveredGroupId === activeDrag.groupId && hoveredRuleId && hoveredRuleId !== activeDrag.ruleId) {
+      const { top, height } = rowElement.getBoundingClientRect();
+      const position = clientY - top < height / 2 ? 'before' : 'after';
+      const nextDropState = normalizeDropState(rules, activeDrag.ruleId, hoveredRuleId, position);
+      setGroupDropStateWithRef(null);
+      setDropStateWithRef((prev) => (
+        prev?.targetRuleId === nextDropState.targetRuleId && prev.position === nextDropState.position
+          ? prev
+          : nextDropState
+      ));
       return;
     }
-    event.preventDefault();
-    setRules((prev) => moveRuleToGroup(prev, groups, dragState.ruleId, groupId));
-    messageApi.success(`规则已移动到规则组「${groupNameMap.get(groupId) ?? ''}」`);
-    clearDragState();
+
+    if (hoveredGroupId !== activeDrag.groupId) {
+      setDropStateWithRef(null);
+      setGroupDropStateWithRef((prev) => prev?.groupId === hoveredGroupId ? prev : { groupId: hoveredGroupId });
+      return;
+    }
+
+    setDropStateWithRef(null);
+    setGroupDropStateWithRef(null);
+  }, [rules, setDropStateWithRef, setGroupDropStateWithRef]);
+
+  React.useEffect(() => {
+    if (!pointerDragState) return undefined;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const activeDrag = pointerDragStateRef.current;
+      if (!activeDrag || event.pointerId !== activeDrag.pointerId) return;
+
+      const movedEnough = activeDrag.isDragging || (
+        Math.abs(event.clientX - activeDrag.startX) >= POINTER_DRAG_THRESHOLD ||
+        Math.abs(event.clientY - activeDrag.startY) >= POINTER_DRAG_THRESHOLD
+      );
+
+      const nextDragState = { ...activeDrag, clientX: event.clientX, clientY: event.clientY, isDragging: movedEnough };
+      pointerDragStateRef.current = nextDragState;
+      setPointerDragState(nextDragState);
+
+      if (!movedEnough) return;
+
+      if (!dragState) {
+        setDragState({ ruleId: activeDrag.ruleId, groupId: activeDrag.groupId });
+      }
+
+      event.preventDefault();
+      updatePointerDropTarget(event.clientX, event.clientY, activeDrag);
+    };
+
+    const finishPointerDrag = (pointerId: number) => {
+      const activeDrag = pointerDragStateRef.current;
+      if (!activeDrag || pointerId !== activeDrag.pointerId) return;
+
+      if (activeDrag.isDragging) {
+        const currentDropState = dropStateRef.current;
+        const currentGroupDropState = groupDropStateRef.current;
+
+        if (currentDropState) {
+          setRules((prev) => moveRuleWithinGroup(prev, activeDrag.ruleId, currentDropState.targetRuleId, currentDropState.position));
+          messageApi.success('规则排序已更新');
+        } else if (currentGroupDropState) {
+          setRules((prev) => moveRuleToGroup(prev, groups, activeDrag.ruleId, currentGroupDropState.groupId));
+          messageApi.success(`规则已移动到规则组「${groupNameMap.get(currentGroupDropState.groupId) ?? ''}」`);
+        }
+      }
+
+      clearDragState();
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      finishPointerDrag(event.pointerId);
+    };
+
+    const handlePointerCancel = (event: PointerEvent) => {
+      finishPointerDrag(event.pointerId);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerCancel);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerCancel);
+    };
+  }, [dragState, groups, groupNameMap, messageApi, pointerDragState, setRules, updatePointerDropTarget, setPointerDragStateWithRef]);
+
+  React.useEffect(() => {
+    if (!dragState) return undefined;
+    document.body.classList.add('rule-pointer-dragging');
+    return () => {
+      document.body.classList.remove('rule-pointer-dragging');
+    };
+  }, [dragState]);
+
+  const handleRulePointerDown = (event: React.PointerEvent<HTMLTableRowElement>, rule: RedirectRule) => {
+    if (event.button !== 0 || isInteractiveDragTarget(event.target)) return;
+    setPointerDragStateWithRef({
+      pointerId: event.pointerId,
+      ruleId: rule.id,
+      groupId: rule.groupId,
+      startX: event.clientX,
+      startY: event.clientY,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      isDragging: false,
+    });
   };
 
   const getRowGroupId = (row: TableRow) => (row.rowType === 'rule' ? row.rule.groupId : row.group.id);
 
   return <div>
+    {pointerDragState?.isDragging && draggedRule ? (
+      <div
+        className="rule-drag-preview"
+        style={{
+          top: pointerDragState.clientY + 12,
+          left: pointerDragState.clientX + 12,
+        }}
+      >
+        <div className="rule-drag-preview__cell rule-drag-preview__cell--name">
+          <Typography.Text ellipsis>{draggedRule.name}</Typography.Text>
+        </div>
+        <div className="rule-drag-preview__cell rule-drag-preview__cell--type">
+          <Space size={6}>{RULE_TYPE_ICON_MAP[draggedRule.type]}<span>{RULE_TYPE_LABEL_MAP[draggedRule.type]}</span></Space>
+        </div>
+        <div className="rule-drag-preview__cell rule-drag-preview__cell--status">
+          <Tooltip title={getRuleEffectiveHint(redirectEnabled, draggedRuleGroupEnabled, draggedRule.enabled)}>
+            <Switch
+              size="small"
+              checked={draggedRule.enabled}
+              disabled
+            />
+          </Tooltip>
+        </div>
+        <div className="rule-drag-preview__cell rule-drag-preview__cell--actions">
+          <Button type="text" icon={<EllipsisOutlined />} disabled />
+        </div>
+      </div>
+    ) : null}
     <div className="detail-header">
       <Space><Typography.Title level={4} style={{ margin: 0 }}>重定向请求</Typography.Title><Switch checked={redirectEnabled} onChange={handleRedirectEnabledChange} /></Space>
       <Space>
@@ -443,34 +611,14 @@ export default function RedirectRuleList({
           const rowProps = {
             'data-group-id': groupId,
             'data-row-type': row.rowType,
-            onDragOver: (event) => handleGroupDragOver(event, groupId),
-            onDrop: (event) => handleGroupDrop(event, groupId),
           };
 
           if (row.rowType !== 'rule') return rowProps;
 
           return {
             ...rowProps,
-            draggable: true,
-            onDragStart: (event: React.DragEvent<HTMLTableRowElement>) => handleRuleDragStart(event, row.rule),
-            onDragEnd: clearDragState,
-            onDragOver: (event: React.DragEvent<HTMLTableRowElement>) => {
-              if (dragState?.groupId === row.rule.groupId) {
-                handleRuleDragOver(event, row);
-                return;
-              }
-              handleGroupDragOver(event, row.rule.groupId);
-            },
-            onDrop: (event: React.DragEvent<HTMLTableRowElement>) => {
-              if (dragState?.groupId === row.rule.groupId) {
-                handleRuleDrop(event, row);
-                return;
-              }
-              handleGroupDrop(event, row.rule.groupId);
-            },
-            onDragLeave: () => {
-              setDropState((prev) => prev?.targetRuleId === row.rule.id ? null : prev);
-            },
+            'data-rule-id': row.rule.id,
+            onPointerDown: (event: React.PointerEvent<HTMLTableRowElement>) => handleRulePointerDown(event, row.rule),
           };
         }}
         columns={[
