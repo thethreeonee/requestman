@@ -32,7 +32,7 @@ export default function RuleDetailToolbar({
   return <div className="detail-header">
     <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack}>返回</Button>
     <Space>
-      <Typography.Text>启用规则</Typography.Text>
+      <Typography.Text type={enabled ? 'success' : 'secondary'}>{enabled ? '生效中' : '未生效'}</Typography.Text>
       <Switch checked={enabled} onChange={onEnabledChange} />
       <Dropdown menu={{ items: menuItems }}><Button icon={<EllipsisOutlined />} /></Dropdown>
       <Select
