@@ -18,6 +18,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -220,7 +221,9 @@ export default function RedirectRuleList({
 }: Props) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const [activeDragGroupId, setActiveDragGroupId] = React.useState<string | null>(null);
-  const displayRules = rules;
+  const [dragPreviewRules, setDragPreviewRules] = React.useState<RedirectRule[] | null>(null);
+  const dragStartRulesRef = React.useRef<RedirectRule[] | null>(null);
+  const displayRules = dragPreviewRules ?? rules;
 
   const currentGroupEnabled = new Map(groups.map((g) => [g.id, g.enabled]));
   const groupNameMap = new Map(groups.map((g) => [g.id, g.name]));
@@ -262,29 +265,43 @@ export default function RedirectRuleList({
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveDragGroupId(event.active.data.current?.groupId ?? null);
+    dragStartRulesRef.current = rules;
+    setDragPreviewRules(rules);
+  };
+
+  const handleDragOver = (event: DragOverEvent) => {
+    const overId = event.over ? String(event.over.id) : '';
+    if (!overId) return;
+
+    setDragPreviewRules((prev) => {
+      const base = prev ?? dragStartRulesRef.current ?? rules;
+      const next = moveRuleWithDropTarget(base, groups.map((group) => group.id), String(event.active.id), overId);
+      return next === base ? prev : next;
+    });
   };
 
   const handleDragCancel = () => {
     setActiveDragGroupId(null);
+    setDragPreviewRules(null);
+    dragStartRulesRef.current = null;
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const activeId = String(event.active.id);
     const overId = event.over ? String(event.over.id) : '';
+    const originalRules = dragStartRulesRef.current ?? rules;
+    const dragRules = dragPreviewRules ?? originalRules;
 
-    if (!overId) {
-      setActiveDragGroupId(null);
-      return;
-    }
+    const finalRules = overId
+      ? moveRuleWithDropTarget(dragRules, groups.map((group) => group.id), activeId, overId)
+      : originalRules;
+    const reordered = finalRules !== originalRules;
 
-    let reordered = false;
-    setRules((prev) => {
-      const next = moveRuleWithDropTarget(prev, groups.map((group) => group.id), activeId, overId);
-      reordered = next !== prev;
-      return next;
-    });
+    if (reordered) setRules(finalRules);
 
     setActiveDragGroupId(null);
+    setDragPreviewRules(null);
+    dragStartRulesRef.current = null;
 
     if (reordered) {
       messageApi.success('排序已更新');
@@ -353,6 +370,7 @@ export default function RedirectRuleList({
     <DndContext
       sensors={sensors}
       onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
       onDragCancel={handleDragCancel}
       onDragEnd={handleDragEnd}
     >
