@@ -18,6 +18,14 @@ import {
   CaretRightOutlined,
   RetweetOutlined,
   EllipsisOutlined,
+  ApiOutlined,
+  CodeOutlined,
+  InsertRowAboveOutlined,
+  FileSearchOutlined,
+  FileDoneOutlined,
+  UserOutlined,
+  StopOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons';
 import { genId } from '../rule-utils';
 import type { RedirectGroup, RedirectRule } from '../types';
@@ -50,10 +58,26 @@ type TableRow = GroupRow | RuleRow;
 
 const RULE_TYPE_LABEL_MAP: Record<RedirectRule['type'], string> = {
   redirect_request: '重定向请求',
+  rewrite_string: '重写字符串',
+  query_params: 'Query参数',
+  modify_request_body: '修改请求体',
+  modify_response_body: '修改请求响应',
+  modify_headers: '修改Headers',
+  user_agent: 'User-Agent',
+  cancel_request: '取消请求',
+  request_delay: '网络请求延迟',
 };
 
 const RULE_TYPE_ICON_MAP: Record<RedirectRule['type'], React.ReactNode> = {
   redirect_request: <RetweetOutlined />,
+  rewrite_string: <CodeOutlined />,
+  query_params: <InsertRowAboveOutlined />,
+  modify_request_body: <FileSearchOutlined />,
+  modify_response_body: <FileDoneOutlined />,
+  modify_headers: <ApiOutlined />,
+  user_agent: <UserOutlined />,
+  cancel_request: <StopOutlined />,
+  request_delay: <ClockCircleOutlined />,
 };
 
 export default function RedirectRuleList({
@@ -104,10 +128,41 @@ export default function RedirectRuleList({
           menu={{
             items: [
               {
-                key: 'redirect_request',
-                icon: RULE_TYPE_ICON_MAP.redirect_request,
-                label: RULE_TYPE_LABEL_MAP.redirect_request,
-                onClick: () => createRule('redirect_request'),
+                key: 'url_rewrites_group',
+                type: 'group',
+                label: 'URL rewrites',
+                children: [
+                  { key: 'redirect_request', icon: RULE_TYPE_ICON_MAP.redirect_request, label: RULE_TYPE_LABEL_MAP.redirect_request, onClick: () => createRule('redirect_request') },
+                  { key: 'rewrite_string', icon: RULE_TYPE_ICON_MAP.rewrite_string, label: RULE_TYPE_LABEL_MAP.rewrite_string, onClick: () => createRule('rewrite_string') },
+                  { key: 'query_params', icon: RULE_TYPE_ICON_MAP.query_params, label: RULE_TYPE_LABEL_MAP.query_params, onClick: () => createRule('query_params') },
+                ],
+              },
+              {
+                key: 'api_mocking_group',
+                type: 'group',
+                label: 'API mocking',
+                children: [
+                  { key: 'modify_request_body', icon: RULE_TYPE_ICON_MAP.modify_request_body, label: RULE_TYPE_LABEL_MAP.modify_request_body, onClick: () => createRule('modify_request_body') },
+                  { key: 'modify_response_body', icon: RULE_TYPE_ICON_MAP.modify_response_body, label: RULE_TYPE_LABEL_MAP.modify_response_body, onClick: () => createRule('modify_response_body') },
+                ],
+              },
+              {
+                key: 'headers_group',
+                type: 'group',
+                label: 'Headers',
+                children: [
+                  { key: 'modify_headers', icon: RULE_TYPE_ICON_MAP.modify_headers, label: RULE_TYPE_LABEL_MAP.modify_headers, onClick: () => createRule('modify_headers') },
+                  { key: 'user_agent', icon: RULE_TYPE_ICON_MAP.user_agent, label: RULE_TYPE_LABEL_MAP.user_agent, onClick: () => createRule('user_agent') },
+                ],
+              },
+              {
+                key: 'others_group',
+                type: 'group',
+                label: 'Others',
+                children: [
+                  { key: 'cancel_request', icon: RULE_TYPE_ICON_MAP.cancel_request, label: RULE_TYPE_LABEL_MAP.cancel_request, onClick: () => createRule('cancel_request') },
+                  { key: 'request_delay', icon: RULE_TYPE_ICON_MAP.request_delay, label: RULE_TYPE_LABEL_MAP.request_delay, onClick: () => createRule('request_delay') },
+                ],
               },
             ],
           }}

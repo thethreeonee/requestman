@@ -3,7 +3,6 @@ import {
   Button,
   Collapse,
   Drawer,
-  Dropdown,
   Form,
   Input,
   Modal,
@@ -11,20 +10,18 @@ import {
   Radio,
   Select,
   Space,
-  Switch,
   Typography,
 } from 'antd';
 import {
-  ArrowLeftOutlined,
   DeleteOutlined,
   EditOutlined,
-  EllipsisOutlined,
   FilterOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import { MATCH_MODE_OPTIONS, MATCH_TARGET_OPTIONS, REQUEST_METHOD_OPTIONS, RESOURCE_TYPE_OPTIONS } from '../constants';
 import { createDefaultCondition, genId, simulateRedirect } from '../rule-utils';
 import type { RedirectCondition, RedirectGroup, RedirectRule } from '../types';
+import RuleDetailToolbar from './RuleDetailToolbar';
 
 type Props = {
   groups: RedirectGroup[];
@@ -72,26 +69,21 @@ export default function RedirectRuleDetail({
   const activeCondition = workingRule.conditions.find((c) => c.id === filterModal.conditionId);
 
   return <div>
-    <div className="detail-header">
-      <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack}>返回</Button>
-      <Space>
-        <Typography.Text>启用规则</Typography.Text>
-        <Switch checked={workingRule.enabled} onChange={(v) => setWorkingRule({ ...workingRule, enabled: v })} />
-        <Dropdown menu={{ items: [
-          { key: 'copy', label: '复制', onClick: () => setWorkingRule({ ...workingRule, id: genId(), name: `${workingRule.name} 副本` }) },
-          { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => { setRules((prev) => prev.filter((r) => r.id !== workingRule.id)); setPageToList(); } }) },
-        ] }}><Button icon={<EllipsisOutlined />} /></Dropdown>
-        <Select
-          value={workingRule.groupId}
-          style={{ width: 220 }}
-          options={groups.map((g) => ({ value: g.id, label: `规则组：${g.name}` }))}
-          onChange={(v) => setWorkingRule({ ...workingRule, groupId: v })}
-          placeholder="规则组：请选择"
-        />
-        <Button onClick={() => setTestDrawerOpen(true)}>测试</Button>
-        <Button type="primary" onClick={saveDetailRule}>{dirty ? '* 保存规则' : '保存规则'}</Button>
-      </Space>
-    </div>
+    <RuleDetailToolbar
+      groups={groups}
+      groupId={workingRule.groupId}
+      enabled={workingRule.enabled}
+      dirty={!!dirty}
+      onBack={onBack}
+      onEnabledChange={(v) => setWorkingRule({ ...workingRule, enabled: v })}
+      onGroupChange={(v) => setWorkingRule({ ...workingRule, groupId: v })}
+      onTest={() => setTestDrawerOpen(true)}
+      onSave={saveDetailRule}
+      menuItems={[
+        { key: 'copy', label: '复制', onClick: () => setWorkingRule({ ...workingRule, id: genId(), name: `${workingRule.name} 副本` }) },
+        { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => { setRules((prev) => prev.filter((r) => r.id !== workingRule.id)); setPageToList(); } }) },
+      ]}
+    />
     <Space align="center" style={{ marginBottom: 16 }}>
       {editRuleName ? <Input value={workingRule.name} onChange={(e) => setWorkingRule({ ...workingRule, name: e.target.value })} onBlur={() => setEditRuleName(false)} /> : <Typography.Title level={4} style={{ margin: 0 }}>{workingRule.name}</Typography.Title>}
       <Button type="text" icon={<EditOutlined />} onClick={() => setEditRuleName(true)} />

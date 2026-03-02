@@ -9,6 +9,14 @@ import {
 import { createDefaultCondition, genId, normalizeGroups, normalizeRules } from './rule-utils';
 import type { RedirectGroup, RedirectRule } from './types';
 import RedirectRuleDetail from './components/RedirectRuleDetail';
+import RewriteStringRuleDetail from './components/RewriteStringRuleDetail';
+import QueryParamsRuleDetail from './components/QueryParamsRuleDetail';
+import ModifyRequestBodyRuleDetail from './components/ModifyRequestBodyRuleDetail';
+import ModifyResponseBodyRuleDetail from './components/ModifyResponseBodyRuleDetail';
+import ModifyHeadersRuleDetail from './components/ModifyHeadersRuleDetail';
+import UserAgentRuleDetail from './components/UserAgentRuleDetail';
+import CancelRequestRuleDetail from './components/CancelRequestRuleDetail';
+import RequestDelayRuleDetail from './components/RequestDelayRuleDetail';
 import RedirectRuleList from './components/RedirectRuleList';
 import './index.css';
 
@@ -88,8 +96,10 @@ export default function RedirectPanel() {
 
   const saveDetailRule = () => {
     if (!workingRule || page.type !== 'detail') return;
-    const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !c.redirectTarget.trim());
-    if (invalid) return message.warning('还有条件配置未输入完整');
+    if (workingRule.type === 'redirect_request') {
+      const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !c.redirectTarget.trim());
+      if (invalid) return message.warning('还有条件配置未输入完整');
+    }
     setRules((prev) => {
       if (page.isNew && !prev.some((r) => r.id === workingRule.id)) {
         return [workingRule, ...prev];
@@ -162,17 +172,28 @@ export default function RedirectPanel() {
   }, [page, workingRule]);
 
   if (currentRule) {
-    return <RedirectRuleDetail
-      groups={groups}
-      workingRule={currentRule}
-      originalRule={originalRule}
-      setWorkingRule={setWorkingRule}
-      setRules={setRules}
-      onBack={onBack}
-      saveDetailRule={saveDetailRule}
-      setPageToList={() => setPage({ type: 'list' })}
-      messageApi={message}
-    />;
+    const detailProps = {
+      groups,
+      workingRule: currentRule,
+      originalRule,
+      setWorkingRule,
+      setRules,
+      onBack,
+      saveDetailRule,
+      setPageToList: () => setPage({ type: 'list' }),
+    };
+
+    if (currentRule.type === 'redirect_request') {
+      return <RedirectRuleDetail {...detailProps} messageApi={message} />;
+    }
+    if (currentRule.type === 'rewrite_string') return <RewriteStringRuleDetail {...detailProps} />;
+    if (currentRule.type === 'query_params') return <QueryParamsRuleDetail {...detailProps} />;
+    if (currentRule.type === 'modify_request_body') return <ModifyRequestBodyRuleDetail {...detailProps} />;
+    if (currentRule.type === 'modify_response_body') return <ModifyResponseBodyRuleDetail {...detailProps} />;
+    if (currentRule.type === 'modify_headers') return <ModifyHeadersRuleDetail {...detailProps} />;
+    if (currentRule.type === 'user_agent') return <UserAgentRuleDetail {...detailProps} />;
+    if (currentRule.type === 'cancel_request') return <CancelRequestRuleDetail {...detailProps} />;
+    return <RequestDelayRuleDetail {...detailProps} />;
   }
 
   return <RedirectRuleList
