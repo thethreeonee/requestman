@@ -261,7 +261,14 @@ export default function RedirectPanel() {
           style={{ marginBottom: 12 }}
         />
       ))}
-      <Button style={{ marginTop: 12 }} icon={<PlusOutlined />} onClick={() => setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, createDefaultCondition()] })}>添加新条件配置</Button>
+      <Button
+        type="dashed"
+        style={{ marginTop: 12, width: '100%', height: 40 }}
+        icon={<PlusOutlined />}
+        onClick={() => setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, createDefaultCondition()] })}
+      >
+        添加新条件配置
+      </Button>
       <Drawer title="测试规则" placement="bottom" open={testDrawerOpen} height={260} onClose={() => setTestDrawerOpen(false)}>
         <Space.Compact style={{ width: '100%' }}>
           <Input value={testUrl} onChange={(e) => setTestUrl(e.target.value)} placeholder="输入测试URL" />
