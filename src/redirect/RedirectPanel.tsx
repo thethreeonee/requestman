@@ -35,6 +35,7 @@ export default function RedirectPanel() {
   const [workingRule, setWorkingRule] = useState<RedirectRule | null>(null);
   const [originalRule, setOriginalRule] = useState<RedirectRule | null>(null);
   const hasInitializedStorageSync = useRef(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     chrome.storage.local.get([REDIRECT_RULES_KEY, REDIRECT_ENABLED_KEY, REDIRECT_GROUPS_KEY], (res) => {
@@ -171,6 +172,77 @@ export default function RedirectPanel() {
     return workingRule;
   }, [page, workingRule]);
 
+  const exportConfig = () => {
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      groups,
+      rules,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `requestman-rules-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const importConfig = () => {
+    importInputRef.current?.click();
+  };
+
+  const onImportFileChange: React.ChangeEventHandler<HTMLInputElement> = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const importedGroups = normalizeGroups(parsed?.groups);
+      const importedGroupIds = new Set(importedGroups.map((g) => g.id));
+      const importedRules = normalizeRules(parsed?.rules, importedGroupIds, importedGroups[0]?.id ?? DEFAULT_GROUP_ID);
+
+      const currentGroupIds = new Set(groups.map((g) => g.id));
+      const currentRuleIds = new Set(rules.map((r) => r.id));
+
+      const groupIdMap = new Map<string, string>();
+      const mergedGroups = importedGroups.map((group) => {
+        let nextId = group.id;
+        if (currentGroupIds.has(nextId) || groupIdMap.has(nextId)) {
+          nextId = genId();
+        }
+        groupIdMap.set(group.id, nextId);
+        currentGroupIds.add(nextId);
+        return { ...group, id: nextId };
+      });
+
+      const mergedRules = importedRules.map((rule) => {
+        let nextRuleId = rule.id;
+        if (currentRuleIds.has(nextRuleId)) nextRuleId = genId();
+        currentRuleIds.add(nextRuleId);
+        const nextConditions = rule.conditions.map((condition) => ({
+          ...condition,
+          id: genId(),
+        }));
+        return {
+          ...rule,
+          id: nextRuleId,
+          groupId: groupIdMap.get(rule.groupId) ?? groups[0]?.id ?? DEFAULT_GROUP_ID,
+          conditions: nextConditions,
+        };
+      });
+
+      setGroups((prev) => [...prev, ...mergedGroups]);
+      setRules((prev) => [...prev, ...mergedRules]);
+      message.success(`导入成功：新增 ${mergedGroups.length} 个规则组，${mergedRules.length} 条规则`);
+    } catch {
+      message.error('导入失败，请检查配置文件格式');
+    }
+  };
+
   if (currentRule) {
     const detailProps = {
       groups,
@@ -196,23 +268,28 @@ export default function RedirectPanel() {
     return <RequestDelayRuleDetail {...detailProps} />;
   }
 
-  return <RedirectRuleList
-    groups={groups}
-    rules={rules}
-    redirectEnabled={redirectEnabled}
-    collapsedGroupIds={collapsedGroupIds}
-    groupModal={groupModal}
-    groupInput={groupInput}
-    setRedirectEnabled={setRedirectEnabled}
-    setCollapsedGroupIds={setCollapsedGroupIds}
-    setGroupModal={setGroupModal}
-    setGroupInput={setGroupInput}
-    createRule={createRule}
-    openRuleDetail={openRuleDetail}
-    duplicateGroup={duplicateGroup}
-    deleteGroup={deleteGroup}
-    confirmGroupModal={confirmGroupModal}
-    setRules={setRules}
-    setGroups={setGroups}
-  />;
+  return <>
+    <input ref={importInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={onImportFileChange} />
+    <RedirectRuleList
+      groups={groups}
+      rules={rules}
+      redirectEnabled={redirectEnabled}
+      collapsedGroupIds={collapsedGroupIds}
+      groupModal={groupModal}
+      groupInput={groupInput}
+      setRedirectEnabled={setRedirectEnabled}
+      setCollapsedGroupIds={setCollapsedGroupIds}
+      setGroupModal={setGroupModal}
+      setGroupInput={setGroupInput}
+      createRule={createRule}
+      openRuleDetail={openRuleDetail}
+      duplicateGroup={duplicateGroup}
+      deleteGroup={deleteGroup}
+      confirmGroupModal={confirmGroupModal}
+      setRules={setRules}
+      setGroups={setGroups}
+      exportConfig={exportConfig}
+      importConfig={importConfig}
+    />
+  </>;
 }

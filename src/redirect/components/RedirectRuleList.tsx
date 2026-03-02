@@ -50,6 +50,8 @@ type Props = {
   confirmGroupModal: () => void;
   setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
   setGroups: React.Dispatch<React.SetStateAction<RedirectGroup[]>>;
+  exportConfig: () => void;
+  importConfig: () => void;
 };
 
 type GroupRow = { key: string; rowType: 'group'; group: RedirectGroup };
@@ -98,6 +100,8 @@ export default function RedirectRuleList({
   confirmGroupModal,
   setRules,
   setGroups,
+  exportConfig,
+  importConfig,
 }: Props) {
   const currentGroupEnabled = new Map(groups.map((g) => [g.id, g.enabled]));
   const groupNameMap = new Map(groups.map((g) => [g.id, g.name]));
@@ -123,6 +127,12 @@ export default function RedirectRuleList({
     <div className="detail-header">
       <Space><Typography.Title level={4} style={{ margin: 0 }}>重定向请求</Typography.Title><Switch checked={redirectEnabled} onChange={setRedirectEnabled} /></Space>
       <Space>
+        <Dropdown menu={{ items: [
+          { key: 'export', label: '导出配置', onClick: exportConfig },
+          { key: 'import', label: '导入配置', onClick: importConfig },
+        ] }} trigger={['click']}>
+          <Button icon={<EllipsisOutlined />} />
+        </Dropdown>
         <Button onClick={() => { setGroupModal({ open: true, mode: 'create' }); setGroupInput(''); }}>新建规则组</Button>
         <Dropdown
           menu={{
