@@ -53,6 +53,7 @@ type Props = {
   confirmGroupModal: () => void;
   setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
   setGroups: React.Dispatch<React.SetStateAction<RedirectGroup[]>>;
+  messageApi: { success: (content: string) => void };
   exportConfig: () => void;
   importConfig: () => void;
 };
@@ -188,6 +189,7 @@ export default function RedirectRuleList({
   confirmGroupModal,
   setRules,
   setGroups,
+  messageApi,
   exportConfig,
   importConfig,
 }: Props) {
@@ -216,7 +218,15 @@ export default function RedirectRuleList({
     const activeId = String(event.active.id);
     const overId = event.over ? String(event.over.id) : '';
     if (!overId) return;
-    setRules((prev) => moveRuleWithDropTarget(prev, groups.map((group) => group.id), activeId, overId));
+    let reordered = false;
+    setRules((prev) => {
+      const next = moveRuleWithDropTarget(prev, groups.map((group) => group.id), activeId, overId);
+      reordered = next !== prev;
+      return next;
+    });
+    if (reordered) {
+      messageApi.success('排序已更新');
+    }
   };
 
   return <div>
