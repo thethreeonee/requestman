@@ -130,10 +130,10 @@ function moveRuleWithDropTarget(list: RedirectRule[], groupOrder: string[], acti
     if (!targetGroupId || active.groupId === targetGroupId) return list;
     const withoutActive = list.filter((rule) => rule.id !== activeRuleId);
     const next = [...withoutActive];
-    const lastInTargetGroup = withoutActive.reduce((idx, rule, index) => (rule.groupId === targetGroupId ? index : idx), -1);
+    const firstInTargetGroup = withoutActive.findIndex((rule) => rule.groupId === targetGroupId);
 
-    if (lastInTargetGroup >= 0) {
-      next.splice(lastInTargetGroup + 1, 0, { ...active, groupId: targetGroupId });
+    if (firstInTargetGroup >= 0) {
+      next.splice(firstInTargetGroup, 0, { ...active, groupId: targetGroupId });
       return next;
     }
 
