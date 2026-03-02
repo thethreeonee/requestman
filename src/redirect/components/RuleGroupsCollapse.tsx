@@ -115,7 +115,7 @@ export default function RuleGroupsCollapse({
             </Space>
           ),
           children: groupRules.length === 0 ? (
-            <Typography.Text type="secondary">暂无规则，点击右上角 + 添加规则。</Typography.Text>
+            <Typography.Text type="secondary">No rules in this group yet. Click + to add one.</Typography.Text>
           ) : (
             <SortableContext items={groupRules.map((rule) => rule.id)} strategy={verticalListSortingStrategy}>
               <>
@@ -145,26 +145,26 @@ export default function RuleGroupsCollapse({
                                   onClick: ({ key }) => moveRuleGroup(rule.id, String(key)),
                                 }}
                               >
-                                <Button type="text" icon={<SwapOutlined />} title="移动到其他分组" aria-label="移动到其他分组" />
+                                <Button type="text" icon={<SwapOutlined />} title="Move to another group" aria-label="Move to another group" />
                               </Dropdown>
-                              <Button type="text" icon={<SaveOutlined />} title="保存规则" aria-label="保存规则" disabled={!dirty} onClick={() => saveRuleDraft(rule)} />
-                              <Button type="text" icon={<CopyOutlined />} title="复制规则" aria-label="复制规则" onClick={() => duplicateRule(rule.id)} />
-                              <Popconfirm title="删除规则？" okButtonProps={{ danger: true, type: 'default' }} onConfirm={() => removeRule(rule.id)}>
-                                <Button type="text" danger icon={<DeleteOutlined />} title="删除规则" aria-label="删除规则" />
+                              <Button type="text" icon={<SaveOutlined />} title="Save rule" aria-label="Save rule" disabled={!dirty} onClick={() => saveRuleDraft(rule)} />
+                              <Button type="text" icon={<CopyOutlined />} title="Duplicate rule" aria-label="Duplicate rule" onClick={() => duplicateRule(rule.id)} />
+                              <Popconfirm title="Delete rule?" okButtonProps={{ danger: true, type: 'default' }} onConfirm={() => removeRule(rule.id)}>
+                                <Button type="text" danger icon={<DeleteOutlined />} title="Delete rule" aria-label="Delete rule" />
                               </Popconfirm>
                             </Space>
                           </div>
                           <div className="simple-rule-field">
-                            <Typography.Text type="secondary">匹配表达式</Typography.Text>
-                            <Input value={getRuleFieldValue(rule, 'expression')} placeholder="请输入用于匹配的表达式" onChange={(e) => updateRuleDraft(rule, 'expression', e.target.value)} />
+                            <Typography.Text type="secondary">Source Condition</Typography.Text>
+                            <Input value={getRuleFieldValue(rule, 'expression')} placeholder="Enter value to match incoming requests" onChange={(e) => updateRuleDraft(rule, 'expression', e.target.value)} />
                           </div>
                           <div className="simple-rule-field">
-                            <Typography.Text type="secondary">重定向 URL</Typography.Text>
-                            <Input value={getRuleFieldValue(rule, 'redirectUrl')} placeholder="请输入重定向目标 URL" onChange={(e) => updateRuleDraft(rule, 'redirectUrl', e.target.value)} />
+                            <Typography.Text type="secondary">Destination URL</Typography.Text>
+                            <Input value={getRuleFieldValue(rule, 'redirectUrl')} placeholder="Enter destination URL" onChange={(e) => updateRuleDraft(rule, 'redirectUrl', e.target.value)} />
                           </div>
                           {dirty ? (
                             <div className="simple-rule-save-row">
-                              <Typography.Text type="warning">有未保存修改</Typography.Text>
+                              <Typography.Text type="warning">Unsaved edits</Typography.Text>
                             </div>
                           ) : null}
                         </div>
