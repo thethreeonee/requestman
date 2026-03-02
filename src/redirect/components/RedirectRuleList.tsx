@@ -18,6 +18,7 @@ import {
   useSensors,
   type DragEndEvent,
   type DragOverEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -78,7 +79,7 @@ type RowProps = React.HTMLAttributes<HTMLTableRowElement> & {
   'data-rule-id'?: string;
 };
 
-function SortableTableRow(props: RowProps) {
+function SortableTableRow(props: RowProps & { activeDragGroupId: string | null }) {
   const rowType = props['data-row-type'];
   const rowKey = props['data-row-key'];
   const groupId = props['data-group-id'];
@@ -87,11 +88,12 @@ function SortableTableRow(props: RowProps) {
   const sortable = useSortable({
     id: rowType === 'rule' && ruleId ? ruleId : `noop-${String(rowKey ?? '')}`,
     disabled: rowType !== 'rule' || !ruleId,
+    data: rowType === 'rule' && groupId ? { type: 'rule', groupId } : undefined,
   });
   const droppable = useDroppable({
     id: rowType === 'group' && groupId ? `group-drop:${groupId}` : `noop-group-${String(rowKey ?? '')}`,
     data: rowType === 'group' && groupId ? { type: 'group', groupId } : undefined,
-    disabled: rowType !== 'group' || !groupId,
+    disabled: rowType !== 'group' || !groupId || groupId === props.activeDragGroupId,
   });
 
   const style = rowType === 'rule'
@@ -211,6 +213,7 @@ export default function RedirectRuleList({
 }: Props) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const [dragPreviewRules, setDragPreviewRules] = React.useState<RedirectRule[] | null>(null);
+  const [activeDragGroupId, setActiveDragGroupId] = React.useState<string | null>(null);
   const displayRules = dragPreviewRules ?? rules;
 
   const currentGroupEnabled = new Map(groups.map((g) => [g.id, g.enabled]));
@@ -236,8 +239,9 @@ export default function RedirectRuleList({
     });
   };
 
-  const handleDragStart = () => {
+  const handleDragStart = (event: DragStartEvent) => {
     setDragPreviewRules(null);
+    setActiveDragGroupId(event.active.data.current?.groupId ?? null);
   };
 
   const handleDragOver = (event: DragOverEvent) => {
@@ -257,6 +261,7 @@ export default function RedirectRuleList({
 
   const handleDragCancel = () => {
     setDragPreviewRules(null);
+    setActiveDragGroupId(null);
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -279,6 +284,7 @@ export default function RedirectRuleList({
     }
 
     setDragPreviewRules(null);
+    setActiveDragGroupId(null);
 
     if (reordered) {
       messageApi.success('排序已更新');
@@ -362,7 +368,7 @@ export default function RedirectRuleList({
             'data-group-id': row.rowType === 'rule' ? row.rule.groupId : row.group.id,
             'data-rule-id': row.rowType === 'rule' ? row.rule.id : undefined,
           })}
-          components={{ body: { row: SortableTableRow } }}
+          components={{ body: { row: (props: RowProps) => <SortableTableRow {...props} activeDragGroupId={activeDragGroupId} /> } }}
           rowClassName={(row) => row.rowType === 'group' ? 'rule-group-row' : 'rule-item-row'}
           columns={[
         {
