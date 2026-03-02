@@ -62,6 +62,8 @@ type GroupEmptyRow = { key: string; rowType: 'group-empty'; group: RedirectGroup
 type TableRow = GroupRow | RuleRow | GroupEmptyRow;
 type DragState = { ruleId: string; groupId: string };
 type DropState = { targetRuleId: string; position: 'before' | 'after' };
+type GroupDropState = { groupId: string };
+type GroupOverlayRect = { top: number; left: number; width: number; height: number; roundBottom: boolean };
 
 function getRuleEffectiveHint(redirectEnabled: boolean, groupEnabled: boolean, ruleEnabled: boolean) {
   if (!redirectEnabled) return '总开关关闭，当前规则不会生效';
@@ -132,6 +134,37 @@ function normalizeDropState(
   return { targetRuleId: nextRule.id, position: 'before' };
 }
 
+function moveRuleToGroup(
+  rules: RedirectRule[],
+  groups: RedirectGroup[],
+  draggedRuleId: string,
+  targetGroupId: string,
+) {
+  const draggedRule = rules.find((rule) => rule.id === draggedRuleId);
+  if (!draggedRule || draggedRule.groupId === targetGroupId) return rules;
+
+  const remainingRules = rules.filter((rule) => rule.id !== draggedRuleId);
+  const movedRule: RedirectRule = { ...draggedRule, groupId: targetGroupId };
+  const lastTargetIndex = remainingRules.reduce((lastIndex, rule, index) => (
+    rule.groupId === targetGroupId ? index : lastIndex
+  ), -1);
+
+  if (lastTargetIndex !== -1) {
+    const nextRules = [...remainingRules];
+    nextRules.splice(lastTargetIndex + 1, 0, movedRule);
+    return nextRules;
+  }
+
+  const targetGroupIndex = groups.findIndex((group) => group.id === targetGroupId);
+  if (targetGroupIndex === -1) return rules;
+
+  const laterGroupIds = new Set(groups.slice(targetGroupIndex + 1).map((group) => group.id));
+  const insertIndex = remainingRules.findIndex((rule) => laterGroupIds.has(rule.groupId));
+  const nextRules = [...remainingRules];
+  nextRules.splice(insertIndex === -1 ? nextRules.length : insertIndex, 0, movedRule);
+  return nextRules;
+}
+
 const RULE_TYPE_LABEL_MAP: Record<RedirectRule['type'], string> = {
   redirect_request: '重定向请求',
   rewrite_string: '重写字符串',
@@ -178,8 +211,11 @@ export default function RedirectRuleList({
   exportConfig,
   importConfig,
 }: Props) {
+  const tableWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const [dragState, setDragState] = React.useState<DragState | null>(null);
   const [dropState, setDropState] = React.useState<DropState | null>(null);
+  const [groupDropState, setGroupDropState] = React.useState<GroupDropState | null>(null);
+  const [groupOverlayRect, setGroupOverlayRect] = React.useState<GroupOverlayRect | null>(null);
   const currentGroupEnabled = new Map(groups.map((g) => [g.id, g.enabled]));
   const groupNameMap = new Map(groups.map((g) => [g.id, g.name]));
   const groupsOptions = groups.map((g) => ({ value: g.name }));
@@ -188,6 +224,49 @@ export default function RedirectRuleList({
     () => buildTableData(groups, collapsedGroupIds, rules),
     [collapsedGroupIds, groups, rules],
   );
+  const lastVisibleGroupId = React.useMemo(() => {
+    const groupRows = tableData.filter((row): row is GroupRow => row.rowType === 'group');
+    return groupRows[groupRows.length - 1]?.group.id ?? null;
+  }, [tableData]);
+
+  React.useLayoutEffect(() => {
+    if (!groupDropState || !tableWrapperRef.current) {
+      setGroupOverlayRect(null);
+      return undefined;
+    }
+
+    const updateOverlayRect = () => {
+      const wrapperEl = tableWrapperRef.current;
+      if (!wrapperEl) return;
+      const groupRows = wrapperEl.querySelectorAll<HTMLTableRowElement>(`tr[data-group-id="${groupDropState.groupId}"]`);
+      const tableContainer = wrapperEl.querySelector<HTMLElement>('.ant-table-container');
+      if (!groupRows.length || !tableContainer) {
+        setGroupOverlayRect(null);
+        return;
+      }
+
+      const firstRect = groupRows[0].getBoundingClientRect();
+      const lastRect = groupRows[groupRows.length - 1].getBoundingClientRect();
+      const wrapperRect = wrapperEl.getBoundingClientRect();
+      const containerRect = tableContainer.getBoundingClientRect();
+
+      setGroupOverlayRect({
+        top: firstRect.top - wrapperRect.top,
+        left: containerRect.left - wrapperRect.left,
+        width: containerRect.width,
+        height: lastRect.bottom - firstRect.top,
+        roundBottom: groupDropState.groupId === lastVisibleGroupId,
+      });
+    };
+
+    updateOverlayRect();
+    window.addEventListener('resize', updateOverlayRect);
+    window.addEventListener('scroll', updateOverlayRect, true);
+    return () => {
+      window.removeEventListener('resize', updateOverlayRect);
+      window.removeEventListener('scroll', updateOverlayRect, true);
+    };
+  }, [groupDropState, lastVisibleGroupId, tableData]);
 
   const toggleGroupCollapse = (groupId: string) => {
     setCollapsedGroupIds((prev) => {
@@ -214,6 +293,8 @@ export default function RedirectRuleList({
   const clearDragState = () => {
     setDragState(null);
     setDropState(null);
+    setGroupDropState(null);
+    setGroupOverlayRect(null);
   };
 
   const handleRuleDragStart = (event: React.DragEvent<HTMLElement>, rule: RedirectRule) => {
@@ -221,11 +302,13 @@ export default function RedirectRuleList({
     event.dataTransfer.setData('text/plain', rule.id);
     setDragState({ ruleId: rule.id, groupId: rule.groupId });
     setDropState(null);
+    setGroupDropState(null);
   };
 
   const handleRuleDragOver = (event: React.DragEvent<HTMLTableRowElement>, row: RuleRow) => {
     if (!dragState || dragState.groupId !== row.rule.groupId || dragState.ruleId === row.rule.id) return;
     event.preventDefault();
+    setGroupDropState(null);
     const { top, height } = event.currentTarget.getBoundingClientRect();
     const position = event.clientY - top < height / 2 ? 'before' : 'after';
     const nextDropState = normalizeDropState(rules, dragState.ruleId, row.rule.id, position);
@@ -248,6 +331,26 @@ export default function RedirectRuleList({
     messageApi.success('规则排序已更新');
     clearDragState();
   };
+
+  const handleGroupDragOver = (event: React.DragEvent<HTMLTableRowElement>, groupId: string) => {
+    if (!dragState || dragState.groupId === groupId) return;
+    event.preventDefault();
+    setDropState(null);
+    setGroupDropState((prev) => prev?.groupId === groupId ? prev : { groupId });
+  };
+
+  const handleGroupDrop = (event: React.DragEvent<HTMLTableRowElement>, groupId: string) => {
+    if (!dragState || dragState.groupId === groupId) {
+      clearDragState();
+      return;
+    }
+    event.preventDefault();
+    setRules((prev) => moveRuleToGroup(prev, groups, dragState.ruleId, groupId));
+    messageApi.success(`规则已移动到规则组「${groupNameMap.get(groupId) ?? ''}」`);
+    clearDragState();
+  };
+
+  const getRowGroupId = (row: TableRow) => (row.rowType === 'rule' ? row.rule.groupId : row.group.id);
 
   return <div>
     <div className="detail-header">
@@ -308,35 +411,69 @@ export default function RedirectRuleList({
         </Dropdown>
       </Space>
     </div>
-    <Table<TableRow>
-      className="rules-list-table"
-      pagination={false}
-      dataSource={tableData}
-      rowKey="key"
-      rowClassName={(row) => {
-        if (row.rowType === 'group') return 'rule-group-row';
-        if (row.rowType !== 'rule') return 'rule-item-row';
-        const classNames = ['rule-item-row'];
-        if (dragState?.ruleId === row.rule.id) classNames.push('dragging-rule-row');
-        if (dropState?.targetRuleId === row.rule.id) {
-          classNames.push(dropState.position === 'before' ? 'drop-before-row' : 'drop-after-row');
-        }
-        return classNames.join(' ');
-      }}
-      onRow={(row) => {
-        if (row.rowType !== 'rule') return {};
-        return {
-          draggable: true,
-          onDragStart: (event) => handleRuleDragStart(event, row.rule),
-          onDragEnd: clearDragState,
-          onDragOver: (event) => handleRuleDragOver(event, row),
-          onDrop: (event) => handleRuleDrop(event, row),
-          onDragLeave: () => {
-            setDropState((prev) => prev?.targetRuleId === row.rule.id ? null : prev);
-          },
-        };
-      }}
-      columns={[
+    <div className="rules-list-table-wrapper" ref={tableWrapperRef}>
+      {groupOverlayRect ? (
+        <div
+          className={`rule-group-drop-overlay${groupOverlayRect.roundBottom ? ' is-last-group' : ''}`}
+          style={{
+            top: groupOverlayRect.top,
+            left: groupOverlayRect.left,
+            width: groupOverlayRect.width,
+            height: groupOverlayRect.height,
+          }}
+        />
+      ) : null}
+      <Table<TableRow>
+        className="rules-list-table"
+        pagination={false}
+        dataSource={tableData}
+        rowKey="key"
+        rowClassName={(row) => {
+          if (row.rowType === 'group') return 'rule-group-row';
+          if (row.rowType !== 'rule') return 'rule-item-row';
+          const classNames = ['rule-item-row'];
+          if (dragState?.ruleId === row.rule.id) classNames.push('dragging-rule-row');
+          if (dropState?.targetRuleId === row.rule.id) {
+            classNames.push(dropState.position === 'before' ? 'drop-before-row' : 'drop-after-row');
+          }
+          return classNames.join(' ');
+        }}
+        onRow={(row) => {
+          const groupId = getRowGroupId(row);
+          const rowProps = {
+            'data-group-id': groupId,
+            'data-row-type': row.rowType,
+            onDragOver: (event) => handleGroupDragOver(event, groupId),
+            onDrop: (event) => handleGroupDrop(event, groupId),
+          };
+
+          if (row.rowType !== 'rule') return rowProps;
+
+          return {
+            ...rowProps,
+            draggable: true,
+            onDragStart: (event: React.DragEvent<HTMLTableRowElement>) => handleRuleDragStart(event, row.rule),
+            onDragEnd: clearDragState,
+            onDragOver: (event: React.DragEvent<HTMLTableRowElement>) => {
+              if (dragState?.groupId === row.rule.groupId) {
+                handleRuleDragOver(event, row);
+                return;
+              }
+              handleGroupDragOver(event, row.rule.groupId);
+            },
+            onDrop: (event: React.DragEvent<HTMLTableRowElement>) => {
+              if (dragState?.groupId === row.rule.groupId) {
+                handleRuleDrop(event, row);
+                return;
+              }
+              handleGroupDrop(event, row.rule.groupId);
+            },
+            onDragLeave: () => {
+              setDropState((prev) => prev?.targetRuleId === row.rule.id ? null : prev);
+            },
+          };
+        }}
+        columns={[
         {
           title: '名称',
           dataIndex: 'name',
@@ -430,8 +567,9 @@ export default function RedirectRuleList({
             );
           },
         },
-      ]}
-    />
+        ]}
+      />
+    </div>
     <Modal open={groupModal.open} title={groupModal.mode === 'create' ? '新建规则组' : groupModal.mode === 'rename' ? '重命名规则组' : '修改规则组'} onCancel={() => setGroupModal({ open: false, mode: 'create' })} onOk={confirmGroupModal}>
       {groupModal.mode === 'move' ? <AutoComplete options={groupsOptions} value={groupInput} onChange={setGroupInput} placeholder="请选择或输入新规则组" /> : <Input value={groupInput} onChange={(e) => setGroupInput(e.target.value)} placeholder="请输入名称" />}
     </Modal>
