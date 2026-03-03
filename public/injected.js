@@ -71,11 +71,74 @@
     return true;
   }
 
-  function getDelayMs(url, method, resourceType) {
+  function normalizeHeaderMap(headersLike) {
+    const normalizedHeaders = new Map();
+    if (!headersLike) return normalizedHeaders;
+
+    const appendHeader = (key, value) => {
+      const normalizedKey = String(key || '').trim().toLowerCase();
+      if (!normalizedKey) return;
+      const normalizedValue = String(value ?? '');
+      if (normalizedHeaders.has(normalizedKey)) {
+        normalizedHeaders.set(normalizedKey, `${normalizedHeaders.get(normalizedKey)}, ${normalizedValue}`);
+      } else {
+        normalizedHeaders.set(normalizedKey, normalizedValue);
+      }
+    };
+
+    try {
+      if (typeof Headers !== 'undefined' && headersLike instanceof Headers) {
+        headersLike.forEach((value, key) => appendHeader(key, value));
+        return normalizedHeaders;
+      }
+
+      if (Array.isArray(headersLike)) {
+        for (const item of headersLike) {
+          if (Array.isArray(item) && item.length >= 2) appendHeader(item[0], item[1]);
+        }
+        return normalizedHeaders;
+      }
+
+      if (typeof headersLike.forEach === 'function') {
+        headersLike.forEach((value, key) => appendHeader(key, value));
+        return normalizedHeaders;
+      }
+
+      if (typeof headersLike === 'object') {
+        for (const [key, value] of Object.entries(headersLike)) appendHeader(key, value);
+      }
+    } catch {
+      return normalizedHeaders;
+    }
+
+    return normalizedHeaders;
+  }
+
+  function matchHeaderFilter(filter, headersLike) {
+    const requestHeaderKey = typeof filter?.requestHeaderKey === 'string' ? filter.requestHeaderKey.trim().toLowerCase() : '';
+    const requestHeaderValue = typeof filter?.requestHeaderValue === 'string' ? filter.requestHeaderValue : '';
+    if (!requestHeaderKey || !requestHeaderValue) return true;
+
+    const requestHeaderOperator = filter?.requestHeaderOperator;
+    const headers = normalizeHeaderMap(headersLike);
+    const actualValue = headers.get(requestHeaderKey) || '';
+
+    if (requestHeaderOperator === 'contains') return actualValue.includes(requestHeaderValue);
+    if (requestHeaderOperator === 'not_equals') return actualValue !== requestHeaderValue;
+    return actualValue === requestHeaderValue;
+  }
+
+  function shouldApplyRule(url, method, resourceType, headers, rule) {
+    if (!matchFilter(method, resourceType, rule.filter)) return false;
+    if (!matchHeaderFilter(rule.filter, headers)) return false;
+    if (!matchesRule(url, rule)) return false;
+    return true;
+  }
+
+  function getDelayMs(url, method, resourceType, headers) {
     let maxDelayMs = 0;
     for (const rule of delayRules) {
-      if (!matchFilter(method, resourceType, rule.filter)) continue;
-      if (!matchesRule(url, rule)) continue;
+      if (!shouldApplyRule(url, method, resourceType, headers, rule)) continue;
       const delayMs = Number.isFinite(rule.delayMs) ? Math.max(0, Math.floor(rule.delayMs)) : 0;
       if (delayMs > maxDelayMs) maxDelayMs = delayMs;
     }
@@ -122,13 +185,12 @@
     }
   }
 
-  function resolveRequestBody(url, method, resourceType, body) {
+  function resolveRequestBody(url, method, resourceType, headers, body) {
     if (typeof body !== 'string') return body;
     let nextBody = body;
 
     for (const rule of modifyRequestBodyRules) {
-      if (!matchFilter(method, resourceType, rule.filter)) continue;
-      if (!matchesRule(url, rule)) continue;
+      if (!shouldApplyRule(url, method, resourceType, headers, rule)) continue;
 
       if (rule.requestBodyMode === 'dynamic') {
         nextBody = runDynamicBodyScript(rule.requestBodyValue, {
@@ -145,22 +207,20 @@
     return nextBody;
   }
 
-  function hasMatchedResponseRule(url, method, resourceType) {
+  function hasMatchedResponseRule(url, method, resourceType, headers) {
     for (const rule of modifyResponseBodyRules) {
-      if (!matchFilter(method, resourceType, rule.filter)) continue;
-      if (!matchesRule(url, rule)) continue;
+      if (!shouldApplyRule(url, method, resourceType, headers, rule)) continue;
       return true;
     }
     return false;
   }
 
-  function resolveResponseBody(url, method, resourceType, responseMeta, body) {
+  function resolveResponseBody(url, method, resourceType, headers, responseMeta, body) {
     if (typeof body !== 'string') return body;
     let nextBody = body;
 
     for (const rule of modifyResponseBodyRules) {
-      if (!matchFilter(method, resourceType, rule.filter)) continue;
-      if (!matchesRule(url, rule)) continue;
+      if (!shouldApplyRule(url, method, resourceType, headers, rule)) continue;
 
       if (rule.responseBodyMode === 'dynamic') {
         nextBody = runDynamicBodyScript(rule.responseBodyValue, {
@@ -212,8 +272,10 @@
       if (init && typeof init.method === 'string') method = init.method;
 
       url = toAbsoluteUrl(url);
+      const requestHeaders = init?.headers
+        || (typeof Request !== 'undefined' && input instanceof Request ? input.headers : undefined);
 
-      const delayMs = getDelayMs(url, method, 'xmlhttprequest');
+      const delayMs = getDelayMs(url, method, 'xmlhttprequest', requestHeaders);
       if (delayMs > 0) await wait(delayMs);
 
       let body = null;
@@ -226,7 +288,7 @@
       let nextInput = input;
       let nextInit = init;
       if (typeof body === 'string') {
-        const nextBody = resolveRequestBody(url, method, 'xmlhttprequest', body);
+        const nextBody = resolveRequestBody(url, method, 'xmlhttprequest', requestHeaders, body);
         const nextBodyValue = toBodyValue(nextBody);
         if (nextBodyValue !== body) {
           nextInit = { ...(init || {}), body: nextBodyValue, method };
@@ -234,11 +296,11 @@
       }
 
       const response = await nativeFetch.call(this, nextInput, nextInit);
-      if (!hasMatchedResponseRule(url, method, 'xmlhttprequest')) return response;
+      if (!hasMatchedResponseRule(url, method, 'xmlhttprequest', requestHeaders)) return response;
 
       try {
         const originalBody = await response.clone().text();
-        const nextBody = toBodyValue(resolveResponseBody(url, method, 'xmlhttprequest', {
+        const nextBody = toBodyValue(resolveResponseBody(url, method, 'xmlhttprequest', requestHeaders, {
           status: response.status,
           statusText: response.statusText,
           headers: Object.fromEntries(response.headers.entries()),
@@ -257,21 +319,38 @@
   }
 
   if (nativeXhrOpen && nativeXhrSend) {
+    const nativeXhrSetRequestHeader = window.XMLHttpRequest.prototype.setRequestHeader;
+
     window.XMLHttpRequest.prototype.open = function requestmanDelayedXhrOpen(method, url) {
       this.__requestmanMethod = method;
       this.__requestmanUrl = url;
+      this.__requestmanHeaders = {};
       return nativeXhrOpen.apply(this, arguments);
     };
+
+    if (nativeXhrSetRequestHeader) {
+      window.XMLHttpRequest.prototype.setRequestHeader = function requestmanSetRequestHeader(key, value) {
+        const normalizedKey = String(key || '').trim().toLowerCase();
+        if (normalizedKey) {
+          const existingValue = this.__requestmanHeaders?.[normalizedKey];
+          const nextValue = String(value ?? '');
+          this.__requestmanHeaders = this.__requestmanHeaders || {};
+          this.__requestmanHeaders[normalizedKey] = existingValue ? `${existingValue}, ${nextValue}` : nextValue;
+        }
+        return nativeXhrSetRequestHeader.apply(this, arguments);
+      };
+    }
 
     window.XMLHttpRequest.prototype.send = function requestmanDelayedXhrSend(body) {
       const method = this.__requestmanMethod;
       const url = toAbsoluteUrl(this.__requestmanUrl);
-      const delayMs = getDelayMs(url, method, 'xmlhttprequest');
+      const requestHeaders = this.__requestmanHeaders || {};
+      const delayMs = getDelayMs(url, method, 'xmlhttprequest', requestHeaders);
       const requestBody = typeof body === 'string'
-        ? toBodyValue(resolveRequestBody(url, method, 'xmlhttprequest', body))
+        ? toBodyValue(resolveRequestBody(url, method, 'xmlhttprequest', requestHeaders, body))
         : body;
 
-      if (hasMatchedResponseRule(url, method, 'xmlhttprequest')) {
+      if (hasMatchedResponseRule(url, method, 'xmlhttprequest', requestHeaders)) {
         this.addEventListener('readystatechange', () => {
           if (this.readyState !== 4) return;
           if (this.responseType && this.responseType !== 'text' && this.responseType !== 'json') return;
@@ -280,7 +359,7 @@
             const originalBody = this.responseType === 'json'
               ? JSON.stringify(this.response)
               : this.responseText;
-            const nextBody = toBodyValue(resolveResponseBody(url, method, 'xmlhttprequest', {
+            const nextBody = toBodyValue(resolveResponseBody(url, method, 'xmlhttprequest', requestHeaders, {
               status: this.status,
               statusText: this.statusText,
               headers: {},
