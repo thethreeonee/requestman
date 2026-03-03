@@ -336,7 +336,7 @@ export default function RequestmanPanel() {
     } else if (currentRule.type === 'user_agent') {
       detail = <UserAgentRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'cancel_request') {
-      detail = <CancelRequestRuleDetail {...detailProps} />;
+      detail = <CancelRequestRuleDetail {...detailProps} messageApi={message} />;
     } else {
       detail = <RequestDelayRuleDetail {...detailProps} />;
     }

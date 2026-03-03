@@ -40,7 +40,7 @@ type RedirectCondition = {
 
 export type RedirectRule = {
   id?: string;
-  type?: 'redirect_request' | 'rewrite_string' | 'query_params' | 'modify_headers' | 'user_agent';
+  type?: 'redirect_request' | 'rewrite_string' | 'query_params' | 'modify_headers' | 'user_agent' | 'cancel_request';
   enabled?: boolean;
   groupId?: string;
   conditions?: RedirectCondition[];
@@ -286,6 +286,28 @@ function toModifyHeadersRule(condition: RedirectCondition, index: number): chrom
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
 }
 
+
+function toCancelRequestRule(condition: RedirectCondition, index: number): chrome.declarativeNetRequest.Rule | null {
+  const expression = typeof condition.expression === 'string' ? condition.expression.trim() : '';
+  if (!expression) return null;
+  const id = REDIRECT_RULE_ID_BASE + index;
+  if (id > REDIRECT_RULE_ID_MAX) return null;
+
+  const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
+  const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
+  const regexFilter = matchTarget === 'host' ? buildHostRegex(matchMode, expression) : buildUrlRegex(matchMode, expression);
+  try { new RegExp(regexFilter); } catch { return null; }
+
+  const action: chrome.declarativeNetRequest.RuleAction = {
+    type: 'block',
+  };
+
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
+  applyConditionFilters(conditionRule, condition.filter);
+
+  return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
+}
+
 function getManagedRuleIds() { return Array.from({ length: REDIRECT_RULE_ID_MAX - REDIRECT_RULE_ID_BASE + 1 }, (_, i) => REDIRECT_RULE_ID_BASE + i); }
 
 async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: RedirectRule[]; enabled?: boolean; }) {
@@ -314,7 +336,9 @@ async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: R
               ? toModifyHeadersRule(c, index)
               : rule.type === 'user_agent'
                 ? toUserAgentRule(c, index)
-                : toOneRule(c, index);
+                : rule.type === 'cancel_request'
+                  ? toCancelRequestRule(c, index)
+                  : toOneRule(c, index);
         index += 1;
         if (dnr) nextRules.push(dnr);
       }
