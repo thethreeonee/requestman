@@ -139,8 +139,8 @@ export default function RewriteStringRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <Space style={{ width: '100%' }}>
-              <Space.Compact style={{ flex: 1, minWidth: 0 }}>
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Space.Compact style={{ width: '100%' }}>
                 <Space.Addon>目标</Space.Addon>
                 <Input
                   value={c.rewriteFrom}
@@ -148,7 +148,7 @@ export default function RewriteStringRuleDetail({
                   placeholder="from"
                 />
               </Space.Compact>
-              <Space.Compact style={{ flex: 1, minWidth: 0 }}>
+              <Space.Compact style={{ width: '100%' }}>
                 <Space.Addon>替换为</Space.Addon>
                 <Input
                   value={c.rewriteTo}
