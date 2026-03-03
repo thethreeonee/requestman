@@ -139,11 +139,15 @@ export default function RedirectPanel() {
     const name = groupInput.trim();
     if (!name) return;
     let target = groups.find((g) => g.name === name);
+    const movedRule = rules.find((r) => r.id === groupModal.ruleId);
+    if (!movedRule) return;
     if (!target) {
       target = { id: genId(), name, enabled: true };
       setGroups((prev) => [...prev, target!]);
+      message.success(`规则组「${name}」已创建`);
     }
     setRules((prev) => prev.map((r) => (r.id === groupModal.ruleId ? { ...r, groupId: target!.id } : r)));
+    message.success(`规则「${movedRule.name}」已移动到规则组「${target.name}」`);
     setGroupModal({ open: false, mode: 'create' });
     setGroupInput('');
   };
@@ -152,8 +156,15 @@ export default function RedirectPanel() {
     if (groupModal.mode === 'move') return moveRuleToGroup();
     const name = groupInput.trim();
     if (!name) return;
-    if (groupModal.mode === 'create') setGroups((prev) => [{ id: genId(), name, enabled: true }, ...prev]);
-    if (groupModal.mode === 'rename' && groupModal.groupId) setGroups((prev) => prev.map((g) => (g.id === groupModal.groupId ? { ...g, name } : g)));
+    if (groupModal.mode === 'create') {
+      setGroups((prev) => [{ id: genId(), name, enabled: true }, ...prev]);
+      message.success(`规则组「${name}」已创建`);
+    }
+    if (groupModal.mode === 'rename' && groupModal.groupId) {
+      const group = groups.find((g) => g.id === groupModal.groupId);
+      setGroups((prev) => prev.map((g) => (g.id === groupModal.groupId ? { ...g, name } : g)));
+      message.success(`规则组「${group?.name ?? ''}」已重命名为「${name}」`);
+    }
     setGroupModal({ open: false, mode: 'create' });
     setGroupInput('');
   };
@@ -164,8 +175,11 @@ export default function RedirectPanel() {
       content: '删除规则组会同时删除组内所有规则。',
       okButtonProps: { danger: true },
       onOk: () => {
+        const deletedGroup = groups.find((g) => g.id === groupId);
+        const deletedRuleCount = rules.filter((r) => r.groupId === groupId).length;
         setGroups((prev) => prev.filter((g) => g.id !== groupId));
         setRules((prev) => prev.filter((r) => r.groupId !== groupId));
+        message.success(`规则组「${deletedGroup?.name ?? ''}」已删除（含 ${deletedRuleCount} 条规则）`);
       },
     });
   };
@@ -185,6 +199,7 @@ export default function RedirectPanel() {
       const selected = prev.filter((r) => r.groupId === groupId).map((r) => ({ ...r, id: genId(), groupId: newGroupId, name: `${r.name} 副本` }));
       return [...prev, ...selected];
     });
+    message.success(`规则组「${group.name}」已复制`);
   };
 
   const currentRule = useMemo(() => {
