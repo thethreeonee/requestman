@@ -129,13 +129,7 @@ export default function RequestmanPanel() {
         if (!c.expression.trim()) return true;
         if (c.requestBodyMode === 'dynamic') {
           const script = c.requestBodyDynamicValue.trim() || DEFAULT_MODIFY_REQUEST_BODY_SCRIPT;
-          try {
-            const hasFunction = new Function(`${script}
-return typeof modifyRequestBody === 'function';`)();
-            return !hasFunction;
-          } catch {
-            return true;
-          }
+          return !hasModifyRequestBodyFunction(script);
         }
         return !c.requestBodyStaticValue.trim();
       });

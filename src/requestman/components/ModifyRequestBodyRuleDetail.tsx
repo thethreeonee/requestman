@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Button,
   Collapse,
@@ -27,6 +27,9 @@ import {
   simulateRuleEffect,
   type SimulateRuleResult,
 } from '../rule-utils';
+import CodeMirror from '@uiw/react-codemirror';
+import { json } from '@codemirror/lang-json';
+import { javascript } from '@codemirror/lang-javascript';
 import type { RedirectCondition, RedirectGroup, RedirectRule, RequestBodyModifyMode } from '../types';
 import ConditionUrlMatchEditor from './ConditionUrlMatchEditor';
 import RuleDetailToolbar from './RuleDetailToolbar';
@@ -45,66 +48,27 @@ type Props = {
   messageApi: { warning: (content: string) => void };
 };
 
-function escapeHtml(text: string) {
-  return text
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
-function simpleJsHighlight(input: string) {
-  const escaped = escapeHtml(input);
-  const tokenRegex = /(\/\/.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\b(function|const|let|var|return|if|else|new|try|catch)\b/gm;
-  return escaped.replace(tokenRegex, (match, comment, stringLiteral, keyword) => {
-    if (comment) return `<span class="requestman-code-comment">${comment}</span>`;
-    if (stringLiteral) return `<span class="requestman-code-string">${stringLiteral}</span>`;
-    if (keyword) return `<span class="requestman-code-keyword">${keyword}</span>`;
-    return match;
-  });
-}
-
-
 function validateDynamicScript(code: string): string | null {
   if (!hasModifyRequestBodyFunction(code)) return '需定义 modifyRequestBody(args) 方法';
   return null;
 }
 
-function CodeEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  const lineCount = Math.max(1, value.split('\n').length);
-  const lineNumbers = Array.from({ length: lineCount }, (_, index) => index + 1).join('\n');
-  const linesRef = useRef<HTMLPreElement | null>(null);
-  const highlightRef = useRef<HTMLPreElement | null>(null);
+function CodeEditor({ value, onChange, mode }: { value: string; onChange: (value: string) => void; mode: RequestBodyModifyMode }) {
+  const extensions = useMemo(() => (mode === 'dynamic' ? [javascript()] : [json()]), [mode]);
 
   return (
-    <div className="requestman-body-editor">
-      <pre aria-hidden ref={linesRef} className="requestman-body-editor__lines">{lineNumbers}</pre>
-      <div className="requestman-body-editor__content">
-        <pre
-          aria-hidden
-          ref={highlightRef}
-          className="requestman-body-editor__highlight"
-          dangerouslySetInnerHTML={{ __html: `${simpleJsHighlight(value)}\n` }}
-        />
-        <textarea
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          spellCheck={false}
-          className="requestman-body-editor__textarea"
-          onScroll={(event) => {
-            const target = event.currentTarget;
-            if (highlightRef.current) {
-              highlightRef.current.scrollTop = target.scrollTop;
-              highlightRef.current.scrollLeft = target.scrollLeft;
-            }
-            if (linesRef.current) {
-              linesRef.current.scrollTop = target.scrollTop;
-            }
-          }}
-        />
-      </div>
-    </div>
+    <CodeMirror
+      value={value}
+      onChange={onChange}
+      extensions={extensions}
+      height="220px"
+      basicSetup={{
+        lineNumbers: true,
+        foldGutter: true,
+        highlightActiveLine: true,
+      }}
+      className="requestman-body-editor"
+    />
   );
 }
 
@@ -235,6 +199,7 @@ export default function ModifyRequestBodyRuleDetail({
               style={{ marginBottom: 0 }}
             >
               <CodeEditor
+                mode={c.requestBodyMode}
                 value={c.requestBodyMode === 'dynamic' ? c.requestBodyDynamicValue : c.requestBodyStaticValue}
                 onChange={(value) => updateCondition(c.id, c.requestBodyMode === 'dynamic'
                   ? { requestBodyDynamicValue: value, requestBodyValue: value }
