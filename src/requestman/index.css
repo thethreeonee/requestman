@@ -135,3 +135,17 @@ body.rule-pointer-dragging {
 .requestman-body-editor .cm-focused {
   outline: none;
 }
+
+.rule-menu-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  color: var(--ant-color-text-description);
+}
+
+.rule-menu-group-title__line {
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+}

@@ -96,6 +96,15 @@ function getRuleEffectiveHint(redirectEnabled: boolean, groupEnabled: boolean, r
   return '规则已开启，当前规则会生效';
 }
 
+function renderRuleMenuGroupLabel(title: string) {
+  return (
+    <span className="rule-menu-group-title">
+      <span className="rule-menu-group-title__text">{title}</span>
+      <span className="rule-menu-group-title__line" />
+    </span>
+  );
+}
+
 function buildTableData(groups: RedirectGroup[], collapsedGroupIds: string[], displayRules: RedirectRule[]): TableRow[] {
   return groups.flatMap((group) => {
     const groupRow: GroupRow = { key: `group-${group.id}`, rowType: 'group', group };
@@ -550,7 +559,7 @@ export default function RedirectRuleList({
               {
                 key: 'url_rewrites_group',
                 type: 'group',
-                label: 'URL rewrites',
+                label: renderRuleMenuGroupLabel('URL rewrites'),
                 children: [
                   { key: 'redirect_request', icon: RULE_TYPE_ICON_MAP.redirect_request, label: RULE_TYPE_LABEL_MAP.redirect_request, onClick: () => createRule('redirect_request') },
                   { key: 'rewrite_string', icon: RULE_TYPE_ICON_MAP.rewrite_string, label: RULE_TYPE_LABEL_MAP.rewrite_string, onClick: () => createRule('rewrite_string') },
@@ -560,7 +569,7 @@ export default function RedirectRuleList({
               {
                 key: 'api_mocking_group',
                 type: 'group',
-                label: 'API mocking',
+                label: renderRuleMenuGroupLabel('API mocking'),
                 children: [
                   { key: 'modify_request_body', icon: RULE_TYPE_ICON_MAP.modify_request_body, label: RULE_TYPE_LABEL_MAP.modify_request_body, onClick: () => createRule('modify_request_body') },
                   { key: 'modify_response_body', icon: RULE_TYPE_ICON_MAP.modify_response_body, label: RULE_TYPE_LABEL_MAP.modify_response_body, onClick: () => createRule('modify_response_body') },
@@ -569,7 +578,7 @@ export default function RedirectRuleList({
               {
                 key: 'headers_group',
                 type: 'group',
-                label: 'Headers',
+                label: renderRuleMenuGroupLabel('Headers'),
                 children: [
                   { key: 'modify_headers', icon: RULE_TYPE_ICON_MAP.modify_headers, label: RULE_TYPE_LABEL_MAP.modify_headers, onClick: () => createRule('modify_headers') },
                   { key: 'user_agent', icon: RULE_TYPE_ICON_MAP.user_agent, label: RULE_TYPE_LABEL_MAP.user_agent, onClick: () => createRule('user_agent') },
@@ -578,7 +587,7 @@ export default function RedirectRuleList({
               {
                 key: 'others_group',
                 type: 'group',
-                label: 'Others',
+                label: renderRuleMenuGroupLabel('Others'),
                 children: [
                   { key: 'cancel_request', icon: RULE_TYPE_ICON_MAP.cancel_request, label: RULE_TYPE_LABEL_MAP.cancel_request, onClick: () => createRule('cancel_request') },
                   { key: 'request_delay', icon: RULE_TYPE_ICON_MAP.request_delay, label: RULE_TYPE_LABEL_MAP.request_delay, onClick: () => createRule('request_delay') },
