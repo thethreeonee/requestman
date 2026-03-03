@@ -7,7 +7,13 @@ import {
   REDIRECT_RULES_KEY,
   DEFAULT_MODIFY_REQUEST_BODY_SCRIPT,
 } from './constants';
-import { createDefaultCondition, genId, normalizeGroups, normalizeRules } from './rule-utils';
+import {
+  createDefaultCondition,
+  genId,
+  hasModifyRequestBodyFunction,
+  normalizeGroups,
+  normalizeRules,
+} from './rule-utils';
 import type { RedirectGroup, RedirectRule } from './types';
 import RedirectRuleList from './components/RedirectRuleList';
 import './index.css';
@@ -123,13 +129,7 @@ export default function RequestmanPanel() {
         if (!c.expression.trim()) return true;
         if (c.requestBodyMode === 'dynamic') {
           const script = c.requestBodyValue.trim() || DEFAULT_MODIFY_REQUEST_BODY_SCRIPT;
-          try {
-            const hasFunction = new Function(`${script}
-return typeof modifyRequestBody === 'function';`)();
-            return !hasFunction;
-          } catch {
-            return true;
-          }
+          return !hasModifyRequestBodyFunction(script);
         }
         return !c.requestBodyValue.trim();
       });
