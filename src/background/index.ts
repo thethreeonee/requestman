@@ -21,12 +21,22 @@ type RedirectCondition = {
     key?: string;
     value?: string;
   }>;
+  requestHeaderModifications?: Array<{
+    action?: 'add' | 'update' | 'delete';
+    key?: string;
+    value?: string;
+  }>;
+  responseHeaderModifications?: Array<{
+    action?: 'add' | 'update' | 'delete';
+    key?: string;
+    value?: string;
+  }>;
   filter?: RedirectFilter;
 };
 
 export type RedirectRule = {
   id?: string;
-  type?: 'redirect_request' | 'rewrite_string' | 'query_params';
+  type?: 'redirect_request' | 'rewrite_string' | 'query_params' | 'modify_headers';
   enabled?: boolean;
   groupId?: string;
   conditions?: RedirectCondition[];
@@ -170,6 +180,45 @@ function toQueryParamsRule(condition: RedirectCondition, index: number): chrome.
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
 }
 
+
+function toModifyHeadersRule(condition: RedirectCondition, index: number): chrome.declarativeNetRequest.Rule | null {
+  const expression = typeof condition.expression === 'string' ? condition.expression.trim() : '';
+  if (!expression) return null;
+  const id = REDIRECT_RULE_ID_BASE + index;
+  if (id > REDIRECT_RULE_ID_MAX) return null;
+
+  const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
+  const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
+  const regexFilter = matchTarget === 'host' ? buildHostRegex(matchMode, expression) : buildUrlRegex(matchMode, expression);
+  try { new RegExp(regexFilter); } catch { return null; }
+
+  const mapHeaders = (modifications: RedirectCondition['requestHeaderModifications']) => (Array.isArray(modifications) ? modifications : [])
+    .filter((mod) => typeof mod?.key === 'string' && mod.key.trim())
+    .map((mod) => ({
+      header: (mod.key as string).trim(),
+      operation: mod.action === 'delete' ? 'remove' : mod.action === 'update' ? 'set' : 'append',
+      ...(mod.action === 'delete' ? {} : { value: typeof mod.value === 'string' ? mod.value : '' }),
+    }));
+
+  const requestHeaders = mapHeaders(condition.requestHeaderModifications);
+  const responseHeaders = mapHeaders(condition.responseHeaderModifications);
+  if (!requestHeaders.length && !responseHeaders.length) return null;
+
+  const action: chrome.declarativeNetRequest.RuleAction = {
+    type: 'modifyHeaders',
+    ...(requestHeaders.length ? { requestHeaders } : {}),
+    ...(responseHeaders.length ? { responseHeaders } : {}),
+  };
+
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other'] };
+  const filter = condition.filter ?? {};
+  if (typeof filter.pageDomain === 'string' && filter.pageDomain.trim()) conditionRule.initiatorDomains = [filter.pageDomain.trim()];
+  if (typeof filter.resourceType === 'string' && filter.resourceType !== 'all') conditionRule.resourceTypes = [filter.resourceType as chrome.declarativeNetRequest.ResourceType];
+  if (typeof filter.requestMethod === 'string' && filter.requestMethod !== 'all') conditionRule.requestMethods = [filter.requestMethod.toUpperCase() as chrome.declarativeNetRequest.RequestMethod];
+
+  return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
+}
+
 function getManagedRuleIds() { return Array.from({ length: REDIRECT_RULE_ID_MAX - REDIRECT_RULE_ID_BASE + 1 }, (_, i) => REDIRECT_RULE_ID_BASE + i); }
 
 async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: RedirectRule[]; enabled?: boolean; }) {
@@ -194,7 +243,9 @@ async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: R
           ? toRewriteRule(c, index)
           : rule.type === 'query_params'
             ? toQueryParamsRule(c, index)
-            : toOneRule(c, index);
+            : rule.type === 'modify_headers'
+              ? toModifyHeadersRule(c, index)
+              : toOneRule(c, index);
         index += 1;
         if (dnr) nextRules.push(dnr);
       }

@@ -35,6 +35,13 @@ export type QueryParamModification = {
   value: string;
 };
 
+export type HeaderModification = {
+  id: string;
+  action: 'add' | 'update' | 'delete';
+  key: string;
+  value: string;
+};
+
 export type RedirectCondition = {
   id: string;
   matchTarget: MatchTarget;
@@ -45,6 +52,8 @@ export type RedirectCondition = {
   redirectType: 'url' | 'file';
   redirectTarget: string;
   queryParamModifications: QueryParamModification[];
+  requestHeaderModifications: HeaderModification[];
+  responseHeaderModifications: HeaderModification[];
   filter: RedirectFilter;
 };
 

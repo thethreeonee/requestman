@@ -30,6 +30,8 @@ export function createDefaultCondition(): RedirectCondition {
     redirectType: 'url',
     redirectTarget: '',
     queryParamModifications: [{ id: genId(), action: 'add', key: '', value: '' }],
+    requestHeaderModifications: [{ id: genId(), action: 'add', key: '', value: '' }],
+    responseHeaderModifications: [{ id: genId(), action: 'add', key: '', value: '' }],
     filter: {
       pageDomain: '',
       resourceType: 'all',
@@ -89,6 +91,26 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
                 : '',
             queryParamModifications: Array.isArray(c.queryParamModifications) && c.queryParamModifications.length > 0
               ? c.queryParamModifications
+                .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+                .map((item) => ({
+                  id: typeof item.id === 'string' && item.id ? item.id : genId(),
+                  action: item.action === 'update' || item.action === 'delete' ? item.action : 'add',
+                  key: typeof item.key === 'string' ? item.key : '',
+                  value: typeof item.value === 'string' ? item.value : '',
+                }))
+              : [{ id: genId(), action: 'add', key: '', value: '' }],
+            requestHeaderModifications: Array.isArray(c.requestHeaderModifications) && c.requestHeaderModifications.length > 0
+              ? c.requestHeaderModifications
+                .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+                .map((item) => ({
+                  id: typeof item.id === 'string' && item.id ? item.id : genId(),
+                  action: item.action === 'update' || item.action === 'delete' ? item.action : 'add',
+                  key: typeof item.key === 'string' ? item.key : '',
+                  value: typeof item.value === 'string' ? item.value : '',
+                }))
+              : [{ id: genId(), action: 'add', key: '', value: '' }],
+            responseHeaderModifications: Array.isArray(c.responseHeaderModifications) && c.responseHeaderModifications.length > 0
+              ? c.responseHeaderModifications
                 .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
                 .map((item) => ({
                   id: typeof item.id === 'string' && item.id ? item.id : genId(),
