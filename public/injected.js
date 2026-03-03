@@ -79,15 +79,32 @@
     }
   }
 
+  function normalizeBodyResult(result, fallbackBody) {
+    if (result === undefined) return fallbackBody;
+    if (result === null) return '';
+    if (typeof result === 'string') return result;
+    if (typeof result === 'object') return result;
+    return String(result);
+  }
+
+  function toRequestBodyValue(bodyResult) {
+    if (typeof bodyResult === 'string') return bodyResult;
+    if (bodyResult && typeof bodyResult === 'object') {
+      try {
+        return JSON.stringify(bodyResult);
+      } catch {
+        return String(bodyResult);
+      }
+    }
+    return String(bodyResult ?? '');
+  }
+
   function runDynamicBodyScript(script, args, fallbackBody) {
     try {
       const dynamicModifier = new Function(`${script}\nreturn typeof modifyRequestBody === 'function' ? modifyRequestBody : null;`)();
       if (typeof dynamicModifier !== 'function') return fallbackBody;
       const result = dynamicModifier(args);
-      if (result === undefined || result === null) return '';
-      if (typeof result === 'string') return result;
-      if (typeof result === 'object') return JSON.stringify(result);
-      return String(result);
+      return normalizeBodyResult(result, fallbackBody);
     } catch {
       return fallbackBody;
     }
@@ -158,8 +175,9 @@
 
       if (typeof body === 'string') {
         const nextBody = resolveRequestBody(url, method, 'xmlhttprequest', body);
-        if (typeof nextBody === 'string' && nextBody !== body) {
-          return nativeFetch.call(this, input, { ...(init || {}), body: nextBody, method });
+        const nextBodyValue = toRequestBodyValue(nextBody);
+        if (nextBodyValue !== body) {
+          return nativeFetch.call(this, input, { ...(init || {}), body: nextBodyValue, method });
         }
       }
 
@@ -178,7 +196,9 @@
       const method = this.__requestmanMethod;
       const url = this.__requestmanUrl;
       const delayMs = getDelayMs(url, method, 'xmlhttprequest');
-      const requestBody = typeof body === 'string' ? resolveRequestBody(url, method, 'xmlhttprequest', body) : body;
+      const requestBody = typeof body === 'string'
+        ? toRequestBodyValue(resolveRequestBody(url, method, 'xmlhttprequest', body))
+        : body;
       if (delayMs <= 0) {
         return nativeXhrSend.call(this, requestBody);
       }
