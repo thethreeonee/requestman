@@ -61,6 +61,8 @@ export type RedirectCondition = {
   userAgentCustomValue?: string;
   delayMs: number;
   requestBodyMode: RequestBodyModifyMode;
+  requestBodyStaticValue: string;
+  requestBodyDynamicValue: string;
   requestBodyValue: string;
   filter: RedirectFilter;
 };

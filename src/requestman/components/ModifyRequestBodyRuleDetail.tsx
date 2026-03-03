@@ -17,7 +17,6 @@ import {
   PlusOutlined,
 } from '@ant-design/icons';
 import {
-  DEFAULT_MODIFY_REQUEST_BODY_SCRIPT,
   REQUEST_METHOD_OPTIONS,
   RESOURCE_TYPE_OPTIONS,
 } from '../constants';
@@ -51,11 +50,15 @@ function escapeHtml(text: string) {
 
 function simpleJsHighlight(input: string) {
   const escaped = escapeHtml(input);
-  return escaped
-    .replace(/(\/\/.*)$/gm, '<span class="requestman-code-comment">$1</span>')
-    .replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, '<span class="requestman-code-string">$1</span>')
-    .replace(/\b(function|const|let|var|return|if|else|new|try|catch)\b/g, '<span class="requestman-code-keyword">$1</span>');
+  const tokenRegex = /(\/\/.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\b(function|const|let|var|return|if|else|new|try|catch)\b/gm;
+  return escaped.replace(tokenRegex, (match, comment, stringLiteral, keyword) => {
+    if (comment) return `<span class="requestman-code-comment">${comment}</span>`;
+    if (stringLiteral) return `<span class="requestman-code-string">${stringLiteral}</span>`;
+    if (keyword) return `<span class="requestman-code-keyword">${keyword}</span>`;
+    return match;
+  });
 }
+
 
 function validateDynamicScript(code: string): string | null {
   try {
@@ -136,9 +139,7 @@ export default function ModifyRequestBodyRuleDetail({
   const updateConditionMode = (conditionId: string, mode: RequestBodyModifyMode) => {
     const condition = workingRule.conditions.find((item) => item.id === conditionId);
     if (!condition) return;
-    const nextValue = mode === 'dynamic' && !condition.requestBodyValue.trim()
-      ? DEFAULT_MODIFY_REQUEST_BODY_SCRIPT
-      : condition.requestBodyValue;
+    const nextValue = mode === 'dynamic' ? condition.requestBodyDynamicValue : condition.requestBodyStaticValue;
     updateCondition(conditionId, { requestBodyMode: mode, requestBodyValue: nextValue });
   };
 
@@ -174,7 +175,7 @@ export default function ModifyRequestBodyRuleDetail({
       <Button type="text" icon={<EditOutlined />} onClick={() => setEditRuleName(true)} />
     </Space>
     {workingRule.conditions.map((c) => {
-      const dynamicScriptError = c.requestBodyMode === 'dynamic' ? validateDynamicScript(c.requestBodyValue) : null;
+      const dynamicScriptError = c.requestBodyMode === 'dynamic' ? validateDynamicScript(c.requestBodyDynamicValue) : null;
       return <Collapse
         key={c.id}
         defaultActiveKey={[c.id]}
@@ -232,7 +233,12 @@ export default function ModifyRequestBodyRuleDetail({
               layout="vertical"
               style={{ marginBottom: 0 }}
             >
-              <CodeEditor value={c.requestBodyValue} onChange={(value) => updateCondition(c.id, { requestBodyValue: value })} />
+              <CodeEditor
+                value={c.requestBodyMode === 'dynamic' ? c.requestBodyDynamicValue : c.requestBodyStaticValue}
+                onChange={(value) => updateCondition(c.id, c.requestBodyMode === 'dynamic'
+                  ? { requestBodyDynamicValue: value, requestBodyValue: value }
+                  : { requestBodyStaticValue: value, requestBodyValue: value })}
+              />
             </Form.Item>
           </Space>,
         }]}
