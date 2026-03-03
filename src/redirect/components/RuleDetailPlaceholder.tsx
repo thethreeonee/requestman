@@ -61,7 +61,7 @@ export default function RuleDetailPlaceholder({
       testUrl={testUrl}
       testResult={testResult}
       onClose={() => setTestDrawerOpen(false)}
-      onTest={() => setTestResult(simulateRuleEffect(testUrl, [workingRule], currentGroupEnabled))}
+      onTest={() => setTestResult(simulateRuleEffect(testUrl, [workingRule], currentGroupEnabled, { includeDisabled: true }))}
       onTestUrlChange={setTestUrl}
     />
   </div>;

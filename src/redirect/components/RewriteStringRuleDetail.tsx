@@ -168,7 +168,7 @@ export default function RewriteStringRuleDetail({
       testUrl={testUrl}
       testResult={testResult}
       onClose={() => setTestDrawerOpen(false)}
-      onTest={() => setTestResult(simulateRuleEffect(testUrl, [workingRule], currentGroupEnabled))}
+      onTest={() => setTestResult(simulateRuleEffect(testUrl, [workingRule], currentGroupEnabled, { includeDisabled: true }))}
       onTestUrlChange={setTestUrl}
     />
     <Modal open={filterModal.open} title="过滤条件" onCancel={() => setFilterModal({ open: false })} onOk={() => setFilterModal({ open: false })}>
