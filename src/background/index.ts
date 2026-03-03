@@ -71,6 +71,36 @@ function buildUrlRegex(mode: MatchMode, expression: string) {
 function normalizeRegexSubstitution(value: string) { return value.replace(/\$(\d+)/g, '\\$1'); }
 function escapeRegexReplacement(value: string) { return value.replace(/\\/g, '\\\\').replace(/\$/g, '$$$$'); }
 
+const ALL_RESOURCE_TYPES: chrome.declarativeNetRequest.ResourceType[] = ['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other'];
+const VALID_RESOURCE_TYPES = new Set<string>([...ALL_RESOURCE_TYPES, 'websocket', 'webtransport', 'csp_report']);
+const VALID_REQUEST_METHODS = new Set<string>(['connect', 'delete', 'get', 'head', 'options', 'patch', 'post', 'put']);
+
+function normalizeDomainFilter(value: string): string {
+  const raw = value.trim();
+  if (!raw) return '';
+  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    return new URL(withProtocol).hostname;
+  } catch {
+    return raw.replace(/^https?:\/\//i, '').split('/')[0].split(':')[0].trim();
+  }
+}
+
+function applyConditionFilters(conditionRule: chrome.declarativeNetRequest.RuleCondition, filter?: RedirectFilter) {
+  const pageDomain = typeof filter?.pageDomain === 'string' ? normalizeDomainFilter(filter.pageDomain) : '';
+  if (pageDomain) conditionRule.initiatorDomains = [pageDomain];
+
+  const resourceType = typeof filter?.resourceType === 'string' ? filter.resourceType.trim().toLowerCase() : '';
+  if (resourceType && resourceType !== 'all' && VALID_RESOURCE_TYPES.has(resourceType)) {
+    conditionRule.resourceTypes = [resourceType as chrome.declarativeNetRequest.ResourceType];
+  }
+
+  const requestMethod = typeof filter?.requestMethod === 'string' ? filter.requestMethod.trim().toLowerCase() : '';
+  if (requestMethod && requestMethod !== 'all' && VALID_REQUEST_METHODS.has(requestMethod)) {
+    conditionRule.requestMethods = [requestMethod as chrome.declarativeNetRequest.RequestMethod];
+  }
+}
+
 function toOneRule(condition: RedirectCondition, index: number): chrome.declarativeNetRequest.Rule | null {
   const expression = typeof condition.expression === 'string' ? condition.expression.trim() : '';
   const redirectTarget = typeof condition.redirectTarget === 'string'
@@ -91,11 +121,8 @@ function toOneRule(condition: RedirectCondition, index: number): chrome.declarat
     redirect: matchMode === 'regex' ? { regexSubstitution: normalizeRegexSubstitution(redirectTarget) } : { url: redirectTarget },
   };
 
-  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other'] };
-  const filter = condition.filter ?? {};
-  if (typeof filter.pageDomain === 'string' && filter.pageDomain.trim()) conditionRule.initiatorDomains = [filter.pageDomain.trim()];
-  if (typeof filter.resourceType === 'string' && filter.resourceType !== 'all') conditionRule.resourceTypes = [filter.resourceType as chrome.declarativeNetRequest.ResourceType];
-  if (typeof filter.requestMethod === 'string' && filter.requestMethod !== 'all') conditionRule.requestMethods = [filter.requestMethod.toUpperCase() as chrome.declarativeNetRequest.RequestMethod];
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
+  applyConditionFilters(conditionRule, condition.filter);
 
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
 }
@@ -126,11 +153,8 @@ function toRewriteRule(condition: RedirectCondition, index: number): chrome.decl
     redirect: { regexSubstitution: `\\1${normalizeRegexSubstitution(escapeRegexReplacement(to))}\\2` },
   };
 
-  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other'] };
-  const filter = condition.filter ?? {};
-  if (typeof filter.pageDomain === 'string' && filter.pageDomain.trim()) conditionRule.initiatorDomains = [filter.pageDomain.trim()];
-  if (typeof filter.resourceType === 'string' && filter.resourceType !== 'all') conditionRule.resourceTypes = [filter.resourceType as chrome.declarativeNetRequest.ResourceType];
-  if (typeof filter.requestMethod === 'string' && filter.requestMethod !== 'all') conditionRule.requestMethods = [filter.requestMethod.toUpperCase() as chrome.declarativeNetRequest.RequestMethod];
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
+  applyConditionFilters(conditionRule, condition.filter);
 
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
 }
@@ -171,11 +195,8 @@ function toQueryParamsRule(condition: RedirectCondition, index: number): chrome.
     },
   };
 
-  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other'] };
-  const filter = condition.filter ?? {};
-  if (typeof filter.pageDomain === 'string' && filter.pageDomain.trim()) conditionRule.initiatorDomains = [filter.pageDomain.trim()];
-  if (typeof filter.resourceType === 'string' && filter.resourceType !== 'all') conditionRule.resourceTypes = [filter.resourceType as chrome.declarativeNetRequest.ResourceType];
-  if (typeof filter.requestMethod === 'string' && filter.requestMethod !== 'all') conditionRule.requestMethods = [filter.requestMethod.toUpperCase() as chrome.declarativeNetRequest.RequestMethod];
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
+  applyConditionFilters(conditionRule, condition.filter);
 
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
 }
@@ -219,11 +240,8 @@ function toModifyHeadersRule(condition: RedirectCondition, index: number): chrom
     ...(responseHeaders.length ? { responseHeaders } : {}),
   };
 
-  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other'] };
-  const filter = condition.filter ?? {};
-  if (typeof filter.pageDomain === 'string' && filter.pageDomain.trim()) conditionRule.initiatorDomains = [filter.pageDomain.trim()];
-  if (typeof filter.resourceType === 'string' && filter.resourceType !== 'all') conditionRule.resourceTypes = [filter.resourceType as chrome.declarativeNetRequest.ResourceType];
-  if (typeof filter.requestMethod === 'string' && filter.requestMethod !== 'all') conditionRule.requestMethods = [filter.requestMethod.toUpperCase() as chrome.declarativeNetRequest.RequestMethod];
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
+  applyConditionFilters(conditionRule, condition.filter);
 
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
 }
