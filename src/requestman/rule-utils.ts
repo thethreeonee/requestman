@@ -35,6 +35,7 @@ export function createDefaultCondition(): RedirectCondition {
     userAgentType: 'device',
     userAgentPresetKey: 'android_phone',
     userAgentCustomValue: '',
+    delayMs: 0,
     filter: {
       pageDomain: '',
       resourceType: 'all',
@@ -125,6 +126,7 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
             userAgentType: c.userAgentType === 'browser' || c.userAgentType === 'custom' ? c.userAgentType : 'device',
             userAgentPresetKey: typeof c.userAgentPresetKey === 'string' && c.userAgentPresetKey ? c.userAgentPresetKey : 'android_phone',
             userAgentCustomValue: typeof c.userAgentCustomValue === 'string' ? c.userAgentCustomValue : '',
+            delayMs: typeof c.delayMs === 'number' && Number.isFinite(c.delayMs) && c.delayMs >= 0 ? Math.floor(c.delayMs) : 0,
             filter: {
               pageDomain: typeof filterObj.pageDomain === 'string' ? filterObj.pageDomain : '',
               resourceType: typeof filterObj.resourceType === 'string' ? (filterObj.resourceType as RedirectCondition['filter']['resourceType']) : 'all',
