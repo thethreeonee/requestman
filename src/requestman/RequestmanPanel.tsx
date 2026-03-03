@@ -128,10 +128,16 @@ export default function RequestmanPanel() {
       const invalid = workingRule.conditions.some((c) => {
         if (!c.expression.trim()) return true;
         if (c.requestBodyMode === 'dynamic') {
-          const script = c.requestBodyValue.trim() || DEFAULT_MODIFY_REQUEST_BODY_SCRIPT;
-          return !hasModifyRequestBodyFunction(script);
+          const script = c.requestBodyDynamicValue.trim() || DEFAULT_MODIFY_REQUEST_BODY_SCRIPT;
+          try {
+            const hasFunction = new Function(`${script}
+return typeof modifyRequestBody === 'function';`)();
+            return !hasFunction;
+          } catch {
+            return true;
+          }
         }
-        return !c.requestBodyValue.trim();
+        return !c.requestBodyStaticValue.trim();
       });
       if (invalid) return message.warning('还有条件配置未输入完整或 JavaScript 无效');
     }

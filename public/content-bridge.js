@@ -52,11 +52,19 @@
       for (const condition of list) {
         if (!condition || typeof condition.expression !== 'string' || !condition.expression.trim()) continue;
         const requestBodyMode = condition.requestBodyMode === 'dynamic' ? 'dynamic' : 'static';
-        const requestBodyValue = typeof condition.requestBodyValue === 'string'
-          ? condition.requestBodyValue
-          : typeof condition.requestBodyScript === 'string'
-            ? condition.requestBodyScript
+        const requestBodyStaticValue = typeof condition.requestBodyStaticValue === 'string'
+          ? condition.requestBodyStaticValue
+          : requestBodyMode === 'static' && typeof condition.requestBodyValue === 'string'
+            ? condition.requestBodyValue
             : '';
+        const requestBodyDynamicValue = typeof condition.requestBodyDynamicValue === 'string'
+          ? condition.requestBodyDynamicValue
+          : requestBodyMode === 'dynamic' && typeof condition.requestBodyValue === 'string'
+            ? condition.requestBodyValue
+            : typeof condition.requestBodyScript === 'string'
+              ? condition.requestBodyScript
+              : '';
+        const requestBodyValue = requestBodyMode === 'dynamic' ? requestBodyDynamicValue : requestBodyStaticValue;
         if (!requestBodyValue.trim()) continue;
         conditions.push({
           expression: condition.expression.trim(),

@@ -37,6 +37,8 @@ export function createDefaultCondition(): RedirectCondition {
     userAgentCustomValue: '',
     delayMs: 0,
     requestBodyMode: 'static',
+    requestBodyStaticValue: '',
+    requestBodyDynamicValue: DEFAULT_MODIFY_REQUEST_BODY_SCRIPT,
     requestBodyValue: '',
     filter: {
       pageDomain: '',
@@ -82,6 +84,23 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
           if (!cond || typeof cond !== 'object') return null;
           const c = cond as Record<string, unknown>;
           const filterObj = c.filter && typeof c.filter === 'object' ? (c.filter as Record<string, unknown>) : {};
+          const requestBodyMode = c.requestBodyMode === 'dynamic' ? 'dynamic' : 'static';
+          const legacyBodyValue = typeof c.requestBodyValue === 'string'
+            ? c.requestBodyValue
+            : c.requestBodyScript && typeof c.requestBodyScript === 'string'
+              ? c.requestBodyScript
+              : '';
+          const requestBodyStaticValue = typeof c.requestBodyStaticValue === 'string'
+            ? c.requestBodyStaticValue
+            : requestBodyMode === 'static'
+              ? legacyBodyValue
+              : '';
+          const requestBodyDynamicValue = typeof c.requestBodyDynamicValue === 'string'
+            ? c.requestBodyDynamicValue
+            : requestBodyMode === 'dynamic' && legacyBodyValue
+              ? legacyBodyValue
+              : DEFAULT_MODIFY_REQUEST_BODY_SCRIPT;
+
           return {
             id: typeof c.id === 'string' && c.id ? c.id : genId(),
             matchTarget: c.matchTarget === 'host' ? 'host' : 'url',
@@ -129,14 +148,10 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
             userAgentPresetKey: typeof c.userAgentPresetKey === 'string' && c.userAgentPresetKey ? c.userAgentPresetKey : 'android_phone',
             userAgentCustomValue: typeof c.userAgentCustomValue === 'string' ? c.userAgentCustomValue : '',
             delayMs: typeof c.delayMs === 'number' && Number.isFinite(c.delayMs) && c.delayMs >= 0 ? Math.floor(c.delayMs) : 0,
-            requestBodyMode: c.requestBodyMode === 'dynamic' ? 'dynamic' : 'static',
-            requestBodyValue: typeof c.requestBodyValue === 'string'
-              ? c.requestBodyValue
-              : c.requestBodyScript && typeof c.requestBodyScript === 'string'
-                ? c.requestBodyScript
-                : c.requestBodyMode === 'dynamic'
-                  ? DEFAULT_MODIFY_REQUEST_BODY_SCRIPT
-                  : '',
+            requestBodyMode,
+            requestBodyStaticValue,
+            requestBodyDynamicValue,
+            requestBodyValue: requestBodyMode === 'dynamic' ? requestBodyDynamicValue : requestBodyStaticValue,
             filter: {
               pageDomain: typeof filterObj.pageDomain === 'string' ? filterObj.pageDomain : '',
               resourceType: typeof filterObj.resourceType === 'string' ? (filterObj.resourceType as RedirectCondition['filter']['resourceType']) : 'all',
