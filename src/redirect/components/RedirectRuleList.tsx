@@ -716,8 +716,34 @@ export default function RedirectRuleList({
             return (
               <Dropdown menu={{ items: [
                 { key: 'move', label: '修改规则组', icon: <FolderOpenOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: row.rule.id }); setGroupInput(groupNameMap.get(row.rule.groupId) ?? ''); } },
-                { key: 'copy', label: '复制', icon: <CopyOutlined />, onClick: () => setRules((prev) => { const idx = prev.findIndex((r) => r.id === row.rule.id); const next = [...prev]; next.splice(idx + 1, 0, { ...row.rule, id: genId(), name: `${row.rule.name} 副本` }); return next; }) },
-                { key: 'delete', label: '删除', icon: <DeleteOutlined />, danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => setRules((prev) => prev.filter((r) => r.id !== row.rule.id)) }) },
+                {
+                  key: 'copy',
+                  label: '复制',
+                  icon: <CopyOutlined />,
+                  onClick: () => {
+                    setRules((prev) => {
+                      const idx = prev.findIndex((r) => r.id === row.rule.id);
+                      const next = [...prev];
+                      next.splice(idx + 1, 0, { ...row.rule, id: genId(), name: `${row.rule.name} 副本` });
+                      return next;
+                    });
+                    messageApi.success(`规则「${row.rule.name}」已复制`);
+                  },
+                },
+                {
+                  key: 'delete',
+                  label: '删除',
+                  icon: <DeleteOutlined />,
+                  danger: true,
+                  onClick: () => Modal.confirm({
+                    title: '确认删除规则？',
+                    okButtonProps: { danger: true },
+                    onOk: () => {
+                      setRules((prev) => prev.filter((r) => r.id !== row.rule.id));
+                      messageApi.success(`规则「${row.rule.name}」已删除`);
+                    },
+                  }),
+                },
               ] }}>
                 <Button type="text" icon={<EllipsisOutlined />} />
               </Dropdown>
