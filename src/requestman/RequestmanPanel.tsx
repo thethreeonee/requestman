@@ -7,7 +7,13 @@ import {
   REDIRECT_RULES_KEY,
   DEFAULT_MODIFY_REQUEST_BODY_SCRIPT,
 } from './constants';
-import { createDefaultCondition, genId, normalizeGroups, normalizeRules } from './rule-utils';
+import {
+  createDefaultCondition,
+  genId,
+  hasModifyRequestBodyFunction,
+  normalizeGroups,
+  normalizeRules,
+} from './rule-utils';
 import type { RedirectGroup, RedirectRule } from './types';
 import RedirectRuleList from './components/RedirectRuleList';
 import './index.css';

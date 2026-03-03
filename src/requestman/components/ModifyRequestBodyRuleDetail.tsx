@@ -20,7 +20,13 @@ import {
   REQUEST_METHOD_OPTIONS,
   RESOURCE_TYPE_OPTIONS,
 } from '../constants';
-import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
+import {
+  createDefaultCondition,
+  genId,
+  hasModifyRequestBodyFunction,
+  simulateRuleEffect,
+  type SimulateRuleResult,
+} from '../rule-utils';
 import type { RedirectCondition, RedirectGroup, RedirectRule, RequestBodyModifyMode } from '../types';
 import ConditionUrlMatchEditor from './ConditionUrlMatchEditor';
 import RuleDetailToolbar from './RuleDetailToolbar';
@@ -61,13 +67,8 @@ function simpleJsHighlight(input: string) {
 
 
 function validateDynamicScript(code: string): string | null {
-  try {
-    const hasFunction = new Function(`${code}\nreturn typeof modifyRequestBody === 'function';`)();
-    if (!hasFunction) return '需定义 modifyRequestBody(args) 方法';
-    return null;
-  } catch (error) {
-    return error instanceof Error ? error.message : 'JavaScript 代码存在语法错误';
-  }
+  if (!hasModifyRequestBodyFunction(code)) return '需定义 modifyRequestBody(args) 方法';
+  return null;
 }
 
 function CodeEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {

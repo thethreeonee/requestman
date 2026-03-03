@@ -173,6 +173,19 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
     .filter(Boolean) as RedirectRule[];
 }
 
+export function hasModifyRequestBodyFunction(script: string): boolean {
+  const trimmed = script.trim();
+  if (!trimmed) return false;
+
+  const declarationPatterns = [
+    /\bfunction\s+modifyRequestBody\s*\(/,
+    /\b(?:const|let|var)\s+modifyRequestBody\s*=\s*(?:async\s*)?(?:function\s*\(|\()/,
+    /\b(?:const|let|var)\s+modifyRequestBody\s*=\s*(?:async\s*)?[A-Za-z_$][\w$]*\s*=>/,
+  ];
+
+  return declarationPatterns.some((pattern) => pattern.test(trimmed));
+}
+
 function escapeRegex(s: string) { return s.replace(/[|\\{}()[\]^$+?.]/g, '\\$&'); }
 function wildcardToRegexBody(pattern: string) { return escapeRegex(pattern).replace(/\*/g, '.*'); }
 
