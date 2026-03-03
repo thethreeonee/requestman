@@ -115,6 +115,14 @@ export default function RequestmanPanel() {
       });
       if (invalid) return message.warning('还有条件配置未输入完整');
     }
+    if (workingRule.type === 'modify_headers') {
+      const invalid = workingRule.conditions.some((c) => {
+        const allModifications = [...c.requestHeaderModifications, ...c.responseHeaderModifications];
+        if (!c.expression.trim() || allModifications.length === 0) return true;
+        return allModifications.some((item) => !item.key.trim() || (item.action !== 'delete' && !item.value.trim()));
+      });
+      if (invalid) return message.warning('还有条件配置未输入完整');
+    }
     setRules((prev) => {
       if (page.isNew && !prev.some((r) => r.id === workingRule.id)) {
         return [workingRule, ...prev];
@@ -305,7 +313,7 @@ export default function RequestmanPanel() {
     } else if (currentRule.type === 'modify_response_body') {
       detail = <ModifyResponseBodyRuleDetail {...detailProps} />;
     } else if (currentRule.type === 'modify_headers') {
-      detail = <ModifyHeadersRuleDetail {...detailProps} />;
+      detail = <ModifyHeadersRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'user_agent') {
       detail = <UserAgentRuleDetail {...detailProps} />;
     } else if (currentRule.type === 'cancel_request') {
