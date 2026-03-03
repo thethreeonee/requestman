@@ -24,9 +24,12 @@ export function isConditionFilterConfigured(condition: RedirectCondition) {
 }
 
 export default function ConditionFilterModal({ open, condition, onClose, onConditionChange }: Props) {
+  const filterRowStyle: React.CSSProperties = { width: '100%', alignItems: 'center' };
+  const filterItemStyle: React.CSSProperties = { marginBottom: 12, flex: 1, minWidth: 0 };
+
   const renderResetButton = (title: string, onClick: () => void) => (
     <Tooltip title={title}>
-      <Button type="text" icon={<ReloadOutlined />} onClick={onClick} />
+      <Button type="text" icon={<ReloadOutlined />} onClick={onClick} style={{ width: 32 }} />
     </Tooltip>
   );
 
@@ -34,8 +37,8 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
     <Modal open={open} title="过滤条件" onCancel={onClose} onOk={onClose}>
       {condition && (
         <Form layout="vertical">
-          <Space size={8} align="end" style={{ width: '100%' }}>
-            <Form.Item label="页面域名" style={{ marginBottom: 12, flex: 1 }}>
+          <Space size={8} align="center" style={filterRowStyle}>
+            <Form.Item label="页面域名" style={filterItemStyle}>
               <Input
                 value={condition.filter.pageDomain}
                 onChange={(e) => onConditionChange(condition.id, {
@@ -48,8 +51,8 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
             }))}
           </Space>
 
-          <Space size={8} align="end" style={{ width: '100%' }}>
-            <Form.Item label="资源类型" style={{ marginBottom: 12, flex: 1 }}>
+          <Space size={8} align="center" style={filterRowStyle}>
+            <Form.Item label="资源类型" style={filterItemStyle}>
               <Select
                 value={condition.filter.resourceType}
                 options={RESOURCE_TYPE_OPTIONS as never}
@@ -63,8 +66,8 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
             }))}
           </Space>
 
-          <Space size={8} align="end" style={{ width: '100%' }}>
-            <Form.Item label="请求方法" style={{ marginBottom: 12, flex: 1 }}>
+          <Space size={8} align="center" style={filterRowStyle}>
+            <Form.Item label="请求方法" style={filterItemStyle}>
               <Select
                 value={condition.filter.requestMethod}
                 options={REQUEST_METHOD_OPTIONS as never}
@@ -78,8 +81,8 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
             }))}
           </Space>
 
-          <Space size={8} align="end" style={{ width: '100%' }}>
-            <Form.Item label="请求 Header 过滤" style={{ marginBottom: 0, flex: 1 }}>
+          <Space size={8} align="center" style={filterRowStyle}>
+            <Form.Item label="请求 Header 过滤" style={filterItemStyle}>
               <Space.Compact style={{ width: '100%' }} block>
                 <AutoComplete
                   options={COMMON_HEADER_OPTIONS}
