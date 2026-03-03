@@ -28,6 +28,13 @@ export type RedirectFilter = {
   requestMethod: RequestMethodFilter;
 };
 
+export type QueryParamModification = {
+  id: string;
+  action: 'add' | 'update' | 'delete';
+  key: string;
+  value: string;
+};
+
 export type RedirectCondition = {
   id: string;
   matchTarget: MatchTarget;
@@ -37,6 +44,7 @@ export type RedirectCondition = {
   rewriteTo: string;
   redirectType: 'url' | 'file';
   redirectTarget: string;
+  queryParamModifications: QueryParamModification[];
   filter: RedirectFilter;
 };
 
