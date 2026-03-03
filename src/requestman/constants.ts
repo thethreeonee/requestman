@@ -88,3 +88,15 @@ export const DEFAULT_MODIFY_RESPONSE_BODY_SCRIPT = `function modifyResponse(args
 
   return body;
 }`;
+
+export const RULE_TYPE_LABEL_MAP = {
+  redirect_request: '重定向请求',
+  rewrite_string: '重写字符串',
+  query_params: 'Query参数',
+  modify_request_body: '修改请求体',
+  modify_response_body: '修改请求响应',
+  modify_headers: '修改Headers',
+  user_agent: 'User-Agent',
+  cancel_request: '取消请求',
+  request_delay: '网络请求延迟',
+} as const;
