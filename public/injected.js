@@ -19,19 +19,30 @@
     return pattern.replace(/[|\\{}()[\]^$+?.]/g, '\\$&').replace(/\*/g, '.*');
   }
 
+  function toAbsoluteUrl(rawUrl) {
+    if (typeof rawUrl !== 'string' || !rawUrl) return '';
+    try {
+      return new URL(rawUrl, window.location.href).href;
+    } catch {
+      return rawUrl;
+    }
+  }
+
   function matchesRule(url, rule) {
     const expression = typeof rule.expression === 'string' ? rule.expression : '';
     if (!expression) return false;
 
+    const normalizedUrl = toAbsoluteUrl(url);
+
     const targetValue = rule.matchTarget === 'host'
       ? (() => {
           try {
-            return new URL(url).host;
+            return new URL(normalizedUrl).host;
           } catch {
             return '';
           }
         })()
-      : url;
+      : normalizedUrl;
 
     if (!targetValue) return false;
 
@@ -200,6 +211,8 @@
       }
       if (init && typeof init.method === 'string') method = init.method;
 
+      url = toAbsoluteUrl(url);
+
       const delayMs = getDelayMs(url, method, 'xmlhttprequest');
       if (delayMs > 0) await wait(delayMs);
 
@@ -252,7 +265,7 @@
 
     window.XMLHttpRequest.prototype.send = function requestmanDelayedXhrSend(body) {
       const method = this.__requestmanMethod;
-      const url = this.__requestmanUrl;
+      const url = toAbsoluteUrl(this.__requestmanUrl);
       const delayMs = getDelayMs(url, method, 'xmlhttprequest');
       const requestBody = typeof body === 'string'
         ? toBodyValue(resolveRequestBody(url, method, 'xmlhttprequest', body))
