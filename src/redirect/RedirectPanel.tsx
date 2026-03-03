@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { App, Modal } from 'antd';
 import {
   DEFAULT_GROUP_ID,
@@ -8,17 +8,18 @@ import {
 } from './constants';
 import { createDefaultCondition, genId, normalizeGroups, normalizeRules } from './rule-utils';
 import type { RedirectGroup, RedirectRule } from './types';
-import RedirectRuleDetail from './components/RedirectRuleDetail';
-import RewriteStringRuleDetail from './components/RewriteStringRuleDetail';
-import QueryParamsRuleDetail from './components/QueryParamsRuleDetail';
-import ModifyRequestBodyRuleDetail from './components/ModifyRequestBodyRuleDetail';
-import ModifyResponseBodyRuleDetail from './components/ModifyResponseBodyRuleDetail';
-import ModifyHeadersRuleDetail from './components/ModifyHeadersRuleDetail';
-import UserAgentRuleDetail from './components/UserAgentRuleDetail';
-import CancelRequestRuleDetail from './components/CancelRequestRuleDetail';
-import RequestDelayRuleDetail from './components/RequestDelayRuleDetail';
 import RedirectRuleList from './components/RedirectRuleList';
 import './index.css';
+
+const RedirectRuleDetail = lazy(() => import('./components/RedirectRuleDetail'));
+const RewriteStringRuleDetail = lazy(() => import('./components/RewriteStringRuleDetail'));
+const QueryParamsRuleDetail = lazy(() => import('./components/QueryParamsRuleDetail'));
+const ModifyRequestBodyRuleDetail = lazy(() => import('./components/ModifyRequestBodyRuleDetail'));
+const ModifyResponseBodyRuleDetail = lazy(() => import('./components/ModifyResponseBodyRuleDetail'));
+const ModifyHeadersRuleDetail = lazy(() => import('./components/ModifyHeadersRuleDetail'));
+const UserAgentRuleDetail = lazy(() => import('./components/UserAgentRuleDetail'));
+const CancelRequestRuleDetail = lazy(() => import('./components/CancelRequestRuleDetail'));
+const RequestDelayRuleDetail = lazy(() => import('./components/RequestDelayRuleDetail'));
 
 type PageState = { type: 'list' } | { type: 'detail'; ruleId: string; isNew: boolean };
 
@@ -294,17 +295,28 @@ export default function RedirectPanel() {
       setPageToList: () => setPage({ type: 'list' }),
     };
 
+    let detail: React.ReactNode;
     if (currentRule.type === 'redirect_request') {
-      return <RedirectRuleDetail {...detailProps} messageApi={message} />;
+      detail = <RedirectRuleDetail {...detailProps} messageApi={message} />;
+    } else if (currentRule.type === 'rewrite_string') {
+      detail = <RewriteStringRuleDetail {...detailProps} messageApi={message} />;
+    } else if (currentRule.type === 'query_params') {
+      detail = <QueryParamsRuleDetail {...detailProps} messageApi={message} />;
+    } else if (currentRule.type === 'modify_request_body') {
+      detail = <ModifyRequestBodyRuleDetail {...detailProps} />;
+    } else if (currentRule.type === 'modify_response_body') {
+      detail = <ModifyResponseBodyRuleDetail {...detailProps} />;
+    } else if (currentRule.type === 'modify_headers') {
+      detail = <ModifyHeadersRuleDetail {...detailProps} />;
+    } else if (currentRule.type === 'user_agent') {
+      detail = <UserAgentRuleDetail {...detailProps} />;
+    } else if (currentRule.type === 'cancel_request') {
+      detail = <CancelRequestRuleDetail {...detailProps} />;
+    } else {
+      detail = <RequestDelayRuleDetail {...detailProps} />;
     }
-    if (currentRule.type === 'rewrite_string') return <RewriteStringRuleDetail {...detailProps} messageApi={message} />;
-    if (currentRule.type === 'query_params') return <QueryParamsRuleDetail {...detailProps} messageApi={message} />;
-    if (currentRule.type === 'modify_request_body') return <ModifyRequestBodyRuleDetail {...detailProps} />;
-    if (currentRule.type === 'modify_response_body') return <ModifyResponseBodyRuleDetail {...detailProps} />;
-    if (currentRule.type === 'modify_headers') return <ModifyHeadersRuleDetail {...detailProps} />;
-    if (currentRule.type === 'user_agent') return <UserAgentRuleDetail {...detailProps} />;
-    if (currentRule.type === 'cancel_request') return <CancelRequestRuleDetail {...detailProps} />;
-    return <RequestDelayRuleDetail {...detailProps} />;
+
+    return <Suspense fallback={<div style={{ padding: 16 }}>加载中...</div>}>{detail}</Suspense>;
   }
 
   return <>
