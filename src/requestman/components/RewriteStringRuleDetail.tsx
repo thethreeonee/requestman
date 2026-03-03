@@ -139,18 +139,20 @@ export default function RewriteStringRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Space.Compact style={{ width: '100%' }}>
-                <Space.Addon>目标</Space.Addon>
+            <Space style={{ width: '100%' }}>
+              <Space.Compact style={{ flex: 1, minWidth: 0 }}>
+                <Space.Addon style={{ flexShrink: 0 }}>目标</Space.Addon>
                 <Input
+                  style={{ minWidth: 0 }}
                   value={c.rewriteFrom}
                   onChange={(e) => updateCondition(c.id, { rewriteFrom: e.target.value })}
                   placeholder="from"
                 />
               </Space.Compact>
-              <Space.Compact style={{ width: '100%' }}>
-                <Space.Addon>替换为</Space.Addon>
+              <Space.Compact style={{ flex: 1, minWidth: 0 }}>
+                <Space.Addon style={{ flexShrink: 0 }}>替换为</Space.Addon>
                 <Input
+                  style={{ minWidth: 0 }}
                   value={c.rewriteTo}
                   onChange={(e) => updateCondition(c.id, { rewriteTo: e.target.value })}
                   placeholder="to"
