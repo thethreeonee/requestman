@@ -156,7 +156,7 @@ export default function RewriteStringRuleDetail({
                   placeholder="to"
                 />
               </Space.Compact>
-            </div>
+            </Space>
           </Space>,
         }]}
         style={{ marginBottom: 12 }}
