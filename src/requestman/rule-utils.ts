@@ -1,4 +1,4 @@
-import { DEFAULT_GROUP_ID, DEFAULT_GROUP_NAME, DEFAULT_MODIFY_REQUEST_BODY_SCRIPT } from './constants';
+import { DEFAULT_GROUP_ID, DEFAULT_GROUP_NAME, DEFAULT_MODIFY_REQUEST_BODY_SCRIPT, DEFAULT_MODIFY_RESPONSE_BODY_SCRIPT } from './constants';
 import type { MatchMode, RedirectCondition, RedirectGroup, RedirectRule } from './types';
 
 const RULE_TYPES: RedirectRule['type'][] = [
@@ -40,6 +40,10 @@ export function createDefaultCondition(): RedirectCondition {
     requestBodyStaticValue: '',
     requestBodyDynamicValue: DEFAULT_MODIFY_REQUEST_BODY_SCRIPT,
     requestBodyValue: '',
+    responseBodyMode: 'static',
+    responseBodyStaticValue: '',
+    responseBodyDynamicValue: DEFAULT_MODIFY_RESPONSE_BODY_SCRIPT,
+    responseBodyValue: '',
     filter: {
       pageDomain: '',
       resourceType: 'all',
@@ -101,6 +105,23 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
               ? legacyBodyValue
               : DEFAULT_MODIFY_REQUEST_BODY_SCRIPT;
 
+          const responseBodyMode = c.responseBodyMode === 'dynamic' ? 'dynamic' : 'static';
+          const legacyResponseBodyValue = typeof c.responseBodyValue === 'string'
+            ? c.responseBodyValue
+            : c.responseBodyScript && typeof c.responseBodyScript === 'string'
+              ? c.responseBodyScript
+              : '';
+          const responseBodyStaticValue = typeof c.responseBodyStaticValue === 'string'
+            ? c.responseBodyStaticValue
+            : responseBodyMode === 'static'
+              ? legacyResponseBodyValue
+              : '';
+          const responseBodyDynamicValue = typeof c.responseBodyDynamicValue === 'string'
+            ? c.responseBodyDynamicValue
+            : responseBodyMode === 'dynamic' && legacyResponseBodyValue
+              ? legacyResponseBodyValue
+              : DEFAULT_MODIFY_RESPONSE_BODY_SCRIPT;
+
           return {
             id: typeof c.id === 'string' && c.id ? c.id : genId(),
             matchTarget: c.matchTarget === 'host' ? 'host' : 'url',
@@ -152,6 +173,10 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
             requestBodyStaticValue,
             requestBodyDynamicValue,
             requestBodyValue: requestBodyMode === 'dynamic' ? requestBodyDynamicValue : requestBodyStaticValue,
+            responseBodyMode,
+            responseBodyStaticValue,
+            responseBodyDynamicValue,
+            responseBodyValue: responseBodyMode === 'dynamic' ? responseBodyDynamicValue : responseBodyStaticValue,
             filter: {
               pageDomain: typeof filterObj.pageDomain === 'string' ? filterObj.pageDomain : '',
               resourceType: typeof filterObj.resourceType === 'string' ? (filterObj.resourceType as RedirectCondition['filter']['resourceType']) : 'all',
@@ -181,6 +206,19 @@ export function hasModifyRequestBodyFunction(script: string): boolean {
     /\bfunction\s+modifyRequestBody\s*\(/,
     /\b(?:const|let|var)\s+modifyRequestBody\s*=\s*(?:async\s*)?(?:function\s*\(|\()/,
     /\b(?:const|let|var)\s+modifyRequestBody\s*=\s*(?:async\s*)?[A-Za-z_$][\w$]*\s*=>/,
+  ];
+
+  return declarationPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+export function hasModifyResponseBodyFunction(script: string): boolean {
+  const trimmed = script.trim();
+  if (!trimmed) return false;
+
+  const declarationPatterns = [
+    /\bfunction\s+modifyResponse\s*\(/,
+    /\b(?:const|let|var)\s+modifyResponse\s*=\s*(?:async\s*)?(?:function\s*\(|\()/,
+    /\b(?:const|let|var)\s+modifyResponse\s*=\s*(?:async\s*)?[A-Za-z_$][\w$]*\s*=>/,
   ];
 
   return declarationPatterns.some((pattern) => pattern.test(trimmed));

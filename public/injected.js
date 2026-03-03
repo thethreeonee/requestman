@@ -9,6 +9,7 @@
   const SOURCE = 'requestman-extension';
   let delayRules = [];
   let modifyRequestBodyRules = [];
+  let modifyResponseBodyRules = [];
 
   const nativeFetch = window.fetch;
   const nativeXhrOpen = window.XMLHttpRequest && window.XMLHttpRequest.prototype.open;
@@ -87,7 +88,7 @@
     return String(result);
   }
 
-  function toRequestBodyValue(bodyResult) {
+  function toBodyValue(bodyResult) {
     if (typeof bodyResult === 'string') return bodyResult;
     if (bodyResult && typeof bodyResult === 'object') {
       try {
@@ -99,9 +100,9 @@
     return String(bodyResult ?? '');
   }
 
-  function runDynamicBodyScript(script, args, fallbackBody) {
+  function runDynamicBodyScript(script, args, fallbackBody, functionName) {
     try {
-      const dynamicModifier = new Function(`${script}\nreturn typeof modifyRequestBody === 'function' ? modifyRequestBody : null;`)();
+      const dynamicModifier = new Function(`${script}\nreturn typeof ${functionName} === 'function' ? ${functionName} : null;`)();
       if (typeof dynamicModifier !== 'function') return fallbackBody;
       const result = dynamicModifier(args);
       return normalizeBodyResult(result, fallbackBody);
@@ -124,9 +125,44 @@
           url,
           body: nextBody,
           bodyAsJson: parseBodyAsJson(nextBody),
-        }, nextBody);
+        }, nextBody, 'modifyRequestBody');
       } else {
         nextBody = rule.requestBodyValue;
+      }
+    }
+
+    return nextBody;
+  }
+
+  function hasMatchedResponseRule(url, method, resourceType) {
+    for (const rule of modifyResponseBodyRules) {
+      if (!matchFilter(method, resourceType, rule.filter)) continue;
+      if (!matchesRule(url, rule)) continue;
+      return true;
+    }
+    return false;
+  }
+
+  function resolveResponseBody(url, method, resourceType, responseMeta, body) {
+    if (typeof body !== 'string') return body;
+    let nextBody = body;
+
+    for (const rule of modifyResponseBodyRules) {
+      if (!matchFilter(method, resourceType, rule.filter)) continue;
+      if (!matchesRule(url, rule)) continue;
+
+      if (rule.responseBodyMode === 'dynamic') {
+        nextBody = runDynamicBodyScript(rule.responseBodyValue, {
+          method: String(method || 'GET').toUpperCase(),
+          url,
+          status: responseMeta.status,
+          statusText: responseMeta.statusText,
+          headers: responseMeta.headers,
+          body: nextBody,
+          bodyAsJson: parseBodyAsJson(nextBody),
+        }, nextBody, 'modifyResponse');
+      } else {
+        nextBody = rule.responseBodyValue;
       }
     }
 
@@ -144,6 +180,7 @@
     if (!data || data.source !== SOURCE || data.type !== MESSAGE_TYPE) return;
     delayRules = Array.isArray(data.delayRules) ? data.delayRules : [];
     modifyRequestBodyRules = Array.isArray(data.modifyRequestBodyRules) ? data.modifyRequestBodyRules : [];
+    modifyResponseBodyRules = Array.isArray(data.modifyResponseBodyRules) ? data.modifyResponseBodyRules : [];
   });
 
   if (typeof nativeFetch === 'function') {
@@ -173,15 +210,36 @@
         body = await input.clone().text();
       }
 
+      let nextInput = input;
+      let nextInit = init;
       if (typeof body === 'string') {
         const nextBody = resolveRequestBody(url, method, 'xmlhttprequest', body);
-        const nextBodyValue = toRequestBodyValue(nextBody);
+        const nextBodyValue = toBodyValue(nextBody);
         if (nextBodyValue !== body) {
-          return nativeFetch.call(this, input, { ...(init || {}), body: nextBodyValue, method });
+          nextInit = { ...(init || {}), body: nextBodyValue, method };
         }
       }
 
-      return nativeFetch.call(this, input, init);
+      const response = await nativeFetch.call(this, nextInput, nextInit);
+      if (!hasMatchedResponseRule(url, method, 'xmlhttprequest')) return response;
+
+      try {
+        const originalBody = await response.clone().text();
+        const nextBody = toBodyValue(resolveResponseBody(url, method, 'xmlhttprequest', {
+          status: response.status,
+          statusText: response.statusText,
+          headers: Object.fromEntries(response.headers.entries()),
+        }, originalBody));
+        if (nextBody === originalBody) return response;
+
+        return new Response(nextBody, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: new Headers(response.headers),
+        });
+      } catch {
+        return response;
+      }
     };
   }
 
@@ -197,8 +255,46 @@
       const url = this.__requestmanUrl;
       const delayMs = getDelayMs(url, method, 'xmlhttprequest');
       const requestBody = typeof body === 'string'
-        ? toRequestBodyValue(resolveRequestBody(url, method, 'xmlhttprequest', body))
+        ? toBodyValue(resolveRequestBody(url, method, 'xmlhttprequest', body))
         : body;
+
+      if (hasMatchedResponseRule(url, method, 'xmlhttprequest')) {
+        this.addEventListener('readystatechange', () => {
+          if (this.readyState !== 4) return;
+          if (this.responseType && this.responseType !== 'text' && this.responseType !== 'json') return;
+
+          try {
+            const originalBody = this.responseType === 'json'
+              ? JSON.stringify(this.response)
+              : this.responseText;
+            const nextBody = toBodyValue(resolveResponseBody(url, method, 'xmlhttprequest', {
+              status: this.status,
+              statusText: this.statusText,
+              headers: {},
+            }, originalBody));
+            if (nextBody === originalBody) return;
+
+            Object.defineProperty(this, 'responseText', { configurable: true, get: () => nextBody });
+            if (!this.responseType || this.responseType === 'text') {
+              Object.defineProperty(this, 'response', { configurable: true, get: () => nextBody });
+            } else if (this.responseType === 'json') {
+              Object.defineProperty(this, 'response', {
+                configurable: true,
+                get: () => {
+                  try {
+                    return JSON.parse(nextBody);
+                  } catch {
+                    return null;
+                  }
+                },
+              });
+            }
+          } catch {
+            // ignore
+          }
+        });
+      }
+
       if (delayMs <= 0) {
         return nativeXhrSend.call(this, requestBody);
       }
