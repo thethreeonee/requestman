@@ -14,12 +14,12 @@ import {
 import {
   DeleteOutlined,
   EditOutlined,
-  FilterOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
-import { MATCH_MODE_OPTIONS, MATCH_TARGET_OPTIONS, REQUEST_METHOD_OPTIONS, RESOURCE_TYPE_OPTIONS } from '../constants';
+import { REQUEST_METHOD_OPTIONS, RESOURCE_TYPE_OPTIONS } from '../constants';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
 import type { RedirectCondition, RedirectGroup, RedirectRule } from '../types';
+import ConditionUrlMatchEditor from './ConditionUrlMatchEditor';
 import RuleDetailToolbar from './RuleDetailToolbar';
 import TestRuleDrawer from './TestRuleDrawer';
 
@@ -131,15 +131,12 @@ export default function RedirectRuleDetail({
             </Popconfirm>
           ),
           children: <Space direction="vertical" style={{ width: '100%' }}>
-            <Space.Compact style={{ width: '100%' }}>
-              <Select value={c.matchTarget} options={MATCH_TARGET_OPTIONS as never} style={{ width: 90 }} onChange={(v) => updateCondition(c.id, { matchTarget: v })} />
-              <Select value={c.matchMode} options={MATCH_MODE_OPTIONS as never} style={{ width: 110 }} onChange={(v) => updateCondition(c.id, { matchMode: v })} />
-              <Input style={{ flex: 1, minWidth: 0 }} value={c.expression} onChange={(e) => updateCondition(c.id, { expression: e.target.value })} />
-              <Button
-                icon={<FilterOutlined style={isFilterConfigured(c) ? { color: '#1677ff' } : undefined} />}
-                onClick={() => setFilterModal({ open: true, conditionId: c.id })}
-              />
-            </Space.Compact>
+            <ConditionUrlMatchEditor
+              condition={c}
+              filterConfigured={isFilterConfigured(c)}
+              onConditionChange={(patch) => updateCondition(c.id, patch)}
+              onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+            />
             <Radio.Group value={c.redirectType} onChange={(e) => updateCondition(c.id, { redirectType: e.target.value })}><Radio value="url">另一个URL</Radio><Radio value="file">本地文件</Radio></Radio.Group>
             <Input value={c.redirectTarget} onChange={(e) => updateCondition(c.id, { redirectTarget: e.target.value })} placeholder="重定向目标" />
           </Space>,
