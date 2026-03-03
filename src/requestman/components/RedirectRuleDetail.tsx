@@ -10,6 +10,7 @@ import {
 } from 'antd';
 import {
   DeleteOutlined,
+  FileOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
@@ -178,7 +179,7 @@ export default function RedirectRuleDetail({
                     onChange={(e) => updateRedirectTarget(c, e.target.value)}
                     placeholder="请输入本地文件绝对路径"
                   />
-                  <Button onClick={() => pickFile(c.id)}>上传文件</Button>
+                  <Button icon={<FileOutlined />} onClick={() => pickFile(c.id)}>选择文件</Button>
                 </Space.Compact>
                 <input
                   ref={(el) => { fileInputRefs.current[c.id] = el; }}
