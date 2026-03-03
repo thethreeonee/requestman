@@ -141,14 +141,22 @@ export default function RewriteStringRuleDetail({
             />
             <Space style={{ width: '100%' }}>
               <Space.Compact style={{ flex: 1, minWidth: 0 }}>
-                <Typography.Text style={{ lineHeight: '32px', padding: '0 8px', whiteSpace: 'nowrap' }}>目标</Typography.Text>
-                <Input value={c.rewriteFrom} onChange={(e) => updateCondition(c.id, { rewriteFrom: e.target.value })} placeholder="from" />
+                <Space.Addon>目标</Space.Addon>
+                <Input
+                  value={c.rewriteFrom}
+                  onChange={(e) => updateCondition(c.id, { rewriteFrom: e.target.value })}
+                  placeholder="from"
+                />
               </Space.Compact>
               <Space.Compact style={{ flex: 1, minWidth: 0 }}>
-                <Typography.Text style={{ lineHeight: '32px', padding: '0 8px', whiteSpace: 'nowrap' }}>替换为</Typography.Text>
-                <Input value={c.rewriteTo} onChange={(e) => updateCondition(c.id, { rewriteTo: e.target.value })} placeholder="to" />
+                <Space.Addon>替换为</Space.Addon>
+                <Input
+                  value={c.rewriteTo}
+                  onChange={(e) => updateCondition(c.id, { rewriteTo: e.target.value })}
+                  placeholder="to"
+                />
               </Space.Compact>
-            </Space>
+            </div>
           </Space>,
         }]}
         style={{ marginBottom: 12 }}
