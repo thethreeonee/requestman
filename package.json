@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",
-    "build": "vite build && node scripts/copy-static.mjs"
+    "build": "vite build && node scripts/copy-static.mjs",
+    "check:references": "node scripts/check-references.mjs"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.4",
