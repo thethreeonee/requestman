@@ -2,12 +2,10 @@ import React, { useMemo, useState } from 'react';
 import {
   Button,
   Collapse,
-  Form,
   Input,
   Modal,
   Popconfirm,
   Radio,
-  Select,
   Space,
   Typography,
 } from 'antd';
@@ -16,12 +14,12 @@ import {
   EditOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
-import { REQUEST_METHOD_OPTIONS, RESOURCE_TYPE_OPTIONS } from '../constants';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
 import type { RedirectCondition, RedirectGroup, RedirectRule } from '../types';
 import ConditionUrlMatchEditor from './ConditionUrlMatchEditor';
 import RuleDetailToolbar from './RuleDetailToolbar';
 import TestRuleDrawer from './TestRuleDrawer';
+import ConditionFilterModal, { isConditionFilterConfigured } from './ConditionFilterModal';
 
 type Props = {
   groups: RedirectGroup[];
@@ -70,9 +68,6 @@ export default function RedirectRuleDetail({
     setWorkingRule({ ...workingRule, conditions: workingRule.conditions.filter((c) => c.id !== conditionId) });
   };
 
-  const isFilterConfigured = (condition: RedirectCondition) => !!condition.filter.pageDomain.trim()
-    || condition.filter.resourceType !== 'all'
-    || condition.filter.requestMethod !== 'all';
 
   const activeCondition = workingRule.conditions.find((c) => c.id === filterModal.conditionId);
 
@@ -133,7 +128,7 @@ export default function RedirectRuleDetail({
           children: <Space direction="vertical" style={{ width: '100%' }}>
             <ConditionUrlMatchEditor
               condition={c}
-              filterConfigured={isFilterConfigured(c)}
+              filterConfigured={isConditionFilterConfigured(c)}
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
@@ -160,12 +155,11 @@ export default function RedirectRuleDetail({
       onTest={() => setTestResult(simulateRuleEffect(testUrl, [workingRule], currentGroupEnabled, { includeDisabled: true }))}
       onTestUrlChange={setTestUrl}
     />
-    <Modal open={filterModal.open} title="过滤条件" onCancel={() => setFilterModal({ open: false })} onOk={() => setFilterModal({ open: false })}>
-      {activeCondition && <Form layout="vertical">
-        <Form.Item label="页面域名"><Input value={activeCondition.filter.pageDomain} onChange={(e) => updateCondition(activeCondition.id, { filter: { ...activeCondition.filter, pageDomain: e.target.value } })} /></Form.Item>
-        <Form.Item label="资源类型"><Select value={activeCondition.filter.resourceType} options={RESOURCE_TYPE_OPTIONS as never} onChange={(v) => updateCondition(activeCondition.id, { filter: { ...activeCondition.filter, resourceType: v } })} /></Form.Item>
-        <Form.Item label="请求方法"><Select value={activeCondition.filter.requestMethod} options={REQUEST_METHOD_OPTIONS as never} onChange={(v) => updateCondition(activeCondition.id, { filter: { ...activeCondition.filter, requestMethod: v } })} /></Form.Item>
-      </Form>}
-    </Modal>
+    <ConditionFilterModal
+      open={filterModal.open}
+      condition={activeCondition}
+      onClose={() => setFilterModal({ open: false })}
+      onConditionChange={updateCondition}
+    />
   </div>;
 }

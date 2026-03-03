@@ -6,6 +6,9 @@ type RedirectFilter = {
   pageDomain?: string;
   resourceType?: string;
   requestMethod?: string;
+  requestHeaderKey?: string;
+  requestHeaderOperator?: 'equals' | 'not_equals' | 'contains';
+  requestHeaderValue?: string;
 };
 
 type RedirectCondition = {
@@ -63,6 +66,7 @@ export const REDIRECT_RULE_ID_MAX = 19999;
 
 function escapeRegex(value: string) { return value.replace(/[|\\{}()[\]^$+?.]/g, '\\$&'); }
 function wildcardToRegexBody(pattern: string) { return escapeRegex(pattern).replace(/\*/g, '.*'); }
+function escapeHeaderPattern(value: string) { return value.replace(/[?*\\]/g, '\\$&'); }
 function buildHostRegex(mode: MatchMode, expression: string) {
   if (mode === 'contains') return `^https?://[^/]*${escapeRegex(expression)}[^/]*(?:/|$)`;
   if (mode === 'regex') return `^https?://(?:${expression})(?:/|$)`;
@@ -105,6 +109,21 @@ function applyConditionFilters(conditionRule: chrome.declarativeNetRequest.RuleC
   const requestMethod = typeof filter?.requestMethod === 'string' ? filter.requestMethod.trim().toLowerCase() : '';
   if (requestMethod && requestMethod !== 'all' && VALID_REQUEST_METHODS.has(requestMethod)) {
     conditionRule.requestMethods = [requestMethod as chrome.declarativeNetRequest.RequestMethod];
+  }
+
+  const requestHeaderKey = typeof filter?.requestHeaderKey === 'string' ? filter.requestHeaderKey.trim() : '';
+  const requestHeaderValue = typeof filter?.requestHeaderValue === 'string' ? filter.requestHeaderValue.trim() : '';
+  const requestHeaderOperator = filter?.requestHeaderOperator;
+  if (requestHeaderKey && requestHeaderValue) {
+    const headerFilter: chrome.declarativeNetRequest.HeaderInfo = {
+      header: requestHeaderKey,
+      ...(requestHeaderOperator === 'contains'
+        ? { values: [`*${escapeHeaderPattern(requestHeaderValue)}*`] }
+        : requestHeaderOperator === 'not_equals'
+          ? { excludedValues: [escapeHeaderPattern(requestHeaderValue)] }
+          : { values: [escapeHeaderPattern(requestHeaderValue)] }),
+    };
+    conditionRule.requestHeaders = [headerFilter];
   }
 }
 
@@ -237,10 +256,7 @@ function toUserAgentRule(condition: RedirectCondition, index: number): chrome.de
   };
 
   const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other'] };
-  const filter = condition.filter ?? {};
-  if (typeof filter.pageDomain === 'string' && filter.pageDomain.trim()) conditionRule.initiatorDomains = [filter.pageDomain.trim()];
-  if (typeof filter.resourceType === 'string' && filter.resourceType !== 'all') conditionRule.resourceTypes = [filter.resourceType as chrome.declarativeNetRequest.ResourceType];
-  if (typeof filter.requestMethod === 'string' && filter.requestMethod !== 'all') conditionRule.requestMethods = [filter.requestMethod.toUpperCase() as chrome.declarativeNetRequest.RequestMethod];
+  applyConditionFilters(conditionRule, condition.filter);
 
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
 }
