@@ -169,7 +169,7 @@ export default function RedirectRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <Radio.Group value={c.redirectType} onChange={(e) => updateRedirectType(c, e.target.value as 'url' | 'file')}><Radio value="url">另一个URL</Radio><Radio value="file">本地文件</Radio></Radio.Group>
+            <Radio.Group value={c.redirectType} onChange={(e) => updateRedirectType(c, e.target.value as 'url' | 'file')}><Radio value="url">URL</Radio><Radio value="file">本地文件</Radio></Radio.Group>
             {c.redirectType === 'file'
               ? <>
                 <Space.Compact style={{ width: '100%' }}>
