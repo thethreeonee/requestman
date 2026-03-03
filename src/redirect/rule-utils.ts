@@ -29,6 +29,7 @@ export function createDefaultCondition(): RedirectCondition {
     rewriteTo: '',
     redirectType: 'url',
     redirectTarget: '',
+    queryParamModifications: [{ id: genId(), action: 'add', key: '', value: '' }],
     filter: {
       pageDomain: '',
       resourceType: 'all',
@@ -86,6 +87,16 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
               : typeof c.redirectUrl === 'string'
                 ? c.redirectUrl
                 : '',
+            queryParamModifications: Array.isArray(c.queryParamModifications) && c.queryParamModifications.length > 0
+              ? c.queryParamModifications
+                .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+                .map((item) => ({
+                  id: typeof item.id === 'string' && item.id ? item.id : genId(),
+                  action: item.action === 'update' || item.action === 'delete' ? item.action : 'add',
+                  key: typeof item.key === 'string' ? item.key : '',
+                  value: typeof item.value === 'string' ? item.value : '',
+                }))
+              : [{ id: genId(), action: 'add', key: '', value: '' }],
             filter: {
               pageDomain: typeof filterObj.pageDomain === 'string' ? filterObj.pageDomain : '',
               resourceType: typeof filterObj.resourceType === 'string' ? (filterObj.resourceType as RedirectCondition['filter']['resourceType']) : 'all',
