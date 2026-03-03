@@ -54,6 +54,9 @@ export type RedirectCondition = {
   queryParamModifications: QueryParamModification[];
   requestHeaderModifications: HeaderModification[];
   responseHeaderModifications: HeaderModification[];
+  userAgentType?: 'device' | 'browser' | 'custom';
+  userAgentPresetKey?: string;
+  userAgentCustomValue?: string;
   filter: RedirectFilter;
 };
 

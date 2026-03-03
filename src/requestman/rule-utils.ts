@@ -32,6 +32,9 @@ export function createDefaultCondition(): RedirectCondition {
     queryParamModifications: [{ id: genId(), action: 'add', key: '', value: '' }],
     requestHeaderModifications: [],
     responseHeaderModifications: [],
+    userAgentType: 'device',
+    userAgentPresetKey: 'android_phone',
+    userAgentCustomValue: '',
     filter: {
       pageDomain: '',
       resourceType: 'all',
@@ -119,6 +122,9 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
                   value: typeof item.value === 'string' ? item.value : '',
                 }))
               : [],
+            userAgentType: c.userAgentType === 'browser' || c.userAgentType === 'custom' ? c.userAgentType : 'device',
+            userAgentPresetKey: typeof c.userAgentPresetKey === 'string' && c.userAgentPresetKey ? c.userAgentPresetKey : 'android_phone',
+            userAgentCustomValue: typeof c.userAgentCustomValue === 'string' ? c.userAgentCustomValue : '',
             filter: {
               pageDomain: typeof filterObj.pageDomain === 'string' ? filterObj.pageDomain : '',
               resourceType: typeof filterObj.resourceType === 'string' ? (filterObj.resourceType as RedirectCondition['filter']['resourceType']) : 'all',

@@ -115,6 +115,16 @@ export default function RequestmanPanel() {
       });
       if (invalid) return message.warning('还有条件配置未输入完整');
     }
+
+    if (workingRule.type === 'user_agent') {
+      const invalid = workingRule.conditions.some((c) => {
+        if (!c.expression.trim()) return true;
+        const type = c.userAgentType ?? 'device';
+        if (type === 'custom') return !c.userAgentCustomValue?.trim();
+        return !c.userAgentPresetKey?.trim();
+      });
+      if (invalid) return message.warning('还有条件配置未输入完整');
+    }
     if (workingRule.type === 'modify_headers') {
       const invalid = workingRule.conditions.some((c) => {
         const allModifications = [...c.requestHeaderModifications, ...c.responseHeaderModifications];
@@ -324,7 +334,7 @@ export default function RequestmanPanel() {
     } else if (currentRule.type === 'modify_headers') {
       detail = <ModifyHeadersRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'user_agent') {
-      detail = <UserAgentRuleDetail {...detailProps} />;
+      detail = <UserAgentRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'cancel_request') {
       detail = <CancelRequestRuleDetail {...detailProps} />;
     } else {
