@@ -79,6 +79,44 @@
     return conditions;
   }
 
+
+  function getActiveModifyResponseBodyConditions(rules, groupEnabled) {
+    const conditions = [];
+    for (const rule of rules) {
+      if (!rule || rule.type !== 'modify_response_body' || rule.enabled === false) continue;
+      if (!isGroupEnabled(groupEnabled, typeof rule.groupId === 'string' ? rule.groupId : '')) continue;
+
+      const list = Array.isArray(rule.conditions) ? rule.conditions : [];
+      for (const condition of list) {
+        if (!condition || typeof condition.expression !== 'string' || !condition.expression.trim()) continue;
+        const responseBodyMode = condition.responseBodyMode === 'dynamic' ? 'dynamic' : 'static';
+        const responseBodyStaticValue = typeof condition.responseBodyStaticValue === 'string'
+          ? condition.responseBodyStaticValue
+          : responseBodyMode === 'static' && typeof condition.responseBodyValue === 'string'
+            ? condition.responseBodyValue
+            : '';
+        const responseBodyDynamicValue = typeof condition.responseBodyDynamicValue === 'string'
+          ? condition.responseBodyDynamicValue
+          : responseBodyMode === 'dynamic' && typeof condition.responseBodyValue === 'string'
+            ? condition.responseBodyValue
+            : typeof condition.responseBodyScript === 'string'
+              ? condition.responseBodyScript
+              : '';
+        const responseBodyValue = responseBodyMode === 'dynamic' ? responseBodyDynamicValue : responseBodyStaticValue;
+        if (!responseBodyValue.trim()) continue;
+        conditions.push({
+          expression: condition.expression.trim(),
+          matchTarget: condition.matchTarget === 'host' ? 'host' : 'url',
+          matchMode: ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode) ? condition.matchMode : 'regex',
+          responseBodyMode,
+          responseBodyValue,
+          filter: condition.filter && typeof condition.filter === 'object' ? condition.filter : {},
+        });
+      }
+    }
+    return conditions;
+  }
+
   function broadcastRules() {
     chrome.storage.local.get([RULES_KEY, GROUPS_KEY, ENABLED_KEY], (payload) => {
       const redirectEnabled = payload?.[ENABLED_KEY] !== false;
@@ -91,6 +129,7 @@
         type: MESSAGE_TYPE,
         delayRules: redirectEnabled ? getActiveDelayConditions(rules, groupEnabled) : [],
         modifyRequestBodyRules: redirectEnabled ? getActiveModifyRequestBodyConditions(rules, groupEnabled) : [],
+        modifyResponseBodyRules: redirectEnabled ? getActiveModifyResponseBodyConditions(rules, groupEnabled) : [],
       }, '*');
     });
   }

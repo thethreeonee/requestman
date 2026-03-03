@@ -6,11 +6,13 @@ import {
   REDIRECT_GROUPS_KEY,
   REDIRECT_RULES_KEY,
   DEFAULT_MODIFY_REQUEST_BODY_SCRIPT,
+  DEFAULT_MODIFY_RESPONSE_BODY_SCRIPT,
 } from './constants';
 import {
   createDefaultCondition,
   genId,
   hasModifyRequestBodyFunction,
+  hasModifyResponseBodyFunction,
   normalizeGroups,
   normalizeRules,
 } from './rule-utils';
@@ -132,6 +134,19 @@ export default function RequestmanPanel() {
           return !hasModifyRequestBodyFunction(script);
         }
         return !c.requestBodyStaticValue.trim();
+      });
+      if (invalid) return message.warning('还有条件配置未输入完整或 JavaScript 无效');
+    }
+
+
+    if (workingRule.type === 'modify_response_body') {
+      const invalid = workingRule.conditions.some((c) => {
+        if (!c.expression.trim()) return true;
+        if (c.responseBodyMode === 'dynamic') {
+          const script = c.responseBodyDynamicValue.trim() || DEFAULT_MODIFY_RESPONSE_BODY_SCRIPT;
+          return !hasModifyResponseBodyFunction(script);
+        }
+        return !c.responseBodyStaticValue.trim();
       });
       if (invalid) return message.warning('还有条件配置未输入完整或 JavaScript 无效');
     }
@@ -356,7 +371,7 @@ export default function RequestmanPanel() {
     } else if (currentRule.type === 'modify_request_body') {
       detail = <ModifyRequestBodyRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'modify_response_body') {
-      detail = <ModifyResponseBodyRuleDetail {...detailProps} />;
+      detail = <ModifyResponseBodyRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'modify_headers') {
       detail = <ModifyHeadersRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'user_agent') {

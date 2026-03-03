@@ -47,3 +47,10 @@ export const DEFAULT_MODIFY_REQUEST_BODY_SCRIPT = `function modifyRequestBody(ar
   
   return body;
 }`;
+
+export const DEFAULT_MODIFY_RESPONSE_BODY_SCRIPT = `function modifyResponse(args) {
+  const { method, url, status, statusText, body, bodyAsJson } = args;
+  // Change response body below depending upon request/response attributes received in args
+
+  return body;
+}`;

@@ -36,6 +36,7 @@ export type QueryParamModification = {
 };
 
 export type RequestBodyModifyMode = 'static' | 'dynamic';
+export type ResponseBodyModifyMode = 'static' | 'dynamic';
 
 export type HeaderModification = {
   id: string;
@@ -64,6 +65,10 @@ export type RedirectCondition = {
   requestBodyStaticValue: string;
   requestBodyDynamicValue: string;
   requestBodyValue: string;
+  responseBodyMode: ResponseBodyModifyMode;
+  responseBodyStaticValue: string;
+  responseBodyDynamicValue: string;
+  responseBodyValue: string;
   filter: RedirectFilter;
 };
 
