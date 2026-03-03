@@ -13,17 +13,15 @@ import {
 import {
   DeleteOutlined,
   EditOutlined,
-  FilterOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import {
-  MATCH_MODE_OPTIONS,
-  MATCH_TARGET_OPTIONS,
   REQUEST_METHOD_OPTIONS,
   RESOURCE_TYPE_OPTIONS,
 } from '../constants';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
 import type { RedirectCondition, RedirectGroup, RedirectRule } from '../types';
+import ConditionUrlMatchEditor from './ConditionUrlMatchEditor';
 import RuleDetailToolbar from './RuleDetailToolbar';
 import TestRuleDrawer from './TestRuleDrawer';
 
@@ -135,16 +133,13 @@ export default function RewriteStringRuleDetail({
             </Popconfirm>
           ),
           children: <Space direction="vertical" style={{ width: '100%' }}>
-            <Space.Compact style={{ width: '100%' }}>
-              <Select value={c.matchTarget} options={MATCH_TARGET_OPTIONS as never} style={{ width: 90 }} onChange={(v) => updateCondition(c.id, { matchTarget: v })} />
-              <Select value={c.matchMode} options={MATCH_MODE_OPTIONS as never} style={{ width: 110 }} onChange={(v) => updateCondition(c.id, { matchMode: v })} />
-              <Input style={{ flex: 1, minWidth: 0 }} value={c.expression} onChange={(e) => updateCondition(c.id, { expression: e.target.value })} />
-              <Button
-                icon={<FilterOutlined style={isFilterConfigured(c) ? { color: '#1677ff' } : undefined} />}
-                onClick={() => setFilterModal({ open: true, conditionId: c.id })}
-              />
-            </Space.Compact>
-            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+            <ConditionUrlMatchEditor
+              condition={c}
+              filterConfigured={isFilterConfigured(c)}
+              onConditionChange={(patch) => updateCondition(c.id, patch)}
+              onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+            />
+            <Space style={{ width: '100%' }}>
               <Space.Compact style={{ flex: 1, minWidth: 0 }}>
                 <Space.Addon>目标</Space.Addon>
                 <Input
