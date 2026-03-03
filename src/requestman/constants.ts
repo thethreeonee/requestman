@@ -60,6 +60,7 @@ export const COMMON_HEADER_OPTIONS = [
   'Origin',
   'Pragma',
   'Referer',
+  'Operation-Type',
   'User-Agent',
   'X-Forwarded-For',
   'X-Requested-With',
