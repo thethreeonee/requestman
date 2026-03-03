@@ -147,5 +147,6 @@ body.rule-pointer-dragging {
 .rule-menu-group-title__line {
   flex: 1;
   height: 1px;
-  background: var(--ant-color-border-secondary);
+  background: currentColor;
+  opacity: 0.3;
 }
