@@ -28,6 +28,7 @@ import {
   StopOutlined,
   ClockCircleOutlined,
 } from '@ant-design/icons';
+import { RULE_TYPE_LABEL_MAP } from '../constants';
 import { genId } from '../rule-utils';
 import type { RedirectGroup, RedirectRule } from '../types';
 
@@ -206,18 +207,6 @@ function isInteractiveDragTarget(target: EventTarget | null) {
     '.ant-select',
   ].join(',')));
 }
-
-const RULE_TYPE_LABEL_MAP: Record<RedirectRule['type'], string> = {
-  redirect_request: '重定向请求',
-  rewrite_string: '重写字符串',
-  query_params: 'Query参数',
-  modify_request_body: '修改请求体',
-  modify_response_body: '修改请求响应',
-  modify_headers: '修改Headers',
-  user_agent: 'User-Agent',
-  cancel_request: '取消请求',
-  request_delay: '网络请求延迟',
-};
 
 const RULE_TYPE_ICON_MAP: Record<RedirectRule['type'], React.ReactNode> = {
   redirect_request: <RetweetOutlined />,

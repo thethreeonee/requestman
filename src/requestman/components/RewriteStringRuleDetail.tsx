@@ -2,21 +2,19 @@ import React, { useMemo, useState } from 'react';
 import {
   Button,
   Collapse,
-  Input,
   Modal,
   Popconfirm,
   Space,
-  Typography,
 } from 'antd';
 import {
   DeleteOutlined,
-  EditOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
 import type { RedirectCondition, RedirectGroup, RedirectRule } from '../types';
 import ConditionUrlMatchEditor from './ConditionUrlMatchEditor';
 import RuleDetailToolbar from './RuleDetailToolbar';
+import RuleNameHeader from './RuleNameHeader';
 import TestRuleDrawer from './TestRuleDrawer';
 import ConditionFilterModal, { isConditionFilterConfigured } from './ConditionFilterModal';
 
@@ -86,10 +84,12 @@ export default function RewriteStringRuleDetail({
         { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => { setRules((prev) => prev.filter((r) => r.id !== workingRule.id)); setPageToList(); } }) },
       ]}
     />
-    <Space align="center" style={{ marginBottom: 16 }}>
-      {editRuleName ? <Input value={workingRule.name} onChange={(e) => setWorkingRule({ ...workingRule, name: e.target.value })} onBlur={() => setEditRuleName(false)} onPressEnter={() => setEditRuleName(false)} /> : <Typography.Title level={4} style={{ margin: 0 }}>{workingRule.name}</Typography.Title>}
-      <Button type="text" icon={<EditOutlined />} onClick={() => setEditRuleName(true)} />
-    </Space>
+    <RuleNameHeader
+      rule={workingRule}
+      editRuleName={editRuleName}
+      setEditRuleName={setEditRuleName}
+      setWorkingRule={setWorkingRule}
+    />
     {workingRule.conditions.map((c) => (
       <Collapse
         key={c.id}
