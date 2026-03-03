@@ -19,7 +19,7 @@ import {
   PlusOutlined,
 } from '@ant-design/icons';
 import { MATCH_MODE_OPTIONS, MATCH_TARGET_OPTIONS, REQUEST_METHOD_OPTIONS, RESOURCE_TYPE_OPTIONS } from '../constants';
-import { createDefaultCondition, genId, simulateRedirect } from '../rule-utils';
+import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
 import type { RedirectCondition, RedirectGroup, RedirectRule } from '../types';
 import RuleDetailToolbar from './RuleDetailToolbar';
 
@@ -51,7 +51,7 @@ export default function RedirectRuleDetail({
   const [editRuleName, setEditRuleName] = useState(false);
   const [testDrawerOpen, setTestDrawerOpen] = useState(false);
   const [testUrl, setTestUrl] = useState('');
-  const [testResult, setTestResult] = useState('');
+  const [testResult, setTestResult] = useState<SimulateRuleResult | null>(null);
   const [filterModal, setFilterModal] = useState<{ open: boolean; conditionId?: string }>({ open: false });
 
   const { enabled: _workingEnabled, ...workingRuleWithoutEnabled } = workingRule;
@@ -158,12 +158,15 @@ export default function RedirectRuleDetail({
     <Drawer title="测试规则" placement="bottom" open={testDrawerOpen} height={260} onClose={() => setTestDrawerOpen(false)}>
       <Space.Compact style={{ width: '100%' }}>
         <Input value={testUrl} onChange={(e) => setTestUrl(e.target.value)} placeholder="输入测试URL" />
-        <Button onClick={() => {
-          const res = simulateRedirect(testUrl, [workingRule], currentGroupEnabled);
-          setTestResult(res.ok ? `命中：${res.matchedRule.name} -> ${res.redirectedUrl}` : res.reason);
-        }}>测试</Button>
+        <Button onClick={() => setTestResult(simulateRuleEffect(testUrl, [workingRule], currentGroupEnabled))}>测试</Button>
       </Space.Compact>
-      <div style={{ marginTop: 12 }}>{testResult}</div>
+      <div style={{ marginTop: 12 }}>
+        {testResult ? (
+          testResult.ok
+            ? `命中条件：${testResult.matchedCondition.matchTarget}/${testResult.matchedCondition.matchMode}，结果：${testResult.redirectedUrl}`
+            : testResult.reason
+        ) : '输入 URL 后点击测试'}
+      </div>
     </Drawer>
     <Modal open={filterModal.open} title="过滤条件" onCancel={() => setFilterModal({ open: false })} onOk={() => setFilterModal({ open: false })}>
       {activeCondition && <Form layout="vertical">

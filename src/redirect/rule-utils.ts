@@ -121,25 +121,108 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
 function escapeRegex(s: string) { return s.replace(/[|\\{}()[\]^$+?.]/g, '\\$&'); }
 function wildcardToRegexBody(pattern: string) { return escapeRegex(pattern).replace(/\*/g, '.*'); }
 
-export function simulateRedirect(inputUrl: string, rules: RedirectRule[], groupEnabledMap: ReadonlyMap<string, boolean>) {
+function createMatcher(condition: RedirectCondition) {
+  const expression = condition.expression.trim();
+  if (!expression) return null;
+  try {
+    if (condition.matchMode === 'contains') return new RegExp(escapeRegex(expression));
+    if (condition.matchMode === 'equals') return new RegExp(`^${escapeRegex(expression)}$`);
+    if (condition.matchMode === 'wildcard') return new RegExp(`^${wildcardToRegexBody(expression)}$`);
+    return new RegExp(expression);
+  } catch {
+    return null;
+  }
+}
+
+function replaceCaptureGroups(template: string, groups: RegExpExecArray) {
+  return template.replace(/\$(\d+)/g, (_m, i) => groups[Number(i)] ?? '');
+}
+
+export type SimulateRuleResult = {
+  ok: true;
+  matchedRule: RedirectRule;
+  matchedCondition: RedirectCondition;
+  redirectedUrl: string;
+} | {
+  ok: false;
+  reason: string;
+};
+
+export function simulateRuleEffect(inputUrl: string, rules: RedirectRule[], groupEnabledMap: ReadonlyMap<string, boolean>): SimulateRuleResult {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(inputUrl);
+  } catch {
+    return { ok: false, reason: '请输入合法的 URL（需包含协议）' };
+  }
+
   for (const rule of rules) {
     if (!rule.enabled || groupEnabledMap.get(rule.groupId) === false) continue;
-    for (const c of rule.conditions) {
-      const expression = c.expression.trim();
-      const redirectTarget = c.redirectTarget.trim();
-      if (!expression || !redirectTarget) continue;
-      let re: RegExp;
-      try {
-        if (c.matchMode === 'contains') re = new RegExp(escapeRegex(expression));
-        else if (c.matchMode === 'equals') re = new RegExp(`^${escapeRegex(expression)}$`);
-        else if (c.matchMode === 'wildcard') re = new RegExp(`^${wildcardToRegexBody(expression)}$`);
-        else re = new RegExp(expression);
-      } catch { continue; }
-      const target = c.matchTarget === 'host' ? (new URL(inputUrl)).host : inputUrl;
-      const groups = re.exec(target);
+
+    for (const condition of rule.conditions) {
+      const re = createMatcher(condition);
+      if (!re) continue;
+
+      const matchTarget = condition.matchTarget === 'host' ? parsedUrl.host : inputUrl;
+      const groups = re.exec(matchTarget);
       if (!groups) continue;
-      return { ok: true as const, matchedRule: rule, redirectedUrl: redirectTarget.replace(/\$(\d+)/g, (_m, i) => groups[Number(i)] ?? '') };
+
+      if (rule.type === 'redirect_request') {
+        const redirectTarget = condition.redirectTarget.trim();
+        if (!redirectTarget) continue;
+        return {
+          ok: true,
+          matchedRule: rule,
+          matchedCondition: condition,
+          redirectedUrl: replaceCaptureGroups(redirectTarget, groups),
+        };
+      }
+
+      if (rule.type === 'rewrite_string') {
+        const rewriteFrom = condition.rewriteFrom;
+        const rewriteTo = condition.rewriteTo;
+        if (!rewriteFrom) continue;
+        const outputUrl = inputUrl.split(rewriteFrom).join(replaceCaptureGroups(rewriteTo, groups));
+        return {
+          ok: true,
+          matchedRule: rule,
+          matchedCondition: condition,
+          redirectedUrl: outputUrl,
+        };
+      }
+
+      if (rule.type === 'query_params') {
+        const next = new URL(inputUrl);
+        for (const modification of condition.queryParamModifications) {
+          const key = modification.key.trim();
+          if (!key) continue;
+          if (modification.action === 'delete') {
+            next.searchParams.delete(key);
+            continue;
+          }
+          if (modification.action === 'add' && next.searchParams.has(key)) continue;
+          next.searchParams.set(key, replaceCaptureGroups(modification.value, groups));
+        }
+        return {
+          ok: true,
+          matchedRule: rule,
+          matchedCondition: condition,
+          redirectedUrl: next.toString(),
+        };
+      }
+
+      return {
+        ok: true,
+        matchedRule: rule,
+        matchedCondition: condition,
+        redirectedUrl: inputUrl,
+      };
     }
   }
-  return { ok: false as const, reason: '未命中任何启用规则' };
+
+  return { ok: false, reason: '未命中任何启用规则' };
+}
+
+export function simulateRedirect(inputUrl: string, rules: RedirectRule[], groupEnabledMap: ReadonlyMap<string, boolean>) {
+  return simulateRuleEffect(inputUrl, rules, groupEnabledMap);
 }
