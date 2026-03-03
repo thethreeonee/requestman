@@ -1,10 +1,10 @@
 import React from 'react';
 import {
-  AutoComplete,
   Button,
   Dropdown,
   Input,
   Modal,
+  Select,
   Space,
   Switch,
   Table,
@@ -265,7 +265,7 @@ export default function RedirectRuleList({
   const groupDropStateRef = React.useRef<GroupDropState | null>(null);
   const currentGroupEnabled = new Map(groups.map((g) => [g.id, g.enabled]));
   const groupNameMap = new Map(groups.map((g) => [g.id, g.name]));
-  const groupsOptions = groups.map((g) => ({ value: g.name, label: g.name }));
+  const groupsOptions = groups.map((g) => ({ value: g.id, label: g.name }));
 
   const tableData = React.useMemo(
     () => buildTableData(groups, collapsedGroupIds, rules),
@@ -722,7 +722,7 @@ export default function RedirectRuleList({
             if (row.rowType === 'group-empty') return null;
             return (
               <Dropdown menu={{ items: [
-                { key: 'move', label: '修改规则组', icon: <FolderOpenOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: row.rule.id }); setGroupInput(groupNameMap.get(row.rule.groupId) ?? ''); } },
+                { key: 'move', label: '修改规则组', icon: <FolderOpenOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: row.rule.id }); setGroupInput(row.rule.groupId); } },
                 {
                   key: 'copy',
                   label: '复制',
@@ -762,13 +762,12 @@ export default function RedirectRuleList({
     </div>
     <Modal open={groupModal.open} title={groupModal.mode === 'create' ? '新建规则组' : groupModal.mode === 'rename' ? '重命名规则组' : '修改规则组'} onCancel={() => setGroupModal({ open: false, mode: 'create' })} onOk={confirmGroupModal}>
       {groupModal.mode === 'move' ? (
-        <AutoComplete
+        <Select
           style={{ width: '100%' }}
           options={groupsOptions}
           value={groupInput}
           onChange={setGroupInput}
-          filterOption={(inputValue, option) => (option?.value ?? '').toLowerCase().includes(inputValue.toLowerCase())}
-          placeholder="请选择或输入新规则组"
+          placeholder="请选择规则组"
         />
       ) : <Input value={groupInput} onChange={(e) => setGroupInput(e.target.value)} placeholder="请输入名称" />}
     </Modal>
