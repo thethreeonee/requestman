@@ -40,6 +40,10 @@ export default function TestRuleDrawer({
   onTest,
   onTestUrlChange,
 }: Props) {
+  const matchedConditionIndex = testResult && testResult.ok
+    ? testResult.matchedRule.conditions.findIndex((condition) => condition.id === testResult.matchedCondition.id)
+    : -1;
+
   return (
     <Drawer title="测试规则" placement="bottom" open={open} height={320} onClose={onClose}>
       <Space.Compact style={{ width: '100%' }}>
@@ -58,9 +62,9 @@ export default function TestRuleDrawer({
         {testResult && testResult.ok && (
           <>
             <div style={rowStyle}>
-              <Typography.Text strong>命中规则</Typography.Text>
+              <Typography.Text strong>命中条件配置</Typography.Text>
               <Typography.Text style={valueStyle}>
-                {testResult.matchedRule.name}（{testResult.matchedCondition.matchTarget}/{testResult.matchedCondition.matchMode}）
+                条件 {matchedConditionIndex >= 0 ? matchedConditionIndex + 1 : '-'}（{testResult.matchedCondition.matchTarget}/{testResult.matchedCondition.matchMode}）
               </Typography.Text>
             </div>
             <div style={rowStyle}>
