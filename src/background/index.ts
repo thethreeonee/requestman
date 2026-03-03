@@ -16,12 +16,17 @@ type RedirectCondition = {
   redirectTarget?: string;
   rewriteFrom?: string;
   rewriteTo?: string;
+  queryParamModifications?: Array<{
+    action?: 'add' | 'update' | 'delete';
+    key?: string;
+    value?: string;
+  }>;
   filter?: RedirectFilter;
 };
 
 export type RedirectRule = {
   id?: string;
-  type?: 'redirect_request' | 'rewrite_string';
+  type?: 'redirect_request' | 'rewrite_string' | 'query_params';
   enabled?: boolean;
   groupId?: string;
   conditions?: RedirectCondition[];
@@ -120,6 +125,51 @@ function toRewriteRule(condition: RedirectCondition, index: number): chrome.decl
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
 }
 
+function toQueryParamsRule(condition: RedirectCondition, index: number): chrome.declarativeNetRequest.Rule | null {
+  const expression = typeof condition.expression === 'string' ? condition.expression.trim() : '';
+  if (!expression) return null;
+  const id = REDIRECT_RULE_ID_BASE + index;
+  if (id > REDIRECT_RULE_ID_MAX) return null;
+
+  const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
+  const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
+  const regexFilter = matchTarget === 'host' ? buildHostRegex(matchMode, expression) : buildUrlRegex(matchMode, expression);
+  try { new RegExp(regexFilter); } catch { return null; }
+
+  const modifications = Array.isArray(condition.queryParamModifications) ? condition.queryParamModifications : [];
+  const addOrReplaceParams = modifications
+    .filter((mod) => (mod.action === 'add' || mod.action === 'update') && typeof mod.key === 'string' && mod.key.trim())
+    .map((mod) => ({
+      key: (mod.key as string).trim(),
+      value: typeof mod.value === 'string' ? mod.value : '',
+      ...(mod.action === 'update' ? { replaceOnly: true } : {}),
+    }));
+  const removeParams = modifications
+    .filter((mod) => mod.action === 'delete' && typeof mod.key === 'string' && mod.key.trim())
+    .map((mod) => (mod.key as string).trim());
+  if (addOrReplaceParams.length === 0 && removeParams.length === 0) return null;
+
+  const action: chrome.declarativeNetRequest.RuleAction = {
+    type: 'redirect',
+    redirect: {
+      transform: {
+        queryTransform: {
+          ...(addOrReplaceParams.length ? { addOrReplaceParams } : {}),
+          ...(removeParams.length ? { removeParams } : {}),
+        },
+      },
+    },
+  };
+
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other'] };
+  const filter = condition.filter ?? {};
+  if (typeof filter.pageDomain === 'string' && filter.pageDomain.trim()) conditionRule.initiatorDomains = [filter.pageDomain.trim()];
+  if (typeof filter.resourceType === 'string' && filter.resourceType !== 'all') conditionRule.resourceTypes = [filter.resourceType as chrome.declarativeNetRequest.ResourceType];
+  if (typeof filter.requestMethod === 'string' && filter.requestMethod !== 'all') conditionRule.requestMethods = [filter.requestMethod.toUpperCase() as chrome.declarativeNetRequest.RequestMethod];
+
+  return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
+}
+
 function getManagedRuleIds() { return Array.from({ length: REDIRECT_RULE_ID_MAX - REDIRECT_RULE_ID_BASE + 1 }, (_, i) => REDIRECT_RULE_ID_BASE + i); }
 
 async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: RedirectRule[]; enabled?: boolean; }) {
@@ -140,7 +190,11 @@ async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: R
         ? rule.conditions
         : [{ expression: rule.expression, redirectTarget: rule.redirectUrl, matchMode: rule.matchMode, matchTarget: rule.matchTarget }];
       for (const c of conditions) {
-        const dnr = rule.type === 'rewrite_string' ? toRewriteRule(c, index) : toOneRule(c, index);
+        const dnr = rule.type === 'rewrite_string'
+          ? toRewriteRule(c, index)
+          : rule.type === 'query_params'
+            ? toQueryParamsRule(c, index)
+            : toOneRule(c, index);
         index += 1;
         if (dnr) nextRules.push(dnr);
       }
