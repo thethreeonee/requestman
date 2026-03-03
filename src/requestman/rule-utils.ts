@@ -48,6 +48,9 @@ export function createDefaultCondition(): RedirectCondition {
       pageDomain: '',
       resourceType: 'all',
       requestMethod: 'all',
+      requestHeaderKey: '',
+      requestHeaderOperator: 'equals',
+      requestHeaderValue: '',
     },
   };
 }
@@ -181,6 +184,9 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
               pageDomain: typeof filterObj.pageDomain === 'string' ? filterObj.pageDomain : '',
               resourceType: typeof filterObj.resourceType === 'string' ? (filterObj.resourceType as RedirectCondition['filter']['resourceType']) : 'all',
               requestMethod: typeof filterObj.requestMethod === 'string' ? (filterObj.requestMethod as RedirectCondition['filter']['requestMethod']) : 'all',
+              requestHeaderKey: typeof filterObj.requestHeaderKey === 'string' ? filterObj.requestHeaderKey : '',
+              requestHeaderOperator: filterObj.requestHeaderOperator === 'not_equals' || filterObj.requestHeaderOperator === 'contains' ? filterObj.requestHeaderOperator : 'equals',
+              requestHeaderValue: typeof filterObj.requestHeaderValue === 'string' ? filterObj.requestHeaderValue : '',
             },
           };
         })

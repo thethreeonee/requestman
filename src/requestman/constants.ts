@@ -41,6 +41,39 @@ export const REQUEST_METHOD_OPTIONS = [
   { label: 'OPTIONS', value: 'options' },
 ] as const;
 
+export const REQUEST_HEADER_FILTER_OPERATOR_OPTIONS = [
+  { label: '等于', value: 'equals' },
+  { label: '不等于', value: 'not_equals' },
+  { label: '包含', value: 'contains' },
+] as const;
+
+export const COMMON_HEADER_OPTIONS = [
+  'Accept',
+  'Accept-Encoding',
+  'Accept-Language',
+  'Authorization',
+  'Cache-Control',
+  'Content-Length',
+  'Content-Type',
+  'Cookie',
+  'Host',
+  'Origin',
+  'Pragma',
+  'Referer',
+  'User-Agent',
+  'X-Forwarded-For',
+  'X-Requested-With',
+  'ETag',
+  'If-Modified-Since',
+  'Last-Modified',
+  'Location',
+  'Set-Cookie',
+  'Access-Control-Allow-Origin',
+  'Access-Control-Allow-Headers',
+  'Access-Control-Allow-Methods',
+  'Access-Control-Expose-Headers',
+].map((header) => ({ value: header }));
+
 export const DEFAULT_MODIFY_REQUEST_BODY_SCRIPT = `function modifyRequestBody(args) {
   const { method, url, body, bodyAsJson } = args;
   // Change request body below depending upon request attributes received in args

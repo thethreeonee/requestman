@@ -26,6 +26,9 @@ export type RedirectFilter = {
   pageDomain: string;
   resourceType: ResourceTypeFilter;
   requestMethod: RequestMethodFilter;
+  requestHeaderKey: string;
+  requestHeaderOperator: 'equals' | 'not_equals' | 'contains';
+  requestHeaderValue: string;
 };
 
 export type QueryParamModification = {
