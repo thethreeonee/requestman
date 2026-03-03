@@ -52,9 +52,9 @@ function escapeHtml(text: string) {
 function simpleJsHighlight(input: string) {
   const escaped = escapeHtml(input);
   return escaped
-    .replace(/\b(function|const|let|var|return|if|else|new|try|catch)\b/g, '<span class="requestman-code-keyword">$1</span>')
+    .replace(/(\/\/.*)$/gm, '<span class="requestman-code-comment">$1</span>')
     .replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, '<span class="requestman-code-string">$1</span>')
-    .replace(/(\/\/.*)$/gm, '<span class="requestman-code-comment">$1</span>');
+    .replace(/\b(function|const|let|var|return|if|else|new|try|catch)\b/g, '<span class="requestman-code-keyword">$1</span>');
 }
 
 function validateDynamicScript(code: string): string | null {
@@ -229,6 +229,7 @@ export default function ModifyRequestBodyRuleDetail({
               label={c.requestBodyMode === 'dynamic' ? 'JavaScript 代码' : '替换后的请求体'}
               validateStatus={dynamicScriptError ? 'error' : ''}
               help={dynamicScriptError ?? (c.requestBodyMode === 'dynamic' ? '需定义 modifyRequestBody(args) 并返回最终请求体' : '命中后会直接替换原始请求 body')}
+              layout="vertical"
               style={{ marginBottom: 0 }}
             >
               <CodeEditor value={c.requestBodyValue} onChange={(value) => updateCondition(c.id, { requestBodyValue: value })} />
