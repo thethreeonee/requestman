@@ -55,6 +55,7 @@ const COMMON_HEADERS = [
   'Origin',
   'Pragma',
   'Referer',
+  'Operation-Type',
   'User-Agent',
   'X-Forwarded-For',
   'X-Requested-With',
