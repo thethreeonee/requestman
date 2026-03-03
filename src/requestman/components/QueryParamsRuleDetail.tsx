@@ -69,7 +69,10 @@ export default function QueryParamsRuleDetail({
   };
 
   const removeCondition = (conditionId: string) => {
-    if (workingRule.conditions.length <= 1) return messageApi.warning('至少保留一条条件配置');
+    if (workingRule.conditions.length <= 1) {
+      messageApi.warning('至少保留一条条件配置');
+      return;
+    }
     setWorkingRule({ ...workingRule, conditions: workingRule.conditions.filter((c) => c.id !== conditionId) });
   };
 
@@ -136,7 +139,11 @@ export default function QueryParamsRuleDetail({
               okText="删除"
               cancelText="取消"
               okButtonProps={{ danger: true, type: 'primary' }}
-              onConfirm={() => removeCondition(c.id)}
+              onCancel={(e) => e?.stopPropagation()}
+              onConfirm={(e) => {
+                e?.stopPropagation();
+                removeCondition(c.id);
+              }}
             >
               <span
                 role="button"
