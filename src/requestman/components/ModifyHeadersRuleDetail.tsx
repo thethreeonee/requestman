@@ -146,7 +146,6 @@ export default function ModifyHeadersRuleDetail({
   ) => {
     const condition = workingRule.conditions.find((item) => item.id === conditionId);
     if (!condition) return;
-    if (condition[tabKey].length <= 1) return messageApi.warning('至少保留一条修改配置');
     updateCondition(conditionId, {
       [tabKey]: condition[tabKey].filter((item) => item.id !== modificationId),
     });

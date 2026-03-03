@@ -30,8 +30,8 @@ export function createDefaultCondition(): RedirectCondition {
     redirectType: 'url',
     redirectTarget: '',
     queryParamModifications: [{ id: genId(), action: 'add', key: '', value: '' }],
-    requestHeaderModifications: [{ id: genId(), action: 'add', key: '', value: '' }],
-    responseHeaderModifications: [{ id: genId(), action: 'add', key: '', value: '' }],
+    requestHeaderModifications: [],
+    responseHeaderModifications: [],
     filter: {
       pageDomain: '',
       resourceType: 'all',
@@ -108,7 +108,7 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
                   key: typeof item.key === 'string' ? item.key : '',
                   value: typeof item.value === 'string' ? item.value : '',
                 }))
-              : [{ id: genId(), action: 'add', key: '', value: '' }],
+              : [],
             responseHeaderModifications: Array.isArray(c.responseHeaderModifications) && c.responseHeaderModifications.length > 0
               ? c.responseHeaderModifications
                 .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
@@ -118,7 +118,7 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
                   key: typeof item.key === 'string' ? item.key : '',
                   value: typeof item.value === 'string' ? item.value : '',
                 }))
-              : [{ id: genId(), action: 'add', key: '', value: '' }],
+              : [],
             filter: {
               pageDomain: typeof filterObj.pageDomain === 'string' ? filterObj.pageDomain : '',
               resourceType: typeof filterObj.resourceType === 'string' ? (filterObj.resourceType as RedirectCondition['filter']['resourceType']) : 'all',
