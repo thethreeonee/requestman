@@ -144,12 +144,16 @@ export default function RewriteStringRuleDetail({
                 onClick={() => setFilterModal({ open: true, conditionId: c.id })}
               />
             </Space.Compact>
-            <Space.Compact style={{ width: '100%' }}>
-              <Typography.Text style={{ lineHeight: '32px', padding: '0 8px' }}>目标</Typography.Text>
-              <Input value={c.rewriteFrom} onChange={(e) => updateCondition(c.id, { rewriteFrom: e.target.value })} placeholder="from" />
-              <Typography.Text style={{ lineHeight: '32px', padding: '0 8px' }}>替换为</Typography.Text>
-              <Input value={c.rewriteTo} onChange={(e) => updateCondition(c.id, { rewriteTo: e.target.value })} placeholder="to" />
-            </Space.Compact>
+            <Space style={{ width: '100%' }}>
+              <Space.Compact style={{ flex: 1, minWidth: 0 }}>
+                <Typography.Text style={{ lineHeight: '32px', padding: '0 8px', whiteSpace: 'nowrap' }}>目标</Typography.Text>
+                <Input value={c.rewriteFrom} onChange={(e) => updateCondition(c.id, { rewriteFrom: e.target.value })} placeholder="from" />
+              </Space.Compact>
+              <Space.Compact style={{ flex: 1, minWidth: 0 }}>
+                <Typography.Text style={{ lineHeight: '32px', padding: '0 8px', whiteSpace: 'nowrap' }}>替换为</Typography.Text>
+                <Input value={c.rewriteTo} onChange={(e) => updateCondition(c.id, { rewriteTo: e.target.value })} placeholder="to" />
+              </Space.Compact>
+            </Space>
           </Space>,
         }]}
         style={{ marginBottom: 12 }}
