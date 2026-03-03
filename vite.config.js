@@ -33,6 +33,11 @@ export default defineConfig({
       },
 
       output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('/react/') || id.includes('/react-dom/')) return 'vendor-react';
+          if (id.includes('/antd/') || id.includes('/@ant-design/')) return 'vendor-antd';
+        },
         // ✅ 固定路径，避免 hash 和层级混乱
         entryFileNames: (chunk) => {
           const name = chunk.name;
