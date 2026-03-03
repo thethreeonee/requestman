@@ -141,17 +141,11 @@ export default function RequestmanPanel() {
 
   const moveRuleToGroup = () => {
     if (!groupModal.ruleId) return;
-    const name = groupInput.trim();
-    if (!name) return;
-    let target = groups.find((g) => g.name === name);
+    const target = groups.find((g) => g.id === groupInput);
+    if (!target) return;
     const movedRule = rules.find((r) => r.id === groupModal.ruleId);
     if (!movedRule) return;
-    if (!target) {
-      target = { id: genId(), name, enabled: true };
-      setGroups((prev) => [...prev, target!]);
-      message.success(`规则组「${name}」已创建`);
-    }
-    setRules((prev) => prev.map((r) => (r.id === groupModal.ruleId ? { ...r, groupId: target!.id } : r)));
+    setRules((prev) => prev.map((r) => (r.id === groupModal.ruleId ? { ...r, groupId: target.id } : r)));
     message.success(`规则「${movedRule.name}」已移动到规则组「${target.name}」`);
     setGroupModal({ open: false, mode: 'create' });
     setGroupInput('');
