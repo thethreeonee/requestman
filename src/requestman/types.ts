@@ -35,6 +35,8 @@ export type QueryParamModification = {
   value: string;
 };
 
+export type RequestBodyModifyMode = 'static' | 'dynamic';
+
 export type HeaderModification = {
   id: string;
   action: 'add' | 'update' | 'delete';
@@ -58,6 +60,8 @@ export type RedirectCondition = {
   userAgentPresetKey?: string;
   userAgentCustomValue?: string;
   delayMs: number;
+  requestBodyMode: RequestBodyModifyMode;
+  requestBodyValue: string;
   filter: RedirectFilter;
 };
 

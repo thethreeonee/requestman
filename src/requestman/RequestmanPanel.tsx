@@ -5,6 +5,7 @@ import {
   REDIRECT_ENABLED_KEY,
   REDIRECT_GROUPS_KEY,
   REDIRECT_RULES_KEY,
+  DEFAULT_MODIFY_REQUEST_BODY_SCRIPT,
 } from './constants';
 import { createDefaultCondition, genId, normalizeGroups, normalizeRules } from './rule-utils';
 import type { RedirectGroup, RedirectRule } from './types';
@@ -114,6 +115,25 @@ export default function RequestmanPanel() {
         return c.queryParamModifications.some((item) => !item.key.trim() || (item.action !== 'delete' && !item.value.trim()));
       });
       if (invalid) return message.warning('还有条件配置未输入完整');
+    }
+
+
+    if (workingRule.type === 'modify_request_body') {
+      const invalid = workingRule.conditions.some((c) => {
+        if (!c.expression.trim()) return true;
+        if (c.requestBodyMode === 'dynamic') {
+          const script = c.requestBodyValue.trim() || DEFAULT_MODIFY_REQUEST_BODY_SCRIPT;
+          try {
+            const hasFunction = new Function(`${script}
+return typeof modifyRequestBody === 'function';`)();
+            return !hasFunction;
+          } catch {
+            return true;
+          }
+        }
+        return !c.requestBodyValue.trim();
+      });
+      if (invalid) return message.warning('还有条件配置未输入完整或 JavaScript 无效');
     }
 
     if (workingRule.type === 'user_agent') {
@@ -334,7 +354,7 @@ export default function RequestmanPanel() {
     } else if (currentRule.type === 'query_params') {
       detail = <QueryParamsRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'modify_request_body') {
-      detail = <ModifyRequestBodyRuleDetail {...detailProps} />;
+      detail = <ModifyRequestBodyRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'modify_response_body') {
       detail = <ModifyResponseBodyRuleDetail {...detailProps} />;
     } else if (currentRule.type === 'modify_headers') {

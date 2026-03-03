@@ -40,3 +40,10 @@ export const REQUEST_METHOD_OPTIONS = [
   { label: 'HEAD', value: 'head' },
   { label: 'OPTIONS', value: 'options' },
 ] as const;
+
+export const DEFAULT_MODIFY_REQUEST_BODY_SCRIPT = `function modifyRequestBody(args) {
+  const { method, url, body, bodyAsJson } = args;
+  // Change request body below depending upon request attributes received in args
+  
+  return body;
+}`;
