@@ -48,7 +48,7 @@ export default function RuleNameHeader({ rule, editRuleName, setEditRuleName, se
         ) : (
           <Typography.Title level={4} style={{ margin: 0 }}>{rule.name}</Typography.Title>
         )}
-        <Space size={6} align="center">
+        <Space size={6} align="center" style={{ marginTop: 8 }}>
           <Typography.Text type="secondary" style={{ fontSize: 14 }}>
             {RULE_TYPE_ICON_MAP[rule.type]}
           </Typography.Text>
