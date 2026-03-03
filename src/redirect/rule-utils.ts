@@ -148,7 +148,12 @@ export type SimulateRuleResult = {
   reason: string;
 };
 
-export function simulateRuleEffect(inputUrl: string, rules: RedirectRule[], groupEnabledMap: ReadonlyMap<string, boolean>): SimulateRuleResult {
+export function simulateRuleEffect(
+  inputUrl: string,
+  rules: RedirectRule[],
+  groupEnabledMap: ReadonlyMap<string, boolean>,
+  options?: { includeDisabled?: boolean },
+): SimulateRuleResult {
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(inputUrl);
@@ -156,8 +161,10 @@ export function simulateRuleEffect(inputUrl: string, rules: RedirectRule[], grou
     return { ok: false, reason: '请输入合法的 URL（需包含协议）' };
   }
 
+  const includeDisabled = !!options?.includeDisabled;
+
   for (const rule of rules) {
-    if (!rule.enabled || groupEnabledMap.get(rule.groupId) === false) continue;
+    if (!includeDisabled && (!rule.enabled || groupEnabledMap.get(rule.groupId) === false)) continue;
 
     for (const condition of rule.conditions) {
       const re = createMatcher(condition);
