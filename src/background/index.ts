@@ -192,16 +192,25 @@ function toModifyHeadersRule(condition: RedirectCondition, index: number): chrom
   const regexFilter = matchTarget === 'host' ? buildHostRegex(matchMode, expression) : buildUrlRegex(matchMode, expression);
   try { new RegExp(regexFilter); } catch { return null; }
 
-  const mapHeaders = (modifications: RedirectCondition['requestHeaderModifications']) => (Array.isArray(modifications) ? modifications : [])
+  const mapHeaders = (
+    modifications: RedirectCondition['requestHeaderModifications'],
+    target: 'request' | 'response',
+  ) => (Array.isArray(modifications) ? modifications : [])
     .filter((mod) => typeof mod?.key === 'string' && mod.key.trim())
     .map((mod) => ({
       header: (mod.key as string).trim(),
-      operation: mod.action === 'delete' ? 'remove' : mod.action === 'update' ? 'set' : 'append',
+      operation: mod.action === 'delete'
+        ? 'remove'
+        : mod.action === 'update'
+          ? 'set'
+          : target === 'request'
+            ? 'set'
+            : 'append',
       ...(mod.action === 'delete' ? {} : { value: typeof mod.value === 'string' ? mod.value : '' }),
     }));
 
-  const requestHeaders = mapHeaders(condition.requestHeaderModifications);
-  const responseHeaders = mapHeaders(condition.responseHeaderModifications);
+  const requestHeaders = mapHeaders(condition.requestHeaderModifications, 'request');
+  const responseHeaders = mapHeaders(condition.responseHeaderModifications, 'response');
   if (!requestHeaders.length && !responseHeaders.length) return null;
 
   const action: chrome.declarativeNetRequest.RuleAction = {
