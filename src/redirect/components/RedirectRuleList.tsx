@@ -531,7 +531,7 @@ export default function RedirectRuleList({
       </div>
     ) : null}
     <div className="detail-header">
-      <Space><Typography.Title level={4} style={{ margin: 0 }}>重定向请求</Typography.Title><Switch checked={redirectEnabled} onChange={handleRedirectEnabledChange} /></Space>
+      <Space><Typography.Title level={4} style={{ margin: 0 }}>Requestman 控制台</Typography.Title><Switch checked={redirectEnabled} onChange={handleRedirectEnabledChange} /></Space>
       <Space>
         <Dropdown menu={{ items: [
           { key: 'export', label: '导出配置', onClick: exportConfig },
