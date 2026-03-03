@@ -18,6 +18,8 @@ type RedirectCondition = {
   expression?: string;
   redirectType?: 'url' | 'file';
   redirectTarget?: string;
+  redirectUrlTarget?: string;
+  redirectFileTarget?: string;
   rewriteFrom?: string;
   rewriteTo?: string;
   queryParamModifications?: Array<{
@@ -129,11 +131,19 @@ function applyConditionFilters(conditionRule: chrome.declarativeNetRequest.RuleC
 
 function toOneRule(condition: RedirectCondition, index: number): chrome.declarativeNetRequest.Rule | null {
   const expression = typeof condition.expression === 'string' ? condition.expression.trim() : '';
-  const redirectTarget = typeof condition.redirectTarget === 'string'
-    ? condition.redirectTarget.trim()
-    : typeof (condition as { redirectUrl?: string }).redirectUrl === 'string'
-      ? ((condition as { redirectUrl?: string }).redirectUrl as string).trim()
-      : '';
+  const redirectTarget = condition.redirectType === 'file'
+    ? (typeof condition.redirectFileTarget === 'string' && condition.redirectFileTarget.trim()
+      ? condition.redirectFileTarget.trim()
+      : typeof condition.redirectTarget === 'string'
+        ? condition.redirectTarget.trim()
+        : '')
+    : (typeof condition.redirectUrlTarget === 'string' && condition.redirectUrlTarget.trim()
+      ? condition.redirectUrlTarget.trim()
+      : typeof condition.redirectTarget === 'string'
+        ? condition.redirectTarget.trim()
+        : typeof (condition as { redirectUrl?: string }).redirectUrl === 'string'
+          ? ((condition as { redirectUrl?: string }).redirectUrl as string).trim()
+          : '');
   if (!expression || !redirectTarget) return null;
   const id = REDIRECT_RULE_ID_BASE + index;
   if (id > REDIRECT_RULE_ID_MAX) return null;

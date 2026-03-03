@@ -11,6 +11,7 @@ import {
 import {
   createDefaultCondition,
   genId,
+  getConditionRedirectTarget,
   hasModifyRequestBodyFunction,
   hasModifyResponseBodyFunction,
   normalizeGroups,
@@ -110,7 +111,7 @@ export default function RequestmanPanel() {
   const saveDetailRule = () => {
     if (!workingRule || page.type !== 'detail') return false;
     if (workingRule.type === 'redirect_request') {
-      const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !c.redirectTarget.trim());
+      const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !getConditionRedirectTarget(c));
       if (invalid) {
         message.warning('还有条件配置未输入完整');
         return false;
