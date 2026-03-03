@@ -139,7 +139,7 @@ export default function RewriteStringRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <Space style={{ width: '100%' }}>
+            <div style={{ display: 'flex', width: '100%', gap: 8 }}>
               <Space.Compact style={{ flex: 1, minWidth: 0 }}>
                 <Space.Addon style={{ flexShrink: 0 }}>目标</Space.Addon>
                 <Input
@@ -158,7 +158,7 @@ export default function RewriteStringRuleDetail({
                   placeholder="to"
                 />
               </Space.Compact>
-            </Space>
+            </div>
           </Space>,
         }]}
         style={{ marginBottom: 12 }}
