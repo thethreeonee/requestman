@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Button, Dropdown, Select, Space, Switch, Typography } from 'antd';
-import { ArrowLeftOutlined, EllipsisOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, CheckOutlined, EllipsisOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import type { RedirectGroup } from '../types';
 
@@ -13,7 +13,7 @@ type Props = {
   onEnabledChange: (value: boolean) => void;
   onGroupChange: (groupId: string) => void;
   onTest: () => void;
-  onSave: () => void;
+  onSave: () => boolean | void;
   menuItems: MenuProps['items'];
 };
 
@@ -29,6 +29,14 @@ export default function RuleDetailToolbar({
   onSave,
   menuItems,
 }: Props) {
+  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+
+  useEffect(() => {
+    if (!showSaveSuccess) return;
+    const timer = window.setTimeout(() => setShowSaveSuccess(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [showSaveSuccess]);
+
   return <div className="detail-header">
     <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack}>返回</Button>
     <Space>
@@ -43,7 +51,18 @@ export default function RuleDetailToolbar({
         placeholder="规则组：请选择"
       />
       <Button onClick={onTest}>测试</Button>
-      <Button type="primary" onClick={onSave}>{dirty ? '* 保存规则' : '保存规则'}</Button>
+      <Button
+        type="primary"
+        onClick={() => {
+          const isSaved = onSave();
+          if (isSaved) setShowSaveSuccess(true);
+        }}
+      >
+        <Space size={4}>
+          {showSaveSuccess ? <CheckOutlined /> : null}
+          <span>{dirty ? '* 保存规则' : '保存规则'}</span>
+        </Space>
+      </Button>
     </Space>
   </div>;
 }
