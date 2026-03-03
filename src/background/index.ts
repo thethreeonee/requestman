@@ -35,12 +35,13 @@ type RedirectCondition = {
   userAgentType?: 'device' | 'browser' | 'custom';
   userAgentPresetKey?: string;
   userAgentCustomValue?: string;
+  delayMs?: number;
   filter?: RedirectFilter;
 };
 
 export type RedirectRule = {
   id?: string;
-  type?: 'redirect_request' | 'rewrite_string' | 'query_params' | 'modify_headers' | 'user_agent' | 'cancel_request';
+  type?: 'redirect_request' | 'rewrite_string' | 'query_params' | 'modify_headers' | 'user_agent' | 'cancel_request' | 'request_delay';
   enabled?: boolean;
   groupId?: string;
   conditions?: RedirectCondition[];
@@ -338,7 +339,9 @@ async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: R
                 ? toUserAgentRule(c, index)
                 : rule.type === 'cancel_request'
                   ? toCancelRequestRule(c, index)
-                  : toOneRule(c, index);
+                  : rule.type === 'request_delay'
+                    ? null
+                    : toOneRule(c, index);
         index += 1;
         if (dnr) nextRules.push(dnr);
       }

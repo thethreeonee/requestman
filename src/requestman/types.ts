@@ -57,6 +57,7 @@ export type RedirectCondition = {
   userAgentType?: 'device' | 'browser' | 'custom';
   userAgentPresetKey?: string;
   userAgentCustomValue?: string;
+  delayMs: number;
   filter: RedirectFilter;
 };
 

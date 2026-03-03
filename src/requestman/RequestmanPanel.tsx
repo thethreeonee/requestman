@@ -125,6 +125,12 @@ export default function RequestmanPanel() {
       });
       if (invalid) return message.warning('还有条件配置未输入完整');
     }
+
+    if (workingRule.type === 'request_delay') {
+      const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !Number.isFinite(c.delayMs) || c.delayMs < 0);
+      if (invalid) return message.warning('还有条件配置未输入完整');
+    }
+
     if (workingRule.type === 'modify_headers') {
       const invalid = workingRule.conditions.some((c) => {
         const allModifications = [...c.requestHeaderModifications, ...c.responseHeaderModifications];
@@ -338,7 +344,7 @@ export default function RequestmanPanel() {
     } else if (currentRule.type === 'cancel_request') {
       detail = <CancelRequestRuleDetail {...detailProps} messageApi={message} />;
     } else {
-      detail = <RequestDelayRuleDetail {...detailProps} />;
+      detail = <RequestDelayRuleDetail {...detailProps} messageApi={message} />;
     }
 
     return <Suspense fallback={<div style={{ padding: 16 }}>加载中...</div>}>{detail}</Suspense>;
