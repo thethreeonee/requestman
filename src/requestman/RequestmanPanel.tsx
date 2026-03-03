@@ -23,7 +23,7 @@ const RequestDelayRuleDetail = lazy(() => import('./components/RequestDelayRuleD
 
 type PageState = { type: 'list' } | { type: 'detail'; ruleId: string; isNew: boolean };
 
-export default function RedirectPanel() {
+export default function RequestmanPanel() {
   const { message } = App.useApp();
   const [groups, setGroups] = useState<RedirectGroup[]>([]);
   const [rules, setRules] = useState<RedirectRule[]>([]);

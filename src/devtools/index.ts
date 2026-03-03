@@ -1,5 +1,5 @@
 chrome.devtools.panels.create(
   '🧰 Requestman',
   '',
-  'redirect/index.html',
+  'requestman/index.html',
 );

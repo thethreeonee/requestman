@@ -25,7 +25,7 @@ export default defineConfig({
     rollupOptions: {
       // ✅ 注意：这里的路径是相对于 root=src 的
       input: {
-        redirect: resolve(__dirname, 'src/redirect/index.html'),
+        requestman: resolve(__dirname, 'src/requestman/index.html'),
         devtools: resolve(__dirname, 'src/devtools/index.html'),
 
         // 纯脚本入口
