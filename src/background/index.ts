@@ -111,7 +111,7 @@ function applyConditionFilters(conditionRule: chrome.declarativeNetRequest.RuleC
     conditionRule.requestMethods = [requestMethod as chrome.declarativeNetRequest.RequestMethod];
   }
 
-  const requestHeaderKey = typeof filter?.requestHeaderKey === 'string' ? filter.requestHeaderKey.trim() : '';
+  const requestHeaderKey = typeof filter?.requestHeaderKey === 'string' ? filter.requestHeaderKey.trim().toLowerCase() : '';
   const requestHeaderValue = typeof filter?.requestHeaderValue === 'string' ? filter.requestHeaderValue.trim() : '';
   const requestHeaderOperator = filter?.requestHeaderOperator;
   if (requestHeaderKey && requestHeaderValue) {
