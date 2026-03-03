@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import {
   Button,
   Collapse,
-  Drawer,
   Form,
   Input,
   Modal,
@@ -22,6 +21,7 @@ import { MATCH_MODE_OPTIONS, MATCH_TARGET_OPTIONS, REQUEST_METHOD_OPTIONS, RESOU
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
 import type { RedirectCondition, RedirectGroup, RedirectRule } from '../types';
 import RuleDetailToolbar from './RuleDetailToolbar';
+import TestRuleDrawer from './TestRuleDrawer';
 
 type Props = {
   groups: RedirectGroup[];
@@ -155,19 +155,14 @@ export default function RedirectRuleDetail({
     >
       添加新条件配置
     </Button>
-    <Drawer title="测试规则" placement="bottom" open={testDrawerOpen} height={260} onClose={() => setTestDrawerOpen(false)}>
-      <Space.Compact style={{ width: '100%' }}>
-        <Input value={testUrl} onChange={(e) => setTestUrl(e.target.value)} placeholder="输入测试URL" />
-        <Button onClick={() => setTestResult(simulateRuleEffect(testUrl, [workingRule], currentGroupEnabled))}>测试</Button>
-      </Space.Compact>
-      <div style={{ marginTop: 12 }}>
-        {testResult ? (
-          testResult.ok
-            ? `命中条件：${testResult.matchedCondition.matchTarget}/${testResult.matchedCondition.matchMode}，结果：${testResult.redirectedUrl}`
-            : testResult.reason
-        ) : '输入 URL 后点击测试'}
-      </div>
-    </Drawer>
+    <TestRuleDrawer
+      open={testDrawerOpen}
+      testUrl={testUrl}
+      testResult={testResult}
+      onClose={() => setTestDrawerOpen(false)}
+      onTest={() => setTestResult(simulateRuleEffect(testUrl, [workingRule], currentGroupEnabled))}
+      onTestUrlChange={setTestUrl}
+    />
     <Modal open={filterModal.open} title="过滤条件" onCancel={() => setFilterModal({ open: false })} onOk={() => setFilterModal({ open: false })}>
       {activeCondition && <Form layout="vertical">
         <Form.Item label="页面域名"><Input value={activeCondition.filter.pageDomain} onChange={(e) => updateCondition(activeCondition.id, { filter: { ...activeCondition.filter, pageDomain: e.target.value } })} /></Form.Item>
