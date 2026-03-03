@@ -1,3 +1,4 @@
+import { getUserAgentByPresetKey } from '../requestman/user-agent-presets';
 export type MatchTarget = 'url' | 'host';
 export type MatchMode = 'equals' | 'contains' | 'regex' | 'wildcard';
 
@@ -31,12 +32,15 @@ type RedirectCondition = {
     key?: string;
     value?: string;
   }>;
+  userAgentType?: 'device' | 'browser' | 'custom';
+  userAgentPresetKey?: string;
+  userAgentCustomValue?: string;
   filter?: RedirectFilter;
 };
 
 export type RedirectRule = {
   id?: string;
-  type?: 'redirect_request' | 'rewrite_string' | 'query_params' | 'modify_headers';
+  type?: 'redirect_request' | 'rewrite_string' | 'query_params' | 'modify_headers' | 'user_agent';
   enabled?: boolean;
   groupId?: string;
   conditions?: RedirectCondition[];
@@ -181,6 +185,42 @@ function toQueryParamsRule(condition: RedirectCondition, index: number): chrome.
 }
 
 
+
+function toUserAgentRule(condition: RedirectCondition, index: number): chrome.declarativeNetRequest.Rule | null {
+  const expression = typeof condition.expression === 'string' ? condition.expression.trim() : '';
+  if (!expression) return null;
+  const id = REDIRECT_RULE_ID_BASE + index;
+  if (id > REDIRECT_RULE_ID_MAX) return null;
+
+  const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
+  const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
+  const regexFilter = matchTarget === 'host' ? buildHostRegex(matchMode, expression) : buildUrlRegex(matchMode, expression);
+  try { new RegExp(regexFilter); } catch { return null; }
+
+  const uaType = condition.userAgentType === 'browser' || condition.userAgentType === 'custom' ? condition.userAgentType : 'device';
+  const userAgentValue = uaType === 'custom'
+    ? (typeof condition.userAgentCustomValue === 'string' ? condition.userAgentCustomValue.trim() : '')
+    : getUserAgentByPresetKey(typeof condition.userAgentPresetKey === 'string' ? condition.userAgentPresetKey : '');
+  if (!userAgentValue) return null;
+
+  const action: chrome.declarativeNetRequest.RuleAction = {
+    type: 'modifyHeaders',
+    requestHeaders: [{
+      header: 'User-Agent',
+      operation: 'set',
+      value: userAgentValue,
+    }],
+  };
+
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other'] };
+  const filter = condition.filter ?? {};
+  if (typeof filter.pageDomain === 'string' && filter.pageDomain.trim()) conditionRule.initiatorDomains = [filter.pageDomain.trim()];
+  if (typeof filter.resourceType === 'string' && filter.resourceType !== 'all') conditionRule.resourceTypes = [filter.resourceType as chrome.declarativeNetRequest.ResourceType];
+  if (typeof filter.requestMethod === 'string' && filter.requestMethod !== 'all') conditionRule.requestMethods = [filter.requestMethod.toUpperCase() as chrome.declarativeNetRequest.RequestMethod];
+
+  return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
+}
+
 function toModifyHeadersRule(condition: RedirectCondition, index: number): chrome.declarativeNetRequest.Rule | null {
   const expression = typeof condition.expression === 'string' ? condition.expression.trim() : '';
   if (!expression) return null;
@@ -254,7 +294,9 @@ async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: R
             ? toQueryParamsRule(c, index)
             : rule.type === 'modify_headers'
               ? toModifyHeadersRule(c, index)
-              : toOneRule(c, index);
+              : rule.type === 'user_agent'
+                ? toUserAgentRule(c, index)
+                : toOneRule(c, index);
         index += 1;
         if (dnr) nextRules.push(dnr);
       }
