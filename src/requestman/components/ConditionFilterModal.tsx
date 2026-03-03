@@ -28,7 +28,7 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
 
   const renderResetButton = (title: string, onClick: () => void) => (
     <Tooltip title={title}>
-      <Button type="text" icon={<ReloadOutlined />} onClick={onClick} style={{ width: 32 }} />
+      <Button icon={<ReloadOutlined />} onClick={onClick} style={{ width: 32 }} />
     </Tooltip>
   );
 
