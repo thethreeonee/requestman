@@ -18,7 +18,7 @@ export const MATCH_MODE_OPTIONS = [
 ] as const;
 
 export const RESOURCE_TYPE_OPTIONS = [
-  { label: '所有', value: 'all' },
+  { label: '<所有>', value: 'all' },
   { label: 'XHR', value: 'xmlhttprequest' },
   { label: 'JS', value: 'script' },
   { label: 'CSS', value: 'stylesheet' },
@@ -31,7 +31,7 @@ export const RESOURCE_TYPE_OPTIONS = [
 ] as const;
 
 export const REQUEST_METHOD_OPTIONS = [
-  { label: '所有', value: 'all' },
+  { label: '<所有>', value: 'all' },
   { label: 'GET', value: 'get' },
   { label: 'POST', value: 'post' },
   { label: 'PUT', value: 'put' },
