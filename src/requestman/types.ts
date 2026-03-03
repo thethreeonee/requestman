@@ -57,6 +57,8 @@ export type RedirectCondition = {
   rewriteTo: string;
   redirectType: 'url' | 'file';
   redirectTarget: string;
+  redirectUrlTarget?: string;
+  redirectFileTarget?: string;
   queryParamModifications: QueryParamModification[];
   requestHeaderModifications: HeaderModification[];
   responseHeaderModifications: HeaderModification[];

@@ -29,6 +29,8 @@ export function createDefaultCondition(): RedirectCondition {
     rewriteTo: '',
     redirectType: 'url',
     redirectTarget: '',
+    redirectUrlTarget: '',
+    redirectFileTarget: '',
     queryParamModifications: [{ id: genId(), action: 'add', key: '', value: '' }],
     requestHeaderModifications: [],
     responseHeaderModifications: [],
@@ -53,6 +55,13 @@ export function createDefaultCondition(): RedirectCondition {
       requestHeaderValue: '',
     },
   };
+}
+
+export function getConditionRedirectTarget(condition: Pick<RedirectCondition, 'redirectType' | 'redirectTarget' | 'redirectUrlTarget' | 'redirectFileTarget'>): string {
+  if (condition.redirectType === 'file') {
+    return (condition.redirectFileTarget ?? '').trim() || condition.redirectTarget.trim();
+  }
+  return (condition.redirectUrlTarget ?? '').trim() || condition.redirectTarget.trim();
 }
 
 export function normalizeGroups(input: unknown): RedirectGroup[] {
@@ -137,6 +146,24 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
               ? c.redirectTarget
               : typeof c.redirectUrl === 'string'
                 ? c.redirectUrl
+                : '',
+            redirectUrlTarget: typeof c.redirectUrlTarget === 'string'
+              ? c.redirectUrlTarget
+              : c.redirectType === 'file'
+                ? ''
+                : typeof c.redirectTarget === 'string'
+                  ? c.redirectTarget
+                  : typeof c.redirectUrl === 'string'
+                    ? c.redirectUrl
+                    : '',
+            redirectFileTarget: typeof c.redirectFileTarget === 'string'
+              ? c.redirectFileTarget
+              : c.redirectType === 'file'
+                ? (typeof c.redirectTarget === 'string'
+                  ? c.redirectTarget
+                  : typeof c.redirectUrl === 'string'
+                    ? c.redirectUrl
+                    : '')
                 : '',
             queryParamModifications: Array.isArray(c.queryParamModifications) && c.queryParamModifications.length > 0
               ? c.queryParamModifications
@@ -287,7 +314,7 @@ export function simulateRuleEffect(
       if (!groups) continue;
 
       if (rule.type === 'redirect_request') {
-        const redirectTarget = condition.redirectTarget.trim();
+        const redirectTarget = getConditionRedirectTarget(condition);
         if (!redirectTarget) continue;
         return {
           ok: true,
