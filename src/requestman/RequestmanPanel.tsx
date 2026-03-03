@@ -118,8 +118,17 @@ export default function RequestmanPanel() {
     if (workingRule.type === 'modify_headers') {
       const invalid = workingRule.conditions.some((c) => {
         const allModifications = [...c.requestHeaderModifications, ...c.responseHeaderModifications];
-        if (!c.expression.trim() || allModifications.length === 0) return true;
-        return allModifications.some((item) => !item.key.trim() || (item.action !== 'delete' && !item.value.trim()));
+        const hasAnyModificationInput = allModifications.some((item) => item.key.trim() || item.value.trim());
+        const hasValidModification = allModifications.some((item) => item.key.trim() && (item.action === 'delete' || item.value.trim()));
+        const hasInvalidPartialModification = allModifications.some((item) => {
+          const hasAnyInput = !!(item.key.trim() || item.value.trim());
+          if (!hasAnyInput) return false;
+          return !item.key.trim() || (item.action !== 'delete' && !item.value.trim());
+        });
+        if (!c.expression.trim()) return true;
+        if (!hasAnyModificationInput) return true;
+        if (!hasValidModification) return true;
+        return hasInvalidPartialModification;
       });
       if (invalid) return message.warning('还有条件配置未输入完整');
     }
