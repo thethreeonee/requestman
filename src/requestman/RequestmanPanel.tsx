@@ -225,10 +225,10 @@ export default function RequestmanPanel() {
     setWorkingRule((prev) => (prev?.id === ruleId ? { ...prev, enabled } : prev));
     setOriginalRule((prev) => (prev?.id === ruleId ? { ...prev, enabled } : prev));
     if (enabled) {
-      message.success('规则已启用');
+      message.success({ content: '规则已启用', duration: 0.8 });
       return;
     }
-    message.warning('规则已停用');
+    message.warning({ content: '规则已停用', duration: 0.8 });
   };
 
   const moveRuleToGroup = () => {
