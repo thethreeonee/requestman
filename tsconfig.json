@@ -1,39 +1,27 @@
 {
   "compilerOptions": {
-    /* 基础 */
     "target": "ES2022",
     "lib": ["ES2022", "DOM"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-
-    /* React */
     "jsx": "react-jsx",
-
-    /* 类型 */
     "types": ["chrome"],
+    "typeRoots": ["./types", "./node_modules/@types"],
     "allowJs": false,
-
-    /* 严格 */
     "strict": true,
     "noImplicitAny": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-
-    /* 路径 */
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
     },
-
-    /* 兼容性 */
     "isolatedModules": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-
-    /* 不生成 JS（由 Vite 负责） */
     "noEmit": true
   },
-  "include": ["src"],
+  "include": ["src", "types"],
   "exclude": ["dist", "node_modules"]
 }
