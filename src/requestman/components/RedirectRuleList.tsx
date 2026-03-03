@@ -16,6 +16,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   FolderOpenOutlined,
+  FolderAddOutlined,
   CaretRightOutlined,
   RetweetOutlined,
   EllipsisOutlined,
@@ -27,6 +28,7 @@ import {
   UserOutlined,
   StopOutlined,
   ClockCircleOutlined,
+  PlusOutlined,
 } from '@ant-design/icons';
 import { RULE_TYPE_LABEL_MAP } from '../constants';
 import { genId } from '../rule-utils';
@@ -535,7 +537,13 @@ export default function RedirectRuleList({
         ] }} trigger={['click']}>
           <Button icon={<EllipsisOutlined />} />
         </Dropdown>
-        <Button onClick={() => { setGroupModal({ open: true, mode: 'create' }); setGroupInput(''); }}>新建规则组</Button>
+        <Tooltip title="新建规则组">
+          <Button
+            icon={<FolderAddOutlined />}
+            aria-label="新建规则组"
+            onClick={() => { setGroupModal({ open: true, mode: 'create' }); setGroupInput(''); }}
+          />
+        </Tooltip>
         <Dropdown
           menu={{
             items: [
@@ -578,9 +586,10 @@ export default function RedirectRuleList({
               },
             ],
           }}
+          overlayStyle={{ minWidth: 320 }}
           trigger={['click']}
         >
-          <Button type="primary">新建规则</Button>
+          <Button type="primary" icon={<PlusOutlined />}>新建规则</Button>
         </Dropdown>
       </Space>
     </div>
