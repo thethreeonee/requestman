@@ -51,7 +51,10 @@ type Props = {
   confirmGroupModal: () => void;
   setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
   setGroups: React.Dispatch<React.SetStateAction<RedirectGroup[]>>;
-  messageApi: { success: (content: string) => void };
+  messageApi: {
+    success: (content: string) => void;
+    warning: (content: string) => void;
+  };
   exportConfig: () => void;
   importConfig: () => void;
 };
@@ -361,7 +364,11 @@ export default function RedirectRuleList({
 
   const handleRuleEnabledChange = (rule: RedirectRule, value: boolean) => {
     setRules((prev) => prev.map((r) => r.id === rule.id ? { ...r, enabled: value } : r));
-    messageApi.success(`规则「${rule.name}」已${value ? '开启' : '关闭'}`);
+    if (value) {
+      messageApi.success(`规则「${rule.name}」已开启`);
+      return;
+    }
+    messageApi.warning(`规则「${rule.name}」已关闭`);
   };
 
   const clearDragState = () => {
@@ -740,7 +747,7 @@ export default function RedirectRuleList({
                     okButtonProps: { danger: true },
                     onOk: () => {
                       setRules((prev) => prev.filter((r) => r.id !== row.rule.id));
-                      messageApi.success(`规则「${row.rule.name}」已删除`);
+                      messageApi.warning(`规则「${row.rule.name}」已删除`);
                     },
                   }),
                 },
