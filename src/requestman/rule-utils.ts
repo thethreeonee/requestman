@@ -1,4 +1,4 @@
-import { DEFAULT_GROUP_ID, DEFAULT_GROUP_NAME } from './constants';
+import { DEFAULT_GROUP_ID, DEFAULT_GROUP_NAME, DEFAULT_MODIFY_REQUEST_BODY_SCRIPT } from './constants';
 import type { MatchMode, RedirectCondition, RedirectGroup, RedirectRule } from './types';
 
 const RULE_TYPES: RedirectRule['type'][] = [
@@ -36,6 +36,8 @@ export function createDefaultCondition(): RedirectCondition {
     userAgentPresetKey: 'android_phone',
     userAgentCustomValue: '',
     delayMs: 0,
+    requestBodyMode: 'static',
+    requestBodyValue: '',
     filter: {
       pageDomain: '',
       resourceType: 'all',
@@ -127,6 +129,14 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
             userAgentPresetKey: typeof c.userAgentPresetKey === 'string' && c.userAgentPresetKey ? c.userAgentPresetKey : 'android_phone',
             userAgentCustomValue: typeof c.userAgentCustomValue === 'string' ? c.userAgentCustomValue : '',
             delayMs: typeof c.delayMs === 'number' && Number.isFinite(c.delayMs) && c.delayMs >= 0 ? Math.floor(c.delayMs) : 0,
+            requestBodyMode: c.requestBodyMode === 'dynamic' ? 'dynamic' : 'static',
+            requestBodyValue: typeof c.requestBodyValue === 'string'
+              ? c.requestBodyValue
+              : c.requestBodyScript && typeof c.requestBodyScript === 'string'
+                ? c.requestBodyScript
+                : c.requestBodyMode === 'dynamic'
+                  ? DEFAULT_MODIFY_REQUEST_BODY_SCRIPT
+                  : '',
             filter: {
               pageDomain: typeof filterObj.pageDomain === 'string' ? filterObj.pageDomain : '',
               resourceType: typeof filterObj.resourceType === 'string' ? (filterObj.resourceType as RedirectCondition['filter']['resourceType']) : 'all',

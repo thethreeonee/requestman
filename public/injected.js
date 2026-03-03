@@ -5,9 +5,10 @@
  * 避免把注入逻辑分散到 background/content 等模块。
  */
 (() => {
-  const MESSAGE_TYPE = '__REQUESTMAN_DELAY_RULES__';
+  const MESSAGE_TYPE = '__REQUESTMAN_RUNTIME_RULES__';
   const SOURCE = 'requestman-extension';
   let delayRules = [];
+  let modifyRequestBodyRules = [];
 
   const nativeFetch = window.fetch;
   const nativeXhrOpen = window.XMLHttpRequest && window.XMLHttpRequest.prototype.open;
@@ -69,6 +70,52 @@
     return maxDelayMs;
   }
 
+  function parseBodyAsJson(body) {
+    if (!body || typeof body !== 'string') return null;
+    try {
+      return JSON.parse(body);
+    } catch {
+      return null;
+    }
+  }
+
+  function runDynamicBodyScript(script, args, fallbackBody) {
+    try {
+      const dynamicModifier = new Function(`${script}\nreturn typeof modifyRequestBody === 'function' ? modifyRequestBody : null;`)();
+      if (typeof dynamicModifier !== 'function') return fallbackBody;
+      const result = dynamicModifier(args);
+      if (result === undefined || result === null) return '';
+      if (typeof result === 'string') return result;
+      if (typeof result === 'object') return JSON.stringify(result);
+      return String(result);
+    } catch {
+      return fallbackBody;
+    }
+  }
+
+  function resolveRequestBody(url, method, resourceType, body) {
+    if (typeof body !== 'string') return body;
+    let nextBody = body;
+
+    for (const rule of modifyRequestBodyRules) {
+      if (!matchFilter(method, resourceType, rule.filter)) continue;
+      if (!matchesRule(url, rule)) continue;
+
+      if (rule.requestBodyMode === 'dynamic') {
+        nextBody = runDynamicBodyScript(rule.requestBodyValue, {
+          method: String(method || 'GET').toUpperCase(),
+          url,
+          body: nextBody,
+          bodyAsJson: parseBodyAsJson(nextBody),
+        }, nextBody);
+      } else {
+        nextBody = rule.requestBodyValue;
+      }
+    }
+
+    return nextBody;
+  }
+
   function wait(ms) {
     return new Promise((resolve) => {
       setTimeout(resolve, ms);
@@ -77,8 +124,9 @@
 
   window.addEventListener('message', (event) => {
     const data = event.data;
-    if (!data || data.source !== SOURCE || data.type !== MESSAGE_TYPE || !Array.isArray(data.rules)) return;
-    delayRules = data.rules;
+    if (!data || data.source !== SOURCE || data.type !== MESSAGE_TYPE) return;
+    delayRules = Array.isArray(data.delayRules) ? data.delayRules : [];
+    modifyRequestBodyRules = Array.isArray(data.modifyRequestBodyRules) ? data.modifyRequestBodyRules : [];
   });
 
   if (typeof nativeFetch === 'function') {
@@ -100,6 +148,21 @@
 
       const delayMs = getDelayMs(url, method, 'xmlhttprequest');
       if (delayMs > 0) await wait(delayMs);
+
+      let body = null;
+      if (typeof init?.body === 'string') {
+        body = init.body;
+      } else if (typeof Request !== 'undefined' && input instanceof Request && !init?.body) {
+        body = await input.clone().text();
+      }
+
+      if (typeof body === 'string') {
+        const nextBody = resolveRequestBody(url, method, 'xmlhttprequest', body);
+        if (typeof nextBody === 'string' && nextBody !== body) {
+          return nativeFetch.call(this, input, { ...(init || {}), body: nextBody, method });
+        }
+      }
+
       return nativeFetch.call(this, input, init);
     };
   }
@@ -112,12 +175,15 @@
     };
 
     window.XMLHttpRequest.prototype.send = function requestmanDelayedXhrSend(body) {
-      const delayMs = getDelayMs(this.__requestmanUrl, this.__requestmanMethod, 'xmlhttprequest');
+      const method = this.__requestmanMethod;
+      const url = this.__requestmanUrl;
+      const delayMs = getDelayMs(url, method, 'xmlhttprequest');
+      const requestBody = typeof body === 'string' ? resolveRequestBody(url, method, 'xmlhttprequest', body) : body;
       if (delayMs <= 0) {
-        return nativeXhrSend.call(this, body);
+        return nativeXhrSend.call(this, requestBody);
       }
       setTimeout(() => {
-        nativeXhrSend.call(this, body);
+        nativeXhrSend.call(this, requestBody);
       }, delayMs);
       return undefined;
     };
