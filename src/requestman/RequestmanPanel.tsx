@@ -108,21 +108,30 @@ export default function RequestmanPanel() {
   };
 
   const saveDetailRule = () => {
-    if (!workingRule || page.type !== 'detail') return;
+    if (!workingRule || page.type !== 'detail') return false;
     if (workingRule.type === 'redirect_request') {
       const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !c.redirectTarget.trim());
-      if (invalid) return message.warning('还有条件配置未输入完整');
+      if (invalid) {
+        message.warning('还有条件配置未输入完整');
+        return false;
+      }
     }
     if (workingRule.type === 'rewrite_string') {
       const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !c.rewriteFrom.trim());
-      if (invalid) return message.warning('还有条件配置未输入完整');
+      if (invalid) {
+        message.warning('还有条件配置未输入完整');
+        return false;
+      }
     }
     if (workingRule.type === 'query_params') {
       const invalid = workingRule.conditions.some((c) => {
         if (!c.expression.trim() || c.queryParamModifications.length === 0) return true;
         return c.queryParamModifications.some((item) => !item.key.trim() || (item.action !== 'delete' && !item.value.trim()));
       });
-      if (invalid) return message.warning('还有条件配置未输入完整');
+      if (invalid) {
+        message.warning('还有条件配置未输入完整');
+        return false;
+      }
     }
 
 
@@ -135,7 +144,10 @@ export default function RequestmanPanel() {
         }
         return !c.requestBodyStaticValue.trim();
       });
-      if (invalid) return message.warning('还有条件配置未输入完整或 JavaScript 无效');
+      if (invalid) {
+        message.warning('还有条件配置未输入完整或 JavaScript 无效');
+        return false;
+      }
     }
 
 
@@ -148,7 +160,10 @@ export default function RequestmanPanel() {
         }
         return !c.responseBodyStaticValue.trim();
       });
-      if (invalid) return message.warning('还有条件配置未输入完整或 JavaScript 无效');
+      if (invalid) {
+        message.warning('还有条件配置未输入完整或 JavaScript 无效');
+        return false;
+      }
     }
 
     if (workingRule.type === 'user_agent') {
@@ -158,12 +173,18 @@ export default function RequestmanPanel() {
         if (type === 'custom') return !c.userAgentCustomValue?.trim();
         return !c.userAgentPresetKey?.trim();
       });
-      if (invalid) return message.warning('还有条件配置未输入完整');
+      if (invalid) {
+        message.warning('还有条件配置未输入完整');
+        return false;
+      }
     }
 
     if (workingRule.type === 'request_delay') {
       const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !Number.isFinite(c.delayMs) || c.delayMs < 0);
-      if (invalid) return message.warning('还有条件配置未输入完整');
+      if (invalid) {
+        message.warning('还有条件配置未输入完整');
+        return false;
+      }
     }
 
     if (workingRule.type === 'modify_headers') {
@@ -181,7 +202,10 @@ export default function RequestmanPanel() {
         if (!hasValidModification) return true;
         return hasInvalidPartialModification;
       });
-      if (invalid) return message.warning('还有条件配置未输入完整');
+      if (invalid) {
+        message.warning('还有条件配置未输入完整');
+        return false;
+      }
     }
     setRules((prev) => {
       if (page.isNew && !prev.some((r) => r.id === workingRule.id)) {
@@ -193,7 +217,7 @@ export default function RequestmanPanel() {
       setPage({ type: 'detail', ruleId: workingRule.id, isNew: false });
     }
     setOriginalRule(JSON.parse(JSON.stringify(workingRule)));
-    message.success('规则已保存');
+    return true;
   };
 
   const toggleDetailRuleEnabled = (ruleId: string, enabled: boolean) => {
