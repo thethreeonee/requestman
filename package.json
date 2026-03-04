@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",
-    "build": "vite build && node scripts/copy-static.mjs",
-    "check:references": "node scripts/check-references.mjs"
+    "build": "npm run build:chrome && npm run build:firefox",
+    "check:references": "node scripts/check-references.mjs",
+    "build:chrome": "BUILD_TARGET=chrome vite build && node scripts/copy-static.mjs chrome",
+    "build:firefox": "BUILD_TARGET=firefox vite build && node scripts/copy-static.mjs firefox",
+    "package:firefox": "npm run build:firefox && node scripts/package-firefox.mjs"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.4",

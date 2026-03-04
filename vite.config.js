@@ -3,6 +3,8 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 
+const buildTarget = process.env.BUILD_TARGET === 'firefox' ? 'firefox' : 'chrome';
+
 export default defineConfig({
   // ✅ 关键：把 src 当成项目根
   root: resolve(__dirname, 'src'),
@@ -13,11 +15,11 @@ export default defineConfig({
   base: './',
 
   // ✅ public 目录仍然使用项目根下的 /public（不在 src 里）
-  publicDir: resolve(__dirname, 'public'),
+  publicDir: false,
 
   build: {
     // ✅ outDir 相对于 root=src，所以要写到 ../dist
-    outDir: resolve(__dirname, 'dist'),
+    outDir: resolve(__dirname, `dist/${buildTarget}`),
     emptyOutDir: true,
     cssCodeSplit: true,
     chunkSizeWarningLimit: 1000,
