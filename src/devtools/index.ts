@@ -1,5 +1,7 @@
+const isFirefox = typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent);
+
 chrome.devtools.panels.create(
-  '🧰 Requestman',
+  isFirefox ? 'Requestman' : '🧰 Requestman',
   '',
-  'requestman/index.html',
+  isFirefox ? '/requestman/index.html' : 'requestman/index.html',
 );
