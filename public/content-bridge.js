@@ -52,7 +52,7 @@
     container.style.top = '16px';
     container.style.right = '16px';
     container.style.zIndex = '2147483647';
-    container.style.minWidth = '450px';
+    container.style.minWidth = '375px';
     container.style.maxWidth = '560px';
     container.style.background = 'rgba(20, 20, 24, 0.95)';
     container.style.color = '#f1f5f9';
@@ -210,6 +210,7 @@
     const icon = createRuleTypeIcon(ruleType);
     const nameNode = document.createElement('span');
     nameNode.style.fontSize = '14px';
+    nameNode.style.lineHeight = '16px';
     nameNode.textContent = ruleName;
     item.appendChild(icon);
     item.appendChild(nameNode);
