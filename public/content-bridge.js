@@ -5,6 +5,8 @@
   const GROUPS_KEY = 'asap_redirect_groups_v1';
   const ENABLED_KEY = 'asap_redirect_enabled_v1';
   const TOAST_VISIBLE_MS = 3000;
+  const TOAST_ENTER_MS = 180;
+  const TOAST_EXIT_MS = 160;
   const RULE_TYPE_ICON_DEFS = {
     redirect_request: { viewBox: '0 0 1024 1024', paths: ['M136 552h63.6c4.4 0 8-3.6 8-8V288.7h528.6v72.6c0 1.9.6 3.7 1.8 5.2a8.3 8.3 0 0011.7 1.4L893 255.4c4.3-5 3.6-10.3 0-13.2L749.7 129.8a8.22 8.22 0 00-5.2-1.8c-4.6 0-8.4 3.8-8.4 8.4V209H199.7c-39.5 0-71.7 32.2-71.7 71.8V544c0 4.4 3.6 8 8 8zm752-80h-63.6c-4.4 0-8 3.6-8 8v255.3H287.8v-72.6c0-1.9-.6-3.7-1.8-5.2a8.3 8.3 0 00-11.7-1.4L131 768.6c-4.3 5-3.6 10.3 0 13.2l143.3 112.4c1.5 1.2 3.3 1.8 5.2 1.8 4.6 0 8.4-3.8 8.4-8.4V815h536.6c39.5 0 71.7-32.2 71.7-71.8V480c-.2-4.4-3.8-8-8.2-8z'] },
     rewrite_string: { viewBox: '64 64 896 896', paths: ['M516 673c0 4.4 3.4 8 7.5 8h185c4.1 0 7.5-3.6 7.5-8v-48c0-4.4-3.4-8-7.5-8h-185c-4.1 0-7.5 3.6-7.5 8v48zm-194.9 6.1l192-161c3.8-3.2 3.8-9.1 0-12.3l-192-160.9A7.95 7.95 0 00308 351v62.7c0 2.4 1 4.6 2.9 6.1L420.7 512l-109.8 92.2a8.1 8.1 0 00-2.9 6.1V673c0 6.8 7.9 10.5 13.1 6.1zM880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 728H184V184h656v656z'] },
@@ -20,6 +22,8 @@
   let hitToast = null;
   let hitListNode = null;
   let hideToastTimer = null;
+  let hideAnimationTimer = null;
+  const renderedRuleKeys = new Set();
 
   function createRuleTypeIcon(ruleType) {
     const iconDef = RULE_TYPE_ICON_DEFS[ruleType] || RULE_TYPE_ICON_DEFS.redirect_request;
@@ -58,6 +62,9 @@
     container.style.overflow = 'hidden';
     container.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
     container.style.display = 'none';
+    container.style.opacity = '0';
+    container.style.transform = 'translateY(-8px)';
+    container.style.transition = `opacity ${TOAST_ENTER_MS}ms ease, transform ${TOAST_ENTER_MS}ms ease`;
 
     const header = document.createElement('div');
     header.style.display = 'flex';
@@ -71,7 +78,7 @@
     headerLeft.style.gap = '8px';
 
     const logo = document.createElement('img');
-    logo.src = chrome.runtime.getURL('assets/icon-16.png');
+    logo.src = chrome.runtime.getURL('assets/icon.svg');
     logo.alt = 'Requestman';
     logo.style.width = '16px';
     logo.style.height = '16px';
@@ -126,16 +133,63 @@
     return { container, list };
   }
 
+  function showHitToast(container) {
+    if (hideAnimationTimer) {
+      clearTimeout(hideAnimationTimer);
+      hideAnimationTimer = null;
+    }
+
+    if (container.style.display !== 'block') {
+      container.style.display = 'block';
+      container.style.opacity = '0';
+      container.style.transform = 'translateY(-8px)';
+      requestAnimationFrame(() => {
+        container.style.opacity = '1';
+        container.style.transform = 'translateY(0)';
+      });
+      return;
+    }
+
+    container.style.opacity = '1';
+    container.style.transform = 'translateY(0)';
+  }
+
   function hideHitToast() {
     if (hideToastTimer) {
       clearTimeout(hideToastTimer);
       hideToastTimer = null;
     }
-    if (hitToast) hitToast.style.display = 'none';
+    if (!hitToast) return;
+
+    hitToast.style.opacity = '0';
+    hitToast.style.transform = 'translateY(-8px)';
+
+    if (hideAnimationTimer) clearTimeout(hideAnimationTimer);
+    hideAnimationTimer = setTimeout(() => {
+      if (!hitToast) return;
+      hitToast.style.display = 'none';
+      if (hitListNode) hitListNode.innerHTML = '';
+      renderedRuleKeys.clear();
+      hideAnimationTimer = null;
+    }, TOAST_EXIT_MS);
   }
 
   function renderHitRecord(record) {
     const { container, list } = ensureHitToast();
+    const ruleType = typeof record.ruleType === 'string' && record.ruleType ? record.ruleType : 'redirect_request';
+    const ruleName = typeof record.ruleName === 'string' && record.ruleName.trim() ? record.ruleName.trim() : '未命名规则';
+    const ruleId = typeof record.ruleId === 'string' ? record.ruleId.trim() : '';
+    const dedupeKey = `${ruleType}::${ruleId || ruleName}`;
+
+    showHitToast(container);
+    if (renderedRuleKeys.has(dedupeKey)) {
+      if (hideToastTimer) clearTimeout(hideToastTimer);
+      hideToastTimer = setTimeout(() => {
+        hideHitToast();
+      }, TOAST_VISIBLE_MS);
+      return;
+    }
+    renderedRuleKeys.add(dedupeKey);
     const item = document.createElement('li');
     item.style.listStyle = 'none';
     item.style.background = 'rgba(148, 163, 184, 0.08)';
@@ -144,15 +198,13 @@
     item.style.display = 'flex';
     item.style.alignItems = 'center';
     item.style.gap = '8px';
-    const icon = createRuleTypeIcon(record.ruleType);
-    const ruleName = typeof record.ruleName === 'string' && record.ruleName.trim() ? record.ruleName.trim() : '未命名规则';
+    const icon = createRuleTypeIcon(ruleType);
     const nameNode = document.createElement('span');
     nameNode.style.fontSize = '14px';
     nameNode.textContent = ruleName;
     item.appendChild(icon);
     item.appendChild(nameNode);
     list.appendChild(item);
-    container.style.display = 'block';
 
     if (hideToastTimer) clearTimeout(hideToastTimer);
     hideToastTimer = setTimeout(() => {
@@ -188,6 +240,7 @@
         if (!delayMs) continue;
         conditions.push({
           ruleName: typeof rule.name === 'string' ? rule.name : '',
+          ruleId: typeof rule.id === 'string' ? rule.id : '',
           ruleType: 'request_delay',
           expression: condition.expression.trim(),
           matchTarget: condition.matchTarget === 'host' ? 'host' : 'url',
@@ -226,6 +279,7 @@
         if (!requestBodyValue.trim()) continue;
         conditions.push({
           ruleName: typeof rule.name === 'string' ? rule.name : '',
+          ruleId: typeof rule.id === 'string' ? rule.id : '',
           ruleType: 'modify_request_body',
           expression: condition.expression.trim(),
           matchTarget: condition.matchTarget === 'host' ? 'host' : 'url',
@@ -266,6 +320,7 @@
         if (!responseBodyValue.trim()) continue;
         conditions.push({
           ruleName: typeof rule.name === 'string' ? rule.name : '',
+          ruleId: typeof rule.id === 'string' ? rule.id : '',
           ruleType: 'modify_response_body',
           expression: condition.expression.trim(),
           matchTarget: condition.matchTarget === 'host' ? 'host' : 'url',
