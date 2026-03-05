@@ -141,6 +141,7 @@
       source: SOURCE,
       type: HIT_MESSAGE_TYPE,
       payload: {
+        ruleId: typeof rule?.ruleId === 'string' ? rule.ruleId : '',
         ruleName: typeof rule?.ruleName === 'string' ? rule.ruleName : '',
         ruleType: typeof rule?.ruleType === 'string' ? rule.ruleType : 'redirect_request',
       },
