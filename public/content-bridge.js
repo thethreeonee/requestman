@@ -188,8 +188,8 @@
     const ruleId = typeof record.ruleId === 'string' ? record.ruleId.trim() : '';
     const dedupeKey = `${ruleType}::${ruleId || ruleName}`;
 
-    showHitToast(container);
     if (renderedRuleKeys.has(dedupeKey)) {
+      showHitToast(container);
       if (hideToastTimer) clearTimeout(hideToastTimer);
       hideToastTimer = setTimeout(() => {
         hideHitToast();
@@ -212,6 +212,7 @@
     item.appendChild(icon);
     item.appendChild(nameNode);
     list.appendChild(item);
+    showHitToast(container);
 
     if (hideToastTimer) clearTimeout(hideToastTimer);
     hideToastTimer = setTimeout(() => {
