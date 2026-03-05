@@ -86,6 +86,7 @@
     const title = document.createElement('strong');
     title.textContent = 'Requestman';
     title.style.fontSize = '10px';
+    title.style.lineHeight = '1';
     title.style.letterSpacing = '0.2px';
 
     headerLeft.appendChild(logo);
@@ -109,11 +110,14 @@
 
     const body = document.createElement('div');
     body.style.padding = '14px';
+    body.style.display = 'flex';
+    body.style.flexDirection = 'column';
+    body.style.rowGap = '10px';
 
     const hint = document.createElement('div');
     hint.textContent = '以下规则已在当前页生效';
     hint.style.fontSize = '12px';
-    hint.style.marginBottom = '10px';
+    hint.style.lineHeight = '16px';
 
     const list = document.createElement('ul');
     list.style.margin = '0';
