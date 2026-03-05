@@ -66,7 +66,33 @@ export const REDIRECT_ENABLED_KEY = 'asap_redirect_enabled_v1';
 export const REDIRECT_GROUPS_KEY = 'asap_redirect_groups_v1';
 export const REDIRECT_RULE_ID_BASE = 10000;
 export const REDIRECT_RULE_ID_MAX = 19999;
+const MANAGED_RULE_META_KEY = 'asap_redirect_rule_meta_v1';
 const managedRuleMeta = new Map<number, { ruleName: string; ruleType: string }>();
+let managedRuleMetaHydrated = false;
+
+async function hydrateManagedRuleMeta() {
+  if (managedRuleMetaHydrated) return;
+  managedRuleMetaHydrated = true;
+  const stored = await chrome.storage.local.get([MANAGED_RULE_META_KEY]);
+  const list = Array.isArray(stored?.[MANAGED_RULE_META_KEY]) ? stored[MANAGED_RULE_META_KEY] : [];
+  for (const item of list) {
+    const ruleId = typeof item?.ruleId === 'number' && Number.isInteger(item.ruleId) ? item.ruleId : null;
+    if (ruleId === null) continue;
+    managedRuleMeta.set(ruleId, {
+      ruleName: typeof item?.ruleName === 'string' ? item.ruleName : '',
+      ruleType: typeof item?.ruleType === 'string' ? item.ruleType : 'redirect_request',
+    });
+  }
+}
+
+async function persistManagedRuleMeta() {
+  const serialized = Array.from(managedRuleMeta.entries()).map(([ruleId, meta]) => ({
+    ruleId,
+    ruleName: meta.ruleName,
+    ruleType: meta.ruleType,
+  }));
+  await chrome.storage.local.set({ [MANAGED_RULE_META_KEY]: serialized });
+}
 
 function escapeRegex(value: string) { return value.replace(/[|\\{}()[\]^$+?.]/g, '\\$&'); }
 function wildcardToRegexBody(pattern: string) { return escapeRegex(pattern).replace(/\*/g, '.*'); }
@@ -386,6 +412,7 @@ async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: R
   }
 
   await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: getManagedRuleIds(), addRules: nextRules });
+  await persistManagedRuleMeta();
   return { ok: true, activeCount: nextRules.length };
 }
 
@@ -413,9 +440,16 @@ if (chrome.declarativeNetRequest.onRuleMatchedDebug) {
     const tabId = normalizeNumericId(info.request?.tabId);
     const ruleId = normalizeNumericId(info.rule?.ruleId);
     if (tabId === null || ruleId === null) return;
-    const meta = managedRuleMeta.get(ruleId) || { ruleName: '', ruleType: 'redirect_request' };
-    chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: meta }, () => {
-      void chrome.runtime.lastError;
-    });
+
+    void (async () => {
+      let meta = managedRuleMeta.get(ruleId);
+      if (!meta) {
+        await hydrateManagedRuleMeta();
+        meta = managedRuleMeta.get(ruleId);
+      }
+      chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: meta || { ruleName: '', ruleType: 'redirect_request' } }, () => {
+        void chrome.runtime.lastError;
+      });
+    })();
   });
 }
