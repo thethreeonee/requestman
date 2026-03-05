@@ -403,10 +403,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 if (chrome.declarativeNetRequest.onRuleMatchedDebug) {
+  const normalizeNumericId = (value: unknown) => {
+    if (typeof value === 'number' && Number.isInteger(value)) return value;
+    if (typeof value === 'string' && /^\d+$/.test(value)) return Number(value);
+    return null;
+  };
+
   chrome.declarativeNetRequest.onRuleMatchedDebug.addListener((info) => {
-    const tabId = info.request?.tabId;
-    const ruleId = info.rule?.ruleId;
-    if (!Number.isInteger(tabId) || !Number.isInteger(ruleId)) return;
+    const tabId = normalizeNumericId(info.request?.tabId);
+    const ruleId = normalizeNumericId(info.rule?.ruleId);
+    if (tabId === null || ruleId === null) return;
     const meta = managedRuleMeta.get(ruleId) || { ruleName: '', ruleType: 'redirect_request' };
     chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: meta }, () => {
       void chrome.runtime.lastError;
