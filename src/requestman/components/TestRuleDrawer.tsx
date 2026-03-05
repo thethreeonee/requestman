@@ -13,6 +13,7 @@ type Props = {
 
 const resultBlockStyle: React.CSSProperties = {
   marginTop: 12,
+  minHeight: 112,
   display: 'flex',
   flexDirection: 'column',
   gap: 10,
