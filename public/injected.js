@@ -6,6 +6,7 @@
  */
 (() => {
   const MESSAGE_TYPE = '__REQUESTMAN_RUNTIME_RULES__';
+  const HIT_MESSAGE_TYPE = '__REQUESTMAN_RULE_HIT__';
   const SOURCE = 'requestman-extension';
   let delayRules = [];
   let modifyRequestBodyRules = [];
@@ -135,10 +136,22 @@
     return true;
   }
 
+  function reportRuleHit(rule) {
+    window.postMessage({
+      source: SOURCE,
+      type: HIT_MESSAGE_TYPE,
+      payload: {
+        ruleName: typeof rule?.ruleName === 'string' ? rule.ruleName : '',
+        ruleType: typeof rule?.ruleType === 'string' ? rule.ruleType : 'redirect_request',
+      },
+    }, '*');
+  }
+
   function getDelayMs(url, method, resourceType, headers) {
     let maxDelayMs = 0;
     for (const rule of delayRules) {
       if (!shouldApplyRule(url, method, resourceType, headers, rule)) continue;
+      reportRuleHit(rule);
       const delayMs = Number.isFinite(rule.delayMs) ? Math.max(0, Math.floor(rule.delayMs)) : 0;
       if (delayMs > maxDelayMs) maxDelayMs = delayMs;
     }
@@ -191,6 +204,7 @@
 
     for (const rule of modifyRequestBodyRules) {
       if (!shouldApplyRule(url, method, resourceType, headers, rule)) continue;
+      reportRuleHit(rule);
 
       if (rule.requestBodyMode === 'dynamic') {
         nextBody = runDynamicBodyScript(rule.requestBodyValue, {
@@ -210,6 +224,7 @@
   function hasMatchedResponseRule(url, method, resourceType, headers) {
     for (const rule of modifyResponseBodyRules) {
       if (!shouldApplyRule(url, method, resourceType, headers, rule)) continue;
+      reportRuleHit(rule);
       return true;
     }
     return false;
