@@ -44,7 +44,7 @@
     {
       "resources": [
         "injected.js",
-        "assets/icon.svg",
+        "assets/icon-128.png",
         "assets/icon-32.png"
       ],
       "matches": [

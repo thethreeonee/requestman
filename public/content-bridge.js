@@ -80,7 +80,7 @@
     headerLeft.style.height = '20px';
 
     const logo = document.createElement('img');
-    logo.src = chrome.runtime.getURL('assets/icon.svg');
+    logo.src = chrome.runtime.getURL('assets/icon-128.png');
     logo.alt = 'Requestman';
     logo.style.width = '20px';
     logo.style.height = '20px';
