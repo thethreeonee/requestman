@@ -63,7 +63,7 @@
     container.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
     container.style.display = 'none';
     container.style.opacity = '0';
-    container.style.transform = 'translateY(-8px)';
+    container.style.transform = 'translateX(12px)';
     container.style.transition = `opacity ${TOAST_ENTER_MS}ms ease, transform ${TOAST_ENTER_MS}ms ease`;
 
     const header = document.createElement('div');
@@ -142,16 +142,16 @@
     if (container.style.display !== 'block') {
       container.style.display = 'block';
       container.style.opacity = '0';
-      container.style.transform = 'translateY(-8px)';
+      container.style.transform = 'translateX(12px)';
       requestAnimationFrame(() => {
         container.style.opacity = '1';
-        container.style.transform = 'translateY(0)';
+        container.style.transform = 'translateX(0)';
       });
       return;
     }
 
     container.style.opacity = '1';
-    container.style.transform = 'translateY(0)';
+    container.style.transform = 'translateX(0)';
   }
 
   function hideHitToast() {
@@ -162,7 +162,7 @@
     if (!hitToast) return;
 
     hitToast.style.opacity = '0';
-    hitToast.style.transform = 'translateY(-8px)';
+    hitToast.style.transform = 'translateX(12px)';
 
     if (hideAnimationTimer) clearTimeout(hideAnimationTimer);
     hideAnimationTimer = setTimeout(() => {
