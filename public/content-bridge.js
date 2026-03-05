@@ -59,7 +59,8 @@
     container.style.border = '1px solid rgba(148, 163, 184, 0.35)';
     container.style.borderRadius = '12px';
     container.style.boxShadow = '0 12px 32px rgba(0, 0, 0, 0.36)';
-    container.style.overflow = 'hidden';
+    container.style.padding = '8px';
+    container.style.boxSizing = 'border-box';
     container.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
     container.style.display = 'none';
     container.style.opacity = '0';
@@ -70,12 +71,13 @@
     header.style.display = 'flex';
     header.style.alignItems = 'center';
     header.style.justifyContent = 'space-between';
-    header.style.padding = '10px 14px';
+    header.style.height = '20px';
 
     const headerLeft = document.createElement('div');
     headerLeft.style.display = 'inline-flex';
     headerLeft.style.alignItems = 'center';
     headerLeft.style.gap = '8px';
+    headerLeft.style.height = '20px';
 
     const logo = document.createElement('img');
     logo.src = chrome.runtime.getURL('assets/icon.svg');
@@ -86,7 +88,7 @@
     const title = document.createElement('strong');
     title.textContent = 'Requestman';
     title.style.fontSize = '10px';
-    title.style.lineHeight = '1';
+    title.style.lineHeight = '20px';
     title.style.letterSpacing = '0.2px';
 
     headerLeft.appendChild(logo);
@@ -100,36 +102,36 @@
     close.style.background = 'transparent';
     close.style.color = '#e2e8f0';
     close.style.fontSize = '16px';
-    close.style.lineHeight = '1';
-    close.style.padding = '2px 4px';
+    close.style.lineHeight = '16px';
+    close.style.padding = '0';
+    close.style.width = '16px';
+    close.style.height = '16px';
+    close.style.display = 'inline-flex';
+    close.style.alignItems = 'center';
+    close.style.justifyContent = 'center';
     close.setAttribute('aria-label', '关闭');
     close.addEventListener('click', () => hideHitToast());
 
     header.appendChild(headerLeft);
     header.appendChild(close);
 
-    const body = document.createElement('div');
-    body.style.padding = '14px';
-    body.style.display = 'flex';
-    body.style.flexDirection = 'column';
-    body.style.rowGap = '10px';
-
     const hint = document.createElement('div');
     hint.textContent = '以下规则已在当前页生效';
     hint.style.fontSize = '12px';
     hint.style.lineHeight = '16px';
+    hint.style.marginTop = '12px';
 
     const list = document.createElement('ul');
     list.style.margin = '0';
     list.style.padding = '0';
+    list.style.marginTop = '8px';
     list.style.display = 'grid';
     list.style.rowGap = '8px';
     list.style.fontSize = '14px';
 
-    body.appendChild(hint);
-    body.appendChild(list);
     container.appendChild(header);
-    container.appendChild(body);
+    container.appendChild(hint);
+    container.appendChild(list);
     (document.body || document.documentElement).appendChild(container);
     hitToast = container;
     hitListNode = list;
