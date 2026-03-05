@@ -59,9 +59,10 @@
     container.style.border = '1px solid rgba(148, 163, 184, 0.35)';
     container.style.borderRadius = '12px';
     container.style.boxShadow = '0 12px 32px rgba(0, 0, 0, 0.36)';
-    container.style.padding = '8px';
+    container.style.padding = '12px';
     container.style.boxSizing = 'border-box';
     container.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    container.style.setProperty('text-align', 'left', 'important');
     container.style.display = 'none';
     container.style.opacity = '0';
     container.style.transform = 'translateX(12px)';
@@ -82,8 +83,8 @@
     const logo = document.createElement('img');
     logo.src = chrome.runtime.getURL('assets/icon-128.png');
     logo.alt = 'Requestman';
-    logo.style.width = '20px';
-    logo.style.height = '20px';
+    logo.style.width = '16px';
+    logo.style.height = '16px';
 
     const title = document.createElement('strong');
     title.textContent = 'Requestman';
@@ -119,7 +120,8 @@
     hint.textContent = '以下规则已在当前页生效';
     hint.style.fontSize = '12px';
     hint.style.lineHeight = '16px';
-    hint.style.marginTop = '12px';
+    hint.style.marginTop = '16px';
+    hint.style.setProperty('text-align', 'left', 'important');
 
     const list = document.createElement('ul');
     list.style.margin = '0';
@@ -128,6 +130,7 @@
     list.style.display = 'grid';
     list.style.rowGap = '8px';
     list.style.fontSize = '14px';
+    list.style.setProperty('text-align', 'left', 'important');
 
     container.appendChild(header);
     container.appendChild(hint);
@@ -146,8 +149,6 @@
     }
 
     if (container.style.display !== 'block') {
-      if (hitListNode) hitListNode.innerHTML = '';
-      renderedRuleKeys.clear();
       container.style.display = 'block';
       container.style.opacity = '0';
       container.style.transform = 'translateX(12px)';
