@@ -442,7 +442,8 @@ async function notifyMatchedRule(tabId: number, ruleId: number) {
     await hydrateManagedRuleMeta();
     meta = managedRuleMeta.get(ruleId);
   }
-  chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: meta || { ruleName: '', ruleType: 'redirect_request' } }, () => {
+  if (!meta || !meta.ruleName.trim()) return;
+  chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: meta }, () => {
     void chrome.runtime.lastError;
   });
 }

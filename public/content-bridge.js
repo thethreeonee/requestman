@@ -140,6 +140,8 @@
     }
 
     if (container.style.display !== 'block') {
+      if (hitListNode) hitListNode.innerHTML = '';
+      renderedRuleKeys.clear();
       container.style.display = 'block';
       container.style.opacity = '0';
       container.style.transform = 'translateX(12px)';
@@ -177,7 +179,8 @@
   function renderHitRecord(record) {
     const { container, list } = ensureHitToast();
     const ruleType = typeof record.ruleType === 'string' && record.ruleType ? record.ruleType : 'redirect_request';
-    const ruleName = typeof record.ruleName === 'string' && record.ruleName.trim() ? record.ruleName.trim() : '未命名规则';
+    const ruleName = typeof record.ruleName === 'string' ? record.ruleName.trim() : '';
+    if (!ruleName) return;
     const ruleId = typeof record.ruleId === 'string' ? record.ruleId.trim() : '';
     const dedupeKey = `${ruleType}::${ruleId || ruleName}`;
 
