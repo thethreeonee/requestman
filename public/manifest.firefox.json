@@ -46,7 +46,9 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "injected.js"
+        "injected.js",
+        "assets/icon.svg",
+        "assets/icon-32.png"
       ],
       "matches": [
         "<all_urls>"
