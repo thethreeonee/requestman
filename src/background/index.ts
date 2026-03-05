@@ -48,6 +48,7 @@ type RedirectCondition = {
 
 export type RedirectRule = {
   id?: string;
+  name?: string;
   type?: 'redirect_request' | 'rewrite_string' | 'query_params' | 'modify_request_body' | 'modify_response_body' | 'modify_headers' | 'user_agent' | 'cancel_request' | 'request_delay';
   enabled?: boolean;
   groupId?: string;
@@ -65,6 +66,7 @@ export const REDIRECT_ENABLED_KEY = 'asap_redirect_enabled_v1';
 export const REDIRECT_GROUPS_KEY = 'asap_redirect_groups_v1';
 export const REDIRECT_RULE_ID_BASE = 10000;
 export const REDIRECT_RULE_ID_MAX = 19999;
+const managedRuleMeta = new Map<number, { ruleName: string; ruleType: string }>();
 
 function escapeRegex(value: string) { return value.replace(/[|\\{}()[\]^$+?.]/g, '\\$&'); }
 function wildcardToRegexBody(pattern: string) { return escapeRegex(pattern).replace(/\*/g, '.*'); }
@@ -347,6 +349,7 @@ async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: R
   for (const group of groups) if (typeof group?.id === 'string' && group.id) groupEnabled.set(group.id, group.enabled !== false);
 
   const nextRules: chrome.declarativeNetRequest.Rule[] = [];
+  managedRuleMeta.clear();
   if (enabled) {
     let index = 0;
     for (const rule of rules) {
@@ -371,7 +374,13 @@ async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: R
                     ? null
                     : toOneRule(c, index);
         index += 1;
-        if (dnr) nextRules.push(dnr);
+        if (dnr) {
+          nextRules.push(dnr);
+          managedRuleMeta.set(dnr.id, {
+            ruleName: typeof rule.name === 'string' ? rule.name : '',
+            ruleType: typeof rule.type === 'string' ? rule.type : 'redirect_request',
+          });
+        }
       }
     }
   }
@@ -392,3 +401,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   applyRedirectRules(message).then((result) => sendResponse(result)).catch((err: unknown) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }));
   return true;
 });
+
+if (chrome.declarativeNetRequest.onRuleMatchedDebug) {
+  chrome.declarativeNetRequest.onRuleMatchedDebug.addListener((info) => {
+    const tabId = info.request?.tabId;
+    const ruleId = info.rule?.ruleId;
+    if (!Number.isInteger(tabId) || !Number.isInteger(ruleId)) return;
+    const meta = managedRuleMeta.get(ruleId) || { ruleName: '', ruleType: 'redirect_request' };
+    chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: meta }, () => {
+      void chrome.runtime.lastError;
+    });
+  });
+}
