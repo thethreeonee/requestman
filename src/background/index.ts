@@ -69,6 +69,7 @@ export const REDIRECT_RULE_ID_MAX = 19999;
 const MANAGED_RULE_META_KEY = 'asap_redirect_rule_meta_v1';
 const managedRuleMeta = new Map<number, { ruleName: string; ruleType: string }>();
 let managedRuleMetaHydrated = false;
+const matchedRulesTimestampByTab = new Map<number, number>();
 
 async function hydrateManagedRuleMeta() {
   if (managedRuleMetaHydrated) return;
@@ -429,27 +430,56 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
-if (chrome.declarativeNetRequest.onRuleMatchedDebug) {
-  const normalizeNumericId = (value: unknown) => {
-    if (typeof value === 'number' && Number.isInteger(value)) return value;
-    if (typeof value === 'string' && /^\d+$/.test(value)) return Number(value);
-    return null;
-  };
+const normalizeNumericId = (value: unknown) => {
+  if (typeof value === 'number' && Number.isInteger(value)) return value;
+  if (typeof value === 'string' && /^\d+$/.test(value)) return Number(value);
+  return null;
+};
 
+async function notifyMatchedRule(tabId: number, ruleId: number) {
+  let meta = managedRuleMeta.get(ruleId);
+  if (!meta) {
+    await hydrateManagedRuleMeta();
+    meta = managedRuleMeta.get(ruleId);
+  }
+  chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: meta || { ruleName: '', ruleType: 'redirect_request' } }, () => {
+    void chrome.runtime.lastError;
+  });
+}
+
+async function notifyMatchedRulesByTab(tabId: number) {
+  if (!chrome.declarativeNetRequest.getMatchedRules) return;
+  const lastTimestamp = matchedRulesTimestampByTab.get(tabId) ?? 0;
+  const result = await chrome.declarativeNetRequest.getMatchedRules({ tabId, minTimeStamp: lastTimestamp + 1 });
+  const matchedRules = Array.isArray(result?.rulesMatchedInfo) ? result.rulesMatchedInfo : [];
+  if (!matchedRules.length) return;
+
+  let nextTimestamp = lastTimestamp;
+  for (const item of matchedRules) {
+    const ruleId = normalizeNumericId(item?.rule?.ruleId);
+    if (ruleId === null) continue;
+    await notifyMatchedRule(tabId, ruleId);
+    const timestamp = Number.isFinite(item?.timeStamp) ? Number(item.timeStamp) : 0;
+    if (timestamp > nextTimestamp) nextTimestamp = timestamp;
+  }
+  matchedRulesTimestampByTab.set(tabId, nextTimestamp || Date.now());
+}
+
+if (chrome.declarativeNetRequest.onRuleMatchedDebug) {
   chrome.declarativeNetRequest.onRuleMatchedDebug.addListener((info) => {
     const tabId = normalizeNumericId(info.request?.tabId);
     const ruleId = normalizeNumericId(info.rule?.ruleId);
     if (tabId === null || ruleId === null) return;
 
-    void (async () => {
-      let meta = managedRuleMeta.get(ruleId);
-      if (!meta) {
-        await hydrateManagedRuleMeta();
-        meta = managedRuleMeta.get(ruleId);
-      }
-      chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: meta || { ruleName: '', ruleType: 'redirect_request' } }, () => {
-        void chrome.runtime.lastError;
-      });
-    })();
+    void notifyMatchedRule(tabId, ruleId);
+  });
+} else if (chrome.declarativeNetRequest.getMatchedRules) {
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.status !== 'complete') return;
+    void notifyMatchedRulesByTab(tabId).catch(() => undefined);
+  });
+
+  chrome.tabs.onActivated.addListener((activeInfo) => {
+    void notifyMatchedRulesByTab(activeInfo.tabId).catch(() => undefined);
   });
 }
