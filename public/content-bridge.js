@@ -363,6 +363,12 @@
     });
   }
 
+  function notifyContentReady() {
+    chrome.runtime.sendMessage({ type: 'requestman:content-ready' }, () => {
+      void chrome.runtime.lastError;
+    });
+  }
+
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return;
     if (!(RULES_KEY in changes) && !(GROUPS_KEY in changes) && !(ENABLED_KEY in changes)) return;
@@ -380,5 +386,10 @@
     renderHitRecord(message.payload || {});
   });
 
+  ensureHitToast();
+  notifyContentReady();
+  window.addEventListener('pageshow', () => {
+    notifyContentReady();
+  });
   broadcastRules();
 })();
