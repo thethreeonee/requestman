@@ -47,6 +47,7 @@
     {
       "resources": [
         "injected.js",
+        "assets/icon-hit-128.png",
         "assets/icon-128.png",
         "assets/icon-32.png"
       ],
