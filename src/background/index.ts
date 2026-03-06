@@ -76,11 +76,22 @@ type ManagedRuleMatcher = {
   requestMethods: Set<string> | null;
   initiatorDomains: Set<string> | null;
 };
+type WebRequestDetailsSnapshot = {
+  tabId: unknown;
+  url: string;
+  type?: string;
+  method?: string;
+  initiator?: string;
+  documentUrl?: string;
+  originUrl?: string;
+};
 const managedRuleMatchers = new Map<number, ManagedRuleMatcher>();
 const recentWebRequestHitAt = new Map<string, number>();
 const WEBREQUEST_HIT_DEDUPE_MS = 1000;
 const WEBREQUEST_HIT_CACHE_MAX = 2000;
 const pendingHitRuleIdsByTab = new Map<number, Set<number>>();
+let ruleCachesReady = false;
+let ruleCachesPromise: Promise<void> | null = null;
 
 async function hydrateManagedRuleMeta() {
   if (managedRuleMetaHydrated) return;
@@ -448,6 +459,7 @@ async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: R
 
   await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: getManagedRuleIds(), addRules: nextRules });
   await persistManagedRuleMeta();
+  ruleCachesReady = true;
   return { ok: true, activeCount: nextRules.length };
 }
 
@@ -456,8 +468,25 @@ async function restoreRulesFromStorage() {
   await applyRedirectRules({ groups: stored?.[REDIRECT_GROUPS_KEY], rules: stored?.[REDIRECT_RULES_KEY], enabled: stored?.[REDIRECT_ENABLED_KEY] !== false });
 }
 
-chrome.runtime.onStartup.addListener(() => { restoreRulesFromStorage().catch(() => undefined); });
-chrome.runtime.onInstalled.addListener(() => { restoreRulesFromStorage().catch(() => undefined); });
+async function ensureRuleCachesReady() {
+  if (ruleCachesReady) return;
+  if (!ruleCachesPromise) {
+    ruleCachesPromise = restoreRulesFromStorage()
+      .then(() => {
+        ruleCachesReady = true;
+      })
+      .catch(() => {
+        ruleCachesReady = false;
+      })
+      .finally(() => {
+        ruleCachesPromise = null;
+      });
+  }
+  await ruleCachesPromise;
+}
+
+chrome.runtime.onStartup.addListener(() => { void ensureRuleCachesReady(); });
+chrome.runtime.onInstalled.addListener(() => { void ensureRuleCachesReady(); });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'requestman:content-ready') {
     const tabId = normalizeNumericId(sender?.tab?.id);
@@ -533,7 +562,7 @@ async function flushPendingHitsForTab(tabId: number) {
   if (!pending.size) pendingHitRuleIdsByTab.delete(tabId);
 }
 
-function toInitiatorHost(details: chrome.webRequest.WebRequestBodyDetails): string {
+function toInitiatorHost(details: WebRequestDetailsSnapshot): string {
   const candidates = [details.initiator, details.documentUrl, details.originUrl];
   for (const value of candidates) {
     if (typeof value !== 'string' || !value) continue;
@@ -547,7 +576,7 @@ function toInitiatorHost(details: chrome.webRequest.WebRequestBodyDetails): stri
   return '';
 }
 
-function shouldNotifyFromWebRequest(details: chrome.webRequest.WebRequestBodyDetails, matcher: ManagedRuleMatcher): boolean {
+function shouldNotifyFromWebRequest(details: WebRequestDetailsSnapshot, matcher: ManagedRuleMatcher): boolean {
   if (!matcher.regex.test(details.url)) return false;
 
   if (matcher.resourceTypes) {
@@ -605,7 +634,7 @@ if (chrome.declarativeNetRequest.onRuleMatchedDebug) {
 }
 
 if (chrome.webRequest?.onBeforeRequest) {
-  chrome.webRequest.onBeforeRequest.addListener((details) => {
+  const notifyByWebRequest = (details: WebRequestDetailsSnapshot) => {
     const tabId = normalizeNumericId(details.tabId);
     if (tabId === null || tabId < 0) return;
 
@@ -614,5 +643,28 @@ if (chrome.webRequest?.onBeforeRequest) {
       if (!markWebRequestHit(tabId, ruleId, details.url)) continue;
       void notifyMatchedRule(tabId, ruleId);
     }
+  };
+
+  const toWebRequestSnapshot = (details: chrome.webRequest.WebRequestBodyDetails): WebRequestDetailsSnapshot => ({
+    tabId: details.tabId,
+    url: details.url,
+    type: details.type,
+    method: details.method,
+    initiator: details.initiator,
+    documentUrl: details.documentUrl,
+    originUrl: details.originUrl,
+  });
+
+  chrome.webRequest.onBeforeRequest.addListener((details) => {
+    if (!ruleCachesReady && managedRuleMatchers.size === 0) {
+      const snapshot = toWebRequestSnapshot(details);
+      void ensureRuleCachesReady().then(() => {
+        notifyByWebRequest(snapshot);
+      });
+      return;
+    }
+    notifyByWebRequest(details);
   }, { urls: ['<all_urls>'] });
 }
+
+void ensureRuleCachesReady();
