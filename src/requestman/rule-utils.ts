@@ -260,14 +260,29 @@ export function hasModifyResponseBodyFunction(script: string): boolean {
 function escapeRegex(s: string) { return s.replace(/[|\\{}()[\]^$+?.]/g, '\\$&'); }
 function wildcardToRegexBody(pattern: string) { return escapeRegex(pattern).replace(/\*/g, '.*'); }
 
+function buildHostRegex(mode: RedirectCondition['matchMode'], expression: string) {
+  if (mode === 'contains') return `^https?://[^/]*${escapeRegex(expression)}[^/]*(?:/|$)`;
+  if (mode === 'regex') return `^https?://(?:${expression})(?:/|$)`;
+  if (mode === 'wildcard') return `^https?://${wildcardToRegexBody(expression)}(?:/|$)`;
+  return `^https?://${escapeRegex(expression)}(?:/|$)`;
+}
+
+function buildUrlRegex(mode: RedirectCondition['matchMode'], expression: string) {
+  if (mode === 'contains') return `^.*${escapeRegex(expression)}.*$`;
+  if (mode === 'wildcard') return `^${wildcardToRegexBody(expression)}$`;
+  if (mode === 'regex') return expression;
+  return `^${escapeRegex(expression)}$`;
+}
+
 function createMatcher(condition: RedirectCondition) {
   const expression = condition.expression.trim();
   if (!expression) return null;
   try {
-    if (condition.matchMode === 'contains') return new RegExp(escapeRegex(expression));
-    if (condition.matchMode === 'equals') return new RegExp(`^${escapeRegex(expression)}$`);
-    if (condition.matchMode === 'wildcard') return new RegExp(`^${wildcardToRegexBody(expression)}$`);
-    return new RegExp(expression);
+    const mode = condition.matchMode;
+    const regexFilter = condition.matchTarget === 'host'
+      ? buildHostRegex(mode, expression)
+      : buildUrlRegex(mode, expression);
+    return new RegExp(regexFilter);
   } catch {
     return null;
   }
@@ -293,9 +308,8 @@ export function simulateRuleEffect(
   groupEnabledMap: ReadonlyMap<string, boolean>,
   options?: { includeDisabled?: boolean },
 ): SimulateRuleResult {
-  let parsedUrl: URL;
   try {
-    parsedUrl = new URL(inputUrl);
+    new URL(inputUrl);
   } catch {
     return { ok: false, reason: '请输入合法的 URL（需包含协议）' };
   }
@@ -309,8 +323,7 @@ export function simulateRuleEffect(
       const re = createMatcher(condition);
       if (!re) continue;
 
-      const matchTarget = condition.matchTarget === 'host' ? parsedUrl.host : inputUrl;
-      const groups = re.exec(matchTarget);
+      const groups = re.exec(inputUrl);
       if (!groups) continue;
 
       if (rule.type === 'redirect_request') {
