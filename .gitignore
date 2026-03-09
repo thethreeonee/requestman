@@ -61,6 +61,7 @@ web_modules/
 
 # Output of 'npm pack'
 *.tgz
+package-lock.json
 yarn.lock
 
 # Yarn Integrity file
