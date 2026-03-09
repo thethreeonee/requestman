@@ -224,15 +224,13 @@ function toRewriteRule(condition: RedirectCondition, index: number): chrome.decl
 
   const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
   const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
-  const conditionBody = matchTarget === 'host'
-    ? buildHostRegex(matchMode, expression).replace(/^\^/, '').replace(/\$$/, '')
-    : buildUrlRegex(matchMode, expression).replace(/^\^/, '').replace(/\$$/, '');
-  const fromBody = matchMode === 'regex' ? from : escapeRegex(from);
-  // Regex matching mode often already embeds `rewriteFrom` inside `expression`.
-  // Avoid appending conditionBody before rewriteFrom, or we may require the token twice.
-  const regexFilter = matchMode === 'regex'
-    ? `^(.*)${fromBody}(.*)$`
-    : `^(.*${conditionBody}.*)${fromBody}(.*)$`;
+  const conditionRegex = matchTarget === 'host'
+    ? buildHostRegex(matchMode, expression)
+    : buildUrlRegex(matchMode, expression);
+  const conditionBody = conditionRegex.replace(/^\^/, '').replace(/\$$/, '');
+  const fromBody = escapeRegex(from);
+  // Keep matching scope on expression first, then rewrite a literal `from` segment on matched URLs.
+  const regexFilter = `^(.*${conditionBody}.*)${fromBody}(.*)$`;
   try { new RegExp(regexFilter); } catch { return null; }
 
   const action: chrome.declarativeNetRequest.RuleAction = {
