@@ -216,28 +216,22 @@ function toOneRule(condition: RedirectCondition, index: number): chrome.declarat
 
 function toRewriteRule(condition: RedirectCondition, index: number): chrome.declarativeNetRequest.Rule | null {
   const expression = typeof condition.expression === 'string' ? condition.expression.trim() : '';
-  const from = typeof condition.rewriteFrom === 'string' ? condition.rewriteFrom : '';
   const to = typeof condition.rewriteTo === 'string' ? condition.rewriteTo : '';
-  if (!expression || !from) return null;
+  if (!expression || !to) return null;
   const id = REDIRECT_RULE_ID_BASE + index;
   if (id > REDIRECT_RULE_ID_MAX) return null;
 
   const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
   const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
-  const conditionBody = matchTarget === 'host'
-    ? buildHostRegex(matchMode, expression).replace(/^\^/, '').replace(/\$$/, '')
-    : buildUrlRegex(matchMode, expression).replace(/^\^/, '').replace(/\$$/, '');
-  const fromBody = matchMode === 'regex' ? from : escapeRegex(from);
-  // Regex matching mode often already embeds `rewriteFrom` inside `expression`.
-  // Avoid appending conditionBody before rewriteFrom, or we may require the token twice.
-  const regexFilter = matchMode === 'regex'
-    ? `^(.*)${fromBody}(.*)$`
-    : `^(.*${conditionBody}.*)${fromBody}(.*)$`;
+  const conditionRegex = matchTarget === 'host'
+    ? buildHostRegex(matchMode, expression)
+    : buildUrlRegex(matchMode, expression);
+  const regexFilter = conditionRegex;
   try { new RegExp(regexFilter); } catch { return null; }
 
   const action: chrome.declarativeNetRequest.RuleAction = {
     type: 'redirect',
-    redirect: { regexSubstitution: `\\1${normalizeRegexSubstitution(escapeRegexReplacement(to))}\\2` },
+    redirect: { regexSubstitution: normalizeRegexSubstitution(escapeRegexReplacement(to)) },
   };
 
   const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
