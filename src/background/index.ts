@@ -229,8 +229,17 @@ function toRewriteRule(condition: RedirectCondition, index: number): chrome.decl
     : buildUrlRegex(matchMode, expression);
   const conditionBody = conditionRegex.replace(/^\^/, '').replace(/\$$/, '');
   const fromBody = escapeRegex(from);
-  // Keep matching scope on expression first, then rewrite a literal `from` segment on matched URLs.
-  const regexFilter = `^(.*${conditionBody}.*)${fromBody}(.*)$`;
+  // Match condition expression first, then capture literal `from` inside that scope.
+  const regexFilter = matchMode === 'regex'
+    ? (() => {
+      const fromIndex = conditionRegex.indexOf(from);
+      if (fromIndex < 0) return '';
+      const beforeFrom = conditionRegex.slice(0, fromIndex);
+      const afterFrom = conditionRegex.slice(fromIndex + from.length);
+      return `${beforeFrom}(.*)${fromBody}(.*)${afterFrom}`;
+    })()
+    : `^(.*${conditionBody}.*)${fromBody}(.*)$`;
+  if (!regexFilter) return null;
   try { new RegExp(regexFilter); } catch { return null; }
 
   const action: chrome.declarativeNetRequest.RuleAction = {
