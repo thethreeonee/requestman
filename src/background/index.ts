@@ -216,9 +216,8 @@ function toOneRule(condition: RedirectCondition, index: number): chrome.declarat
 
 function toRewriteRule(condition: RedirectCondition, index: number): chrome.declarativeNetRequest.Rule | null {
   const expression = typeof condition.expression === 'string' ? condition.expression.trim() : '';
-  const from = typeof condition.rewriteFrom === 'string' ? condition.rewriteFrom : '';
   const to = typeof condition.rewriteTo === 'string' ? condition.rewriteTo : '';
-  if (!expression || !from) return null;
+  if (!expression || !to) return null;
   const id = REDIRECT_RULE_ID_BASE + index;
   if (id > REDIRECT_RULE_ID_MAX) return null;
 
@@ -227,24 +226,12 @@ function toRewriteRule(condition: RedirectCondition, index: number): chrome.decl
   const conditionRegex = matchTarget === 'host'
     ? buildHostRegex(matchMode, expression)
     : buildUrlRegex(matchMode, expression);
-  const conditionBody = conditionRegex.replace(/^\^/, '').replace(/\$$/, '');
-  const fromBody = escapeRegex(from);
-  // Match condition expression first, then capture literal `from` inside that scope.
-  const regexFilter = matchMode === 'regex'
-    ? (() => {
-      const fromIndex = conditionRegex.indexOf(from);
-      if (fromIndex < 0) return '';
-      const beforeFrom = conditionRegex.slice(0, fromIndex);
-      const afterFrom = conditionRegex.slice(fromIndex + from.length);
-      return `${beforeFrom}(.*)${fromBody}(.*)${afterFrom}`;
-    })()
-    : `^(.*${conditionBody}.*)${fromBody}(.*)$`;
-  if (!regexFilter) return null;
+  const regexFilter = conditionRegex;
   try { new RegExp(regexFilter); } catch { return null; }
 
   const action: chrome.declarativeNetRequest.RuleAction = {
     type: 'redirect',
-    redirect: { regexSubstitution: `\\1${normalizeRegexSubstitution(escapeRegexReplacement(to))}\\2` },
+    redirect: { regexSubstitution: normalizeRegexSubstitution(escapeRegexReplacement(to)) },
   };
 
   const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
