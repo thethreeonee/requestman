@@ -223,7 +223,13 @@ function buildRewriteUrlRegex(mode: MatchMode, expression: string, rewriteFrom: 
     if (idx === -1) return '^(?!x)x$';
     return `^(${escapeRegex(expression.slice(0, idx))})${escapedFrom}(${escapeRegex(expression.slice(idx + rewriteFrom.length))})$`;
   }
-  // regex: expression is user-provided regex, fall back to rewriteFrom-based pattern
+  // regex: expression is user-provided regex; find rewriteFrom within it to build a constrained filter
+  const idx = expression.indexOf(rewriteFrom);
+  if (idx !== -1) {
+    const before = expression.slice(0, idx).replace(/^\^/, '');
+    const after = expression.slice(idx + rewriteFrom.length).replace(/\$$/, '');
+    return `^(${before})${escapedFrom}(${after})$`;
+  }
   return `^(.*?)${escapedFrom}(.*)$`;
 }
 
