@@ -223,14 +223,22 @@ function buildRewriteUrlRegex(mode: MatchMode, expression: string, rewriteFrom: 
     if (idx === -1) return '^(?!x)x$';
     return `^(${escapeRegex(expression.slice(0, idx))})${escapedFrom}(${escapeRegex(expression.slice(idx + rewriteFrom.length))})$`;
   }
-  // regex: expression is user-provided regex; find rewriteFrom within it to build a constrained filter
-  const idx = expression.indexOf(rewriteFrom);
-  if (idx !== -1) {
-    const before = expression.slice(0, idx).replace(/^\^/, '');
-    const after = expression.slice(idx + rewriteFrom.length).replace(/\$$/, '');
-    return `^(${before})${escapedFrom}(${after})$`;
-  }
-  return `^(.*?)${escapedFrom}(.*)$`;
+  // regex: expression is the URL filter; regexSubstitution is built separately in toRewriteRule
+  return expression;
+}
+
+// For regex mode rewrite_string: build regexSubstitution by replacing rewriteFrom with rewriteTo
+// in the expression text, stripping anchors, and converting (groups) to \N backreferences.
+function buildRegexModeRewriteSubstitution(expression: string, rewriteFrom: string, rewriteTo: string): string | null {
+  if (!expression.includes(rewriteFrom)) return null;
+  const escapedTo = rewriteTo.replace(/\\/g, '\\\\');
+  const modified = expression.split(rewriteFrom).join(escapedTo);
+  const stripped = modified.replace(/^\^/, '').replace(/\$$/, '');
+  let groupNum = 0;
+  return stripped.replace(/\((?!\?)(.*?)\)/g, () => {
+    groupNum++;
+    return `\\${groupNum}`;
+  });
 }
 
 function buildRewriteHostRegex(mode: MatchMode, expression: string, rewriteFrom: string): string {
@@ -256,11 +264,21 @@ function toRewriteRule(condition: RedirectCondition, index: number): chrome.decl
     : buildRewriteUrlRegex(matchMode, expression, rewriteFrom);
   try { new RegExp(regexFilter); } catch { return null; }
 
-  // In Chrome DNR regexSubstitution, only \ needs escaping; \1 and \2 refer to capture groups
-  const escapedTo = rewriteTo.replace(/\\/g, '\\\\');
+  // In Chrome DNR regexSubstitution, only \ needs escaping; \N refers to capture groups.
+  // For regex+url mode: regexFilter IS the expression; build substitution from it directly.
+  // For other modes: regexFilter has two capture groups (before/after rewriteFrom), use \1rewriteTo\2.
+  let regexSubstitution: string;
+  if (matchMode === 'regex' && matchTarget === 'url') {
+    const sub = buildRegexModeRewriteSubstitution(expression, rewriteFrom, rewriteTo);
+    if (sub === null) return null;
+    regexSubstitution = sub;
+  } else {
+    const escapedTo = rewriteTo.replace(/\\/g, '\\\\');
+    regexSubstitution = `\\1${escapedTo}\\2`;
+  }
   const action: chrome.declarativeNetRequest.RuleAction = {
     type: 'redirect',
-    redirect: { regexSubstitution: `\\1${escapedTo}\\2` },
+    redirect: { regexSubstitution },
   };
 
   const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
