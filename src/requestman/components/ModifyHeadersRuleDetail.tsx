@@ -161,7 +161,7 @@ export default function ModifyHeadersRuleDetail({
             onChange={(value) => updateHeaderModification(condition.id, tabKey, modification.id, { action: value })}
           />
           <AutoComplete
-            style={{ width: 220 }}
+            style={{ width: 400 }}
             options={HEADER_OPTIONS}
             filterOption={false}
             value={modification.key}
