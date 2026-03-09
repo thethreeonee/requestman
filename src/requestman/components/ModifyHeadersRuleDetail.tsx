@@ -9,6 +9,7 @@ import {
   Select,
   Space,
   Tabs,
+  Tooltip,
 } from 'antd';
 import {
   DeleteOutlined,
@@ -69,7 +70,24 @@ const COMMON_HEADERS = [
   'Access-Control-Expose-Headers',
 ];
 
-const HEADER_OPTIONS = COMMON_HEADERS.map((header) => ({ value: header }));
+const HEADER_OPTIONS = COMMON_HEADERS.map((header) => ({
+  value: header,
+  label: (
+    <Tooltip title={header} placement="right">
+      <span
+        style={{
+          display: 'inline-block',
+          width: '100%',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {header}
+      </span>
+    </Tooltip>
+  ),
+}));
 
 export default function ModifyHeadersRuleDetail({
   groups,
