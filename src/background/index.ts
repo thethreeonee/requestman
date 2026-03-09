@@ -214,24 +214,47 @@ function toOneRule(condition: RedirectCondition, index: number): chrome.declarat
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
 }
 
+function buildRewriteUrlRegex(mode: MatchMode, expression: string, rewriteFrom: string): string {
+  const escapedFrom = escapeRegex(rewriteFrom);
+  if (mode === 'contains') return `^(.*${escapeRegex(expression)}.*?)${escapedFrom}(.*)$`;
+  if (mode === 'wildcard') return `^(${wildcardToRegexBody(expression)}.*?)${escapedFrom}(.*)$`;
+  if (mode === 'equals') {
+    const idx = expression.indexOf(rewriteFrom);
+    if (idx === -1) return '^(?!x)x$';
+    return `^(${escapeRegex(expression.slice(0, idx))})${escapedFrom}(${escapeRegex(expression.slice(idx + rewriteFrom.length))})$`;
+  }
+  // regex: expression is user-provided regex, fall back to rewriteFrom-based pattern
+  return `^(.*?)${escapedFrom}(.*)$`;
+}
+
+function buildRewriteHostRegex(mode: MatchMode, expression: string, rewriteFrom: string): string {
+  const escapedFrom = escapeRegex(rewriteFrom);
+  if (mode === 'contains') return `^(https?://[^/]*${escapeRegex(expression)}[^/]*(?:/|$).*?)${escapedFrom}(.*)$`;
+  if (mode === 'wildcard') return `^(https?://${wildcardToRegexBody(expression)}(?:/|$).*?)${escapedFrom}(.*)$`;
+  if (mode === 'regex') return `^(https?://(?:${expression})(?:/|$).*?)${escapedFrom}(.*)$`;
+  return `^(https?://${escapeRegex(expression)}(?:/|$).*?)${escapedFrom}(.*)$`;
+}
+
 function toRewriteRule(condition: RedirectCondition, index: number): chrome.declarativeNetRequest.Rule | null {
   const expression = typeof condition.expression === 'string' ? condition.expression.trim() : '';
-  const to = typeof condition.rewriteTo === 'string' ? condition.rewriteTo : '';
-  if (!expression || !to) return null;
+  const rewriteFrom = typeof condition.rewriteFrom === 'string' ? condition.rewriteFrom : '';
+  const rewriteTo = typeof condition.rewriteTo === 'string' ? condition.rewriteTo : '';
+  if (!expression || !rewriteFrom) return null;
   const id = REDIRECT_RULE_ID_BASE + index;
   if (id > REDIRECT_RULE_ID_MAX) return null;
 
   const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
   const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
-  const conditionRegex = matchTarget === 'host'
-    ? buildHostRegex(matchMode, expression)
-    : buildUrlRegex(matchMode, expression);
-  const regexFilter = conditionRegex;
+  const regexFilter = matchTarget === 'host'
+    ? buildRewriteHostRegex(matchMode, expression, rewriteFrom)
+    : buildRewriteUrlRegex(matchMode, expression, rewriteFrom);
   try { new RegExp(regexFilter); } catch { return null; }
 
+  // In Chrome DNR regexSubstitution, only \ needs escaping; \1 and \2 refer to capture groups
+  const escapedTo = rewriteTo.replace(/\\/g, '\\\\');
   const action: chrome.declarativeNetRequest.RuleAction = {
     type: 'redirect',
-    redirect: { regexSubstitution: normalizeRegexSubstitution(escapeRegexReplacement(to)) },
+    redirect: { regexSubstitution: `\\1${escapedTo}\\2` },
   };
 
   const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
