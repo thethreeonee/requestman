@@ -185,7 +185,14 @@ export default function ModifyHeadersRuleDetail({
             value={modification.key}
             onChange={(value) => updateHeaderModification(condition.id, tabKey, modification.id, { key: value })}
           >
-            <Input placeholder="Header" />
+            <Tooltip title={modification.key || undefined} placement="topLeft">
+              <Input
+                placeholder="Header"
+                style={{
+                  textOverflow: 'ellipsis',
+                }}
+              />
+            </Tooltip>
           </AutoComplete>
           <Input
             placeholder="值"
