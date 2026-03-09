@@ -185,7 +185,13 @@ export default function ModifyHeadersRuleDetail({
             value={modification.key}
             onChange={(value) => updateHeaderModification(condition.id, tabKey, modification.id, { key: value })}
           >
-            <Input placeholder="Header" />
+            <Input
+              placeholder="Header"
+              title={modification.key || undefined}
+              style={{
+                textOverflow: 'ellipsis',
+              }}
+            />
           </AutoComplete>
           <Input
             placeholder="值"
