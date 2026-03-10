@@ -1,137 +1,267 @@
 # requestman
 
-`requestman` 是一个面向前端/接口调试场景的浏览器扩展（Chrome / Firefox），在 DevTools 中提供统一的请求规则面板，可对网络请求进行重定向、改写、拦截和延迟等操作。
+> A browser extension for intercepting and modifying network requests — right inside DevTools.
 
-> 当前版本并不只是“请求重定向”插件，而是一个多规则类型的请求调试工具。
+**requestman** adds a **Redirect Rules** panel to your browser's DevTools (Chrome & Firefox). Without writing any proxy config or changing your code, you can redirect, rewrite, block, and delay network requests on the fly.
 
-## 技术栈
+---
 
-- 构建工具：Vite
-- UI：React + Ant Design
-- 编辑器：CodeMirror（用于动态脚本编辑）
-- 能力实现：
-  - `declarativeNetRequest`（重定向 / Header / UA / 取消请求等）
-  - 注入脚本（请求体/响应体改写、请求延迟）
-
-## 核心能力
-
-### 1) 规则组织与启停
-
-- DevTools 新增 `Redirect Rules` 面板
-- 全局总开关
-- 规则组（分组）管理：创建、重命名、复制、删除、折叠
-- 规则管理：创建、编辑、启停、复制、删除
-- 拖拽排序（组内排序、跨组移动）
-
-### 2) 支持的规则类型
-
-当前支持以下 9 类规则：
-
-1. `redirect_request`：请求重定向（URL/Host 匹配后跳转到目标地址或扩展内文件）
-2. `rewrite_string`：字符串重写（按匹配条件替换 URL 片段）
-3. `query_params`：Query 参数增删改
-4. `modify_request_body`：改写请求体（静态文本或动态 JS 函数）
-5. `modify_response_body`：改写响应体（静态文本或动态 JS 函数）
-6. `modify_headers`：修改请求/响应 Headers（add/update/delete）
-7. `user_agent`：修改 User-Agent（设备预设、浏览器预设、自定义）
-8. `cancel_request`：取消请求
-9. `request_delay`：请求延迟（毫秒）
-
-### 3) 匹配与过滤
-
-每条规则可配置多个条件（conditions），支持：
-
-- 匹配目标：`URL` / `HOST`
-- 匹配方式：`contains` / `equals` / `regex` / `wildcard`
-- 过滤器：
-  - 页面域名（initiator）
-  - 资源类型（XHR、script、image 等）
-  - 请求方法（GET/POST/PUT...）
-  - 请求头键值条件（equals/not_equals/contains）
-
-### 4) 调试与配置迁移
-
-- 支持规则导出为 JSON
-- 支持规则导入（自动处理冲突 ID）
-- 详情页离开前未保存变更提醒
-- 删除规则/规则组二次确认
-
-## 开发
-
-安装依赖：
-
-```bash
-npm install
-```
-
-开发模式（监听构建）：
-
-```bash
-npm run dev
-```
-
-完整构建（同时输出 Chrome / Firefox）：
-
-```bash
-npm run build
-```
-
-单独构建：
-
-```bash
-npm run build:chrome
-npm run build:firefox
-```
-
-引用检查：
-
-```bash
-npm run check:references
-```
-
-打包 Firefox xpi：
-
-```bash
-npm run package:firefox
-```
-
-构建产物：
-
-- `dist/chrome/*`
-- `dist/firefox/*`
-- `dist/requestman-firefox.xpi`（执行 `npm run package:firefox` 后生成）
-
-## 安装
+## 🚀 Installation
 
 ### Chrome
 
-1. 打开 `chrome://extensions/`
-2. 开启开发者模式
-3. 点击“加载已解压的扩展程序”
-4. 选择 `dist/chrome`
+1. Open `chrome://extensions/`
+2. Enable **Developer mode** (top-right toggle)
+3. Click **Load unpacked**
+4. Select the `dist/chrome` folder
 
 ### Firefox
 
-1. 打开 `about:debugging#/runtime/this-firefox`
-2. 点击“加载临时附加组件”
-3. 选择 `dist/firefox/manifest.json`
-   - 或直接安装 `dist/requestman-firefox.xpi`
+1. Open `about:debugging#/runtime/this-firefox`
+2. Click **Load Temporary Add-on**
+3. Select `dist/firefox/manifest.json`
+   - Or install `dist/requestman-firefox.xpi` directly
 
-## 使用流程
+---
 
-1. 打开任意页面并启动 DevTools
-2. 切换到 `Redirect Rules` 面板
-3. 创建规则组与规则，填写匹配条件和动作
-4. 启用对应规则（并确认总开关、分组开关开启）
-5. 刷新或重发请求验证效果
+## 🎯 Quick Start
 
-## 注意事项
+1. Open any webpage and launch **DevTools** (`F12`)
+2. Switch to the **Redirect Rules** tab
+3. Click **New Group** → **New Rule**, choose a rule type
+4. Fill in the match conditions and the action
+5. Make sure the rule, its group, and the **global switch** are all enabled
+6. Refresh the page or replay the request to see it take effect
 
-- 使用正则匹配时，请确保表达式合法。
-- 请求体/响应体动态改写依赖你提供的 JS 函数签名：
-  - 请求体：`modifyRequestBody(args)`
-  - 响应体：`modifyResponse(args)`
-- 多条规则同时命中时，实际行为受规则顺序、优先级及浏览器能力限制影响。
-- `declarativeNetRequest` 与注入脚本是两套能力：
-  - 前者更稳定、浏览器原生支持
-  - 后者适合更灵活的 Body 改写与延迟模拟
+---
+
+## 🛠 Rule Types
+
+### 1. 🔀 Redirect Request
+
+Redirect a request from one URL to another — or to a local file bundled with the extension.
+
+**Use cases:**
+- Point production API calls to your local dev server
+- Swap a CDN asset for a local build
+
+**Example:**
+```
+Match URL contains:  api.example.com/v1/users
+Redirect to:         http://localhost:3000/v1/users
+```
+
+---
+
+### 2. ✏️ Rewrite String
+
+Find and replace a substring inside a request URL.
+
+**Use cases:**
+- Switch API versions without changing your source code
+- Replace a hostname across all requests
+
+**Example:**
+```
+Match URL contains:  /api/v1/
+Replace:             /api/v1/
+With:                /api/v2/
+```
+
+---
+
+### 3. 🔗 Query Params
+
+Add, update, or remove URL query parameters.
+
+**Use cases:**
+- Append `debug=true` to every API request automatically
+- Strip analytics parameters like `utm_source` from outgoing requests
+- Override a feature flag: `feature_x=enabled`
+
+**Example:**
+```
+Match URL contains:  api.example.com
+Add param:           debug = true
+```
+
+---
+
+### 4. 📤 Modify Request Body
+
+Replace the body of a POST/PUT request — with a static payload or a dynamic JavaScript function.
+
+**Use cases:**
+- Hardcode a test payload to reproduce a bug
+- Inject extra fields into every form submission
+
+**Static example:**
+```json
+{ "userId": 42, "role": "admin" }
+```
+
+**Dynamic example (JS function):**
+```js
+function modifyRequestBody(args) {
+  const body = JSON.parse(args.body);
+  body.debug = true;
+  return JSON.stringify(body);
+}
+```
+
+---
+
+### 5. 📥 Modify Response Body
+
+Replace or transform what the server sends back — with static text or a JavaScript function.
+
+**Use cases:**
+- Mock an API endpoint that doesn't exist yet
+- Force an error state to test your UI's error handling
+- Override a config value returned from the server
+
+**Static example:**
+```json
+{ "status": "ok", "items": [] }
+```
+
+**Dynamic example (JS function):**
+```js
+function modifyResponse(args) {
+  const data = JSON.parse(args.body);
+  data.items = [{ id: 1, name: "Mock Item" }];
+  return JSON.stringify(data);
+}
+```
+
+---
+
+### 6. 📋 Modify Headers
+
+Add, update, or delete request or response headers.
+
+**Use cases:**
+- Inject an `Authorization` token without changing your app code
+- Add `Access-Control-Allow-Origin: *` to bypass CORS during development
+- Remove a header that interferes with your debugging
+
+**Example:**
+```
+Add request header:   Authorization = Bearer my-dev-token
+Add response header:  Access-Control-Allow-Origin = *
+```
+
+---
+
+### 7. 📱 User Agent
+
+Override the browser's User-Agent string — using a device preset, browser preset, or a custom value.
+
+**Use cases:**
+- Test mobile layouts without DevTools emulation
+- Simulate a different browser to check compatibility
+- Access APIs that behave differently based on client type
+
+**Example:**
+```
+Preset: iPhone 15  →  Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 ...) AppleWebKit/...
+```
+
+---
+
+### 8. 🚫 Cancel Request
+
+Block a request entirely so it never reaches the server.
+
+**Use cases:**
+- Silence noisy analytics or tracking calls during debugging
+- Block ads or third-party scripts to isolate a performance issue
+- Simulate a network failure for a specific endpoint
+
+**Example:**
+```
+Match URL contains:  analytics.example.com
+Action:              Cancel
+```
+
+---
+
+### 9. ⏱ Request Delay
+
+Add an artificial delay (in milliseconds) before a request is sent.
+
+**Use cases:**
+- Simulate a slow network to test loading spinners and skeleton screens
+- Reproduce race conditions that only appear under latency
+- Stress-test timeouts and retry logic
+
+**Example:**
+```
+Match URL contains:  /api/search
+Delay:               2000 ms
+```
+
+---
+
+## 🔍 Matching & Filtering
+
+Every rule supports fine-grained conditions so it only fires when you want it to.
+
+| Option | Description |
+|---|---|
+| **Target** | Match against the full `URL` or just the `HOST` |
+| **Method** | `contains` / `equals` / `regex` / `wildcard` |
+| **Page domain** | Only apply the rule when requests come from a specific page |
+| **Resource type** | Limit to XHR, script, image, stylesheet, etc. |
+| **HTTP method** | GET, POST, PUT, DELETE, etc. |
+| **Request header** | Match on a header value (`equals` / `not_equals` / `contains`) |
+
+---
+
+## 📦 Import & Export
+
+- **Export** all rules to a JSON file for backup or sharing with teammates
+- **Import** a JSON file — duplicate IDs are handled automatically
+
+---
+
+## ⚠️ Notes
+
+- **Regex rules:** Make sure your regular expression is valid before saving.
+- **Dynamic body scripts:** The function signature must match exactly:
+  - Request body: `function modifyRequestBody(args) { ... }`
+  - Response body: `function modifyResponse(args) { ... }`
+- **Rule priority:** When multiple rules match the same request, order and rule type determine which takes effect. Drag rules to reorder them.
+- **Two engines under the hood:**
+  - `declarativeNetRequest` — native browser API, stable and performant (used for redirect, headers, cancel, UA, etc.)
+  - Injected scripts — more flexible, used for body rewriting and request delay
+
+---
+
+## 🧑‍💻 Development
+
+```bash
+# Install dependencies
+npm install
+
+# Watch mode (hot rebuild)
+npm run dev
+
+# Build for both Chrome and Firefox
+npm run build
+
+# Build separately
+npm run build:chrome
+npm run build:firefox
+
+# Check internal references
+npm run check:references
+
+# Package Firefox .xpi
+npm run package:firefox
+```
+
+**Build output:**
+- `dist/chrome/`
+- `dist/firefox/`
+- `dist/requestman-firefox.xpi` (after running `package:firefox`)
