@@ -1,11 +1,16 @@
-name: Build
+name: Build and Release
 
 on:
   push:
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
       - uses: actions/checkout@v4
 
@@ -19,3 +24,35 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Package Chrome extension
+        run: |
+          cd dist/chrome
+          zip -r ../../requestman-chrome.zip .
+          cd ../..
+
+      - name: Generate tag name
+        id: tag
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          DATE=$(date -u +"%Y%m%d%H%M%S")
+          TAG="v${DATE}-${SHORT_SHA}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Create tag
+        run: |
+          git tag ${{ steps.tag.outputs.tag }}
+          git push origin ${{ steps.tag.outputs.tag }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Release ${{ steps.tag.outputs.tag }}
+          body: |
+            Automated release from commit ${{ github.sha }}
+
+            **Commit message:** ${{ github.event.head_commit.message }}
+          files: |
+            requestman-chrome.zip
+            dist/requestman-firefox.xpi
