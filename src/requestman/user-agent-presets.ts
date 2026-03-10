@@ -1,16 +1,17 @@
+import { t } from './i18n';
 export type UserAgentType = 'device' | 'browser' | 'custom';
 
 export const USER_AGENT_PRESETS = {
   device: {
     android: {
-      label: '安卓',
+      label: t('安卓', 'Android'),
       options: [
-        { key: 'android_phone', label: '安卓手机', ua: 'Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/UQ1A.240205.002) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36' },
-        { key: 'android_tablet', label: '安卓平板', ua: 'Mozilla/5.0 (Linux; Android 13; SM-X706B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' },
+        { key: 'android_phone', label: t('安卓手机', 'Android phone'), ua: 'Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/UQ1A.240205.002) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36' },
+        { key: 'android_tablet', label: t('安卓平板', 'Android tablet'), ua: 'Mozilla/5.0 (Linux; Android 13; SM-X706B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' },
       ],
     },
     apple: {
-      label: '苹果',
+      label: t('苹果', 'Apple'),
       options: [
         { key: 'iphone', label: 'iPhone', ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1' },
         { key: 'ipad', label: 'iPad', ua: 'Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1' },
@@ -20,13 +21,13 @@ export const USER_AGENT_PRESETS = {
       label: 'Windows',
       options: [
         { key: 'windows_phone', label: 'Windows Phone', ua: 'Mozilla/5.0 (Windows Phone 10.0; Android 6.0.1; Microsoft; RM-1152) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/52.0.2743.116 Mobile Safari/537.36 Edge/15.15254' },
-        { key: 'windows_tablet', label: 'Windows 平板', ua: 'Mozilla/5.0 (Windows NT 10.0; ARM; Tablet PC) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36' },
+        { key: 'windows_tablet', label: t('Windows 平板', 'Windows tablet'), ua: 'Mozilla/5.0 (Windows NT 10.0; ARM; Tablet PC) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36' },
       ],
     },
     other: {
-      label: '其他',
+      label: t('其他', 'Other'),
       options: [
-        { key: 'symbian_phone', label: 'Symbian 手机', ua: 'Mozilla/5.0 (SymbianOS/9.4; Series60/5.0 Nokia5800d-1/52.0.007; Profile/MIDP-2.1 Configuration/CLDC-1.1 ) AppleWebKit/525 (KHTML, like Gecko) BrowserNG/7.2.6.9 3gpp-gba' },
+        { key: 'symbian_phone', label: t('Symbian 手机', 'Symbian phone'), ua: 'Mozilla/5.0 (SymbianOS/9.4; Series60/5.0 Nokia5800d-1/52.0.007; Profile/MIDP-2.1 Configuration/CLDC-1.1 ) AppleWebKit/525 (KHTML, like Gecko) BrowserNG/7.2.6.9 3gpp-gba' },
       ],
     },
   },

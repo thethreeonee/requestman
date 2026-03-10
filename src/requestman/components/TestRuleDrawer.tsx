@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button, Drawer, Input, Space, Typography } from 'antd';
 import type { SimulateRuleResult } from '../rule-utils';
+import { t } from '../i18n';
 
 type Props = {
   open: boolean;
@@ -46,30 +47,30 @@ export default function TestRuleDrawer({
     : -1;
 
   return (
-    <Drawer title="测试规则" placement="bottom" open={open} height={320} onClose={onClose}>
+    <Drawer title={t('测试规则', 'Test rule')} placement="bottom" open={open} height={320} onClose={onClose}>
       <Space.Compact style={{ width: '100%' }}>
         <Input
           value={testUrl}
           onChange={(e) => onTestUrlChange(e.target.value)}
           onPressEnter={onTest}
-          placeholder="输入测试URL"
+          placeholder={t('输入测试URL', 'Enter URL to test')}
         />
-        <Button onClick={onTest}>测试</Button>
+        <Button onClick={onTest}>{t('测试', 'Test')}</Button>
       </Space.Compact>
 
       <div style={resultBlockStyle}>
-        {!testResult && <Typography.Text type="secondary">输入 URL 后点击测试（或按 Enter）</Typography.Text>}
+        {!testResult && <Typography.Text type="secondary">{t('输入 URL 后点击测试（或按 Enter）', 'Enter URL and click Test (or press Enter).')}</Typography.Text>}
 
         {testResult && testResult.ok && (
           <>
             <div style={rowStyle}>
-              <Typography.Text strong>命中条件配置</Typography.Text>
+              <Typography.Text strong>{t('命中条件配置', 'Matched condition')}</Typography.Text>
               <Typography.Text style={valueStyle}>
-                条件 {matchedConditionIndex >= 0 ? matchedConditionIndex + 1 : '-'}（{testResult.matchedCondition.matchTarget}/{testResult.matchedCondition.matchMode}）
+                {t('条件', 'Condition')} {matchedConditionIndex >= 0 ? matchedConditionIndex + 1 : '-'}（{testResult.matchedCondition.matchTarget}/{testResult.matchedCondition.matchMode}）
               </Typography.Text>
             </div>
             <div style={rowStyle}>
-              <Typography.Text strong>最终结果</Typography.Text>
+              <Typography.Text strong>{t('最终结果', 'Final result')}</Typography.Text>
               <Typography.Text style={valueStyle} copyable={{ text: testResult.redirectedUrl }}>
                 {testResult.redirectedUrl}
               </Typography.Text>

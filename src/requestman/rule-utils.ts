@@ -1,5 +1,6 @@
 import { DEFAULT_GROUP_ID, DEFAULT_GROUP_NAME, DEFAULT_MODIFY_REQUEST_BODY_SCRIPT, DEFAULT_MODIFY_RESPONSE_BODY_SCRIPT } from './constants';
 import type { MatchMode, RedirectCondition, RedirectGroup, RedirectRule } from './types';
+import { t } from './i18n';
 
 const RULE_TYPES: RedirectRule['type'][] = [
   'redirect_request',
@@ -78,7 +79,7 @@ export function normalizeGroups(input: unknown): RedirectGroup[] {
       seen.add(rawId);
       return {
         id: rawId,
-        name: typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim() : '未命名分组',
+        name: typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim() : t('未命名分组', 'Unnamed group'),
         enabled: obj.enabled !== false,
       };
     })
@@ -221,7 +222,7 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
 
       return {
         id: typeof obj.id === 'string' && obj.id ? obj.id : genId(),
-        name: typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim() : `规则 ${idx + 1}`,
+        name: typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim() : `${t('规则', 'Rule')} ${idx + 1}`,
         type: RULE_TYPES.includes(obj.type as RedirectRule['type']) ? (obj.type as RedirectRule['type']) : 'redirect_request',
         enabled: obj.enabled !== false,
         groupId: typeof obj.groupId === 'string' && groupIds.has(obj.groupId) ? obj.groupId : fallbackGroupId,
@@ -311,7 +312,7 @@ export function simulateRuleEffect(
   try {
     new URL(inputUrl);
   } catch {
-    return { ok: false, reason: '请输入合法的 URL（需包含协议）' };
+    return { ok: false, reason: t('请输入合法的 URL（需包含协议）', 'Please enter a valid URL including protocol.') };
   }
 
   const includeDisabled = !!options?.includeDisabled;
@@ -379,7 +380,7 @@ export function simulateRuleEffect(
     }
   }
 
-  return { ok: false, reason: '未命中任何启用规则' };
+  return { ok: false, reason: t('未命中任何启用规则', 'No enabled rule matched.') };
 }
 
 export function simulateRedirect(inputUrl: string, rules: RedirectRule[], groupEnabledMap: ReadonlyMap<string, boolean>) {
