@@ -11,6 +11,7 @@ import {
   Tooltip,
   Typography,
 } from 'antd';
+import { t } from '../i18n';
 import {
   CopyOutlined,
   DeleteOutlined,
@@ -722,8 +723,8 @@ export default function RedirectRuleList({
             if (row.rowType === 'group') {
               return <Dropdown menu={{ items: [
                 { key: 'rename', label: '重命名', icon: <EditOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: row.group.id }); setGroupInput(row.group.name); } },
-                { key: 'copy', label: '复制', icon: <CopyOutlined />, onClick: () => duplicateGroup(row.group.id) },
-                { key: 'delete', label: '删除', icon: <DeleteOutlined />, danger: true, onClick: () => deleteGroup(row.group.id) },
+                { key: 'copy', label: t('复制', 'Duplicate'), icon: <CopyOutlined />, onClick: () => duplicateGroup(row.group.id) },
+                { key: 'delete', label: t('删除', 'Delete'), icon: <DeleteOutlined />, danger: true, onClick: () => deleteGroup(row.group.id) },
               ] }}><Button type="text" icon={<EllipsisOutlined />} /></Dropdown>;
             }
             if (row.rowType === 'group-empty') return null;
@@ -732,7 +733,7 @@ export default function RedirectRuleList({
                 { key: 'move', label: '修改规则组', icon: <FolderOpenOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: row.rule.id }); setGroupInput(row.rule.groupId); } },
                 {
                   key: 'copy',
-                  label: '复制',
+                  label: t('复制', 'Duplicate'),
                   icon: <CopyOutlined />,
                   onClick: () => {
                     setRules((prev) => {
@@ -746,11 +747,11 @@ export default function RedirectRuleList({
                 },
                 {
                   key: 'delete',
-                  label: '删除',
+                  label: t('删除', 'Delete'),
                   icon: <DeleteOutlined />,
                   danger: true,
                   onClick: () => Modal.confirm({
-                    title: '确认删除规则？',
+                    title: t('确认删除规则？', 'Delete this rule?'),
                     okButtonProps: { danger: true },
                     onOk: () => {
                       setRules((prev) => prev.filter((r) => r.id !== row.rule.id));

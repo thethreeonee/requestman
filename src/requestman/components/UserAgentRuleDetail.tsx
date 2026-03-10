@@ -8,6 +8,7 @@ import {
   Select,
   Space,
 } from 'antd';
+import { t } from '../i18n';
 import {
   DeleteOutlined,
   PlusOutlined,
@@ -35,9 +36,9 @@ type Props = {
 };
 
 const USER_AGENT_TYPE_OPTIONS = [
-  { label: '设备', value: 'device' },
-  { label: '浏览器', value: 'browser' },
-  { label: '自定义', value: 'custom' },
+  { label: t('设备', 'Device'), value: 'device' },
+  { label: t('浏览器', 'Browser'), value: 'browser' },
+  { label: t('自定义', 'Custom'), value: 'custom' },
 ] as const;
 
 const DEVICE_PRESET_GROUP_OPTIONS = Object.entries(USER_AGENT_PRESETS.device).map(([key, group]) => ({
@@ -83,7 +84,7 @@ export default function UserAgentRuleDetail({
 
   const removeCondition = (conditionId: string) => {
     if (workingRule.conditions.length <= 1) {
-      messageApi.warning('至少保留一条条件配置');
+      messageApi.warning(t('至少保留一条条件配置', 'Keep at least one condition.'));
       return;
     }
     setWorkingRule({ ...workingRule, conditions: workingRule.conditions.filter((c) => c.id !== conditionId) });
@@ -117,8 +118,8 @@ export default function UserAgentRuleDetail({
       onTest={() => setTestDrawerOpen(true)}
       onSave={saveDetailRule}
       menuItems={[
-        { key: 'copy', label: '复制', onClick: () => setWorkingRule({ ...workingRule, id: genId(), name: `${workingRule.name} 副本` }) },
-        { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => { setRules((prev) => prev.filter((r) => r.id !== workingRule.id)); setPageToList(); } }) },
+        { key: 'copy', label: t('复制', 'Duplicate'), onClick: () => setWorkingRule({ ...workingRule, id: genId(), name: `${workingRule.name} ${t('副本', 'Copy')}` }) },
+        { key: 'delete', label: t('删除', 'Delete'), danger: true, onClick: () => Modal.confirm({ title: t('确认删除规则？', 'Delete this rule?'), okButtonProps: { danger: true }, onOk: () => { setRules((prev) => prev.filter((r) => r.id !== workingRule.id)); setPageToList(); } }) },
       ]}
     />
     <RuleNameHeader
@@ -133,12 +134,12 @@ export default function UserAgentRuleDetail({
         defaultActiveKey={[c.id]}
         items={[{
           key: c.id,
-          label: '请求条件配置',
+          label: t('请求条件配置', 'Request conditions'),
           extra: (
             <Popconfirm
-              title="确认删除该条件配置？"
-              okText="删除"
-              cancelText="取消"
+              title={t('确认删除该条件配置？', 'Delete this condition?')}
+              okText={t('删除', 'Delete')}
+              cancelText={t('取消', 'Cancel')}
               okButtonProps={{ danger: true, type: 'primary' }}
               onCancel={(e) => e?.stopPropagation()}
               onConfirm={(e) => {
@@ -149,7 +150,7 @@ export default function UserAgentRuleDetail({
               <span
                 role="button"
                 tabIndex={0}
-                aria-label="删除条件"
+                aria-label={t('删除条件', 'Delete condition')}
                 onMouseDown={(e) => e.stopPropagation()}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
@@ -194,10 +195,10 @@ export default function UserAgentRuleDetail({
             </Space.Compact>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {(c.userAgentType ?? 'device') === 'custom'
-                ? (c.userAgentCustomValue?.trim() ? `将设置为：${c.userAgentCustomValue.trim()}` : '请输入自定义 User-Agent')
+                ? (c.userAgentCustomValue?.trim() ? `将设置为：${c.userAgentCustomValue.trim()}` : t('请输入自定义 User-Agent', 'Enter custom User-Agent'))
                 : (() => {
                   const value = getUserAgentByPresetKey(c.userAgentPresetKey ?? '');
-                  return value ? `将设置为：${value}` : '请选择 User-Agent';
+                  return value ? `将设置为：${value}` : t('请选择 User-Agent', 'Select User-Agent');
                 })()}
             </Typography.Text>
           </Space>,
@@ -211,7 +212,7 @@ export default function UserAgentRuleDetail({
       icon={<PlusOutlined />}
       onClick={() => setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, createDefaultCondition()] })}
     >
-      添加新条件配置
+      {t('添加新条件配置', 'Add condition')}
     </Button>
     <TestRuleDrawer
       open={testDrawerOpen}

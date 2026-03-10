@@ -1,6 +1,7 @@
 import React from 'react';
 import { ReloadOutlined } from '@ant-design/icons';
 import { AutoComplete, Button, Form, Input, Modal, Select, Space, Tooltip } from 'antd';
+import { t } from '../i18n';
 import {
   COMMON_HEADER_OPTIONS,
   REQUEST_HEADER_FILTER_OPERATOR_OPTIONS,

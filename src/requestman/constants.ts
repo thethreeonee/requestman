@@ -1,9 +1,10 @@
+import { t } from './i18n';
 export const REDIRECT_RULES_KEY = 'asap_redirect_rules_v1';
 export const REDIRECT_ENABLED_KEY = 'asap_redirect_enabled_v1';
 export const REDIRECT_GROUPS_KEY = 'asap_redirect_groups_v1';
 
 export const DEFAULT_GROUP_ID = '__default__';
-export const DEFAULT_GROUP_NAME = '默认分组';
+export const DEFAULT_GROUP_NAME = t('默认分组', 'Default group');
 
 export const MATCH_TARGET_OPTIONS = [
   { label: 'URL', value: 'url' },
@@ -11,14 +12,14 @@ export const MATCH_TARGET_OPTIONS = [
 ] as const;
 
 export const MATCH_MODE_OPTIONS = [
-  { label: '包含', value: 'contains' },
-  { label: '等于', value: 'equals' },
-  { label: '正则', value: 'regex' },
-  { label: '通配符', value: 'wildcard' },
+  { label: t('包含', 'Contains'), value: 'contains' },
+  { label: t('等于', 'Equals'), value: 'equals' },
+  { label: t('正则', 'Regex'), value: 'regex' },
+  { label: t('通配符', 'Wildcard'), value: 'wildcard' },
 ] as const;
 
 export const RESOURCE_TYPE_OPTIONS = [
-  { label: '<所有>', value: 'all' },
+  { label: t('<所有>', '<All>'), value: 'all' },
   { label: 'XHR', value: 'xmlhttprequest' },
   { label: 'JS', value: 'script' },
   { label: 'CSS', value: 'stylesheet' },
@@ -31,7 +32,7 @@ export const RESOURCE_TYPE_OPTIONS = [
 ] as const;
 
 export const REQUEST_METHOD_OPTIONS = [
-  { label: '<所有>', value: 'all' },
+  { label: t('<所有>', '<All>'), value: 'all' },
   { label: 'GET', value: 'get' },
   { label: 'POST', value: 'post' },
   { label: 'PUT', value: 'put' },
@@ -42,9 +43,9 @@ export const REQUEST_METHOD_OPTIONS = [
 ] as const;
 
 export const REQUEST_HEADER_FILTER_OPERATOR_OPTIONS = [
-  { label: '等于', value: 'equals' },
-  { label: '不等于', value: 'not_equals' },
-  { label: '包含', value: 'contains' },
+  { label: t('等于', 'Equals'), value: 'equals' },
+  { label: t('不等于', 'Not equals'), value: 'not_equals' },
+  { label: t('包含', 'Contains'), value: 'contains' },
 ] as const;
 
 export const COMMON_HEADER_OPTIONS = [
@@ -90,13 +91,13 @@ export const DEFAULT_MODIFY_RESPONSE_BODY_SCRIPT = `function modifyResponse(args
 }`;
 
 export const RULE_TYPE_LABEL_MAP = {
-  redirect_request: '重定向请求',
-  rewrite_string: '重写字符串',
-  query_params: 'Query参数',
-  modify_request_body: '改写请求体',
-  modify_response_body: '改写响应体',
-  modify_headers: '修改Headers',
+  redirect_request: t('重定向请求', 'Redirect request'),
+  rewrite_string: t('重写字符串', 'Rewrite string'),
+  query_params: t('Query参数', 'Query params'),
+  modify_request_body: t('改写请求体', 'Modify request body'),
+  modify_response_body: t('改写响应体', 'Modify response body'),
+  modify_headers: t('修改Headers', 'Modify headers'),
   user_agent: 'User-Agent',
-  cancel_request: '取消请求',
-  request_delay: '网络请求延迟',
+  cancel_request: t('取消请求', 'Cancel request'),
+  request_delay: t('网络请求延迟', 'Request delay'),
 } as const;

@@ -3,6 +3,7 @@ import { Button, Dropdown, Select, Space, Switch, Tooltip, Typography } from 'an
 import { ArrowLeftOutlined, CheckOutlined, EllipsisOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import type { RedirectGroup } from '../types';
+import { t } from '../i18n';
 
 type Props = {
   groups: RedirectGroup[];
@@ -38,15 +39,15 @@ export default function RuleDetailToolbar({
   }, [showSaveSuccess]);
 
   return <div className="detail-header">
-    <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack}>返回</Button>
+    <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack}>{t('返回', 'Back')}</Button>
     <Space>
-      <Typography.Text type={enabled ? 'success' : 'secondary'}>{enabled ? '生效中' : '未生效'}</Typography.Text>
+      <Typography.Text type={enabled ? 'success' : 'secondary'}>{enabled ? t('生效中', 'Enabled') : t('未生效', 'Disabled')}</Typography.Text>
       <Switch checked={enabled} onChange={onEnabledChange} />
       <Dropdown menu={{ items: menuItems }}><Button icon={<EllipsisOutlined />} /></Dropdown>
       <Select
         value={groupId}
         style={{ width: 220 }}
-        options={groups.map((g) => ({ value: g.id, label: `规则组：${g.name}` }))}
+        options={groups.map((g) => ({ value: g.id, label: `${t('规则组：', 'Group: ')}${g.name}` }))}
         labelRender={({ label }) => {
           const labelText = String(label ?? '');
           return <Tooltip title={labelText}>
@@ -64,9 +65,9 @@ export default function RuleDetailToolbar({
           </Tooltip>;
         }}
         onChange={onGroupChange}
-        placeholder="规则组：请选择"
+        placeholder={t('规则组：请选择', 'Select group')}
       />
-      <Button onClick={onTest}>测试</Button>
+      <Button onClick={onTest}>{t('测试', 'Test')}</Button>
       <Button
         type="primary"
         onClick={() => {
@@ -76,7 +77,7 @@ export default function RuleDetailToolbar({
       >
         <Space size={4}>
           {showSaveSuccess ? <CheckOutlined /> : null}
-          <span>{dirty ? '* 保存规则' : '保存规则'}</span>
+          <span>{dirty ? `* ${t('保存规则', 'Save rule')}` : t('保存规则', 'Save rule')}</span>
         </Space>
       </Button>
     </Space>

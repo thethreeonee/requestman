@@ -9,6 +9,7 @@ import {
   Select,
   Space,
 } from 'antd';
+import { t } from '../i18n';
 import {
   DeleteOutlined,
   PlusOutlined,
@@ -65,7 +66,7 @@ export default function RequestDelayRuleDetail({
 
   const removeCondition = (conditionId: string) => {
     if (workingRule.conditions.length <= 1) {
-      messageApi.warning('至少保留一条条件配置');
+      messageApi.warning(t('至少保留一条条件配置', 'Keep at least one condition.'));
       return;
     }
     setWorkingRule({ ...workingRule, conditions: workingRule.conditions.filter((c) => c.id !== conditionId) });
@@ -86,8 +87,8 @@ export default function RequestDelayRuleDetail({
       onTest={() => setTestDrawerOpen(true)}
       onSave={saveDetailRule}
       menuItems={[
-        { key: 'copy', label: '复制', onClick: () => setWorkingRule({ ...workingRule, id: genId(), name: `${workingRule.name} 副本` }) },
-        { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => { setRules((prev) => prev.filter((r) => r.id !== workingRule.id)); setPageToList(); } }) },
+        { key: 'copy', label: t('复制', 'Duplicate'), onClick: () => setWorkingRule({ ...workingRule, id: genId(), name: `${workingRule.name} ${t('副本', 'Copy')}` }) },
+        { key: 'delete', label: t('删除', 'Delete'), danger: true, onClick: () => Modal.confirm({ title: t('确认删除规则？', 'Delete this rule?'), okButtonProps: { danger: true }, onOk: () => { setRules((prev) => prev.filter((r) => r.id !== workingRule.id)); setPageToList(); } }) },
       ]}
     />
     <RuleNameHeader
@@ -102,12 +103,12 @@ export default function RequestDelayRuleDetail({
         defaultActiveKey={[c.id]}
         items={[{
           key: c.id,
-          label: '请求条件配置',
+          label: t('请求条件配置', 'Request conditions'),
           extra: (
             <Popconfirm
-              title="确认删除该条件配置？"
-              okText="删除"
-              cancelText="取消"
+              title={t('确认删除该条件配置？', 'Delete this condition?')}
+              okText={t('删除', 'Delete')}
+              cancelText={t('取消', 'Cancel')}
               okButtonProps={{ danger: true, type: 'primary' }}
               onCancel={(e) => e?.stopPropagation()}
               onConfirm={(e) => {
@@ -118,7 +119,7 @@ export default function RequestDelayRuleDetail({
               <span
                 role="button"
                 tabIndex={0}
-                aria-label="删除条件"
+                aria-label={t('删除条件', 'Delete condition')}
                 onMouseDown={(e) => e.stopPropagation()}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
@@ -163,7 +164,7 @@ export default function RequestDelayRuleDetail({
       icon={<PlusOutlined />}
       onClick={() => setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, createDefaultCondition()] })}
     >
-      添加新条件配置
+      {t('添加新条件配置', 'Add condition')}
     </Button>
     <TestRuleDrawer
       open={testDrawerOpen}
