@@ -9,6 +9,7 @@ import {
   Select,
   Space,
 } from 'antd';
+import { t } from '../i18n';
 import {
   DeleteOutlined,
   PlusOutlined,
@@ -44,7 +45,7 @@ type Props = {
 };
 
 function validateDynamicScript(code: string): string | null {
-  if (!hasModifyRequestBodyFunction(code)) return '需定义 modifyRequestBody(args) 方法';
+  if (!hasModifyRequestBodyFunction(code)) return t('需定义 modifyRequestBody(args) 方法', 'Define modifyRequestBody(args).');
   return null;
 }
 
@@ -105,7 +106,7 @@ export default function ModifyRequestBodyRuleDetail({
 
   const removeCondition = (conditionId: string) => {
     if (workingRule.conditions.length <= 1) {
-      messageApi.warning('至少保留一条条件配置');
+      messageApi.warning(t('至少保留一条条件配置', 'Keep at least one condition.'));
       return;
     }
     setWorkingRule({ ...workingRule, conditions: workingRule.conditions.filter((c) => c.id !== conditionId) });
@@ -126,8 +127,8 @@ export default function ModifyRequestBodyRuleDetail({
       onTest={() => setTestDrawerOpen(true)}
       onSave={saveDetailRule}
       menuItems={[
-        { key: 'copy', label: '复制', onClick: () => setWorkingRule({ ...workingRule, id: genId(), name: `${workingRule.name} 副本` }) },
-        { key: 'delete', label: '删除', danger: true, onClick: () => Modal.confirm({ title: '确认删除规则？', okButtonProps: { danger: true }, onOk: () => { setRules((prev) => prev.filter((r) => r.id !== workingRule.id)); setPageToList(); } }) },
+        { key: 'copy', label: t('复制', 'Duplicate'), onClick: () => setWorkingRule({ ...workingRule, id: genId(), name: `${workingRule.name} ${t('副本', 'Copy')}` }) },
+        { key: 'delete', label: t('删除', 'Delete'), danger: true, onClick: () => Modal.confirm({ title: t('确认删除规则？', 'Delete this rule?'), okButtonProps: { danger: true }, onOk: () => { setRules((prev) => prev.filter((r) => r.id !== workingRule.id)); setPageToList(); } }) },
       ]}
     />
     <RuleNameHeader
@@ -143,12 +144,12 @@ export default function ModifyRequestBodyRuleDetail({
         defaultActiveKey={[c.id]}
         items={[{
           key: c.id,
-          label: '请求条件配置',
+          label: t('请求条件配置', 'Request conditions'),
           extra: (
             <Popconfirm
-              title="确认删除该条件配置？"
-              okText="删除"
-              cancelText="取消"
+              title={t('确认删除该条件配置？', 'Delete this condition?')}
+              okText={t('删除', 'Delete')}
+              cancelText={t('取消', 'Cancel')}
               okButtonProps={{ danger: true, type: 'primary' }}
               onCancel={(e) => e?.stopPropagation()}
               onConfirm={(e) => {
@@ -159,7 +160,7 @@ export default function ModifyRequestBodyRuleDetail({
               <span
                 role="button"
                 tabIndex={0}
-                aria-label="删除条件"
+                aria-label={t('删除条件', 'Delete condition')}
                 onMouseDown={(e) => e.stopPropagation()}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
@@ -182,20 +183,20 @@ export default function ModifyRequestBodyRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <Form.Item label="修改方式" style={{ marginBottom: 8 }}>
+            <Form.Item label={t('修改方式', 'Modify mode')} style={{ marginBottom: 8 }}>
               <Radio.Group
                 value={c.requestBodyMode}
                 onChange={(e) => updateConditionMode(c.id, e.target.value)}
                 options={[
-                  { label: '静态数据', value: 'static' },
-                  { label: '动态（JavaScript）', value: 'dynamic' },
+                  { label: t('静态数据', 'Static'), value: 'static' },
+                  { label: t('动态（JavaScript）', 'Dynamic (JavaScript)'), value: 'dynamic' },
                 ]}
               />
             </Form.Item>
             <Form.Item
-              label={c.requestBodyMode === 'dynamic' ? 'JavaScript 代码' : '替换后的请求体'}
+              label={c.requestBodyMode === 'dynamic' ? t('JavaScript 代码', 'JavaScript code') : t('替换后的请求体', 'Replaced request body')}
               validateStatus={dynamicScriptError ? 'error' : ''}
-              help={dynamicScriptError ?? (c.requestBodyMode === 'dynamic' ? '需定义 modifyRequestBody(args) 并返回最终请求体' : '命中后会直接替换原始请求 body')}
+              help={dynamicScriptError ?? (c.requestBodyMode === 'dynamic' ? t('需定义 modifyRequestBody(args) 并返回最终请求体', 'Define modifyRequestBody(args) and return the final request body.') : t('命中后会直接替换原始请求 body', 'Will directly replace the original request body when matched.'))}
               layout="vertical"
               style={{ marginBottom: 0 }}
             >
@@ -218,7 +219,7 @@ export default function ModifyRequestBodyRuleDetail({
       icon={<PlusOutlined />}
       onClick={() => setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, createDefaultCondition()] })}
     >
-      添加新条件配置
+      {t('添加新条件配置', 'Add condition')}
     </Button>
     <TestRuleDrawer
       open={testDrawerOpen}

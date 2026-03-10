@@ -8,6 +8,7 @@ import {
   DEFAULT_MODIFY_REQUEST_BODY_SCRIPT,
   DEFAULT_MODIFY_RESPONSE_BODY_SCRIPT,
 } from './constants';
+import { t } from './i18n';
 import {
   createDefaultCondition,
   genId,
