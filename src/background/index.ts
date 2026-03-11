@@ -214,6 +214,10 @@ function toOneRule(condition: RedirectCondition, index: number): chrome.declarat
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
 }
 
+function makeRegexNonCapturing(expression: string): string {
+  return expression.replace(/(^|[^\\])\((?!\?)/g, '$1(?:');
+}
+
 function buildRewriteUrlRegex(mode: MatchMode, expression: string, rewriteFrom: string): string {
   const escapedFrom = escapeRegex(rewriteFrom);
   if (mode === 'contains') return `^(.*${escapeRegex(expression)}.*?)${escapedFrom}(.*)$`;
@@ -224,7 +228,9 @@ function buildRewriteUrlRegex(mode: MatchMode, expression: string, rewriteFrom: 
     return `^(${escapeRegex(expression.slice(0, idx))})${escapedFrom}(${escapeRegex(expression.slice(idx + rewriteFrom.length))})$`;
   }
   // regex: preserve expression matching with a lookahead, then capture before/after rewriteFrom.
-  return `^(?=${expression}$)(.*)${escapedFrom}(.*)$`;
+  // Normalize lookahead groups to non-capturing so substitution group indexes remain stable.
+  const lookaheadExpression = makeRegexNonCapturing(expression);
+  return `^(?=${lookaheadExpression}$)(.*)${escapedFrom}(.*)$`;
 }
 
 function buildRewriteHostRegex(mode: MatchMode, expression: string, rewriteFrom: string): string {
