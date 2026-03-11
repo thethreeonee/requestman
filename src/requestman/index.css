@@ -158,6 +158,6 @@ body.rule-pointer-dragging {
   color: #DD5927;
 }
 
-.rules-list-table .rule-name-link:hover {
+.rules-list-table .rule-name-link.ant-btn-link:not(:disabled):not(.ant-btn-disabled):hover {
   color: #B7471E;
 }
