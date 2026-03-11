@@ -55,11 +55,11 @@ body.rule-pointer-dragging {
 }
 
 .rules-list-table .ant-table-tbody > .drop-before-row > td {
-  box-shadow: inset 0 2px 0 #1677ff;
+  box-shadow: inset 0 2px 0 #DD5927;
 }
 
 .rules-list-table .ant-table-tbody > .drop-after-row > td {
-  box-shadow: inset 0 -2px 0 #1677ff;
+  box-shadow: inset 0 -2px 0 #DD5927;
 }
 
 .rules-list-table .ant-table-tbody > tr:last-child > td {
@@ -98,8 +98,8 @@ body.rule-pointer-dragging {
   z-index: 2;
   box-sizing: border-box;
   pointer-events: none;
-  border: 1px solid rgba(22, 119, 255, 0.9);
-  background: rgba(22, 119, 255, 0.12);
+  border: 1px solid rgba(221, 89, 39, 0.9);
+  background: rgba(221, 89, 39, 0.12);
 }
 
 .rule-group-drop-overlay.is-last-group {
