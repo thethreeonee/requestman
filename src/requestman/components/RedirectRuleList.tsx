@@ -91,10 +91,10 @@ type GroupOverlayRect = { top: number; left: number; width: number; height: numb
 const POINTER_DRAG_THRESHOLD = 4;
 
 function getRuleEffectiveHint(redirectEnabled: boolean, groupEnabled: boolean, ruleEnabled: boolean) {
-  if (!redirectEnabled) return '总开关关闭，当前规则不会生效';
-  if (!groupEnabled) return '规则组已关闭，当前规则不会生效';
-  if (!ruleEnabled) return '规则已关闭，不会生效';
-  return '规则已开启，当前规则会生效';
+  if (!redirectEnabled) return t('总开关关闭，当前规则不会生效', 'Master switch is off. This rule will not take effect.');
+  if (!groupEnabled) return t('规则组已关闭，当前规则不会生效', 'Group is off. This rule will not take effect.');
+  if (!ruleEnabled) return t('规则已关闭，不会生效', 'Rule is off and will not take effect.');
+  return t('规则已开启，当前规则会生效', 'Rule is on and will take effect.');
 }
 
 function renderRuleMenuGroupLabel(title: string) {
@@ -355,21 +355,21 @@ export default function RedirectRuleList({
 
   const handleRedirectEnabledChange = (value: boolean) => {
     setRedirectEnabled(value);
-    messageApi.success(value ? '总开关已开启' : '总开关已关闭');
+    messageApi.success(value ? t('总开关已开启', 'Master switch enabled') : t('总开关已关闭', 'Master switch disabled'));
   };
 
   const handleGroupEnabledChange = (group: RedirectGroup, value: boolean) => {
     setGroups((prev) => prev.map((g) => g.id === group.id ? { ...g, enabled: value } : g));
-    messageApi.success(`规则组「${group.name}」已${value ? '开启' : '关闭'}`);
+    messageApi.success(value ? t(`规则组「${group.name}」已开启`, `Group "${group.name}" enabled.`) : t(`规则组「${group.name}」已关闭`, `Group "${group.name}" disabled.`));
   };
 
   const handleRuleEnabledChange = (rule: RedirectRule, value: boolean) => {
     setRules((prev) => prev.map((r) => r.id === rule.id ? { ...r, enabled: value } : r));
     if (value) {
-      messageApi.success(`规则「${rule.name}」已开启`);
+      messageApi.success(t(`规则「${rule.name}」已开启`, `Rule "${rule.name}" enabled.`));
       return;
     }
-    messageApi.warning(`规则「${rule.name}」已关闭`);
+    messageApi.warning(t(`规则「${rule.name}」已关闭`, `Rule "${rule.name}" disabled.`));
   };
 
   const clearDragState = () => {
@@ -453,7 +453,7 @@ export default function RedirectRuleList({
 
         if (currentDropState) {
           setRules((prev) => moveRuleWithinGroup(prev, activeDrag.ruleId, currentDropState.targetRuleId, currentDropState.position));
-          messageApi.success('规则排序已更新');
+          messageApi.success(t('规则排序已更新', 'Rule order updated'));
         } else if (currentGroupDropState) {
           setRules((prev) => moveRuleToGroup(prev, groups, activeDrag.ruleId, currentGroupDropState.groupId));
           messageApi.success(`规则已移动到规则组「${groupNameMap.get(currentGroupDropState.groupId) ?? ''}」`);
@@ -539,18 +539,18 @@ export default function RedirectRuleList({
       </div>
     ) : null}
     <div className="detail-header">
-      <Space><Typography.Title level={4} style={{ margin: 0 }}>Requestman 控制台</Typography.Title><Switch checked={redirectEnabled} onChange={handleRedirectEnabledChange} /></Space>
+      <Space><Typography.Title level={4} style={{ margin: 0 }}>{t('Requestman 控制台', 'Requestman Console')}</Typography.Title><Switch checked={redirectEnabled} onChange={handleRedirectEnabledChange} /></Space>
       <Space>
         <Dropdown menu={{ items: [
-          { key: 'export', label: '导出配置', onClick: exportConfig },
-          { key: 'import', label: '导入配置', onClick: importConfig },
+          { key: 'export', label: t('导出配置', 'Export config'), onClick: exportConfig },
+          { key: 'import', label: t('导入配置', 'Import config'), onClick: importConfig },
         ] }} trigger={['click']}>
           <Button icon={<EllipsisOutlined />} />
         </Dropdown>
-        <Tooltip title="新建规则组">
+        <Tooltip title={t('新建规则组', 'Create group')}>
           <Button
             icon={<FolderAddOutlined />}
-            aria-label="新建规则组"
+            aria-label={t('新建规则组', 'Create group')}
             onClick={() => { setGroupModal({ open: true, mode: 'create' }); setGroupInput(''); }}
           />
         </Tooltip>
@@ -560,7 +560,7 @@ export default function RedirectRuleList({
               {
                 key: 'url_rewrites_group',
                 type: 'group',
-                label: renderRuleMenuGroupLabel('URL rewrites'),
+                label: renderRuleMenuGroupLabel('URL Rewrites'),
                 children: [
                   { key: 'redirect_request', icon: RULE_TYPE_ICON_MAP.redirect_request, label: RULE_TYPE_LABEL_MAP.redirect_request, onClick: () => createRule('redirect_request') },
                   { key: 'rewrite_string', icon: RULE_TYPE_ICON_MAP.rewrite_string, label: RULE_TYPE_LABEL_MAP.rewrite_string, onClick: () => createRule('rewrite_string') },
@@ -570,7 +570,7 @@ export default function RedirectRuleList({
               {
                 key: 'api_mocking_group',
                 type: 'group',
-                label: renderRuleMenuGroupLabel('API mocking'),
+                label: renderRuleMenuGroupLabel('API Mocking'),
                 children: [
                   { key: 'modify_request_body', icon: RULE_TYPE_ICON_MAP.modify_request_body, label: RULE_TYPE_LABEL_MAP.modify_request_body, onClick: () => createRule('modify_request_body') },
                   { key: 'modify_response_body', icon: RULE_TYPE_ICON_MAP.modify_response_body, label: RULE_TYPE_LABEL_MAP.modify_response_body, onClick: () => createRule('modify_response_body') },
@@ -599,7 +599,7 @@ export default function RedirectRuleList({
           overlayStyle={{ minWidth: 320 }}
           trigger={['click']}
         >
-          <Button type="primary" icon={<PlusOutlined />}>新建规则</Button>
+          <Button type="primary" icon={<PlusOutlined />}>{t('新建规则', 'New rule')}</Button>
         </Dropdown>
       </Space>
     </div>
@@ -647,7 +647,7 @@ export default function RedirectRuleList({
         }}
         columns={[
         {
-          title: '名称',
+          title: t('名称', 'Name'),
           dataIndex: 'name',
           onCell: (row) => row.rowType === 'group'
             ? {
@@ -674,13 +674,13 @@ export default function RedirectRuleList({
               );
             }
             if (row.rowType === 'group-empty') {
-              return <Typography.Text type="secondary" style={{ marginLeft: 40 }}>该规则组暂无规则</Typography.Text>;
+              return <Typography.Text type="secondary" style={{ marginLeft: 40 }}>{t('该规则组暂无规则', 'No rules in this group')}</Typography.Text>;
             }
-            return <Button type="link" style={{ paddingInline: 0, marginLeft: 40 }} onClick={() => openRuleDetail(row.rule.id)}>{row.rule.name}</Button>;
+            return <Button type="link" className="rule-name-link" style={{ paddingInline: 0, marginLeft: 40 }} onClick={() => openRuleDetail(row.rule.id)}>{row.rule.name}</Button>;
           },
         },
         {
-          title: '类型',
+          title: t('类型', 'Type'),
           width: 180,
           render: (_, row) => {
             if (row.rowType !== 'rule') return null;
@@ -688,13 +688,13 @@ export default function RedirectRuleList({
           },
         },
         {
-          title: '状态',
+          title: t('状态', 'Status'),
           width: 100,
           render: (_, row) => {
             if (row.rowType === 'group') {
               return (
                 <Space size={6}>
-                  <Tooltip title={redirectEnabled ? (row.group.enabled ? '规则组已开启，组内规则可生效' : '规则组已关闭，组内规则不会生效') : '总开关关闭，组内规则不会生效'}>
+                  <Tooltip title={redirectEnabled ? (row.group.enabled ? t('规则组已开启，组内规则可生效', 'Group is enabled. Rules in this group can take effect.') : t('规则组已关闭，组内规则不会生效', 'Group is disabled. Rules in this group will not take effect.')) : t('总开关关闭，组内规则不会生效', 'Master switch is off. Rules in this group will not take effect.')}>
                     <Switch size="small" checked={row.group.enabled} disabled={!redirectEnabled} onChange={(v) => handleGroupEnabledChange(row.group, v)} />
                   </Tooltip>
                 </Space>
@@ -717,12 +717,12 @@ export default function RedirectRuleList({
           },
         },
         {
-          title: '操作',
+          title: t('操作', 'Actions'),
           width: 80,
           render: (_, row) => {
             if (row.rowType === 'group') {
               return <Dropdown menu={{ items: [
-                { key: 'rename', label: '重命名', icon: <EditOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: row.group.id }); setGroupInput(row.group.name); } },
+                { key: 'rename', label: t('重命名', 'Rename'), icon: <EditOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: row.group.id }); setGroupInput(row.group.name); } },
                 { key: 'copy', label: t('复制', 'Duplicate'), icon: <CopyOutlined />, onClick: () => duplicateGroup(row.group.id) },
                 { key: 'delete', label: t('删除', 'Delete'), icon: <DeleteOutlined />, danger: true, onClick: () => deleteGroup(row.group.id) },
               ] }}><Button type="text" icon={<EllipsisOutlined />} /></Dropdown>;
@@ -730,7 +730,7 @@ export default function RedirectRuleList({
             if (row.rowType === 'group-empty') return null;
             return (
               <Dropdown menu={{ items: [
-                { key: 'move', label: '修改规则组', icon: <FolderOpenOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: row.rule.id }); setGroupInput(row.rule.groupId); } },
+                { key: 'move', label: t('修改规则组', 'Change group'), icon: <FolderOpenOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: row.rule.id }); setGroupInput(row.rule.groupId); } },
                 {
                   key: 'copy',
                   label: t('复制', 'Duplicate'),
@@ -739,10 +739,10 @@ export default function RedirectRuleList({
                     setRules((prev) => {
                       const idx = prev.findIndex((r) => r.id === row.rule.id);
                       const next = [...prev];
-                      next.splice(idx + 1, 0, { ...row.rule, id: genId(), name: `${row.rule.name} 副本` });
+                      next.splice(idx + 1, 0, { ...row.rule, id: genId(), name: `${row.rule.name} ${t('副本', 'Copy')}` });
                       return next;
                     });
-                    messageApi.success(`规则「${row.rule.name}」已复制`);
+                    messageApi.success(t(`规则「${row.rule.name}」已复制`, `Rule "${row.rule.name}" duplicated.`));
                   },
                 },
                 {
@@ -755,7 +755,7 @@ export default function RedirectRuleList({
                     okButtonProps: { danger: true },
                     onOk: () => {
                       setRules((prev) => prev.filter((r) => r.id !== row.rule.id));
-                      messageApi.warning(`规则「${row.rule.name}」已删除`);
+                      messageApi.warning(t(`规则「${row.rule.name}」已删除`, `Rule "${row.rule.name}" deleted.`));
                     },
                   }),
                 },
@@ -768,16 +768,16 @@ export default function RedirectRuleList({
         ]}
       />
     </div>
-    <Modal open={groupModal.open} title={groupModal.mode === 'create' ? '新建规则组' : groupModal.mode === 'rename' ? '重命名规则组' : '修改规则组'} onCancel={() => setGroupModal({ open: false, mode: 'create' })} onOk={confirmGroupModal}>
+    <Modal open={groupModal.open} title={groupModal.mode === 'create' ? t('新建规则组', 'Create group') : groupModal.mode === 'rename' ? t('重命名规则组', 'Rename group') : t('修改规则组', 'Change group')} onCancel={() => setGroupModal({ open: false, mode: 'create' })} onOk={confirmGroupModal}>
       {groupModal.mode === 'move' ? (
         <Select
           style={{ width: '100%' }}
           options={groupsOptions}
           value={groupInput}
           onChange={setGroupInput}
-          placeholder="请选择规则组"
+          placeholder={t('请选择规则组', 'Select a group')}
         />
-      ) : <Input value={groupInput} onChange={(e) => setGroupInput(e.target.value)} placeholder="请输入名称" />}
+      ) : <Input value={groupInput} onChange={(e) => setGroupInput(e.target.value)} placeholder={t('请输入名称', 'Enter name')} />}
     </Modal>
   </div>;
 }

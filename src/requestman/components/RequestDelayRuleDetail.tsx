@@ -142,17 +142,17 @@ export default function RequestDelayRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <Form.Item label="延迟（ms）" style={{ marginBottom: 0 }}>
+            <Form.Item label={t('延迟（ms）', 'Delay (ms)')} style={{ marginBottom: 0 }}>
               <InputNumber
                 style={{ width: '100%' }}
                 min={0}
                 precision={0}
                 value={c.delayMs}
                 onChange={(value) => updateCondition(c.id, { delayMs: typeof value === 'number' ? value : 0 })}
-                placeholder="输入请求延迟时间"
+                placeholder={t('输入请求延迟时间', 'Enter request delay')}
               />
             </Form.Item>
-            <Typography.Text type="secondary">命中该 URL 条件后，请求将延迟指定毫秒数再继续。</Typography.Text>
+            <Typography.Text type="secondary">{t('命中该 URL 条件后，请求将延迟指定毫秒数再继续。', 'When this URL condition matches, the request will continue after the specified delay.')}</Typography.Text>
           </Space>,
         }]}
         style={{ marginBottom: 12 }}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Dropdown, Select, Space, Switch, Tooltip, Typography } from 'antd';
+import { Button, Dropdown, Select, Space, Switch, Typography } from 'antd';
 import { ArrowLeftOutlined, CheckOutlined, EllipsisOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import type { RedirectGroup } from '../types';
@@ -48,22 +48,6 @@ export default function RuleDetailToolbar({
         value={groupId}
         style={{ width: 220 }}
         options={groups.map((g) => ({ value: g.id, label: `${t('规则组：', 'Group: ')}${g.name}` }))}
-        labelRender={({ label }) => {
-          const labelText = String(label ?? '');
-          return <Tooltip title={labelText}>
-            <span
-              style={{
-                display: 'inline-block',
-                width: '100%',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {labelText}
-            </span>
-          </Tooltip>;
-        }}
         onChange={onGroupChange}
         placeholder={t('规则组：请选择', 'Select group')}
       />

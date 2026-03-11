@@ -91,13 +91,13 @@ export const DEFAULT_MODIFY_RESPONSE_BODY_SCRIPT = `function modifyResponse(args
 }`;
 
 export const RULE_TYPE_LABEL_MAP = {
-  redirect_request: t('重定向请求', 'Redirect request'),
-  rewrite_string: t('重写字符串', 'Rewrite string'),
-  query_params: t('Query参数', 'Query params'),
-  modify_request_body: t('改写请求体', 'Modify request body'),
-  modify_response_body: t('改写响应体', 'Modify response body'),
-  modify_headers: t('修改Headers', 'Modify headers'),
+  redirect_request: t('重定向请求', 'Redirect Request'),
+  rewrite_string: t('重写字符串', 'Rewrite String'),
+  query_params: t('Query参数', 'Query Params'),
+  modify_request_body: t('改写请求体', 'Modify Request Body'),
+  modify_response_body: t('改写响应体', 'Modify Response Body'),
+  modify_headers: t('修改Headers', 'Modify Headers'),
   user_agent: 'User-Agent',
-  cancel_request: t('取消请求', 'Cancel request'),
-  request_delay: t('网络请求延迟', 'Request delay'),
+  cancel_request: t('取消请求', 'Cancel Request'),
+  request_delay: t('网络请求延迟', 'Request Delay'),
 } as const;

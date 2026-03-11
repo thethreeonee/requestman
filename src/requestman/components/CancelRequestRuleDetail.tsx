@@ -139,7 +139,7 @@ export default function CancelRequestRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <Typography.Text type="secondary">命中该 URL 条件后，将直接取消请求。</Typography.Text>
+            <Typography.Text type="secondary">{t('命中该 URL 条件后，将直接取消请求。', 'When this URL condition matches, the request will be cancelled immediately.')}</Typography.Text>
           </Space>,
         }]}
         style={{ marginBottom: 12 }}
