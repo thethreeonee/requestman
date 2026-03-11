@@ -34,10 +34,10 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
   );
 
   return (
-    <Modal open={open} title="过滤条件" onCancel={onClose} onOk={onClose}>
+    <Modal open={open} title={t('过滤条件', 'Filter conditions')} onCancel={onClose} onOk={onClose}>
       {condition && (
         <Form layout="vertical">
-          <Form.Item label="页面域名" style={filterItemStyle}>
+          <Form.Item label={t('页面域名', 'Page domain')} style={filterItemStyle}>
             <Space.Compact style={{ width: '100%' }} block>
               <Input
                 value={condition.filter.pageDomain}
@@ -45,13 +45,13 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
                   filter: { ...condition.filter, pageDomain: e.target.value },
                 })}
               />
-              {renderResetButton('重置页面域名', () => onConditionChange(condition.id, {
+              {renderResetButton(t('重置页面域名', 'Reset page domain'), () => onConditionChange(condition.id, {
                 filter: { ...condition.filter, pageDomain: '' },
               }))}
             </Space.Compact>
           </Form.Item>
 
-          <Form.Item label="资源类型" style={filterItemStyle}>
+          <Form.Item label={t('资源类型', 'Resource type')} style={filterItemStyle}>
             <Space.Compact style={{ width: '100%' }} block>
               <Select
                 value={condition.filter.resourceType}
@@ -60,13 +60,13 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
                   filter: { ...condition.filter, resourceType: v },
                 })}
               />
-              {renderResetButton('重置资源类型', () => onConditionChange(condition.id, {
+              {renderResetButton(t('重置资源类型', 'Reset resource type'), () => onConditionChange(condition.id, {
                 filter: { ...condition.filter, resourceType: 'all' },
               }))}
             </Space.Compact>
           </Form.Item>
 
-          <Form.Item label="请求方法" style={filterItemStyle}>
+          <Form.Item label={t('请求方法', 'Request method')} style={filterItemStyle}>
             <Space.Compact style={{ width: '100%' }} block>
               <Select
                 value={condition.filter.requestMethod}
@@ -75,18 +75,18 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
                   filter: { ...condition.filter, requestMethod: v },
                 })}
               />
-              {renderResetButton('重置请求方法', () => onConditionChange(condition.id, {
+              {renderResetButton(t('重置请求方法', 'Reset request method'), () => onConditionChange(condition.id, {
                 filter: { ...condition.filter, requestMethod: 'all' },
               }))}
             </Space.Compact>
           </Form.Item>
 
-          <Form.Item label="请求 Header 过滤" style={filterItemStyle}>
+          <Form.Item label={t('请求 Header 过滤', 'Request header filter')} style={filterItemStyle}>
             <Space.Compact style={{ width: '100%' }} block>
               <AutoComplete
                 options={COMMON_HEADER_OPTIONS}
                 value={condition.filter.requestHeaderKey}
-                placeholder="Header"
+                placeholder={t('Header', 'Header')}
                 style={{ width: '30%' }}
                 onChange={(value) => onConditionChange(condition.id, {
                   filter: { ...condition.filter, requestHeaderKey: value },
@@ -102,13 +102,13 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
               />
               <Input
                 value={condition.filter.requestHeaderValue}
-                placeholder="目标值"
+                placeholder={t('目标值', 'Target value')}
                 style={{ width: '48%' }}
                 onChange={(e) => onConditionChange(condition.id, {
                   filter: { ...condition.filter, requestHeaderValue: e.target.value },
                 })}
               />
-              {renderResetButton('重置 Header 过滤', () => onConditionChange(condition.id, {
+              {renderResetButton(t('重置 Header 过滤', 'Reset header filter'), () => onConditionChange(condition.id, {
                 filter: {
                   ...condition.filter,
                   requestHeaderKey: '',

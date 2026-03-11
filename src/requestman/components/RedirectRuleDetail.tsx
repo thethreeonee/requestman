@@ -178,16 +178,16 @@ export default function RedirectRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <Radio.Group value={c.redirectType} onChange={(e) => updateRedirectType(c, e.target.value as 'url' | 'file')}><Radio value="url">URL</Radio><Radio value="file">本地文件</Radio></Radio.Group>
+            <Radio.Group value={c.redirectType} onChange={(e) => updateRedirectType(c, e.target.value as 'url' | 'file')}><Radio value="url">URL</Radio><Radio value="file">{t('本地文件', 'Local file')}</Radio></Radio.Group>
             {c.redirectType === 'file'
               ? <>
                 <Space.Compact style={{ width: '100%' }}>
                   <Input
                     value={getRedirectTarget(c)}
                     onChange={(e) => updateRedirectTarget(c, e.target.value)}
-                    placeholder="请输入本地文件绝对路径"
+                    placeholder={t('请输入本地文件绝对路径', 'Enter absolute local file path')}
                   />
-                  <Button icon={<FileOutlined />} onClick={() => pickFile(c.id)}>选择文件</Button>
+                  <Button icon={<FileOutlined />} onClick={() => pickFile(c.id)}>{t('选择文件', 'Select file')}</Button>
                 </Space.Compact>
                 <input
                   ref={(el) => { fileInputRefs.current[c.id] = el; }}

@@ -195,7 +195,7 @@ export default function ModifyHeadersRuleDetail({
             />
           </AutoComplete>
           <Input
-            placeholder="值"
+            placeholder={t('值', 'Value')}
             value={modification.value}
             disabled={modification.action === 'delete'}
             onChange={(e) => updateHeaderModification(condition.id, tabKey, modification.id, { value: e.target.value })}
@@ -203,7 +203,7 @@ export default function ModifyHeadersRuleDetail({
           <Button danger icon={<DeleteOutlined />} onClick={() => removeHeaderModification(condition.id, tabKey, modification.id)} />
         </Space.Compact>
       ))}
-      <Button type="dashed" onClick={() => addHeaderModification(condition.id, tabKey)} icon={<PlusOutlined />}>添加Header</Button>
+      <Button type="dashed" onClick={() => addHeaderModification(condition.id, tabKey)} icon={<PlusOutlined />}>{t('添加 Header', 'Add header')}</Button>
     </Space>
   );
 
@@ -278,12 +278,12 @@ export default function ModifyHeadersRuleDetail({
               items={[
                 {
                   key: 'requestHeaderModifications',
-                  label: '请求Headers',
+                  label: t('请求 Headers', 'Request headers'),
                   children: renderHeaderTabContent(c, 'requestHeaderModifications'),
                 },
                 {
                   key: 'responseHeaderModifications',
-                  label: '响应Headers',
+                  label: t('响应 Headers', 'Response headers'),
                   children: renderHeaderTabContent(c, 'responseHeaderModifications'),
                 },
               ]}
