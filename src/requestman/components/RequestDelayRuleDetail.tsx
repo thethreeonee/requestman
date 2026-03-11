@@ -8,6 +8,7 @@ import {
   Popconfirm,
   Select,
   Space,
+  Typography,
 } from 'antd';
 import { t } from '../i18n';
 import {
