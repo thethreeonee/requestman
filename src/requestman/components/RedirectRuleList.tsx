@@ -676,7 +676,7 @@ export default function RedirectRuleList({
             if (row.rowType === 'group-empty') {
               return <Typography.Text type="secondary" style={{ marginLeft: 40 }}>{t('该规则组暂无规则', 'No rules in this group')}</Typography.Text>;
             }
-            return <Button type="link" style={{ paddingInline: 0, marginLeft: 40 }} onClick={() => openRuleDetail(row.rule.id)}>{row.rule.name}</Button>;
+            return <Button type="link" className="rule-name-link" style={{ paddingInline: 0, marginLeft: 40 }} onClick={() => openRuleDetail(row.rule.id)}>{row.rule.name}</Button>;
           },
         },
         {

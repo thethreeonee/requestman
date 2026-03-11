@@ -151,3 +151,13 @@ body.rule-pointer-dragging {
   background: currentColor;
   opacity: 0.2;
 }
+
+.rules-list-table .rule-name-link,
+.rules-list-table .rule-name-link:focus,
+.rules-list-table .rule-name-link:active {
+  color: #DD5927;
+}
+
+.rules-list-table .rule-name-link:hover {
+  color: #B7471E;
+}
