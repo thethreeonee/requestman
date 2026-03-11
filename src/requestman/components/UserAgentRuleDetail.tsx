@@ -182,12 +182,12 @@ export default function UserAgentRuleDetail({
               />
               {c.userAgentType === 'custom' ? <Input
                 style={{ flex: 1, minWidth: 0 }}
-                placeholder="请输入自定义 User-Agent"
+                placeholder={t('请输入自定义 User-Agent', 'Enter custom User-Agent')}
                 value={c.userAgentCustomValue ?? ''}
                 onChange={(e) => updateCondition(c.id, { userAgentCustomValue: e.target.value })}
               /> : <Select
                 style={{ flex: 1, minWidth: 0 }}
-                placeholder="请选择 User-Agent"
+                placeholder={t('请选择 User-Agent', 'Select User-Agent')}
                 value={c.userAgentPresetKey}
                 options={(c.userAgentType ?? 'device') === 'browser' ? BROWSER_PRESET_GROUP_OPTIONS : DEVICE_PRESET_GROUP_OPTIONS as never}
                 onChange={(value) => updateCondition(c.id, { userAgentPresetKey: value })}

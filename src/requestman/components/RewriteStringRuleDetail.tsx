@@ -142,7 +142,7 @@ export default function RewriteStringRuleDetail({
             />
             <div style={{ display: 'flex', width: '100%', gap: 8 }}>
               <Space.Compact style={{ flex: 1, minWidth: 0 }}>
-                <Space.Addon style={{ flexShrink: 0 }}>目标</Space.Addon>
+                <Space.Addon style={{ flexShrink: 0 }}>{t('目标', 'Target')}</Space.Addon>
                 <Input
                   style={{ minWidth: 0 }}
                   value={c.rewriteFrom}
@@ -151,7 +151,7 @@ export default function RewriteStringRuleDetail({
                 />
               </Space.Compact>
               <Space.Compact style={{ flex: 1, minWidth: 0 }}>
-                <Space.Addon style={{ flexShrink: 0 }}>替换为</Space.Addon>
+                <Space.Addon style={{ flexShrink: 0 }}>{t('替换为', 'Replace with')}</Space.Addon>
                 <Input
                   style={{ minWidth: 0 }}
                   value={c.rewriteTo}

@@ -181,12 +181,12 @@ export default function QueryParamsRuleDetail({
                   onChange={(value) => updateModification(c.id, modification.id, { action: value })}
                 />
                 <Input
-                  placeholder="参数名"
+                  placeholder={t('参数名', 'Parameter key')}
                   value={modification.key}
                   onChange={(e) => updateModification(c.id, modification.id, { key: e.target.value })}
                 />
                 <Input
-                  placeholder="参数值"
+                  placeholder={t('参数值', 'Parameter value')}
                   value={modification.value}
                   disabled={modification.action === 'delete'}
                   onChange={(e) => updateModification(c.id, modification.id, { value: e.target.value })}
@@ -194,7 +194,7 @@ export default function QueryParamsRuleDetail({
                 <Button danger icon={<DeleteOutlined />} onClick={() => removeModification(c.id, modification.id)} />
               </Space.Compact>
             ))}
-            <Button type="dashed" onClick={() => addModification(c.id)} icon={<PlusOutlined />}>添加修改</Button>
+            <Button type="dashed" onClick={() => addModification(c.id)} icon={<PlusOutlined />}>{t('添加修改', 'Add modification')}</Button>
           </Space>,
         }]}
         style={{ marginBottom: 12 }}
