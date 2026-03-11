@@ -560,7 +560,7 @@ export default function RedirectRuleList({
               {
                 key: 'url_rewrites_group',
                 type: 'group',
-                label: renderRuleMenuGroupLabel('URL rewrites'),
+                label: renderRuleMenuGroupLabel('URL Rewrites'),
                 children: [
                   { key: 'redirect_request', icon: RULE_TYPE_ICON_MAP.redirect_request, label: RULE_TYPE_LABEL_MAP.redirect_request, onClick: () => createRule('redirect_request') },
                   { key: 'rewrite_string', icon: RULE_TYPE_ICON_MAP.rewrite_string, label: RULE_TYPE_LABEL_MAP.rewrite_string, onClick: () => createRule('rewrite_string') },
@@ -570,7 +570,7 @@ export default function RedirectRuleList({
               {
                 key: 'api_mocking_group',
                 type: 'group',
-                label: renderRuleMenuGroupLabel('API mocking'),
+                label: renderRuleMenuGroupLabel('API Mocking'),
                 children: [
                   { key: 'modify_request_body', icon: RULE_TYPE_ICON_MAP.modify_request_body, label: RULE_TYPE_LABEL_MAP.modify_request_body, onClick: () => createRule('modify_request_body') },
                   { key: 'modify_response_body', icon: RULE_TYPE_ICON_MAP.modify_response_body, label: RULE_TYPE_LABEL_MAP.modify_response_body, onClick: () => createRule('modify_response_body') },
