@@ -224,13 +224,23 @@ function buildRewriteUrlRegex(mode: MatchMode, expression: string, rewriteFrom: 
   if (mode === 'wildcard') return `^(${wildcardToRegexBody(expression)}.*?)${escapedFrom}(.*)$`;
   if (mode === 'equals') {
     const idx = expression.indexOf(rewriteFrom);
-    if (idx === -1) return '^(?!x)x$';
+    if (idx === -1) return '^\\b$';
     return `^(${escapeRegex(expression.slice(0, idx))})${escapedFrom}(${escapeRegex(expression.slice(idx + rewriteFrom.length))})$`;
   }
-  // regex: preserve expression matching with a lookahead, then capture before/after rewriteFrom.
-  // Normalize lookahead groups to non-capturing so substitution group indexes remain stable.
-  const lookaheadExpression = makeRegexNonCapturing(expression);
-  return `^(?=${lookaheadExpression}$)(.*)${escapedFrom}(.*)$`;
+  // regex: split expression at rewriteFrom to create capture groups around it.
+  // Avoids lookaheads which are not supported by RE2 (Chrome DNR regex engine).
+  // Normalize user's capture groups to non-capturing so substitution group indexes remain stable.
+  const ncExpression = makeRegexNonCapturing(expression);
+  const fromIdx = ncExpression.indexOf(rewriteFrom);
+  if (fromIdx !== -1) {
+    const prefix = ncExpression.slice(0, fromIdx);
+    const suffix = ncExpression.slice(fromIdx + rewriteFrom.length);
+    const cleanPrefix = prefix.replace(/^\^/, '');
+    const cleanSuffix = suffix.replace(/\$$/, '');
+    return `^(${cleanPrefix})${escapedFrom}(${cleanSuffix})$`;
+  }
+  // Fallback: rewriteFrom not found literally in expression, match any URL containing it.
+  return `^(.*)${escapedFrom}(.*)$`;
 }
 
 function buildRewriteHostRegex(mode: MatchMode, expression: string, rewriteFrom: string): string {
