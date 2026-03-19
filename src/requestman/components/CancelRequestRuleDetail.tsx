@@ -5,6 +5,7 @@ import {
   Modal,
   Popconfirm,
   Space,
+  Typography,
 } from 'antd';
 import { t } from '../i18n';
 import {
