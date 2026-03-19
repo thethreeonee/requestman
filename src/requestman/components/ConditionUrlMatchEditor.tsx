@@ -36,7 +36,7 @@ export default function ConditionUrlMatchEditor({
       onChange={(event) => onConditionChange({ expression: event.target.value })}
     />
     <Button
-      icon={<FilterOutlined style={filterConfigured ? { color: '#DD5927' } : undefined} />}
+      icon={<FilterOutlined style={filterConfigured ? { color: '#FF8700' } : undefined} />}
       onClick={onFilterClick}
     />
   </Space.Compact>;
