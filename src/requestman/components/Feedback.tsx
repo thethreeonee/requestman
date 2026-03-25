@@ -1,4 +1,4 @@
-import { Button } from './Button';
+import { Button } from '@/components/animate-ui/components/buttons/button';
 
 export function Modal({ open, title, children, onCancel, onOk }: any) {
   if (!open) return null;
@@ -9,8 +9,8 @@ export function Modal({ open, title, children, onCancel, onOk }: any) {
         <h3>{title}</h3>
         <div>{children}</div>
         <div className="aui-space">
-          <Button onClick={onCancel}>Cancel</Button>
-          <Button type="primary" onClick={onOk}>OK</Button>
+          <Button variant="outline" onClick={onCancel}>Cancel</Button>
+          <Button variant="default" onClick={onOk}>OK</Button>
         </div>
       </div>
     </div>

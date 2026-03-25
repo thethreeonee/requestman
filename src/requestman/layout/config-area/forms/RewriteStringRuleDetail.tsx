@@ -134,11 +134,11 @@ export default function RewriteStringRuleDetail({
       />
     ))}
     <Button
-      type="dashed"
+      variant="outline"
       style={{ marginTop: 12, width: '100%', height: 40, background: 'transparent' }}
-      icon={<PlusOutlined />}
       onClick={() => setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, createDefaultCondition()] })}
     >
+      <PlusOutlined />
       {t('添加新条件配置', 'Add condition')}
     </Button>
     <TestRuleDrawer

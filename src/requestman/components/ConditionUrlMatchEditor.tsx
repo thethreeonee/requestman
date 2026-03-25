@@ -1,5 +1,6 @@
 import React from 'react';
-import { Button, Input, Space } from '.';
+import { Button } from '@/components/animate-ui/components/buttons/button';
+import { Input, Space } from '.';
 import { FilterOutlined } from '../icons';
 import { MATCH_MODE_OPTIONS, MATCH_TARGET_OPTIONS } from '../constants';
 import GroupDropdownSelect from './GroupDropdownSelect';
@@ -39,8 +40,11 @@ export default function ConditionUrlMatchEditor({
       onChange={(event) => onConditionChange({ expression: event.target.value })}
     />
     <Button
-      icon={<FilterOutlined style={filterConfigured ? { color: '#FF8700' } : undefined} />}
+      variant="outline"
+      size="icon"
       onClick={onFilterClick}
-    />
+    >
+      <FilterOutlined style={filterConfigured ? { color: '#FF8700' } : undefined} />
+    </Button>
   </Space.Compact>;
 }

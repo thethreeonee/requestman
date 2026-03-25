@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
+import { Button } from '@/components/animate-ui/components/buttons/button';
 import {
-  Button,
   Collapse,
   Input,
   Modal,
@@ -159,21 +159,23 @@ export default function QueryParamsRuleDetail({
                   disabled={modification.action === 'delete'}
                   onChange={(e) => updateModification(c.id, modification.id, { value: e.target.value })}
                 />
-                <Button danger icon={<DeleteOutlined />} onClick={() => removeModification(c.id, modification.id)} />
+                <Button variant="destructive" size="icon" onClick={() => removeModification(c.id, modification.id)}>
+                  <DeleteOutlined />
+                </Button>
               </Space.Compact>
             ))}
-            <Button type="dashed" onClick={() => addModification(c.id)} icon={<PlusOutlined />}>{t('添加修改', 'Add modification')}</Button>
+            <Button variant="outline" onClick={() => addModification(c.id)}><PlusOutlined />{t('添加修改', 'Add modification')}</Button>
           </Space>,
         }]}
         style={{ marginBottom: 12 }}
       />
     ))}
     <Button
-      type="dashed"
+      variant="outline"
       style={{ marginTop: 12, width: '100%', height: 40, background: 'transparent' }}
-      icon={<PlusOutlined />}
       onClick={() => setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, createDefaultCondition()] })}
     >
+      <PlusOutlined />
       {t('添加新条件配置', 'Add condition')}
     </Button>
     <TestRuleDrawer

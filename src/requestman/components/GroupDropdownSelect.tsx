@@ -1,6 +1,6 @@
 import React from 'react';
+import { Button } from '@/components/animate-ui/components/buttons/button';
 import { ChevronsUpDown } from 'lucide-react';
-import { Button } from '.';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,7 +46,7 @@ export default function GroupDropdownSelect({
       <DropdownMenuTrigger asChild disabled={isDisabled}>
         <span className="group-dropdown-select" style={style}>
           <Button
-            type="dashed"
+            variant="outline"
             className={`group-dropdown-select__trigger${className ? ` ${className}` : ''}`}
             disabled={isDisabled}
           >

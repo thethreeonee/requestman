@@ -1,5 +1,6 @@
 import React from 'react';
-import { Button, Switch, Typography } from '../../components';
+import { Button } from '@/components/animate-ui/components/buttons/button';
+import { Switch, Typography } from '../../components';
 import { Moon, Sun } from 'lucide-react';
 import { Menu } from '@/components/animate-ui/icons/menu';
 import { Upload } from '@/components/animate-ui/icons/upload';
@@ -47,7 +48,7 @@ export default function TopBar({
         <DropdownMenu open={toolbarMenuOpen} onOpenChange={setToolbarMenuOpen}>
           <DropdownMenuTrigger asChild>
             <span>
-              <Button size="sm" icon={<Menu size={16} animate={toolbarMenuOpen} />} />
+              <Button variant="outline" size="sm"><Menu size={16} animate={toolbarMenuOpen} /></Button>
             </span>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" sideOffset={6}>
@@ -66,15 +67,15 @@ export default function TopBar({
             const next = effectiveTheme === 'light' ? 'dark' : 'light';
             return (
               <Button
+                variant="outline"
                 size="sm"
                 onClick={() => toggleTheme(next)}
-                icon={(
-                  <span className="theme-toggle-icons">
-                    <Sun size={16} className="theme-icon-sun" />
-                    <Moon size={16} className="theme-icon-moon" />
-                  </span>
-                )}
-              />
+              >
+                <span className="theme-toggle-icons">
+                  <Sun size={16} className="theme-icon-sun" />
+                  <Moon size={16} className="theme-icon-moon" />
+                </span>
+              </Button>
             );
           }}
         </ThemeToggler>

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Input, Space } from '.';
+import { Button } from '@/components/animate-ui/components/buttons/button';
+import { Input, Space } from '.';
 import { Binary } from '@/components/animate-ui/icons/binary';
 import { Blend } from '@/components/animate-ui/icons/blend';
 import {
@@ -74,12 +75,14 @@ export default function RuleDetailToolbar({
         <span className="detail-header__title-icon" aria-hidden="true">{RULE_TYPE_ICON_MAP[rule.type]}</span>
         <span className="detail-header__title-text">{rule.name || t('未命名规则', 'Untitled rule')}</span>
         <Button
-          type="text"
+          variant="ghost"
+          size="icon-sm"
           className="detail-header__rename-btn"
           aria-label={t('重命名规则', 'Rename rule')}
           onClick={() => setRenameDialogOpen(true)}
-          icon={<Brush size={16} />}
-        />
+        >
+          <Brush size={16} />
+        </Button>
       </div>
       <Space>
         <GroupDropdownSelect
@@ -89,9 +92,9 @@ export default function RuleDetailToolbar({
           onChange={onGroupChange}
           placeholder={t('规则组：请选择', 'Select group')}
         />
-        <Button onClick={onTest}>{t('测试', 'Test')}</Button>
+        <Button variant="outline" onClick={onTest}>{t('测试', 'Test')}</Button>
         <Button
-          type="primary"
+          variant="default"
           disabled={!dirty}
           onClick={() => {
             onSave();
@@ -116,8 +119,8 @@ export default function RuleDetailToolbar({
           placeholder={t('请输入规则名称', 'Enter rule name')}
         />
         <DialogFooter>
-          <Button onClick={() => setRenameDialogOpen(false)}>{t('取消', 'Cancel')}</Button>
-          <Button type="primary" onClick={confirmRename} disabled={!renameValue.trim()}>{t('确定', 'OK')}</Button>
+          <Button variant="outline" onClick={() => setRenameDialogOpen(false)}>{t('取消', 'Cancel')}</Button>
+          <Button variant="default" onClick={confirmRename} disabled={!renameValue.trim()}>{t('确定', 'OK')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

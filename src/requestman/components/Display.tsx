@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button } from './Button';
+import { Button } from '@/components/animate-ui/components/buttons/button';
 
 export const Typography = {
   Text: ({ children, strong, type, style }: any) => <span style={{ fontWeight: strong ? 600 : 400, opacity: type === 'secondary' ? 0.7 : 1, ...style }}>{children}</span>,
@@ -12,5 +12,5 @@ export function Collapse({ items }: any) {
 }
 
 export function Tabs({ items, activeKey, onChange }: any) {
-  return <div><div className="aui-space">{items.map((item: any) => <Button key={item.key} type={item.key === activeKey ? 'primary' : 'default'} onClick={() => onChange?.(item.key)}>{item.label}</Button>)}</div><div>{items.find((item: any) => item.key === activeKey)?.children}</div></div>;
+  return <div><div className="aui-space">{items.map((item: any) => <Button key={item.key} variant={item.key === activeKey ? 'default' : 'outline'} onClick={() => onChange?.(item.key)}>{item.label}</Button>)}</div><div>{items.find((item: any) => item.key === activeKey)?.children}</div></div>;
 }

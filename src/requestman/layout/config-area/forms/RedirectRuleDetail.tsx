@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
+import { Button } from '@/components/animate-ui/components/buttons/button';
 import {
-  Button,
   Collapse,
   Input,
   Modal,
@@ -155,7 +155,7 @@ export default function RedirectRuleDetail({
                     onChange={(e) => updateRedirectTarget(c, e.target.value)}
                     placeholder={t('请输入本地文件绝对路径', 'Enter absolute local file path')}
                   />
-                  <Button icon={<FileOutlined />} onClick={() => pickFile(c.id)}>{t('选择文件', 'Select file')}</Button>
+                  <Button variant="outline" onClick={() => pickFile(c.id)}><FileOutlined />{t('选择文件', 'Select file')}</Button>
                 </Space.Compact>
                 <input
                   ref={(el) => { fileInputRefs.current[c.id] = el; }}
@@ -171,11 +171,11 @@ export default function RedirectRuleDetail({
       />
     ))}
     <Button
-      type="dashed"
+      variant="outline"
       style={{ marginTop: 12, width: '100%', height: 40, background: 'transparent' }}
-      icon={<PlusOutlined />}
       onClick={() => setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, createDefaultCondition()] })}
     >
+      <PlusOutlined />
       {t('添加新条件配置', 'Add condition')}
     </Button>
     <TestRuleDrawer

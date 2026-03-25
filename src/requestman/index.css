@@ -464,35 +464,35 @@ html.dark .requestman-shell .ant-switch.ant-switch-checked .ant-switch-handle::b
   width: 100%;
   min-height: 36px;
   padding: 0 10px;
-  border: 1px solid var(--rm-border);
+  border: 1px solid var(--rm-border, #e0e0e0);
   border-radius: 10px;
-  background: var(--rm-content-bg);
+  background: var(--rm-content-bg, #ffffff);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease, transform .18s ease;
 }
 .aui-input-wrap:hover {
-  border-color: color-mix(in srgb, var(--rm-text-primary) 18%, var(--rm-border));
+  border-color: color-mix(in srgb, var(--rm-text-primary, #1a1a1a) 18%, var(--rm-border, #e0e0e0));
 }
 .aui-input-wrap:focus-within {
-  border-color: var(--rm-text-primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--rm-text-primary) 14%, transparent), 0 1px 2px rgba(15, 23, 42, 0.04);
+  border-color: var(--rm-text-primary, #1a1a1a);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--rm-text-primary, #1a1a1a) 14%, transparent), 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 .aui-input-wrap.is-disabled {
   opacity: 0.65;
-  background: var(--rm-surface-bg);
+  background: var(--rm-surface-bg, #f8f8f8);
 }
 .aui-input, .aui-textarea {
   width: 100%;
   border: 0;
   padding: 8px 0;
   background: transparent;
-  color: var(--rm-text-primary);
+  color: var(--rm-text-primary, #1a1a1a);
   font: inherit;
   font-size: 14px;
   line-height: 1.5;
 }
 .aui-input::placeholder, .aui-textarea::placeholder {
-  color: var(--rm-text-placeholder);
+  color: var(--rm-text-placeholder, #aaaaaa);
 }
 .aui-input:focus, .aui-textarea:focus {
   outline: none;
@@ -505,7 +505,7 @@ html.dark .requestman-shell .ant-switch.ant-switch-checked .ant-switch-handle::b
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
-  color: var(--rm-text-secondary);
+  color: var(--rm-text-secondary, #666666);
 }
 .aui-select {
   border: 1px solid #d0d7de;

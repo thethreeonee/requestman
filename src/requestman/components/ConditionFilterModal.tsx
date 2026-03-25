@@ -1,6 +1,7 @@
 import React from 'react';
+import { Button } from '@/components/animate-ui/components/buttons/button';
 import { ReloadOutlined } from '../icons';
-import { AutoComplete, Button, Form, Input, Modal, Select, Space, Tooltip } from '.';
+import { AutoComplete, Form, Input, Modal, Select, Space, Tooltip } from '.';
 import { t } from '../i18n';
 import {
   COMMON_HEADER_OPTIONS,
@@ -29,7 +30,9 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
 
   const renderResetButton = (title: string, onClick: () => void) => (
     <Tooltip title={title}>
-      <Button icon={<ReloadOutlined />} onClick={onClick} style={{ width: 32 }} />
+      <Button variant="outline" size="icon" onClick={onClick} style={{ width: 32 }}>
+        <ReloadOutlined />
+      </Button>
     </Tooltip>
   );
 

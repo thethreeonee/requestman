@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
+import { Button } from '@/components/animate-ui/components/buttons/button';
 import {
   AutoComplete,
-  Button,
   Collapse,
   Input,
   Modal,
@@ -180,10 +180,12 @@ export default function ModifyHeadersRuleDetail({
             disabled={modification.action === 'delete'}
             onChange={(e) => updateHeaderModification(condition.id, tabKey, modification.id, { value: e.target.value })}
           />
-          <Button danger icon={<DeleteOutlined />} onClick={() => removeHeaderModification(condition.id, tabKey, modification.id)} />
+          <Button variant="destructive" size="icon" onClick={() => removeHeaderModification(condition.id, tabKey, modification.id)}>
+            <DeleteOutlined />
+          </Button>
         </Space.Compact>
       ))}
-      <Button type="dashed" onClick={() => addHeaderModification(condition.id, tabKey)} icon={<PlusOutlined />}>{t('添加 Header', 'Add header')}</Button>
+      <Button variant="outline" onClick={() => addHeaderModification(condition.id, tabKey)}><PlusOutlined />{t('添加 Header', 'Add header')}</Button>
     </Space>
   );
 
@@ -261,11 +263,11 @@ export default function ModifyHeadersRuleDetail({
       />
     ))}
     <Button
-      type="dashed"
+      variant="outline"
       style={{ marginTop: 12, width: '100%', height: 40, background: 'transparent' }}
-      icon={<PlusOutlined />}
       onClick={() => setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, createDefaultCondition()] })}
     >
+      <PlusOutlined />
       {t('添加新条件配置', 'Add condition')}
     </Button>
     <TestRuleDrawer

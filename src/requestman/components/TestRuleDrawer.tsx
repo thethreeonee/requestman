@@ -1,5 +1,6 @@
 import React from 'react';
-import { Button, Input, Space, Typography } from '.';
+import { Button } from '@/components/animate-ui/components/buttons/button';
+import { Input, Space, Typography } from '.';
 import type { SimulateRuleResult } from '../rule-utils';
 import { t } from '../i18n';
 import {
@@ -73,7 +74,7 @@ export default function TestRuleDrawer({
               onPressEnter={onTest}
               placeholder={t('输入测试URL', 'Enter URL to test')}
             />
-            <Button onClick={onTest}>{t('测试', 'Test')}</Button>
+            <Button variant="outline" onClick={onTest}>{t('测试', 'Test')}</Button>
           </Space.Compact>
 
           <div style={resultBlockStyle}>

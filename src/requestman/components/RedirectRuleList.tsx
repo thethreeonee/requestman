@@ -1,7 +1,7 @@
 import React from 'react';
+import { Button } from '@/components/animate-ui/components/buttons/button';
 import { ChevronsUpDown } from 'lucide-react';
 import {
-  Button,
   Input,
   Modal,
   Switch,
@@ -474,7 +474,7 @@ export default function RedirectRuleList({
           {renderRuleTypeIcon(rule.type, hoveredRuleId === rule.id)}
         </div>
         <div className="rule-item-row__name">
-          <Button type="link" className="rule-name-link" style={{ paddingInline: 0 }} onClick={() => openRuleDetail(rule.id)}>
+          <Button variant="link" className="rule-name-link" style={{ paddingInline: 0 }} onClick={() => openRuleDetail(rule.id)}>
             {rule.name}
           </Button>
         </div>
@@ -541,7 +541,7 @@ export default function RedirectRuleList({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <span>
-                    <Button type="text" size="icon-sm" icon={<EllipsisOutlined />} />
+                    <Button variant="ghost" size="icon-sm"><EllipsisOutlined /></Button>
                   </span>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" sideOffset={6}>
@@ -651,7 +651,7 @@ export default function RedirectRuleList({
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <span>
-                              <Button type="text" size="icon-sm" icon={<EllipsisOutlined />} />
+                              <Button variant="ghost" size="icon-sm"><EllipsisOutlined /></Button>
                             </span>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" sideOffset={6}>
@@ -686,13 +686,14 @@ export default function RedirectRuleList({
         <Tooltip title={t('新建规则组', 'Create group')}>
           <Button
             size="icon"
-            type="secondary"
-            icon={<GalleryHorizontalEnd size={16} animate={hoveredAction === 'group'} />}
+            variant="secondary"
             aria-label={t('新建规则组', 'Create group')}
             onMouseEnter={() => setHoveredAction('group')}
             onMouseLeave={() => setHoveredAction((current) => (current === 'group' ? null : current))}
             onClick={() => { setGroupModal({ open: true, mode: 'create' }); setGroupInput(''); }}
-          />
+          >
+            <GalleryHorizontalEnd size={16} animate={hoveredAction === 'group'} />
+          </Button>
         </Tooltip>
       </div>
       <div className="sidebar-actions__rule">
@@ -700,12 +701,12 @@ export default function RedirectRuleList({
           <DropdownMenuTrigger asChild>
             <span className="sidebar-actions__trigger">
               <Button
-                type="primary"
+                variant="default"
                 className="sidebar-actions__button"
-                icon={<GalleryVertical size={16} animate={hoveredAction === 'rule'} />}
                 onMouseEnter={() => setHoveredAction('rule')}
                 onMouseLeave={() => setHoveredAction((current) => (current === 'rule' ? null : current))}
               >
+                <GalleryVertical size={16} animate={hoveredAction === 'rule'} />
                 {t('新建规则', 'New rule')}
               </Button>
             </span>
@@ -831,11 +832,18 @@ export default function RedirectRuleList({
             placeholder={t('请选择规则组', 'Select a group')}
           />
         ) : (
-          <Input value={groupInput} onChange={(e) => setGroupInput(e.target.value)} placeholder={t('请输入名称', 'Enter name')} />
+          <div style={{ width: '100%' }}>
+            <Input
+              style={{ width: '100%' }}
+              value={groupInput}
+              onChange={(e) => setGroupInput(e.target.value)}
+              placeholder={t('请输入名称', 'Enter name')}
+            />
+          </div>
         )}
         <DialogFooter>
-          <Button onClick={() => setGroupModal({ open: false, mode: 'create' })}>Cancel</Button>
-          <Button type="primary" onClick={confirmGroupModal}>OK</Button>
+          <Button variant="outline" onClick={() => setGroupModal({ open: false, mode: 'create' })}>Cancel</Button>
+          <Button variant="default" onClick={confirmGroupModal}>OK</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
