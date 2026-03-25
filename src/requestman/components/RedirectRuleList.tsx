@@ -7,20 +7,30 @@ import {
   Select,
   Space,
   Switch,
-  Table,
   Tooltip,
   Typography,
 } from '../ui';
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from '@/components/animate-ui/components/radix/accordion';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/animate-ui/components/radix/dialog';
 import { t } from '../i18n';
 import {
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
   FolderOpenOutlined,
-  FolderAddOutlined,
-  CaretRightOutlined,
   RetweetOutlined,
-  EllipsisOutlined,
+  EllipsisVerticalOutlined,
   ApiOutlined,
   CodeOutlined,
   InsertRowAboveOutlined,
@@ -29,8 +39,9 @@ import {
   UserOutlined,
   StopOutlined,
   ClockCircleOutlined,
-  PlusOutlined,
 } from '../ui/icons';
+import { GalleryVertical } from '@/components/animate-ui/icons/gallery-vertical';
+import { GalleryVerticalEnd as GalleryHorizontalEnd } from '@/components/animate-ui/icons/gallery-horizontal-end';
 import { RULE_TYPE_LABEL_MAP } from '../constants';
 import { genId } from '../rule-utils';
 import type { RedirectGroup, RedirectRule } from '../types';
@@ -60,10 +71,6 @@ type Props = {
   };
 };
 
-type GroupRow = { key: string; rowType: 'group'; group: RedirectGroup };
-type RuleRow = { key: string; rowType: 'rule'; rule: RedirectRule };
-type GroupEmptyRow = { key: string; rowType: 'group-empty'; group: RedirectGroup };
-type TableRow = GroupRow | RuleRow | GroupEmptyRow;
 type DragState = { ruleId: string; groupId: string };
 type PointerDragState = DragState & {
   pointerId: number;
@@ -74,12 +81,6 @@ type PointerDragState = DragState & {
   previewOffsetX: number;
   previewOffsetY: number;
   isDragging: boolean;
-};
-type DragPreviewState = {
-  rowHtml: string;
-  rowClassName: string;
-  cellWidths: number[];
-  width: number;
 };
 type DropState = { targetRuleId: string; position: 'before' | 'after' };
 type GroupDropState = { groupId: string };
@@ -101,23 +102,6 @@ function renderRuleMenuGroupLabel(title: string) {
       <span className="rule-menu-group-title__line" />
     </span>
   );
-}
-
-function buildTableData(groups: RedirectGroup[], collapsedGroupIds: string[], displayRules: RedirectRule[]): TableRow[] {
-  return groups.flatMap((group) => {
-    const groupRow: GroupRow = { key: `group-${group.id}`, rowType: 'group', group };
-    if (collapsedGroupIds.includes(group.id)) return [groupRow];
-
-    const ruleRows: RuleRow[] = displayRules
-      .filter((rule) => rule.groupId === group.id)
-      .map((rule) => ({ key: `rule-${rule.id}`, rowType: 'rule', rule }));
-
-    if (ruleRows.length === 0) {
-      return [groupRow, { key: `group-empty-${group.id}`, rowType: 'group-empty', group }];
-    }
-
-    return [groupRow, ...ruleRows];
-  });
 }
 
 function moveRuleWithinGroup(
@@ -214,6 +198,8 @@ function isInteractiveDragTarget(target: EventTarget | null) {
     '.ant-input',
     '.ant-input-affix-wrapper',
     '.ant-select',
+    '.aui-collapse-header',
+    '.aui-collapse-trigger',
   ].join(',')));
 }
 
@@ -248,28 +234,39 @@ export default function RedirectRuleList({
   setGroups,
   messageApi,
 }: Props) {
-  const tableWrapperRef = React.useRef<HTMLDivElement | null>(null);
+  const listWrapperRef = React.useRef<HTMLDivElement | null>(null);
+  const [hoveredAction, setHoveredAction] = React.useState<'group' | 'rule' | null>(null);
   const [dragState, setDragState] = React.useState<DragState | null>(null);
   const [pointerDragState, setPointerDragState] = React.useState<PointerDragState | null>(null);
-  const [dragPreviewState, setDragPreviewState] = React.useState<DragPreviewState | null>(null);
   const [dropState, setDropState] = React.useState<DropState | null>(null);
   const [groupDropState, setGroupDropState] = React.useState<GroupDropState | null>(null);
   const [groupOverlayRect, setGroupOverlayRect] = React.useState<GroupOverlayRect | null>(null);
   const pointerDragStateRef = React.useRef<PointerDragState | null>(null);
   const dropStateRef = React.useRef<DropState | null>(null);
   const groupDropStateRef = React.useRef<GroupDropState | null>(null);
+
   const currentGroupEnabled = new Map(groups.map((g) => [g.id, g.enabled]));
   const groupNameMap = new Map(groups.map((g) => [g.id, g.name]));
   const groupsOptions = groups.map((g) => ({ value: g.id, label: g.name }));
-
-  const tableData = React.useMemo(
-    () => buildTableData(groups, collapsedGroupIds, rules),
-    [collapsedGroupIds, groups, rules],
+  const groupRuleMap = React.useMemo(
+    () => new Map(groups.map((group) => [group.id, rules.filter((rule) => rule.groupId === group.id)])),
+    [groups, rules],
   );
-  const lastVisibleGroupId = React.useMemo(() => {
-    const groupRows = tableData.filter((row): row is GroupRow => row.rowType === 'group');
-    return groupRows[groupRows.length - 1]?.group.id ?? null;
-  }, [tableData]);
+  const expandedGroupIds = React.useMemo(
+    () => groups.map((group) => group.id).filter((groupId) => !collapsedGroupIds.includes(groupId)),
+    [collapsedGroupIds, groups],
+  );
+  const lastVisibleGroupId = groups[groups.length - 1]?.id ?? null;
+  const activePreviewRule = React.useMemo(
+    () => rules.find((rule) => rule.id === pointerDragState?.ruleId) ?? null,
+    [pointerDragState?.ruleId, rules],
+  );
+  const isGroupDialogOpen = groupModal.open;
+  const groupDialogTitle = groupModal.mode === 'create'
+    ? t('新建规则组', 'Create group')
+    : groupModal.mode === 'rename'
+      ? t('重命名规则组', 'Rename group')
+      : t('修改规则组', 'Change group');
 
   const setPointerDragStateWithRef = React.useCallback((value: React.SetStateAction<PointerDragState | null>) => {
     setPointerDragState((prev) => {
@@ -302,31 +299,27 @@ export default function RedirectRuleList({
   }, []);
 
   React.useLayoutEffect(() => {
-    if (!groupDropState || !tableWrapperRef.current) {
+    if (!groupDropState || !listWrapperRef.current) {
       setGroupOverlayRect(null);
       return undefined;
     }
 
     const updateOverlayRect = () => {
-      const wrapperEl = tableWrapperRef.current;
+      const wrapperEl = listWrapperRef.current;
       if (!wrapperEl) return;
-      const groupRows = wrapperEl.querySelectorAll<HTMLTableRowElement>(`tr[data-group-id="${groupDropState.groupId}"]`);
-      const tableContainer = wrapperEl.querySelector<HTMLElement>('.ant-table-container');
-      if (!groupRows.length || !tableContainer) {
+      const panelEl = wrapperEl.querySelector<HTMLElement>(`.rule-group-panel[data-group-id="${groupDropState.groupId}"]`);
+      if (!panelEl) {
         setGroupOverlayRect(null);
         return;
       }
 
-      const firstRect = groupRows[0].getBoundingClientRect();
-      const lastRect = groupRows[groupRows.length - 1].getBoundingClientRect();
+      const panelRect = panelEl.getBoundingClientRect();
       const wrapperRect = wrapperEl.getBoundingClientRect();
-      const containerRect = tableContainer.getBoundingClientRect();
-
       setGroupOverlayRect({
-        top: firstRect.top - wrapperRect.top,
-        left: containerRect.left - wrapperRect.left,
-        width: containerRect.width,
-        height: lastRect.bottom - firstRect.top,
+        top: panelRect.top - wrapperRect.top,
+        left: panelRect.left - wrapperRect.left,
+        width: panelRect.width,
+        height: panelRect.height,
         roundBottom: groupDropState.groupId === lastVisibleGroupId,
       });
     };
@@ -338,13 +331,16 @@ export default function RedirectRuleList({
       window.removeEventListener('resize', updateOverlayRect);
       window.removeEventListener('scroll', updateOverlayRect, true);
     };
-  }, [groupDropState, lastVisibleGroupId, tableData]);
+  }, [groupDropState, lastVisibleGroupId]);
 
-  const toggleGroupCollapse = (groupId: string) => {
-    setCollapsedGroupIds((prev) => {
-      if (prev.includes(groupId)) return prev.filter((id) => id !== groupId);
-      return [...prev, groupId];
-    });
+  const handleExpandedGroupsChange = (nextActiveKeys: string[] | string | undefined) => {
+    const nextExpandedGroupIds = Array.isArray(nextActiveKeys)
+      ? nextActiveKeys.map(String)
+      : nextActiveKeys == null
+        ? []
+        : [String(nextActiveKeys)];
+    const nextExpandedSet = new Set(nextExpandedGroupIds);
+    setCollapsedGroupIds(groups.map((group) => group.id).filter((groupId) => !nextExpandedSet.has(groupId)));
   };
 
   const handleGroupEnabledChange = (group: RedirectGroup, value: boolean) => {
@@ -366,13 +362,12 @@ export default function RedirectRuleList({
     setPointerDragStateWithRef(null);
     setDropStateWithRef(null);
     setGroupDropStateWithRef(null);
-    setDragPreviewState(null);
     setGroupOverlayRect(null);
   };
 
   const updatePointerDropTarget = React.useCallback((clientX: number, clientY: number, activeDrag: DragState) => {
     const hoveredElement = document.elementFromPoint(clientX, clientY);
-    const rowElement = hoveredElement?.closest<HTMLTableRowElement>('tr[data-row-type][data-group-id]');
+    const rowElement = hoveredElement?.closest<HTMLElement>('[data-row-type][data-group-id]');
     const hoveredGroupId = rowElement?.dataset.groupId;
     const hoveredRowType = rowElement?.dataset.rowType;
     const hoveredRuleId = rowElement?.dataset.ruleId;
@@ -445,7 +440,7 @@ export default function RedirectRuleList({
           messageApi.success(t('规则排序已更新', 'Rule order updated'));
         } else if (currentGroupDropState) {
           setRules((prev) => moveRuleToGroup(prev, groups, activeDrag.ruleId, currentGroupDropState.groupId));
-          messageApi.success(`规则已移动到规则组「${groupNameMap.get(currentGroupDropState.groupId) ?? ''}」`);
+          messageApi.success(t(`规则已移动到规则组「${groupNameMap.get(currentGroupDropState.groupId) ?? ''}」`, `Rule moved to group "${groupNameMap.get(currentGroupDropState.groupId) ?? ''}".`));
         }
       }
 
@@ -468,7 +463,7 @@ export default function RedirectRuleList({
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerCancel);
     };
-  }, [dragState, groups, groupNameMap, messageApi, pointerDragState, setRules, updatePointerDropTarget, setPointerDragStateWithRef]);
+  }, [dragState, groupNameMap, groups, messageApi, pointerDragState, setRules, setPointerDragStateWithRef, updatePointerDropTarget]);
 
   React.useEffect(() => {
     if (!dragState) return undefined;
@@ -478,17 +473,9 @@ export default function RedirectRuleList({
     };
   }, [dragState]);
 
-  const handleRulePointerDown = (event: React.PointerEvent<HTMLTableRowElement>, rule: RedirectRule) => {
+  const handleRulePointerDown = (event: React.PointerEvent<HTMLDivElement>, rule: RedirectRule) => {
     if (event.button !== 0 || isInteractiveDragTarget(event.target)) return;
     const rowRect = event.currentTarget.getBoundingClientRect();
-    const cellWidths = Array.from(event.currentTarget.children)
-      .map((cell) => (cell as HTMLElement).getBoundingClientRect().width);
-    setDragPreviewState({
-      rowHtml: event.currentTarget.innerHTML,
-      rowClassName: event.currentTarget.className,
-      cellWidths,
-      width: rowRect.width,
-    });
     setPointerDragStateWithRef({
       pointerId: event.pointerId,
       ruleId: rule.id,
@@ -503,10 +490,81 @@ export default function RedirectRuleList({
     });
   };
 
-  const getRowGroupId = (row: TableRow) => (row.rowType === 'rule' ? row.rule.groupId : row.group.id);
+  const renderRuleRow = (rule: RedirectRule) => {
+    const groupEnabled = currentGroupEnabled.get(rule.groupId) !== false;
+    const classNames = ['rule-item-row'];
+    if (dragState?.ruleId === rule.id) classNames.push('dragging-rule-row');
+    if (dropState?.targetRuleId === rule.id) classNames.push(dropState.position === 'before' ? 'drop-before-row' : 'drop-after-row');
+
+    return (
+      <div
+        key={rule.id}
+        className={classNames.join(' ')}
+        data-group-id={rule.groupId}
+        data-row-type="rule"
+        data-rule-id={rule.id}
+        onPointerDown={(event) => handleRulePointerDown(event, rule)}
+      >
+        <div className="rule-item-row__name">
+          <Button type="link" className="rule-name-link" style={{ paddingInline: 0 }} onClick={() => openRuleDetail(rule.id)}>
+            {rule.name}
+          </Button>
+        </div>
+        <div className="rule-item-row__type">
+          <Space size={6}>{RULE_TYPE_ICON_MAP[rule.type]}<span>{RULE_TYPE_LABEL_MAP[rule.type]}</span></Space>
+        </div>
+        <div className="rule-item-row__status">
+          <Tooltip title={getRuleEffectiveHint(redirectEnabled, groupEnabled, rule.enabled)}>
+            <Switch
+              className="rules-compact-switch"
+              pressedWidth={14}
+              checked={rule.enabled}
+              disabled={!redirectEnabled || !groupEnabled}
+              onChange={(value: boolean) => handleRuleEnabledChange(rule, value)}
+            />
+          </Tooltip>
+        </div>
+        <div className="rule-item-row__actions" data-no-drag="true">
+          <Dropdown menu={{ items: [
+            { key: 'move', label: t('修改规则组', 'Change group'), icon: <FolderOpenOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: rule.id }); setGroupInput(rule.groupId); } },
+            {
+              key: 'copy',
+              label: t('复制', 'Duplicate'),
+              icon: <CopyOutlined />,
+              onClick: () => {
+                setRules((prev) => {
+                  const idx = prev.findIndex((item) => item.id === rule.id);
+                  const next = [...prev];
+                  next.splice(idx + 1, 0, { ...rule, id: genId(), name: `${rule.name} ${t('副本', 'Copy')}` });
+                  return next;
+                });
+                messageApi.success(t(`规则「${rule.name}」已复制`, `Rule "${rule.name}" duplicated.`));
+              },
+            },
+            {
+              key: 'delete',
+              label: t('删除', 'Delete'),
+              icon: <DeleteOutlined />,
+              danger: true,
+              onClick: () => Modal.confirm({
+                title: t('确认删除规则？', 'Delete this rule?'),
+                okButtonProps: { danger: true },
+                onOk: () => {
+                  setRules((prev) => prev.filter((item) => item.id !== rule.id));
+                  messageApi.warning(t(`规则「${rule.name}」已删除`, `Rule "${rule.name}" deleted.`));
+                },
+              }),
+            },
+          ] }}>
+            <Button type="text" size="icon-sm" icon={<EllipsisVerticalOutlined />} />
+          </Dropdown>
+        </div>
+      </div>
+    );
+  };
 
   return <div className="rules-sidebar">
-    {pointerDragState?.isDragging && dragPreviewState ? (
+    {pointerDragState?.isDragging && activePreviewRule ? (
       <div
         className="rule-drag-preview"
         style={{
@@ -514,21 +572,24 @@ export default function RedirectRuleList({
           left: pointerDragState.clientX - pointerDragState.previewOffsetX,
         }}
       >
-        <table className="rules-list-table rule-drag-preview__table" style={{ width: dragPreviewState.width }}>
-          <colgroup>
-            {dragPreviewState.cellWidths.map((width, index) => <col key={index} style={{ width }} />)}
-          </colgroup>
-          <tbody className="ant-table-tbody">
-            <tr
-              className={dragPreviewState.rowClassName}
-              dangerouslySetInnerHTML={{ __html: dragPreviewState.rowHtml }}
-            />
-          </tbody>
-        </table>
+        <div className="rule-drag-preview__row">
+          <div className="rule-item-row__name">
+            <Typography.Text strong>{activePreviewRule.name}</Typography.Text>
+          </div>
+          <div className="rule-item-row__type">
+            <Space size={6}>{RULE_TYPE_ICON_MAP[activePreviewRule.type]}<span>{RULE_TYPE_LABEL_MAP[activePreviewRule.type]}</span></Space>
+          </div>
+          <div className="rule-item-row__status">
+            <Typography.Text type="secondary">{activePreviewRule.enabled ? t('已开启', 'On') : t('已关闭', 'Off')}</Typography.Text>
+          </div>
+          <div className="rule-item-row__actions">
+            <EllipsisVerticalOutlined />
+          </div>
+        </div>
       </div>
     ) : null}
-    <div className="rules-list-table-scroll">
-      <div className="rules-list-table-wrapper" ref={tableWrapperRef}>
+    <div className="rules-list-accordion-scroll">
+      <div className="rules-list-accordion" ref={listWrapperRef}>
         {groupOverlayRect ? (
           <div
             className={`rule-group-drop-overlay${groupOverlayRect.roundBottom ? ' is-last-group' : ''}`}
@@ -540,169 +601,76 @@ export default function RedirectRuleList({
             }}
           />
         ) : null}
-        <Table<TableRow>
-          className="rules-list-table"
-          pagination={false}
-          dataSource={tableData}
-          rowKey="key"
-          rowClassName={(row) => {
-            if (row.rowType === 'group') return 'rule-group-row';
-            if (row.rowType !== 'rule') return 'rule-item-row';
-            const classNames = ['rule-item-row'];
-            if (dragState?.ruleId === row.rule.id) classNames.push('dragging-rule-row');
-            if (dropState?.targetRuleId === row.rule.id) {
-              classNames.push(dropState.position === 'before' ? 'drop-before-row' : 'drop-after-row');
-            }
-            return classNames.join(' ');
-          }}
-          onRow={(row) => {
-            const groupId = getRowGroupId(row);
-            const rowProps = {
-              'data-group-id': groupId,
-              'data-row-type': row.rowType,
-            };
-
-            if (row.rowType !== 'rule') return rowProps;
-
-            return {
-              ...rowProps,
-              'data-rule-id': row.rule.id,
-              onPointerDown: (event: React.PointerEvent<HTMLTableRowElement>) => handleRulePointerDown(event, row.rule),
-            };
-          }}
-          columns={[
-            {
-              title: t('名称', 'Name'),
-              dataIndex: 'name',
-              onCell: (row) => row.rowType === 'group'
-                ? {
-                  className: 'rule-group-name-cell',
-                  onClick: () => toggleGroupCollapse(row.group.id),
-                }
-                : {},
-              render: (_, row) => {
-                if (row.rowType === 'group') {
-                  const isCollapsed = collapsedGroupIds.includes(row.group.id);
-                  return (
-                    <Space>
-                      <Button
-                        type="text"
-                        className="group-collapse-btn"
-                        icon={<CaretRightOutlined className={isCollapsed ? '' : 'expanded'} />}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          toggleGroupCollapse(row.group.id);
-                        }}
-                      />
-                      <Typography.Text strong>{row.group.name}</Typography.Text>
-                    </Space>
-                  );
-                }
-                if (row.rowType === 'group-empty') {
-                  return <Typography.Text type="secondary" style={{ marginLeft: 40 }}>{t('该规则组暂无规则', 'No rules in this group')}</Typography.Text>;
-                }
-                return <Button type="link" className="rule-name-link" style={{ paddingInline: 0, marginLeft: 40 }} onClick={() => openRuleDetail(row.rule.id)}>{row.rule.name}</Button>;
-              },
-            },
-            {
-              title: t('类型', 'Type'),
-              width: 180,
-              render: (_, row) => {
-                if (row.rowType !== 'rule') return null;
-                return <Space size={6}>{RULE_TYPE_ICON_MAP[row.rule.type]}<span>{RULE_TYPE_LABEL_MAP[row.rule.type]}</span></Space>;
-              },
-            },
-            {
-              title: t('状态', 'Status'),
-              width: 100,
-              render: (_, row) => {
-                if (row.rowType === 'group') {
-                  return (
-                    <Space size={6}>
-                      <Tooltip title={redirectEnabled ? (row.group.enabled ? t('规则组已开启，组内规则可生效', 'Group is enabled. Rules in this group can take effect.') : t('规则组已关闭，组内规则不会生效', 'Group is disabled. Rules in this group will not take effect.')) : t('总开关关闭，组内规则不会生效', 'Master switch is off. Rules in this group will not take effect.')}>
-                        <Switch size="small" checked={row.group.enabled} disabled={!redirectEnabled} onChange={(v) => handleGroupEnabledChange(row.group, v)} />
-                      </Tooltip>
-                    </Space>
-                  );
-                }
-                if (row.rowType === 'group-empty') return null;
-                const groupEnabled = currentGroupEnabled.get(row.rule.groupId) !== false;
-                return (
-                  <Space size={6}>
-                    <Tooltip title={getRuleEffectiveHint(redirectEnabled, groupEnabled, row.rule.enabled)}>
-                      <Switch
-                        size="small"
-                        checked={row.rule.enabled}
-                        disabled={!redirectEnabled || !groupEnabled}
-                        onChange={(v) => handleRuleEnabledChange(row.rule, v)}
-                      />
+        <Accordion type="multiple" value={expandedGroupIds} onValueChange={handleExpandedGroupsChange}>
+          {groups.map((group) => {
+            const groupRules = groupRuleMap.get(group.id) ?? [];
+            return (
+              <AccordionItem key={group.id} value={group.id}>
+                <div className="rule-group-accordion-header">
+                  <AccordionTrigger className="rule-group-accordion-trigger">
+                    <div className="rule-group-header" data-group-id={group.id} data-row-type="group">
+                      <div className="rule-group-header__title">
+                        <span className="rule-group-header__title-text" style={{ fontWeight: 600 }}>{group.name}</span>
+                        <span className="rule-group-header__count">{groupRules.length}</span>
+                      </div>
+                    </div>
+                  </AccordionTrigger>
+                  <div className="rule-group-header__actions" data-no-drag="true">
+                    <Tooltip title={redirectEnabled ? (group.enabled ? t('规则组已开启，组内规则可生效', 'Group is enabled. Rules in this group can take effect.') : t('规则组已关闭，组内规则不会生效', 'Group is disabled. Rules in this group will not take effect.')) : t('总开关关闭，组内规则不会生效', 'Master switch is off. Rules in this group will not take effect.')}>
+                      <span className="rule-group-header__switch">
+                        <Switch
+                          className="rules-compact-switch"
+                          pressedWidth={14}
+                          checked={group.enabled}
+                          disabled={!redirectEnabled}
+                          onChange={(value: boolean) => handleGroupEnabledChange(group, value)}
+                        />
+                      </span>
                     </Tooltip>
-                  </Space>
-                );
-              },
-            },
-            {
-              title: t('操作', 'Actions'),
-              width: 80,
-              render: (_, row) => {
-                if (row.rowType === 'group') {
-                  return <Dropdown menu={{ items: [
-                    { key: 'rename', label: t('重命名', 'Rename'), icon: <EditOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: row.group.id }); setGroupInput(row.group.name); } },
-                    { key: 'copy', label: t('复制', 'Duplicate'), icon: <CopyOutlined />, onClick: () => duplicateGroup(row.group.id) },
-                    { key: 'delete', label: t('删除', 'Delete'), icon: <DeleteOutlined />, danger: true, onClick: () => deleteGroup(row.group.id) },
-                  ] }}><Button type="text" icon={<EllipsisOutlined />} /></Dropdown>;
-                }
-                if (row.rowType === 'group-empty') return null;
-                return (
-                  <Dropdown menu={{ items: [
-                    { key: 'move', label: t('修改规则组', 'Change group'), icon: <FolderOpenOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: row.rule.id }); setGroupInput(row.rule.groupId); } },
-                    {
-                      key: 'copy',
-                      label: t('复制', 'Duplicate'),
-                      icon: <CopyOutlined />,
-                      onClick: () => {
-                        setRules((prev) => {
-                          const idx = prev.findIndex((r) => r.id === row.rule.id);
-                          const next = [...prev];
-                          next.splice(idx + 1, 0, { ...row.rule, id: genId(), name: `${row.rule.name} ${t('副本', 'Copy')}` });
-                          return next;
-                        });
-                        messageApi.success(t(`规则「${row.rule.name}」已复制`, `Rule "${row.rule.name}" duplicated.`));
-                      },
-                    },
-                    {
-                      key: 'delete',
-                      label: t('删除', 'Delete'),
-                      icon: <DeleteOutlined />,
-                      danger: true,
-                      onClick: () => Modal.confirm({
-                        title: t('确认删除规则？', 'Delete this rule?'),
-                        okButtonProps: { danger: true },
-                        onOk: () => {
-                          setRules((prev) => prev.filter((r) => r.id !== row.rule.id));
-                          messageApi.warning(t(`规则「${row.rule.name}」已删除`, `Rule "${row.rule.name}" deleted.`));
-                        },
-                      }),
-                    },
-                  ] }}>
-                    <Button type="text" icon={<EllipsisOutlined />} />
-                  </Dropdown>
-                );
-              },
-            },
-          ]}
-        />
+                    <Dropdown menu={{ items: [
+                      { key: 'rename', label: t('重命名', 'Rename'), icon: <EditOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: group.id }); setGroupInput(group.name); } },
+                      { key: 'copy', label: t('复制', 'Duplicate'), icon: <CopyOutlined />, onClick: () => duplicateGroup(group.id) },
+                      { key: 'delete', label: t('删除', 'Delete'), icon: <DeleteOutlined />, danger: true, onClick: () => deleteGroup(group.id) },
+                    ] }}>
+                    <Button type="text" size="icon-sm" icon={<EllipsisVerticalOutlined />} />
+                    </Dropdown>
+                  </div>
+                </div>
+                <AccordionContent keepRendered>
+                  <div className="rule-group-panel" data-group-id={group.id} data-row-type="group">
+                    <div className="rule-group-body" data-group-id={group.id} data-row-type="group">
+                      {groupRules.length > 0
+                        ? groupRules.map(renderRuleRow)
+                        : (
+                          <div className="rule-item-row__empty" data-group-id={group.id} data-row-type="group">
+                            <Typography.Text type="secondary">{t('该规则组暂无规则', 'No rules in this group')}</Typography.Text>
+                          </div>
+                        )}
+                    </div>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            );
+          })}
+        </Accordion>
       </div>
     </div>
     <div className="sidebar-header sidebar-actions">
-      <Tooltip title={t('新建规则组', 'Create group')}>
-        <Button
-          icon={<FolderAddOutlined />}
-          aria-label={t('新建规则组', 'Create group')}
-          onClick={() => { setGroupModal({ open: true, mode: 'create' }); setGroupInput(''); }}
-        />
-      </Tooltip>
-      <Dropdown
+      <div className="sidebar-actions__group">
+        <Tooltip title={t('新建规则组', 'Create group')}>
+          <Button
+            size="icon"
+            type="secondary"
+            icon={<GalleryHorizontalEnd size={16} animate={hoveredAction === 'group'} />}
+            aria-label={t('新建规则组', 'Create group')}
+            onMouseEnter={() => setHoveredAction('group')}
+            onMouseLeave={() => setHoveredAction((current) => (current === 'group' ? null : current))}
+            onClick={() => { setGroupModal({ open: true, mode: 'create' }); setGroupInput(''); }}
+          />
+        </Tooltip>
+      </div>
+      <div className="sidebar-actions__rule">
+        <Dropdown
           menu={{
             items: [
               {
@@ -746,20 +714,40 @@ export default function RedirectRuleList({
           }}
           overlayStyle={{ minWidth: 320 }}
           trigger={['click']}
-      >
-        <Button type="primary" icon={<PlusOutlined />}>{t('新建规则', 'New rule')}</Button>
-      </Dropdown>
+        >
+          <Button
+            type="primary"
+            className="sidebar-actions__button"
+            icon={<GalleryVertical size={16} animate={hoveredAction === 'rule'} />}
+            onMouseEnter={() => setHoveredAction('rule')}
+            onMouseLeave={() => setHoveredAction((current) => (current === 'rule' ? null : current))}
+          >
+            {t('新建规则', 'New rule')}
+          </Button>
+        </Dropdown>
+      </div>
     </div>
-    <Modal open={groupModal.open} title={groupModal.mode === 'create' ? t('新建规则组', 'Create group') : groupModal.mode === 'rename' ? t('重命名规则组', 'Rename group') : t('修改规则组', 'Change group')} onCancel={() => setGroupModal({ open: false, mode: 'create' })} onOk={confirmGroupModal}>
-      {groupModal.mode === 'move' ? (
-        <Select
-          style={{ width: '100%' }}
-          options={groupsOptions}
-          value={groupInput}
-          onChange={setGroupInput}
-          placeholder={t('请选择规则组', 'Select a group')}
-        />
-      ) : <Input value={groupInput} onChange={(e) => setGroupInput(e.target.value)} placeholder={t('请输入名称', 'Enter name')} />}
-    </Modal>
+    <Dialog open={isGroupDialogOpen} onOpenChange={(open) => { if (!open) setGroupModal({ open: false, mode: 'create' }); }}>
+      <DialogContent showCloseButton>
+        <DialogHeader>
+          <DialogTitle>{groupDialogTitle}</DialogTitle>
+        </DialogHeader>
+        {groupModal.mode === 'move' ? (
+          <Select
+            style={{ width: '100%' }}
+            options={groupsOptions}
+            value={groupInput}
+            onChange={setGroupInput}
+            placeholder={t('请选择规则组', 'Select a group')}
+          />
+        ) : (
+          <Input value={groupInput} onChange={(e) => setGroupInput(e.target.value)} placeholder={t('请输入名称', 'Enter name')} />
+        )}
+        <DialogFooter>
+          <Button onClick={() => setGroupModal({ open: false, mode: 'create' })}>Cancel</Button>
+          <Button type="primary" onClick={confirmGroupModal}>OK</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>;
 }

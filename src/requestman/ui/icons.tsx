@@ -10,6 +10,7 @@ export const ReloadOutlined = icon('🔄');
 export const ArrowLeftOutlined = icon('⬅️');
 export const CheckOutlined = icon('✅');
 export const EllipsisOutlined = icon('⋯');
+export const EllipsisVerticalOutlined = icon('⋮');
 export const CopyOutlined = icon('📄');
 export const FolderOpenOutlined = icon('📂');
 export const FolderAddOutlined = icon('📁');

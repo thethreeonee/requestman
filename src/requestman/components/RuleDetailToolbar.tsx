@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Button, Dropdown, Select, Space, Switch, Typography } from '../ui';
-import { ArrowLeftOutlined, CheckOutlined, EllipsisOutlined } from '../ui/icons';
+import { ArrowLeftOutlined, CheckOutlined, EllipsisVerticalOutlined } from '../ui/icons';
 import type { MenuProps } from '../ui';
 import type { RedirectGroup } from '../types';
 import { t } from '../i18n';
@@ -43,7 +43,7 @@ export default function RuleDetailToolbar({
     <Space>
       <Typography.Text type={enabled ? 'success' : 'secondary'}>{enabled ? t('生效中', 'Enabled') : t('未生效', 'Disabled')}</Typography.Text>
       <Switch checked={enabled} onChange={onEnabledChange} />
-      <Dropdown menu={{ items: menuItems }}><Button icon={<EllipsisOutlined />} /></Dropdown>
+      <Dropdown menu={{ items: menuItems }}><Button size="icon-sm" icon={<EllipsisVerticalOutlined />} /></Dropdown>
       <Select
         value={groupId}
         style={{ width: 220 }}

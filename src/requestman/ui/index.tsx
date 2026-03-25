@@ -57,6 +57,8 @@ export function ConfigProvider({ children }: { children: React.ReactNode; theme?
 export function Button({ children, icon, type, ...rest }: any) {
   const variant = type === 'primary'
     ? 'default'
+    : type === 'secondary'
+      ? 'secondary'
     : type === 'text'
       ? 'ghost'
       : type === 'link'
@@ -93,9 +95,9 @@ export function Select({ options = [], value, onChange, style, disabled, placeho
   );
 }
 
-export function Switch({ checked, onChange, disabled }: any) {
+export function Switch({ checked, onChange, disabled, ...rest }: any) {
   return (
-    <AnimateSwitch checked={checked} onCheckedChange={onChange} disabled={disabled} />
+    <AnimateSwitch checked={checked} onCheckedChange={onChange} disabled={disabled} {...rest} />
   );
 }
 

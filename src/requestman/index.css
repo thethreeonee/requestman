@@ -168,11 +168,49 @@ html.dark .theme-toggle-icons .theme-icon-moon {
   overflow: auto;
 }
 
+.rules-list-accordion-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
 .sidebar-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
   margin-bottom: 0;
   margin-top: var(--rm-space-12);
   padding-top: var(--rm-space-12);
   border-top: 1px solid var(--rm-border);
+}
+
+.sidebar-actions > * {
+  min-width: 0;
+}
+
+.sidebar-actions__group {
+  width: 20%;
+}
+
+.sidebar-actions__rule {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-actions__group > span,
+.sidebar-actions__rule > .aui-dropdown,
+.sidebar-actions__rule > .aui-dropdown > span {
+  display: block;
+  width: 100%;
+}
+
+.sidebar-actions__group > span > button {
+  width: 100%;
+}
+
+.sidebar-actions__button {
+  width: 100%;
+  justify-content: center;
 }
 
 .editor-placeholder {
@@ -191,23 +229,56 @@ html.dark .theme-toggle-icons .theme-icon-moon {
   transition: transform 0.2s ease;
 }
 .group-collapse-btn .anticon.expanded { transform: rotate(90deg); }
-.rules-list-table .ant-table-tbody > tr > td.rule-group-name-cell { cursor: pointer; }
-.rules-list-table .ant-table-thead > tr > th,
-.rules-list-table .ant-table-tbody > tr > td { padding-block: 8px; }
-.rules-list-table .ant-table-tbody > .rule-item-row > td { cursor: grab; }
-.rules-list-table .ant-table-tbody > .rule-item-row:active > td { cursor: grabbing; }
 body.rule-pointer-dragging { cursor: grabbing; user-select: none; }
-.rules-list-table .ant-table-tbody > .rule-group-row > td { background: var(--rm-surface-bg); }
-.rules-list-table .ant-table-tbody > .dragging-rule-row > td { opacity: 0.45; }
-.rules-list-table .ant-table-tbody > .drop-before-row > td { box-shadow: inset 0 2px 0 var(--rm-icon-accent-alt); }
-.rules-list-table .ant-table-tbody > .drop-after-row > td { box-shadow: inset 0 -2px 0 var(--rm-icon-accent-alt); }
-.rules-list-table .ant-table-tbody > tr:last-child > td,
-.nested-rules-table .ant-table-tbody > tr:last-child > td { border-bottom: none; }
-.rules-list-table-wrapper { position: relative; }
-.rule-drag-preview { position: fixed; z-index: 1000; pointer-events: none; border-radius: 8px; box-shadow: 0 16px 36px rgba(0, 0, 0, 0.14); overflow: hidden; opacity: 0.92; }
-.rule-drag-preview__table { margin: 0; table-layout: fixed; }
+.rules-list-accordion { position: relative; }
+.rule-drag-preview { position: fixed; z-index: 1000; pointer-events: none; border-radius: 12px; box-shadow: 0 16px 36px rgba(0, 0, 0, 0.14); overflow: hidden; opacity: 0.92; background: var(--rm-surface-bg); border: 1px solid var(--rm-border); }
+.rule-drag-preview__row { display: grid; grid-template-columns: minmax(0, 1fr) 180px 80px 64px; align-items: center; gap: 12px; padding: 10px 12px; min-width: 520px; }
 .rule-group-drop-overlay { position: absolute; z-index: 2; box-sizing: border-box; pointer-events: none; border: 1px solid var(--rm-icon-accent-alt); background: color-mix(in srgb, var(--rm-icon-accent-alt) 18%, transparent); }
 .rule-group-drop-overlay.is-last-group { border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
+.rule-group-accordion-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.rule-group-accordion-trigger { flex: 1; min-width: 0; padding-block: 12px; }
+.rule-group-accordion-trigger:hover { text-decoration: none; }
+.rule-group-panel { position: relative; }
+.rule-group-header { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.rule-group-header__title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rule-group-header__title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rule-group-header__count { color: var(--rm-text-secondary); font-size: 12px; }
+.rule-group-header__actions { display: flex; align-items: center; gap: 8px; }
+.rule-group-header__switch { display: inline-flex; align-items: center; }
+.rule-group-header__actions .aui-btn {
+  padding: 3px 6px;
+  min-height: 26px;
+}
+.rule-group-header__actions .aui-btn > span,
+.rule-item-row__actions .aui-btn > span,
+.rule-drag-preview__row > .rule-item-row__actions > span {
+  font-size: 12px;
+  line-height: 1;
+}
+.rule-group-body { display: flex; flex-direction: column; }
+.rule-item-row { display: grid; grid-template-columns: minmax(0, 1fr) 180px 80px 64px; align-items: center; gap: 12px; padding: 10px 12px; border-top: 1px solid var(--rm-border); cursor: grab; background: var(--rm-surface-bg); }
+.rule-item-row:active { cursor: grabbing; }
+.rule-item-row.dragging-rule-row { opacity: 0.45; }
+.rule-item-row.drop-before-row { box-shadow: inset 0 2px 0 var(--rm-icon-accent-alt); }
+.rule-item-row.drop-after-row { box-shadow: inset 0 -2px 0 var(--rm-icon-accent-alt); }
+.rule-item-row__name { min-width: 0; display: flex; align-items: center; }
+.rule-item-row__type,
+.rule-item-row__status,
+.rule-item-row__actions { display: flex; align-items: center; }
+.rule-item-row__actions { justify-content: flex-end; }
+.rule-item-row__empty { padding: 14px 12px; border-top: 1px solid var(--rm-border); }
+.rules-compact-switch {
+  width: 26px !important;
+  height: 16px !important;
+  min-width: 26px;
+}
+.rules-compact-switch[data-state="checked"] {
+  justify-content: flex-end;
+}
+.rules-compact-switch [data-slot="switch-thumb"] {
+  width: 12px !important;
+  height: 12px !important;
+}
 
 .requestman-body-editor { overflow: hidden; }
 .requestman-body-editor .cm-editor { font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace; font-size: 13px; }
@@ -217,10 +288,10 @@ body.rule-pointer-dragging { cursor: grabbing; user-select: none; }
 
 .rule-menu-group-title { display: flex; align-items: center; gap: 8px; width: 100%; color: var(--rm-text-secondary); }
 .rule-menu-group-title__line { flex: 1; height: 1px; background: currentColor; opacity: 0.2; }
-.rules-list-table .rule-name-link,
-.rules-list-table .rule-name-link:focus,
-.rules-list-table .rule-name-link:active { color: var(--rm-icon-accent-alt); }
-.rules-list-table .rule-name-link.ant-btn-link:not(:disabled):not(.ant-btn-disabled):hover { color: var(--rm-accent-primary); }
+.rule-name-link,
+.rule-name-link:focus,
+.rule-name-link:active { color: var(--rm-icon-accent-alt); }
+.rule-name-link.ant-btn-link:not(:disabled):not(.ant-btn-disabled):hover { color: var(--rm-accent-primary); }
 
 .requestman-shell .ant-btn-primary {
   background: var(--rm-accent-primary);
