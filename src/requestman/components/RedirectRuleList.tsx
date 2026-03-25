@@ -41,20 +41,20 @@ import type {
 } from '../dropdown-menu-types';
 import {
   DeleteOutlined,
-  RetweetOutlined,
   EllipsisOutlined,
-  ApiOutlined,
-  CodeOutlined,
-  InsertRowAboveOutlined,
-  FileSearchOutlined,
-  FileDoneOutlined,
-  UserOutlined,
-  StopOutlined,
-  ClockCircleOutlined,
 } from '../icons';
+import { Binary } from '@/components/animate-ui/icons/binary';
+import { Blend } from '@/components/animate-ui/icons/blend';
+import { CircleX } from '@/components/animate-ui/icons/circle-x';
+import { CircuitBoard } from '@/components/animate-ui/icons/circuit-board';
+import { Gauge } from '@/components/animate-ui/icons/gauge';
 import { GalleryVertical } from '@/components/animate-ui/icons/gallery-vertical';
 import { GalleryVerticalEnd as GalleryHorizontalEnd } from '@/components/animate-ui/icons/gallery-horizontal-end';
+import { LayoutDashboard } from '@/components/animate-ui/icons/layout-dashboard';
 import { RULE_TYPE_LABEL_MAP } from '../constants';
+import { Orbit } from '@/components/animate-ui/icons/orbit';
+import { Route } from '@/components/animate-ui/icons/route';
+import { User } from '@/components/animate-ui/icons/user';
 import { genId } from '../rule-utils';
 import type { RedirectGroup, RedirectRule } from '../types';
 
@@ -214,17 +214,22 @@ function isInteractiveDragTarget(target: EventTarget | null, ignoredElement?: El
   return Boolean(interactiveElement && interactiveElement !== ignoredElement);
 }
 
-const RULE_TYPE_ICON_MAP: Record<RedirectRule['type'], React.ReactNode> = {
-  redirect_request: <RetweetOutlined />,
-  rewrite_string: <CodeOutlined />,
-  query_params: <InsertRowAboveOutlined />,
-  modify_request_body: <FileSearchOutlined />,
-  modify_response_body: <FileDoneOutlined />,
-  modify_headers: <ApiOutlined />,
-  user_agent: <UserOutlined />,
-  cancel_request: <StopOutlined />,
-  request_delay: <ClockCircleOutlined />,
+const RULE_TYPE_ICON_COMPONENT_MAP: Record<RedirectRule['type'], React.ComponentType<{ size?: number; animate?: boolean }>> = {
+  redirect_request: Route,
+  rewrite_string: CircuitBoard,
+  query_params: Orbit,
+  modify_request_body: LayoutDashboard,
+  modify_response_body: Binary,
+  modify_headers: Blend,
+  user_agent: User,
+  cancel_request: CircleX,
+  request_delay: Gauge,
 };
+
+function renderRuleTypeIcon(type: RedirectRule['type'], animate = false) {
+  const IconComponent = RULE_TYPE_ICON_COMPONENT_MAP[type];
+  return <IconComponent size={14} animate={animate} />;
+}
 
 export default function RedirectRuleList({
   groups,
@@ -248,6 +253,8 @@ export default function RedirectRuleList({
   const listWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const [hoveredAction, setHoveredAction] = React.useState<'group' | 'rule' | null>(null);
   const [hoveredMenuAction, setHoveredMenuAction] = React.useState<string | null>(null);
+  const [hoveredRuleId, setHoveredRuleId] = React.useState<string | null>(null);
+  const [hoveredCreateRuleType, setHoveredCreateRuleType] = React.useState<RedirectRule['type'] | null>(null);
   const [dragState, setDragState] = React.useState<DragState | null>(null);
   const [pointerDragState, setPointerDragState] = React.useState<PointerDragState | null>(null);
   const [dropState, setDropState] = React.useState<DropState | null>(null);
@@ -452,6 +459,8 @@ export default function RedirectRuleList({
         data-group-id={rule.groupId}
         data-row-type="rule"
         data-rule-id={rule.id}
+        onMouseEnter={() => setHoveredRuleId(rule.id)}
+        onMouseLeave={() => setHoveredRuleId((current) => (current === rule.id ? null : current))}
       >
         <button
           type="button"
@@ -462,7 +471,7 @@ export default function RedirectRuleList({
           <ChevronsUpDown size={13} />
         </button>
         <div className="rule-item-row__type-icon" aria-hidden="true">
-          {RULE_TYPE_ICON_MAP[rule.type]}
+          {renderRuleTypeIcon(rule.type, hoveredRuleId === rule.id)}
         </div>
         <div className="rule-item-row__name">
           <Button type="link" className="rule-name-link" style={{ paddingInline: 0 }} onClick={() => openRuleDetail(rule.id)}>
@@ -560,7 +569,7 @@ export default function RedirectRuleList({
             <ChevronsUpDown size={13} />
           </div>
           <div className="rule-item-row__type-icon" aria-hidden="true">
-            {RULE_TYPE_ICON_MAP[activePreviewRule.type]}
+            {renderRuleTypeIcon(activePreviewRule.type)}
           </div>
           <div className="rule-item-row__name">
             <Typography.Text strong>{activePreviewRule.name}</Typography.Text>
@@ -708,9 +717,30 @@ export default function RedirectRuleList({
                 type: 'group',
                 label: renderRuleMenuGroupLabel('URL Rewrites'),
                 children: [
-                  { key: 'redirect_request', icon: RULE_TYPE_ICON_MAP.redirect_request, label: RULE_TYPE_LABEL_MAP.redirect_request, onClick: () => createRule('redirect_request') },
-                  { key: 'rewrite_string', icon: RULE_TYPE_ICON_MAP.rewrite_string, label: RULE_TYPE_LABEL_MAP.rewrite_string, onClick: () => createRule('rewrite_string') },
-                  { key: 'query_params', icon: RULE_TYPE_ICON_MAP.query_params, label: RULE_TYPE_LABEL_MAP.query_params, onClick: () => createRule('query_params') },
+                  {
+                    key: 'redirect_request',
+                    icon: renderRuleTypeIcon('redirect_request', hoveredCreateRuleType === 'redirect_request'),
+                    label: RULE_TYPE_LABEL_MAP.redirect_request,
+                    onMouseEnter: () => setHoveredCreateRuleType('redirect_request'),
+                    onMouseLeave: () => setHoveredCreateRuleType((current) => (current === 'redirect_request' ? null : current)),
+                    onClick: () => createRule('redirect_request'),
+                  },
+                  {
+                    key: 'rewrite_string',
+                    icon: renderRuleTypeIcon('rewrite_string', hoveredCreateRuleType === 'rewrite_string'),
+                    label: RULE_TYPE_LABEL_MAP.rewrite_string,
+                    onMouseEnter: () => setHoveredCreateRuleType('rewrite_string'),
+                    onMouseLeave: () => setHoveredCreateRuleType((current) => (current === 'rewrite_string' ? null : current)),
+                    onClick: () => createRule('rewrite_string'),
+                  },
+                  {
+                    key: 'query_params',
+                    icon: renderRuleTypeIcon('query_params', hoveredCreateRuleType === 'query_params'),
+                    label: RULE_TYPE_LABEL_MAP.query_params,
+                    onMouseEnter: () => setHoveredCreateRuleType('query_params'),
+                    onMouseLeave: () => setHoveredCreateRuleType((current) => (current === 'query_params' ? null : current)),
+                    onClick: () => createRule('query_params'),
+                  },
                 ],
               },
               {
@@ -718,8 +748,22 @@ export default function RedirectRuleList({
                 type: 'group',
                 label: renderRuleMenuGroupLabel('API Mocking'),
                 children: [
-                  { key: 'modify_request_body', icon: RULE_TYPE_ICON_MAP.modify_request_body, label: RULE_TYPE_LABEL_MAP.modify_request_body, onClick: () => createRule('modify_request_body') },
-                  { key: 'modify_response_body', icon: RULE_TYPE_ICON_MAP.modify_response_body, label: RULE_TYPE_LABEL_MAP.modify_response_body, onClick: () => createRule('modify_response_body') },
+                  {
+                    key: 'modify_request_body',
+                    icon: renderRuleTypeIcon('modify_request_body', hoveredCreateRuleType === 'modify_request_body'),
+                    label: RULE_TYPE_LABEL_MAP.modify_request_body,
+                    onMouseEnter: () => setHoveredCreateRuleType('modify_request_body'),
+                    onMouseLeave: () => setHoveredCreateRuleType((current) => (current === 'modify_request_body' ? null : current)),
+                    onClick: () => createRule('modify_request_body'),
+                  },
+                  {
+                    key: 'modify_response_body',
+                    icon: renderRuleTypeIcon('modify_response_body', hoveredCreateRuleType === 'modify_response_body'),
+                    label: RULE_TYPE_LABEL_MAP.modify_response_body,
+                    onMouseEnter: () => setHoveredCreateRuleType('modify_response_body'),
+                    onMouseLeave: () => setHoveredCreateRuleType((current) => (current === 'modify_response_body' ? null : current)),
+                    onClick: () => createRule('modify_response_body'),
+                  },
                 ],
               },
               {
@@ -727,8 +771,22 @@ export default function RedirectRuleList({
                 type: 'group',
                 label: renderRuleMenuGroupLabel('Headers'),
                 children: [
-                  { key: 'modify_headers', icon: RULE_TYPE_ICON_MAP.modify_headers, label: RULE_TYPE_LABEL_MAP.modify_headers, onClick: () => createRule('modify_headers') },
-                  { key: 'user_agent', icon: RULE_TYPE_ICON_MAP.user_agent, label: RULE_TYPE_LABEL_MAP.user_agent, onClick: () => createRule('user_agent') },
+                  {
+                    key: 'modify_headers',
+                    icon: renderRuleTypeIcon('modify_headers', hoveredCreateRuleType === 'modify_headers'),
+                    label: RULE_TYPE_LABEL_MAP.modify_headers,
+                    onMouseEnter: () => setHoveredCreateRuleType('modify_headers'),
+                    onMouseLeave: () => setHoveredCreateRuleType((current) => (current === 'modify_headers' ? null : current)),
+                    onClick: () => createRule('modify_headers'),
+                  },
+                  {
+                    key: 'user_agent',
+                    icon: renderRuleTypeIcon('user_agent', hoveredCreateRuleType === 'user_agent'),
+                    label: RULE_TYPE_LABEL_MAP.user_agent,
+                    onMouseEnter: () => setHoveredCreateRuleType('user_agent'),
+                    onMouseLeave: () => setHoveredCreateRuleType((current) => (current === 'user_agent' ? null : current)),
+                    onClick: () => createRule('user_agent'),
+                  },
                 ],
               },
               {
@@ -736,8 +794,22 @@ export default function RedirectRuleList({
                 type: 'group',
                 label: renderRuleMenuGroupLabel('Others'),
                 children: [
-                  { key: 'cancel_request', icon: RULE_TYPE_ICON_MAP.cancel_request, label: RULE_TYPE_LABEL_MAP.cancel_request, onClick: () => createRule('cancel_request') },
-                  { key: 'request_delay', icon: RULE_TYPE_ICON_MAP.request_delay, label: RULE_TYPE_LABEL_MAP.request_delay, onClick: () => createRule('request_delay') },
+                  {
+                    key: 'cancel_request',
+                    icon: renderRuleTypeIcon('cancel_request', hoveredCreateRuleType === 'cancel_request'),
+                    label: RULE_TYPE_LABEL_MAP.cancel_request,
+                    onMouseEnter: () => setHoveredCreateRuleType('cancel_request'),
+                    onMouseLeave: () => setHoveredCreateRuleType((current) => (current === 'cancel_request' ? null : current)),
+                    onClick: () => createRule('cancel_request'),
+                  },
+                  {
+                    key: 'request_delay',
+                    icon: renderRuleTypeIcon('request_delay', hoveredCreateRuleType === 'request_delay'),
+                    label: RULE_TYPE_LABEL_MAP.request_delay,
+                    onMouseEnter: () => setHoveredCreateRuleType('request_delay'),
+                    onMouseLeave: () => setHoveredCreateRuleType((current) => (current === 'request_delay' ? null : current)),
+                    onClick: () => createRule('request_delay'),
+                  },
                 ],
               },
             ], 'create-rule')}
