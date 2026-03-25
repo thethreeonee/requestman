@@ -1,6 +1,6 @@
 import React from 'react';
-import { ReloadOutlined } from '../ui/icons';
-import { AutoComplete, Button, Form, Input, Modal, Select, Space, Tooltip } from '../ui';
+import { ReloadOutlined } from '../icons';
+import { AutoComplete, Button, Form, Input, Modal, Select, Space, Tooltip } from '../primitives';
 import { t } from '../i18n';
 import {
   COMMON_HEADER_OPTIONS,

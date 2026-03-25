@@ -1,6 +1,6 @@
 import React from 'react';
-import { Button, Input, Select, Space } from '../ui';
-import { FilterOutlined } from '../ui/icons';
+import { Button, Input, Select, Space } from '../primitives';
+import { FilterOutlined } from '../icons';
 import { MATCH_MODE_OPTIONS, MATCH_TARGET_OPTIONS } from '../constants';
 import type { RedirectCondition } from '../types';
 

@@ -7,13 +7,13 @@ import {
   Popconfirm,
   Radio,
   Space,
-} from '../../../ui';
+} from '../../../primitives';
 import { t } from '../../../i18n';
 import {
   DeleteOutlined,
   FileOutlined,
   PlusOutlined,
-} from '../../../ui/icons';
+} from '../../../icons';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
 import type { RedirectCondition } from '../../../types';
 import ConditionUrlMatchEditor from '../../../components/ConditionUrlMatchEditor';

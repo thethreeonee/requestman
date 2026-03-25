@@ -8,12 +8,12 @@ import {
   Radio,
   Select,
   Space,
-} from '../../../ui';
+} from '../../../primitives';
 import { t } from '../../../i18n';
 import {
   DeleteOutlined,
   PlusOutlined,
-} from '../../../ui/icons';
+} from '../../../icons';
 import {
   createDefaultCondition,
   genId,

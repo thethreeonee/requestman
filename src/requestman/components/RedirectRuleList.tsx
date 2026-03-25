@@ -1,15 +1,15 @@
 import React from 'react';
+import { ChevronsUpDown } from 'lucide-react';
 import {
   Button,
   Dropdown,
   Input,
   Modal,
   Select,
-  Space,
   Switch,
   Tooltip,
   Typography,
-} from '../ui';
+} from '../primitives';
 import {
   Accordion,
   AccordionItem,
@@ -40,7 +40,7 @@ import {
   UserOutlined,
   StopOutlined,
   ClockCircleOutlined,
-} from '../ui/icons';
+} from '../icons';
 import { GalleryVertical } from '@/components/animate-ui/icons/gallery-vertical';
 import { GalleryVerticalEnd as GalleryHorizontalEnd } from '@/components/animate-ui/icons/gallery-horizontal-end';
 import { RULE_TYPE_LABEL_MAP } from '../constants';
@@ -84,9 +84,6 @@ type PointerDragState = DragState & {
   isDragging: boolean;
 };
 type DropState = { targetRuleId: string; position: 'before' | 'after' };
-type GroupDropState = { groupId: string };
-type GroupOverlayRect = { top: number; left: number; width: number; height: number; roundBottom: boolean };
-
 const POINTER_DRAG_THRESHOLD = 4;
 
 function getRuleEffectiveHint(redirectEnabled: boolean, groupEnabled: boolean, ruleEnabled: boolean) {
@@ -150,37 +147,6 @@ function normalizeDropState(
   return { targetRuleId: nextRule.id, position: 'before' };
 }
 
-function moveRuleToGroup(
-  rules: RedirectRule[],
-  groups: RedirectGroup[],
-  draggedRuleId: string,
-  targetGroupId: string,
-) {
-  const draggedRule = rules.find((rule) => rule.id === draggedRuleId);
-  if (!draggedRule || draggedRule.groupId === targetGroupId) return rules;
-
-  const remainingRules = rules.filter((rule) => rule.id !== draggedRuleId);
-  const movedRule: RedirectRule = { ...draggedRule, groupId: targetGroupId };
-  const lastTargetIndex = remainingRules.reduce((lastIndex, rule, index) => (
-    rule.groupId === targetGroupId ? index : lastIndex
-  ), -1);
-
-  if (lastTargetIndex !== -1) {
-    const nextRules = [...remainingRules];
-    nextRules.splice(lastTargetIndex + 1, 0, movedRule);
-    return nextRules;
-  }
-
-  const targetGroupIndex = groups.findIndex((group) => group.id === targetGroupId);
-  if (targetGroupIndex === -1) return rules;
-
-  const laterGroupIds = new Set(groups.slice(targetGroupIndex + 1).map((group) => group.id));
-  const insertIndex = remainingRules.findIndex((rule) => laterGroupIds.has(rule.groupId));
-  const nextRules = [...remainingRules];
-  nextRules.splice(insertIndex === -1 ? nextRules.length : insertIndex, 0, movedRule);
-  return nextRules;
-}
-
 function isInteractiveDragTarget(target: EventTarget | null) {
   if (!(target instanceof Element)) return false;
   return Boolean(target.closest([
@@ -241,14 +207,10 @@ export default function RedirectRuleList({
   const [dragState, setDragState] = React.useState<DragState | null>(null);
   const [pointerDragState, setPointerDragState] = React.useState<PointerDragState | null>(null);
   const [dropState, setDropState] = React.useState<DropState | null>(null);
-  const [groupDropState, setGroupDropState] = React.useState<GroupDropState | null>(null);
-  const [groupOverlayRect, setGroupOverlayRect] = React.useState<GroupOverlayRect | null>(null);
   const pointerDragStateRef = React.useRef<PointerDragState | null>(null);
   const dropStateRef = React.useRef<DropState | null>(null);
-  const groupDropStateRef = React.useRef<GroupDropState | null>(null);
 
   const currentGroupEnabled = new Map(groups.map((g) => [g.id, g.enabled]));
-  const groupNameMap = new Map(groups.map((g) => [g.id, g.name]));
   const groupsOptions = groups.map((g) => ({ value: g.id, label: g.name }));
   const groupRuleMap = React.useMemo(
     () => new Map(groups.map((group) => [group.id, rules.filter((rule) => rule.groupId === group.id)])),
@@ -258,7 +220,6 @@ export default function RedirectRuleList({
     () => groups.map((group) => group.id).filter((groupId) => !collapsedGroupIds.includes(groupId)),
     [collapsedGroupIds, groups],
   );
-  const lastVisibleGroupId = groups[groups.length - 1]?.id ?? null;
   const activePreviewRule = React.useMemo(
     () => rules.find((rule) => rule.id === pointerDragState?.ruleId) ?? null,
     [pointerDragState?.ruleId, rules],
@@ -290,51 +251,6 @@ export default function RedirectRuleList({
     });
   }, []);
 
-  const setGroupDropStateWithRef = React.useCallback((value: React.SetStateAction<GroupDropState | null>) => {
-    setGroupDropState((prev) => {
-      const next = typeof value === 'function'
-        ? (value as (prev: GroupDropState | null) => GroupDropState | null)(prev)
-        : value;
-      groupDropStateRef.current = next;
-      return next;
-    });
-  }, []);
-
-  React.useLayoutEffect(() => {
-    if (!groupDropState || !listWrapperRef.current) {
-      setGroupOverlayRect(null);
-      return undefined;
-    }
-
-    const updateOverlayRect = () => {
-      const wrapperEl = listWrapperRef.current;
-      if (!wrapperEl) return;
-      const panelEl = wrapperEl.querySelector<HTMLElement>(`.rule-group-panel[data-group-id="${groupDropState.groupId}"]`);
-      if (!panelEl) {
-        setGroupOverlayRect(null);
-        return;
-      }
-
-      const panelRect = panelEl.getBoundingClientRect();
-      const wrapperRect = wrapperEl.getBoundingClientRect();
-      setGroupOverlayRect({
-        top: panelRect.top - wrapperRect.top,
-        left: panelRect.left - wrapperRect.left,
-        width: panelRect.width,
-        height: panelRect.height,
-        roundBottom: groupDropState.groupId === lastVisibleGroupId,
-      });
-    };
-
-    updateOverlayRect();
-    window.addEventListener('resize', updateOverlayRect);
-    window.addEventListener('scroll', updateOverlayRect, true);
-    return () => {
-      window.removeEventListener('resize', updateOverlayRect);
-      window.removeEventListener('scroll', updateOverlayRect, true);
-    };
-  }, [groupDropState, lastVisibleGroupId]);
-
   const handleExpandedGroupsChange = (nextActiveKeys: string[] | string | undefined) => {
     const nextExpandedGroupIds = Array.isArray(nextActiveKeys)
       ? nextActiveKeys.map(String)
@@ -363,8 +279,6 @@ export default function RedirectRuleList({
     setDragState(null);
     setPointerDragStateWithRef(null);
     setDropStateWithRef(null);
-    setGroupDropStateWithRef(null);
-    setGroupOverlayRect(null);
   };
 
   const updatePointerDropTarget = React.useCallback((clientX: number, clientY: number, activeDrag: DragState) => {
@@ -376,7 +290,6 @@ export default function RedirectRuleList({
 
     if (!rowElement || !hoveredGroupId) {
       setDropStateWithRef(null);
-      setGroupDropStateWithRef(null);
       return;
     }
 
@@ -384,7 +297,6 @@ export default function RedirectRuleList({
       const { top, height } = rowElement.getBoundingClientRect();
       const position = clientY - top < height / 2 ? 'before' : 'after';
       const nextDropState = normalizeDropState(rules, activeDrag.ruleId, hoveredRuleId, position);
-      setGroupDropStateWithRef(null);
       setDropStateWithRef((prev) => (
         prev?.targetRuleId === nextDropState.targetRuleId && prev.position === nextDropState.position
           ? prev
@@ -393,15 +305,8 @@ export default function RedirectRuleList({
       return;
     }
 
-    if (hoveredGroupId !== activeDrag.groupId) {
-      setDropStateWithRef(null);
-      setGroupDropStateWithRef((prev) => prev?.groupId === hoveredGroupId ? prev : { groupId: hoveredGroupId });
-      return;
-    }
-
     setDropStateWithRef(null);
-    setGroupDropStateWithRef(null);
-  }, [rules, setDropStateWithRef, setGroupDropStateWithRef]);
+  }, [rules, setDropStateWithRef]);
 
   React.useEffect(() => {
     if (!pointerDragState) return undefined;
@@ -435,14 +340,10 @@ export default function RedirectRuleList({
 
       if (activeDrag.isDragging) {
         const currentDropState = dropStateRef.current;
-        const currentGroupDropState = groupDropStateRef.current;
 
         if (currentDropState) {
           setRules((prev) => moveRuleWithinGroup(prev, activeDrag.ruleId, currentDropState.targetRuleId, currentDropState.position));
           messageApi.success(t('规则排序已更新', 'Rule order updated'));
-        } else if (currentGroupDropState) {
-          setRules((prev) => moveRuleToGroup(prev, groups, activeDrag.ruleId, currentGroupDropState.groupId));
-          messageApi.success(t(`规则已移动到规则组「${groupNameMap.get(currentGroupDropState.groupId) ?? ''}」`, `Rule moved to group "${groupNameMap.get(currentGroupDropState.groupId) ?? ''}".`));
         }
       }
 
@@ -465,7 +366,7 @@ export default function RedirectRuleList({
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerCancel);
     };
-  }, [dragState, groupNameMap, groups, messageApi, pointerDragState, setRules, setPointerDragStateWithRef, updatePointerDropTarget]);
+  }, [dragState, messageApi, pointerDragState, setRules, setPointerDragStateWithRef, updatePointerDropTarget]);
 
   React.useEffect(() => {
     if (!dragState) return undefined;
@@ -475,9 +376,11 @@ export default function RedirectRuleList({
     };
   }, [dragState]);
 
-  const handleRulePointerDown = (event: React.PointerEvent<HTMLDivElement>, rule: RedirectRule) => {
+  const handleRulePointerDown = (event: React.PointerEvent<HTMLButtonElement>, rule: RedirectRule) => {
     if (event.button !== 0 || isInteractiveDragTarget(event.target)) return;
-    const rowRect = event.currentTarget.getBoundingClientRect();
+    const rowElement = event.currentTarget.closest<HTMLElement>('.rule-item-row');
+    if (!rowElement) return;
+    const rowRect = rowElement.getBoundingClientRect();
     setPointerDragStateWithRef({
       pointerId: event.pointerId,
       ruleId: rule.id,
@@ -505,16 +408,24 @@ export default function RedirectRuleList({
         data-group-id={rule.groupId}
         data-row-type="rule"
         data-rule-id={rule.id}
-        onPointerDown={(event) => handleRulePointerDown(event, rule)}
       >
+        <button
+          type="button"
+          className="rule-item-row__drag-handle"
+          aria-label={t('拖拽排序', 'Drag to reorder')}
+          onPointerDown={(event) => handleRulePointerDown(event, rule)}
+        >
+          <ChevronsUpDown size={13} />
+        </button>
+        <div className="rule-item-row__type-icon" aria-hidden="true">
+          {RULE_TYPE_ICON_MAP[rule.type]}
+        </div>
         <div className="rule-item-row__name">
           <Button type="link" className="rule-name-link" style={{ paddingInline: 0 }} onClick={() => openRuleDetail(rule.id)}>
             {rule.name}
           </Button>
         </div>
-        <div className="rule-item-row__type">
-          <Space size={6}>{RULE_TYPE_ICON_MAP[rule.type]}<span>{RULE_TYPE_LABEL_MAP[rule.type]}</span></Space>
-        </div>
+        <div className="rule-item-row__spacer" />
         <div className="rule-item-row__status">
           <Tooltip title={getRuleEffectiveHint(redirectEnabled, groupEnabled, rule.enabled)}>
             <Switch
@@ -528,7 +439,6 @@ export default function RedirectRuleList({
         </div>
         <div className="rule-item-row__actions" data-no-drag="true">
           {(() => {
-            const moveKey = `rule:${rule.id}:move`;
             const copyKey = `rule:${rule.id}:copy`;
             const deleteKey = `rule:${rule.id}:delete`;
             return (
@@ -591,12 +501,16 @@ export default function RedirectRuleList({
         }}
       >
         <div className="rule-drag-preview__row">
+          <div className="rule-item-row__drag-handle" aria-hidden="true">
+            <ChevronsUpDown size={13} />
+          </div>
+          <div className="rule-item-row__type-icon" aria-hidden="true">
+            {RULE_TYPE_ICON_MAP[activePreviewRule.type]}
+          </div>
           <div className="rule-item-row__name">
             <Typography.Text strong>{activePreviewRule.name}</Typography.Text>
           </div>
-          <div className="rule-item-row__type">
-            <Space size={6}>{RULE_TYPE_ICON_MAP[activePreviewRule.type]}<span>{RULE_TYPE_LABEL_MAP[activePreviewRule.type]}</span></Space>
-          </div>
+          <div className="rule-item-row__spacer" />
           <div className="rule-item-row__status">
             <Typography.Text type="secondary">{activePreviewRule.enabled ? t('已开启', 'On') : t('已关闭', 'Off')}</Typography.Text>
           </div>
@@ -608,17 +522,6 @@ export default function RedirectRuleList({
     ) : null}
     <div className="rules-list-accordion-scroll">
       <div className="rules-list-accordion" ref={listWrapperRef}>
-        {groupOverlayRect ? (
-          <div
-            className={`rule-group-drop-overlay${groupOverlayRect.roundBottom ? ' is-last-group' : ''}`}
-            style={{
-              top: groupOverlayRect.top,
-              left: groupOverlayRect.left,
-              width: groupOverlayRect.width,
-              height: groupOverlayRect.height,
-            }}
-          />
-        ) : null}
         <Accordion type="multiple" value={expandedGroupIds} onValueChange={handleExpandedGroupsChange}>
           {groups.map((group) => {
             const groupRules = groupRuleMap.get(group.id) ?? [];

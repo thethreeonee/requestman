@@ -1,5 +1,14 @@
 import React from 'react';
 import { Button as AnimateButton } from '@/components/animate-ui/components/buttons/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/animate-ui/components/radix/dropdown-menu';
 import { Switch as AnimateSwitch } from '@/components/animate-ui/components/radix/switch';
 
 type MessagePayload = string | { content: string; duration?: number };
@@ -59,13 +68,13 @@ export function Button({ children, icon, type, ...rest }: any) {
     ? 'default'
     : type === 'secondary'
       ? 'secondary'
-    : type === 'text'
-      ? 'ghost'
-      : type === 'link'
-        ? 'link'
-        : type === 'dashed'
-          ? 'outline'
-          : 'outline';
+      : type === 'text'
+        ? 'ghost'
+        : type === 'link'
+          ? 'link'
+          : type === 'dashed'
+            ? 'outline'
+            : 'outline';
   return <AnimateButton variant={variant} {...rest}>{icon}{children}</AnimateButton>;
 }
 
@@ -96,9 +105,7 @@ export function Select({ options = [], value, onChange, style, disabled, placeho
 }
 
 export function Switch({ checked, onChange, disabled, ...rest }: any) {
-  return (
-    <AnimateSwitch checked={checked} onCheckedChange={onChange} disabled={disabled} {...rest} />
-  );
+  return <AnimateSwitch checked={checked} onCheckedChange={onChange} disabled={disabled} {...rest} />;
 }
 
 function SpaceBase({ children, direction, size, style, align }: any) {
@@ -168,54 +175,49 @@ export function Tabs({ items, activeKey, onChange }: any) {
   return <div><div className="aui-space">{items.map((item: any) => <Button key={item.key} type={item.key === activeKey ? 'primary' : 'default'} onClick={() => onChange?.(item.key)}>{item.label}</Button>)}</div><div>{items.find((item: any) => item.key === activeKey)?.children}</div></div>;
 }
 
-export function Dropdown({ menu, children, open: openProp, onOpenChange }: any) {
-  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false);
-  const open = openProp ?? uncontrolledOpen;
-  const setOpen = (next: boolean | ((value: boolean) => boolean)) => {
-    const resolved = typeof next === 'function' ? next(open) : next;
-    if (openProp === undefined) setUncontrolledOpen(resolved);
-    onOpenChange?.(resolved);
-  };
+export function Dropdown({ menu, children, open: openProp, onOpenChange, overlayStyle }: any) {
   return (
-    <span className="aui-dropdown">
-      <span onClick={() => setOpen((v) => !v)}>{children}</span>
-      {open ? (
-        <div className="aui-dropdown-menu">
-          {(menu?.items ?? []).map((item: any) => {
-            if (item?.type === 'divider') return <div className="aui-dropdown-divider" key={item.key ?? Math.random()} />;
-            if (item?.type === 'group') {
-              return (
-                <div key={item.key} className="aui-dropdown-group">
-                  <div className="aui-dropdown-group-label">{item.label}</div>
-                  {(item.children ?? []).map((child: any) => (
-                    <button
-                      className={`aui-dropdown-item ${child.danger ? 'danger' : ''}`}
-                      key={child.key}
-                      onMouseEnter={child.onMouseEnter}
-                      onMouseLeave={child.onMouseLeave}
-                      onClick={() => { child.onClick?.(); setOpen(false); }}
-                    >
-                      {child.icon}{child.label}
-                    </button>
-                  ))}
-                </div>
-              );
-            }
+    <DropdownMenu open={openProp} onOpenChange={onOpenChange}>
+      <DropdownMenuTrigger asChild>
+        {children}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={6} style={overlayStyle}>
+        {(menu?.items ?? []).map((item: any) => {
+          if (item?.type === 'divider') return <DropdownMenuSeparator key={item.key ?? Math.random()} />;
+          if (item?.type === 'group') {
             return (
-              <button
-                className={`aui-dropdown-item ${item?.danger ? 'danger' : ''}`}
-                key={item?.key}
-                onMouseEnter={item?.onMouseEnter}
-                onMouseLeave={item?.onMouseLeave}
-                onClick={() => { item?.onClick?.(); setOpen(false); }}
-              >
-                {item?.icon}{item?.label}
-              </button>
+              <DropdownMenuGroup key={item.key}>
+                <DropdownMenuLabel>{item.label}</DropdownMenuLabel>
+                {(item.children ?? []).map((child: any) => (
+                  <DropdownMenuItem
+                    key={child.key}
+                    variant={child.danger ? 'destructive' : 'default'}
+                    onMouseEnter={child.onMouseEnter}
+                    onMouseLeave={child.onMouseLeave}
+                    onSelect={() => child.onClick?.()}
+                  >
+                    {child.icon}
+                    {child.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
             );
-          })}
-        </div>
-      ) : null}
-    </span>
+          }
+          return (
+            <DropdownMenuItem
+              key={item?.key}
+              variant={item?.danger ? 'destructive' : 'default'}
+              onMouseEnter={item?.onMouseEnter}
+              onMouseLeave={item?.onMouseLeave}
+              onSelect={() => item?.onClick?.()}
+            >
+              {item?.icon}
+              {item?.label}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Input, Space, Typography } from '../ui';
+import { Button, Input, Space, Typography } from '../primitives';
 import {
   ApiOutlined,
   ClockCircleOutlined,
@@ -11,7 +11,7 @@ import {
   RetweetOutlined,
   StopOutlined,
   UserOutlined,
-} from '../ui/icons';
+} from '../icons';
 import { RULE_TYPE_LABEL_MAP } from '../constants';
 import type { RedirectRule } from '../types';
 
