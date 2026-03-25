@@ -1,10 +1,5 @@
-import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
-import { App, Button, Dropdown, Modal, Space, Switch, Typography } from './ui';
-import { Moon, Sun } from 'lucide-react';
-import { Menu } from '@/components/animate-ui/icons/menu';
-import { Upload } from '@/components/animate-ui/icons/upload';
-import { Download } from '@/components/animate-ui/icons/download';
-import { ThemeToggler, type ThemeSelection } from '@/components/animate-ui/primitives/effects/theme-toggler';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { App, Modal } from './ui';
 import {
   DEFAULT_GROUP_ID,
   REDIRECT_ENABLED_KEY,
@@ -25,19 +20,12 @@ import {
   simulateRedirect,
 } from './rule-utils';
 import type { RedirectGroup, RedirectRule } from './types';
-import RedirectRuleList from './components/RedirectRuleList';
-import RuleTestPanel from './components/RuleTestPanel';
+import TopBar from './layout/top-bar';
+import Sidebar from './layout/sidebar';
+import ConfigArea from './layout/config-area';
+import TestArea from './layout/test-area';
+import type { RuleDetailProps } from './layout/config-area/types';
 import './index.css';
-
-const RedirectRuleDetail = lazy(() => import('./components/RedirectRuleDetail'));
-const RewriteStringRuleDetail = lazy(() => import('./components/RewriteStringRuleDetail'));
-const QueryParamsRuleDetail = lazy(() => import('./components/QueryParamsRuleDetail'));
-const ModifyRequestBodyRuleDetail = lazy(() => import('./components/ModifyRequestBodyRuleDetail'));
-const ModifyResponseBodyRuleDetail = lazy(() => import('./components/ModifyResponseBodyRuleDetail'));
-const ModifyHeadersRuleDetail = lazy(() => import('./components/ModifyHeadersRuleDetail'));
-const UserAgentRuleDetail = lazy(() => import('./components/UserAgentRuleDetail'));
-const CancelRequestRuleDetail = lazy(() => import('./components/CancelRequestRuleDetail'));
-const RequestDelayRuleDetail = lazy(() => import('./components/RequestDelayRuleDetail'));
 
 type PageState = { type: 'list' } | { type: 'detail'; ruleId: string; isNew: boolean };
 
@@ -400,17 +388,9 @@ export default function RequestmanPanel() {
       message.error(t('导入失败，请检查配置文件格式', 'Import failed. Please check the config file format.'));
     }
   };
-
-
-  let editorNode: React.ReactNode = (
-    <div className="editor-placeholder">
-      <Typography.Title level={4} style={{ marginTop: 0 }}>{t('选择一条规则开始编辑', 'Select a rule to start editing')}</Typography.Title>
-      <Typography.Text type="secondary">{t('左侧规则列表选择规则后，可在此处编辑。', 'Select a rule from the sidebar to edit it here.')}</Typography.Text>
-    </div>
-  );
-
-  if (currentRule) {
-    const detailProps = {
+  const groupNameMap = new Map(groups.map((group) => [group.id, group.name]));
+  const detailProps: RuleDetailProps | null = currentRule
+    ? {
       groups,
       workingRule: currentRule,
       originalRule,
@@ -420,104 +400,52 @@ export default function RequestmanPanel() {
       saveDetailRule,
       toggleDetailRuleEnabled,
       setPageToList: () => setPage({ type: 'list' }),
-    };
-
-    if (currentRule.type === 'redirect_request') {
-      editorNode = <RedirectRuleDetail {...detailProps} messageApi={message} />;
-    } else if (currentRule.type === 'rewrite_string') {
-      editorNode = <RewriteStringRuleDetail {...detailProps} messageApi={message} />;
-    } else if (currentRule.type === 'query_params') {
-      editorNode = <QueryParamsRuleDetail {...detailProps} messageApi={message} />;
-    } else if (currentRule.type === 'modify_request_body') {
-      editorNode = <ModifyRequestBodyRuleDetail {...detailProps} messageApi={message} />;
-    } else if (currentRule.type === 'modify_response_body') {
-      editorNode = <ModifyResponseBodyRuleDetail {...detailProps} messageApi={message} />;
-    } else if (currentRule.type === 'modify_headers') {
-      editorNode = <ModifyHeadersRuleDetail {...detailProps} messageApi={message} />;
-    } else if (currentRule.type === 'user_agent') {
-      editorNode = <UserAgentRuleDetail {...detailProps} messageApi={message} />;
-    } else if (currentRule.type === 'cancel_request') {
-      editorNode = <CancelRequestRuleDetail {...detailProps} messageApi={message} />;
-    } else {
-      editorNode = <RequestDelayRuleDetail {...detailProps} messageApi={message} />;
+      messageApi: message,
     }
-  }
-
-  const groupNameMap = new Map(groups.map((group) => [group.id, group.name]));
+    : null;
 
   return <div className="requestman-shell">
     <input ref={importInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={onImportFileChange} />
-    <div className="global-toolbar">
-      <div className="toolbar-left-tools">
-        <img className="toolbar-logo" src="/assets/icon-source.png" alt="logo" style={{ width: 24, height: 24 }} />
-        <Typography.Text strong>REQUESTMAN</Typography.Text>
-        <Switch checked={redirectEnabled} onChange={handleRedirectEnabledChange} />
-      </div>
-      <div className="toolbar-right-tools">
-        <Dropdown
-          open={toolbarMenuOpen}
-          onOpenChange={setToolbarMenuOpen}
-          menu={{ items: [
-            { key: 'import', icon: <Download size={14} animateOnHover />, label: t('导入配置', 'Import'), onClick: importConfig },
-            { key: 'export', icon: <Upload size={14} animateOnHover />, label: t('导出配置', 'Export'), onClick: exportConfig },
-          ] }}
-        >
-          <Button size="sm" icon={<Menu size={16} animate={toolbarMenuOpen} />} />
-        </Dropdown>
-        <ThemeToggler
-          theme={themeMode}
-          resolvedTheme={effectiveTheme}
-          setTheme={(t) => setThemeMode(t as 'light' | 'dark')}
-        >
-          {({ toggleTheme }) => {
-            const next = effectiveTheme === 'light' ? 'dark' : 'light';
-            return <Button size="sm" onClick={() => toggleTheme(next)} icon={
-              <span className="theme-toggle-icons">
-                <Sun size={16} className="theme-icon-sun" />
-                <Moon size={16} className="theme-icon-moon" />
-              </span>
-            } />;
-          }}
-        </ThemeToggler>
-      </div>
-    </div>
+    <TopBar
+      redirectEnabled={redirectEnabled}
+      onRedirectEnabledChange={handleRedirectEnabledChange}
+      toolbarMenuOpen={toolbarMenuOpen}
+      setToolbarMenuOpen={setToolbarMenuOpen}
+      importConfig={importConfig}
+      exportConfig={exportConfig}
+      themeMode={themeMode}
+      effectiveTheme={effectiveTheme}
+      setThemeMode={setThemeMode}
+    />
 
     <div className="main-body-layout">
-      <aside className="main-sidebar">
-        <RedirectRuleList
-          groups={groups}
-          rules={rules}
-          redirectEnabled={redirectEnabled}
-          collapsedGroupIds={collapsedGroupIds}
-          groupModal={groupModal}
-          groupInput={groupInput}
-          setCollapsedGroupIds={setCollapsedGroupIds}
-          setGroupModal={setGroupModal}
-          setGroupInput={setGroupInput}
-          createRule={createRule}
-          openRuleDetail={openRuleDetail}
-          duplicateGroup={duplicateGroup}
-          deleteGroup={deleteGroup}
-          confirmGroupModal={confirmGroupModal}
-          setRules={setRules}
-          setGroups={setGroups}
-          messageApi={message}
-        />
-      </aside>
-      <main className="main-editor">
-        <Suspense fallback={<div style={{ padding: 16 }}>{t('加载中...', 'Loading...')}</div>}>
-          {editorNode}
-        </Suspense>
-      </main>
-      <aside className="main-test-panel">
-        <RuleTestPanel
-          testUrl={testUrl}
-          setTestUrl={setTestUrl}
-          triggerTest={triggerRuleTest}
-          testResult={testResult}
-          groupNameMap={groupNameMap}
-        />
-      </aside>
+      <Sidebar
+        groups={groups}
+        rules={rules}
+        redirectEnabled={redirectEnabled}
+        collapsedGroupIds={collapsedGroupIds}
+        groupModal={groupModal}
+        groupInput={groupInput}
+        setCollapsedGroupIds={setCollapsedGroupIds}
+        setGroupModal={setGroupModal}
+        setGroupInput={setGroupInput}
+        createRule={createRule}
+        openRuleDetail={openRuleDetail}
+        duplicateGroup={duplicateGroup}
+        deleteGroup={deleteGroup}
+        confirmGroupModal={confirmGroupModal}
+        setRules={setRules}
+        setGroups={setGroups}
+        messageApi={message}
+      />
+      <ConfigArea currentRule={currentRule} detailProps={detailProps} />
+      <TestArea
+        testUrl={testUrl}
+        setTestUrl={setTestUrl}
+        triggerTest={triggerRuleTest}
+        testResult={testResult}
+        groupNameMap={groupNameMap}
+      />
     </div>
   </div>;
 }

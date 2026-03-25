@@ -3,40 +3,60 @@ import {
   Button,
   Collapse,
   Form,
-  InputNumber,
   Modal,
   Popconfirm,
+  Radio,
   Select,
   Space,
-  Typography,
-} from '../ui';
-import { t } from '../i18n';
+} from '../../../ui';
+import { t } from '../../../i18n';
 import {
   DeleteOutlined,
   PlusOutlined,
-} from '../ui/icons';
-import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
-import type { RedirectCondition, RedirectGroup, RedirectRule } from '../types';
-import ConditionUrlMatchEditor from './ConditionUrlMatchEditor';
-import RuleDetailToolbar from './RuleDetailToolbar';
-import RuleNameHeader from './RuleNameHeader';
-import TestRuleDrawer from './TestRuleDrawer';
-import ConditionFilterModal, { isConditionFilterConfigured } from './ConditionFilterModal';
+} from '../../../ui/icons';
+import {
+  createDefaultCondition,
+  genId,
+  hasModifyResponseBodyFunction,
+  simulateRuleEffect,
+  type SimulateRuleResult,
+} from '../../../rule-utils';
+import CodeMirror from '@uiw/react-codemirror';
+import { json } from '@codemirror/lang-json';
+import { javascript } from '@codemirror/lang-javascript';
+import type { RedirectCondition, ResponseBodyModifyMode } from '../../../types';
+import ConditionUrlMatchEditor from '../../../components/ConditionUrlMatchEditor';
+import RuleDetailToolbar from '../../../components/RuleDetailToolbar';
+import RuleNameHeader from '../../../components/RuleNameHeader';
+import TestRuleDrawer from '../../../components/TestRuleDrawer';
+import ConditionFilterModal, { isConditionFilterConfigured } from '../../../components/ConditionFilterModal';
+import type { RuleDetailProps as Props } from '../types';
 
-type Props = {
-  groups: RedirectGroup[];
-  workingRule: RedirectRule;
-  originalRule: RedirectRule | null;
-  setWorkingRule: React.Dispatch<React.SetStateAction<RedirectRule | null>>;
-  setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
-  onBack: () => void;
-  saveDetailRule: () => void;
-  toggleDetailRuleEnabled: (ruleId: string, enabled: boolean) => void;
-  setPageToList: () => void;
-  messageApi: { warning: (content: string) => void };
-};
+function validateDynamicScript(code: string): string | null {
+  if (!hasModifyResponseBodyFunction(code)) return t('需定义 modifyResponse(args) 方法', 'Define modifyResponse(args).');
+  return null;
+}
 
-export default function RequestDelayRuleDetail({
+function CodeEditor({ value, onChange, mode }: { value: string; onChange: (value: string) => void; mode: ResponseBodyModifyMode }) {
+  const extensions = useMemo(() => (mode === 'dynamic' ? [javascript()] : [json()]), [mode]);
+
+  return (
+    <CodeMirror
+      value={value}
+      onChange={onChange}
+      extensions={extensions}
+      height="220px"
+      basicSetup={{
+        lineNumbers: true,
+        foldGutter: true,
+        highlightActiveLine: true,
+      }}
+      className="requestman-body-editor"
+    />
+  );
+}
+
+export default function ModifyResponseBodyRuleDetail({
   groups,
   workingRule,
   originalRule,
@@ -63,6 +83,13 @@ export default function RequestDelayRuleDetail({
     setWorkingRule((prev) => (prev
       ? { ...prev, conditions: prev.conditions.map((c) => (c.id === conditionId ? { ...c, ...patch } : c)) }
       : prev));
+  };
+
+  const updateConditionMode = (conditionId: string, mode: ResponseBodyModifyMode) => {
+    const condition = workingRule.conditions.find((item) => item.id === conditionId);
+    if (!condition) return;
+    const nextValue = mode === 'dynamic' ? condition.responseBodyDynamicValue : condition.responseBodyStaticValue;
+    updateCondition(conditionId, { responseBodyMode: mode, responseBodyValue: nextValue });
   };
 
   const removeCondition = (conditionId: string) => {
@@ -98,8 +125,9 @@ export default function RequestDelayRuleDetail({
       setEditRuleName={setEditRuleName}
       setWorkingRule={setWorkingRule}
     />
-    {workingRule.conditions.map((c) => (
-      <Collapse
+    {workingRule.conditions.map((c) => {
+      const dynamicScriptError = c.responseBodyMode === 'dynamic' ? validateDynamicScript(c.responseBodyDynamicValue) : null;
+      return <Collapse
         key={c.id}
         defaultActiveKey={[c.id]}
         items={[{
@@ -143,22 +171,36 @@ export default function RequestDelayRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <Form.Item label={t('延迟（ms）', 'Delay (ms)')} style={{ marginBottom: 0 }}>
-              <InputNumber
-                style={{ width: '100%' }}
-                min={0}
-                precision={0}
-                value={c.delayMs}
-                onChange={(value) => updateCondition(c.id, { delayMs: typeof value === 'number' ? value : 0 })}
-                placeholder={t('输入请求延迟时间', 'Enter request delay')}
+            <Form.Item label={t('修改方式', 'Modify mode')} style={{ marginBottom: 8 }}>
+              <Radio.Group
+                value={c.responseBodyMode}
+                onChange={(e) => updateConditionMode(c.id, e.target.value)}
+                options={[
+                  { label: t('静态数据', 'Static'), value: 'static' },
+                  { label: t('动态（JavaScript）', 'Dynamic (JavaScript)'), value: 'dynamic' },
+                ]}
               />
             </Form.Item>
-            <Typography.Text type="secondary">{t('命中该 URL 条件后，请求将延迟指定毫秒数再继续。', 'When this URL condition matches, the request will continue after the specified delay.')}</Typography.Text>
+            <Form.Item
+              label={c.responseBodyMode === 'dynamic' ? t('JavaScript 代码', 'JavaScript code') : t('替换后的响应体', 'Replaced response body')}
+              validateStatus={dynamicScriptError ? 'error' : ''}
+              help={dynamicScriptError ?? (c.responseBodyMode === 'dynamic' ? t('需定义 modifyResponse(args) 并返回最终响应体', 'Define modifyResponse(args) and return the final response body.') : t('命中后会直接替换原始响应 body', 'Will directly replace the original response body when matched.'))}
+              layout="vertical"
+              style={{ marginBottom: 0 }}
+            >
+              <CodeEditor
+                mode={c.responseBodyMode}
+                value={c.responseBodyMode === 'dynamic' ? c.responseBodyDynamicValue : c.responseBodyStaticValue}
+                onChange={(value) => updateCondition(c.id, c.responseBodyMode === 'dynamic'
+                  ? { responseBodyDynamicValue: value, responseBodyValue: value }
+                  : { responseBodyStaticValue: value, responseBodyValue: value })}
+              />
+            </Form.Item>
           </Space>,
         }]}
         style={{ marginBottom: 12 }}
-      />
-    ))}
+      />;
+    })}
     <Button
       type="dashed"
       style={{ marginTop: 12, width: '100%', height: 40, background: 'transparent' }}

@@ -1,41 +1,62 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Button,
   Collapse,
-  Input,
+  Form,
   Modal,
   Popconfirm,
   Radio,
+  Select,
   Space,
-} from '../ui';
-import { t } from '../i18n';
+} from '../../../ui';
+import { t } from '../../../i18n';
 import {
   DeleteOutlined,
-  FileOutlined,
   PlusOutlined,
-} from '../ui/icons';
-import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
-import type { RedirectCondition, RedirectGroup, RedirectRule } from '../types';
-import ConditionUrlMatchEditor from './ConditionUrlMatchEditor';
-import RuleDetailToolbar from './RuleDetailToolbar';
-import RuleNameHeader from './RuleNameHeader';
-import TestRuleDrawer from './TestRuleDrawer';
-import ConditionFilterModal, { isConditionFilterConfigured } from './ConditionFilterModal';
+} from '../../../ui/icons';
+import {
+  createDefaultCondition,
+  genId,
+  hasModifyRequestBodyFunction,
+  simulateRuleEffect,
+  type SimulateRuleResult,
+} from '../../../rule-utils';
+import CodeMirror from '@uiw/react-codemirror';
+import { json } from '@codemirror/lang-json';
+import { javascript } from '@codemirror/lang-javascript';
+import type { RedirectCondition, RequestBodyModifyMode } from '../../../types';
+import ConditionUrlMatchEditor from '../../../components/ConditionUrlMatchEditor';
+import RuleDetailToolbar from '../../../components/RuleDetailToolbar';
+import RuleNameHeader from '../../../components/RuleNameHeader';
+import TestRuleDrawer from '../../../components/TestRuleDrawer';
+import ConditionFilterModal, { isConditionFilterConfigured } from '../../../components/ConditionFilterModal';
+import type { RuleDetailProps as Props } from '../types';
 
-type Props = {
-  groups: RedirectGroup[];
-  workingRule: RedirectRule;
-  originalRule: RedirectRule | null;
-  setWorkingRule: React.Dispatch<React.SetStateAction<RedirectRule | null>>;
-  setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
-  onBack: () => void;
-  saveDetailRule: () => void;
-  toggleDetailRuleEnabled: (ruleId: string, enabled: boolean) => void;
-  setPageToList: () => void;
-  messageApi: { warning: (content: string) => void };
-};
+function validateDynamicScript(code: string): string | null {
+  if (!hasModifyRequestBodyFunction(code)) return t('需定义 modifyRequestBody(args) 方法', 'Define modifyRequestBody(args).');
+  return null;
+}
 
-export default function RedirectRuleDetail({
+function CodeEditor({ value, onChange, mode }: { value: string; onChange: (value: string) => void; mode: RequestBodyModifyMode }) {
+  const extensions = useMemo(() => (mode === 'dynamic' ? [javascript()] : [json()]), [mode]);
+
+  return (
+    <CodeMirror
+      value={value}
+      onChange={onChange}
+      extensions={extensions}
+      height="220px"
+      basicSetup={{
+        lineNumbers: true,
+        foldGutter: true,
+        highlightActiveLine: true,
+      }}
+      className="requestman-body-editor"
+    />
+  );
+}
+
+export default function ModifyRequestBodyRuleDetail({
   groups,
   workingRule,
   originalRule,
@@ -52,11 +73,6 @@ export default function RedirectRuleDetail({
   const [testUrl, setTestUrl] = useState('');
   const [testResult, setTestResult] = useState<SimulateRuleResult | null>(null);
   const [filterModal, setFilterModal] = useState<{ open: boolean; conditionId?: string }>({ open: false });
-  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-
-  const getRedirectTarget = (condition: RedirectCondition) => (condition.redirectType === 'file'
-    ? condition.redirectFileTarget ?? condition.redirectTarget
-    : condition.redirectUrlTarget ?? condition.redirectTarget);
 
   const { enabled: _workingEnabled, ...workingRuleWithoutEnabled } = workingRule;
   const { enabled: _originalEnabled, ...originalRuleWithoutEnabled } = originalRule ?? workingRule;
@@ -69,35 +85,11 @@ export default function RedirectRuleDetail({
       : prev));
   };
 
-  const updateRedirectTarget = (condition: RedirectCondition, value: string) => {
-    if (condition.redirectType === 'file') {
-      updateCondition(condition.id, { redirectFileTarget: value, redirectTarget: value });
-      return;
-    }
-    updateCondition(condition.id, { redirectUrlTarget: value, redirectTarget: value });
-  };
-
-  const updateRedirectType = (condition: RedirectCondition, type: 'url' | 'file') => {
-    const nextTarget = type === 'file'
-      ? (condition.redirectFileTarget ?? '')
-      : (condition.redirectUrlTarget ?? '');
-    updateCondition(condition.id, { redirectType: type, redirectTarget: nextTarget });
-  };
-
-  const pickFile = (conditionId: string) => {
-    const input = fileInputRefs.current[conditionId];
-    input?.click();
-  };
-
-  const onFilePicked = (condition: RedirectCondition, event: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = event.target.files?.[0] as (File & { path?: string }) | undefined;
-    if (!selected) return;
-    const nativePath = selected.path
-      || event.target.value
-      || '';
-    const fullPath = nativePath.replace(/^C:\\fakepath\\/i, '').trim();
-    updateCondition(condition.id, { redirectFileTarget: fullPath, redirectTarget: fullPath });
-    event.target.value = '';
+  const updateConditionMode = (conditionId: string, mode: RequestBodyModifyMode) => {
+    const condition = workingRule.conditions.find((item) => item.id === conditionId);
+    if (!condition) return;
+    const nextValue = mode === 'dynamic' ? condition.requestBodyDynamicValue : condition.requestBodyStaticValue;
+    updateCondition(conditionId, { requestBodyMode: mode, requestBodyValue: nextValue });
   };
 
   const removeCondition = (conditionId: string) => {
@@ -133,8 +125,9 @@ export default function RedirectRuleDetail({
       setEditRuleName={setEditRuleName}
       setWorkingRule={setWorkingRule}
     />
-    {workingRule.conditions.map((c) => (
-      <Collapse
+    {workingRule.conditions.map((c) => {
+      const dynamicScriptError = c.requestBodyMode === 'dynamic' ? validateDynamicScript(c.requestBodyDynamicValue) : null;
+      return <Collapse
         key={c.id}
         defaultActiveKey={[c.id]}
         items={[{
@@ -178,30 +171,36 @@ export default function RedirectRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <Radio.Group value={c.redirectType} onChange={(e) => updateRedirectType(c, e.target.value as 'url' | 'file')}><Radio value="url">URL</Radio><Radio value="file">{t('本地文件', 'Local file')}</Radio></Radio.Group>
-            {c.redirectType === 'file'
-              ? <>
-                <Space.Compact style={{ width: '100%' }}>
-                  <Input
-                    value={getRedirectTarget(c)}
-                    onChange={(e) => updateRedirectTarget(c, e.target.value)}
-                    placeholder={t('请输入本地文件绝对路径', 'Enter absolute local file path')}
-                  />
-                  <Button icon={<FileOutlined />} onClick={() => pickFile(c.id)}>{t('选择文件', 'Select file')}</Button>
-                </Space.Compact>
-                <input
-                  ref={(el) => { fileInputRefs.current[c.id] = el; }}
-                  type="file"
-                  style={{ display: 'none' }}
-                  onChange={(e) => onFilePicked(c, e)}
-                />
-              </>
-              : <Input value={getRedirectTarget(c)} onChange={(e) => updateRedirectTarget(c, e.target.value)} placeholder="重定向目标 URL" />}
+            <Form.Item label={t('修改方式', 'Modify mode')} style={{ marginBottom: 8 }}>
+              <Radio.Group
+                value={c.requestBodyMode}
+                onChange={(e) => updateConditionMode(c.id, e.target.value)}
+                options={[
+                  { label: t('静态数据', 'Static'), value: 'static' },
+                  { label: t('动态（JavaScript）', 'Dynamic (JavaScript)'), value: 'dynamic' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item
+              label={c.requestBodyMode === 'dynamic' ? t('JavaScript 代码', 'JavaScript code') : t('替换后的请求体', 'Replaced request body')}
+              validateStatus={dynamicScriptError ? 'error' : ''}
+              help={dynamicScriptError ?? (c.requestBodyMode === 'dynamic' ? t('需定义 modifyRequestBody(args) 并返回最终请求体', 'Define modifyRequestBody(args) and return the final request body.') : t('命中后会直接替换原始请求 body', 'Will directly replace the original request body when matched.'))}
+              layout="vertical"
+              style={{ marginBottom: 0 }}
+            >
+              <CodeEditor
+                mode={c.requestBodyMode}
+                value={c.requestBodyMode === 'dynamic' ? c.requestBodyDynamicValue : c.requestBodyStaticValue}
+                onChange={(value) => updateCondition(c.id, c.requestBodyMode === 'dynamic'
+                  ? { requestBodyDynamicValue: value, requestBodyValue: value }
+                  : { requestBodyStaticValue: value, requestBodyValue: value })}
+              />
+            </Form.Item>
           </Space>,
         }]}
         style={{ marginBottom: 12 }}
-      />
-    ))}
+      />;
+    })}
     <Button
       type="dashed"
       style={{ marginTop: 12, width: '100%', height: 40, background: 'transparent' }}

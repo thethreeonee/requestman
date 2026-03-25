@@ -2,38 +2,26 @@ import React, { useMemo, useState } from 'react';
 import {
   Button,
   Collapse,
+  Input,
   Modal,
   Popconfirm,
   Space,
-  Typography,
-} from '../ui';
-import { t } from '../i18n';
+} from '../../../ui';
+import { t } from '../../../i18n';
 import {
   DeleteOutlined,
   PlusOutlined,
-} from '../ui/icons';
-import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
-import type { RedirectCondition, RedirectGroup, RedirectRule } from '../types';
-import ConditionUrlMatchEditor from './ConditionUrlMatchEditor';
-import RuleDetailToolbar from './RuleDetailToolbar';
-import RuleNameHeader from './RuleNameHeader';
-import TestRuleDrawer from './TestRuleDrawer';
-import ConditionFilterModal, { isConditionFilterConfigured } from './ConditionFilterModal';
+} from '../../../ui/icons';
+import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
+import type { RedirectCondition } from '../../../types';
+import ConditionUrlMatchEditor from '../../../components/ConditionUrlMatchEditor';
+import RuleDetailToolbar from '../../../components/RuleDetailToolbar';
+import RuleNameHeader from '../../../components/RuleNameHeader';
+import TestRuleDrawer from '../../../components/TestRuleDrawer';
+import ConditionFilterModal, { isConditionFilterConfigured } from '../../../components/ConditionFilterModal';
+import type { RuleDetailProps as Props } from '../types';
 
-type Props = {
-  groups: RedirectGroup[];
-  workingRule: RedirectRule;
-  originalRule: RedirectRule | null;
-  setWorkingRule: React.Dispatch<React.SetStateAction<RedirectRule | null>>;
-  setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
-  onBack: () => void;
-  saveDetailRule: () => void;
-  toggleDetailRuleEnabled: (ruleId: string, enabled: boolean) => void;
-  setPageToList: () => void;
-  messageApi: { warning: (content: string) => void };
-};
-
-export default function CancelRequestRuleDetail({
+export default function RewriteStringRuleDetail({
   groups,
   workingRule,
   originalRule,
@@ -140,7 +128,26 @@ export default function CancelRequestRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <Typography.Text type="secondary">{t('命中该 URL 条件后，将直接取消请求。', 'When this URL condition matches, the request will be cancelled immediately.')}</Typography.Text>
+            <div style={{ display: 'flex', width: '100%', gap: 8 }}>
+              <Space.Compact style={{ flex: 1, minWidth: 0 }}>
+                <Space.Addon style={{ flexShrink: 0 }}>{t('目标', 'Target')}</Space.Addon>
+                <Input
+                  style={{ minWidth: 0 }}
+                  value={c.rewriteFrom}
+                  onChange={(e) => updateCondition(c.id, { rewriteFrom: e.target.value })}
+                  placeholder="from"
+                />
+              </Space.Compact>
+              <Space.Compact style={{ flex: 1, minWidth: 0 }}>
+                <Space.Addon style={{ flexShrink: 0 }}>{t('替换为', 'Replace with')}</Space.Addon>
+                <Input
+                  style={{ minWidth: 0 }}
+                  value={c.rewriteTo}
+                  onChange={(e) => updateCondition(c.id, { rewriteTo: e.target.value })}
+                  placeholder="to"
+                />
+              </Space.Compact>
+            </div>
           </Space>,
         }]}
         style={{ marginBottom: 12 }}

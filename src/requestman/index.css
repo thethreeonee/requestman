@@ -69,6 +69,9 @@ body {
 .main-sidebar {
   background: var(--rm-content-bg);
   border-right: 1px solid var(--rm-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .main-editor {
@@ -138,6 +141,11 @@ html.dark .theme-toggle-icons .theme-icon-moon {
 .main-editor,
 .main-test-panel {
   padding: var(--rm-space-12);
+  min-height: 0;
+}
+
+.main-editor,
+.main-test-panel {
   overflow: auto;
 }
 
@@ -145,6 +153,26 @@ html.dark .theme-toggle-icons .theme-icon-moon {
   display: flex;
   justify-content: space-between;
   margin-bottom: var(--rm-space-12);
+}
+
+.rules-sidebar {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.rules-list-table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.sidebar-actions {
+  margin-bottom: 0;
+  margin-top: var(--rm-space-12);
+  padding-top: var(--rm-space-12);
+  border-top: 1px solid var(--rm-border);
 }
 
 .editor-placeholder {

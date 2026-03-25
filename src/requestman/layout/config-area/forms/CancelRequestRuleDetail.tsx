@@ -2,45 +2,26 @@ import React, { useMemo, useState } from 'react';
 import {
   Button,
   Collapse,
-  Input,
   Modal,
   Popconfirm,
-  Select,
   Space,
-} from '../ui';
-import { t } from '../i18n';
+  Typography,
+} from '../../../ui';
+import { t } from '../../../i18n';
 import {
   DeleteOutlined,
   PlusOutlined,
-} from '../ui/icons';
-import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
-import type { QueryParamModification, RedirectCondition, RedirectGroup, RedirectRule } from '../types';
-import ConditionUrlMatchEditor from './ConditionUrlMatchEditor';
-import RuleDetailToolbar from './RuleDetailToolbar';
-import RuleNameHeader from './RuleNameHeader';
-import TestRuleDrawer from './TestRuleDrawer';
-import ConditionFilterModal, { isConditionFilterConfigured } from './ConditionFilterModal';
+} from '../../../ui/icons';
+import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
+import type { RedirectCondition } from '../../../types';
+import ConditionUrlMatchEditor from '../../../components/ConditionUrlMatchEditor';
+import RuleDetailToolbar from '../../../components/RuleDetailToolbar';
+import RuleNameHeader from '../../../components/RuleNameHeader';
+import TestRuleDrawer from '../../../components/TestRuleDrawer';
+import ConditionFilterModal, { isConditionFilterConfigured } from '../../../components/ConditionFilterModal';
+import type { RuleDetailProps as Props } from '../types';
 
-type Props = {
-  groups: RedirectGroup[];
-  workingRule: RedirectRule;
-  originalRule: RedirectRule | null;
-  setWorkingRule: React.Dispatch<React.SetStateAction<RedirectRule | null>>;
-  setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
-  onBack: () => void;
-  saveDetailRule: () => void;
-  toggleDetailRuleEnabled: (ruleId: string, enabled: boolean) => void;
-  setPageToList: () => void;
-  messageApi: { warning: (content: string) => void };
-};
-
-const QUERY_ACTION_OPTIONS = [
-  { label: t('添加', 'Add'), value: 'add' },
-  { label: t('修改', 'Update'), value: 'update' },
-  { label: t('删除', 'Delete'), value: 'delete' },
-] as const;
-
-export default function QueryParamsRuleDetail({
+export default function CancelRequestRuleDetail({
   groups,
   workingRule,
   originalRule,
@@ -77,31 +58,6 @@ export default function QueryParamsRuleDetail({
     setWorkingRule({ ...workingRule, conditions: workingRule.conditions.filter((c) => c.id !== conditionId) });
   };
 
-
-  const updateModification = (conditionId: string, modificationId: string, patch: Partial<QueryParamModification>) => {
-    const condition = workingRule.conditions.find((item) => item.id === conditionId);
-    if (!condition) return;
-    updateCondition(conditionId, {
-      queryParamModifications: condition.queryParamModifications.map((item) => (item.id === modificationId ? { ...item, ...patch } : item)),
-    });
-  };
-
-  const addModification = (conditionId: string) => {
-    const condition = workingRule.conditions.find((item) => item.id === conditionId);
-    if (!condition) return;
-    updateCondition(conditionId, {
-      queryParamModifications: [...condition.queryParamModifications, { id: genId(), action: 'add', key: '', value: '' }],
-    });
-  };
-
-  const removeModification = (conditionId: string, modificationId: string) => {
-    const condition = workingRule.conditions.find((item) => item.id === conditionId);
-    if (!condition) return;
-    if (condition.queryParamModifications.length <= 1) return messageApi.warning(t('至少保留一条修改配置', 'Keep at least one modification.'));
-    updateCondition(conditionId, {
-      queryParamModifications: condition.queryParamModifications.filter((item) => item.id !== modificationId),
-    });
-  };
 
   const activeCondition = workingRule.conditions.find((c) => c.id === filterModal.conditionId);
 
@@ -172,29 +128,7 @@ export default function QueryParamsRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            {c.queryParamModifications.map((modification) => (
-              <Space.Compact key={modification.id} style={{ width: '100%' }}>
-                <Select
-                  value={modification.action}
-                  options={QUERY_ACTION_OPTIONS as never}
-                  style={{ width: 100 }}
-                  onChange={(value) => updateModification(c.id, modification.id, { action: value })}
-                />
-                <Input
-                  placeholder={t('参数名', 'Parameter key')}
-                  value={modification.key}
-                  onChange={(e) => updateModification(c.id, modification.id, { key: e.target.value })}
-                />
-                <Input
-                  placeholder={t('参数值', 'Parameter value')}
-                  value={modification.value}
-                  disabled={modification.action === 'delete'}
-                  onChange={(e) => updateModification(c.id, modification.id, { value: e.target.value })}
-                />
-                <Button danger icon={<DeleteOutlined />} onClick={() => removeModification(c.id, modification.id)} />
-              </Space.Compact>
-            ))}
-            <Button type="dashed" onClick={() => addModification(c.id)} icon={<PlusOutlined />}>{t('添加修改', 'Add modification')}</Button>
+            <Typography.Text type="secondary">{t('命中该 URL 条件后，将直接取消请求。', 'When this URL condition matches, the request will be cancelled immediately.')}</Typography.Text>
           </Space>,
         }]}
         style={{ marginBottom: 12 }}

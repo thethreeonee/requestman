@@ -10,32 +10,20 @@ import {
   Space,
   Tabs,
   Tooltip,
-} from '../ui';
-import { t } from '../i18n';
+} from '../../../ui';
+import { t } from '../../../i18n';
 import {
   DeleteOutlined,
   PlusOutlined,
-} from '../ui/icons';
-import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
-import type { HeaderModification, RedirectCondition, RedirectGroup, RedirectRule } from '../types';
-import ConditionUrlMatchEditor from './ConditionUrlMatchEditor';
-import RuleDetailToolbar from './RuleDetailToolbar';
-import RuleNameHeader from './RuleNameHeader';
-import TestRuleDrawer from './TestRuleDrawer';
-import ConditionFilterModal, { isConditionFilterConfigured } from './ConditionFilterModal';
-
-type Props = {
-  groups: RedirectGroup[];
-  workingRule: RedirectRule;
-  originalRule: RedirectRule | null;
-  setWorkingRule: React.Dispatch<React.SetStateAction<RedirectRule | null>>;
-  setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
-  onBack: () => void;
-  saveDetailRule: () => void;
-  toggleDetailRuleEnabled: (ruleId: string, enabled: boolean) => void;
-  setPageToList: () => void;
-  messageApi: { warning: (content: string) => void };
-};
+} from '../../../ui/icons';
+import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
+import type { HeaderModification, RedirectCondition } from '../../../types';
+import ConditionUrlMatchEditor from '../../../components/ConditionUrlMatchEditor';
+import RuleDetailToolbar from '../../../components/RuleDetailToolbar';
+import RuleNameHeader from '../../../components/RuleNameHeader';
+import TestRuleDrawer from '../../../components/TestRuleDrawer';
+import ConditionFilterModal, { isConditionFilterConfigured } from '../../../components/ConditionFilterModal';
+import type { RuleDetailProps as Props } from '../types';
 
 const HEADER_ACTION_OPTIONS = [
   { label: t('添加', 'Add'), value: 'add' },

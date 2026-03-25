@@ -2,73 +2,47 @@ import React, { useMemo, useState } from 'react';
 import {
   Button,
   Collapse,
-  Form,
+  Input,
   Modal,
   Popconfirm,
-  Radio,
   Select,
   Space,
-} from '../ui';
-import { t } from '../i18n';
+  Typography,
+} from '../../../ui';
+import { t } from '../../../i18n';
 import {
   DeleteOutlined,
   PlusOutlined,
-} from '../ui/icons';
-import {
-  createDefaultCondition,
-  genId,
-  hasModifyRequestBodyFunction,
-  simulateRuleEffect,
-  type SimulateRuleResult,
-} from '../rule-utils';
-import CodeMirror from '@uiw/react-codemirror';
-import { json } from '@codemirror/lang-json';
-import { javascript } from '@codemirror/lang-javascript';
-import type { RedirectCondition, RedirectGroup, RedirectRule, RequestBodyModifyMode } from '../types';
-import ConditionUrlMatchEditor from './ConditionUrlMatchEditor';
-import RuleDetailToolbar from './RuleDetailToolbar';
-import RuleNameHeader from './RuleNameHeader';
-import TestRuleDrawer from './TestRuleDrawer';
-import ConditionFilterModal, { isConditionFilterConfigured } from './ConditionFilterModal';
+} from '../../../ui/icons';
+import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
+import type { RedirectCondition } from '../../../types';
+import ConditionUrlMatchEditor from '../../../components/ConditionUrlMatchEditor';
+import RuleDetailToolbar from '../../../components/RuleDetailToolbar';
+import RuleNameHeader from '../../../components/RuleNameHeader';
+import TestRuleDrawer from '../../../components/TestRuleDrawer';
+import ConditionFilterModal, { isConditionFilterConfigured } from '../../../components/ConditionFilterModal';
+import { getUserAgentByPresetKey, USER_AGENT_PRESETS, type UserAgentType } from '../../../user-agent-presets';
+import type { RuleDetailProps as Props } from '../types';
 
-type Props = {
-  groups: RedirectGroup[];
-  workingRule: RedirectRule;
-  originalRule: RedirectRule | null;
-  setWorkingRule: React.Dispatch<React.SetStateAction<RedirectRule | null>>;
-  setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
-  onBack: () => void;
-  saveDetailRule: () => void;
-  toggleDetailRuleEnabled: (ruleId: string, enabled: boolean) => void;
-  setPageToList: () => void;
-  messageApi: { warning: (content: string) => void };
-};
+const USER_AGENT_TYPE_OPTIONS = [
+  { label: t('设备', 'Device'), value: 'device' },
+  { label: t('浏览器', 'Browser'), value: 'browser' },
+  { label: t('自定义', 'Custom'), value: 'custom' },
+] as const;
 
-function validateDynamicScript(code: string): string | null {
-  if (!hasModifyRequestBodyFunction(code)) return t('需定义 modifyRequestBody(args) 方法', 'Define modifyRequestBody(args).');
-  return null;
-}
+const DEVICE_PRESET_GROUP_OPTIONS = Object.entries(USER_AGENT_PRESETS.device).map(([key, group]) => ({
+  label: group.label,
+  options: group.options.map((option) => ({ label: option.label, value: option.key })),
+  key,
+}));
 
-function CodeEditor({ value, onChange, mode }: { value: string; onChange: (value: string) => void; mode: RequestBodyModifyMode }) {
-  const extensions = useMemo(() => (mode === 'dynamic' ? [javascript()] : [json()]), [mode]);
+const BROWSER_PRESET_GROUP_OPTIONS = Object.entries(USER_AGENT_PRESETS.browser).map(([key, group]) => ({
+  label: group.label,
+  options: group.options.map((option) => ({ label: option.label, value: option.key })),
+  key,
+}));
 
-  return (
-    <CodeMirror
-      value={value}
-      onChange={onChange}
-      extensions={extensions}
-      height="220px"
-      basicSetup={{
-        lineNumbers: true,
-        foldGutter: true,
-        highlightActiveLine: true,
-      }}
-      className="requestman-body-editor"
-    />
-  );
-}
-
-export default function ModifyRequestBodyRuleDetail({
+export default function UserAgentRuleDetail({
   groups,
   workingRule,
   originalRule,
@@ -97,13 +71,6 @@ export default function ModifyRequestBodyRuleDetail({
       : prev));
   };
 
-  const updateConditionMode = (conditionId: string, mode: RequestBodyModifyMode) => {
-    const condition = workingRule.conditions.find((item) => item.id === conditionId);
-    if (!condition) return;
-    const nextValue = mode === 'dynamic' ? condition.requestBodyDynamicValue : condition.requestBodyStaticValue;
-    updateCondition(conditionId, { requestBodyMode: mode, requestBodyValue: nextValue });
-  };
-
   const removeCondition = (conditionId: string) => {
     if (workingRule.conditions.length <= 1) {
       messageApi.warning(t('至少保留一条条件配置', 'Keep at least one condition.'));
@@ -114,6 +81,19 @@ export default function ModifyRequestBodyRuleDetail({
 
 
   const activeCondition = workingRule.conditions.find((c) => c.id === filterModal.conditionId);
+
+  const onUserAgentTypeChange = (condition: RedirectCondition, nextType: UserAgentType) => {
+    if (nextType === 'custom') {
+      updateCondition(condition.id, { userAgentType: 'custom', userAgentPresetKey: '' });
+      return;
+    }
+    const groupedOptions = nextType === 'device' ? DEVICE_PRESET_GROUP_OPTIONS : BROWSER_PRESET_GROUP_OPTIONS;
+    const firstPresetKey = groupedOptions[0]?.options[0]?.value ?? '';
+    updateCondition(condition.id, {
+      userAgentType: nextType,
+      userAgentPresetKey: firstPresetKey,
+    });
+  };
 
   return <div>
     <RuleDetailToolbar
@@ -137,9 +117,8 @@ export default function ModifyRequestBodyRuleDetail({
       setEditRuleName={setEditRuleName}
       setWorkingRule={setWorkingRule}
     />
-    {workingRule.conditions.map((c) => {
-      const dynamicScriptError = c.requestBodyMode === 'dynamic' ? validateDynamicScript(c.requestBodyDynamicValue) : null;
-      return <Collapse
+    {workingRule.conditions.map((c) => (
+      <Collapse
         key={c.id}
         defaultActiveKey={[c.id]}
         items={[{
@@ -183,36 +162,39 @@ export default function ModifyRequestBodyRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <Form.Item label={t('修改方式', 'Modify mode')} style={{ marginBottom: 8 }}>
-              <Radio.Group
-                value={c.requestBodyMode}
-                onChange={(e) => updateConditionMode(c.id, e.target.value)}
-                options={[
-                  { label: t('静态数据', 'Static'), value: 'static' },
-                  { label: t('动态（JavaScript）', 'Dynamic (JavaScript)'), value: 'dynamic' },
-                ]}
+            <Space.Compact style={{ width: '100%' }}>
+              <Select
+                value={c.userAgentType ?? 'device'}
+                options={USER_AGENT_TYPE_OPTIONS as never}
+                style={{ width: 110 }}
+                onChange={(value) => onUserAgentTypeChange(c, value)}
               />
-            </Form.Item>
-            <Form.Item
-              label={c.requestBodyMode === 'dynamic' ? t('JavaScript 代码', 'JavaScript code') : t('替换后的请求体', 'Replaced request body')}
-              validateStatus={dynamicScriptError ? 'error' : ''}
-              help={dynamicScriptError ?? (c.requestBodyMode === 'dynamic' ? t('需定义 modifyRequestBody(args) 并返回最终请求体', 'Define modifyRequestBody(args) and return the final request body.') : t('命中后会直接替换原始请求 body', 'Will directly replace the original request body when matched.'))}
-              layout="vertical"
-              style={{ marginBottom: 0 }}
-            >
-              <CodeEditor
-                mode={c.requestBodyMode}
-                value={c.requestBodyMode === 'dynamic' ? c.requestBodyDynamicValue : c.requestBodyStaticValue}
-                onChange={(value) => updateCondition(c.id, c.requestBodyMode === 'dynamic'
-                  ? { requestBodyDynamicValue: value, requestBodyValue: value }
-                  : { requestBodyStaticValue: value, requestBodyValue: value })}
-              />
-            </Form.Item>
+              {c.userAgentType === 'custom' ? <Input
+                style={{ flex: 1, minWidth: 0 }}
+                placeholder={t('请输入自定义 User-Agent', 'Enter custom User-Agent')}
+                value={c.userAgentCustomValue ?? ''}
+                onChange={(e) => updateCondition(c.id, { userAgentCustomValue: e.target.value })}
+              /> : <Select
+                style={{ flex: 1, minWidth: 0 }}
+                placeholder={t('请选择 User-Agent', 'Select User-Agent')}
+                value={c.userAgentPresetKey}
+                options={(c.userAgentType ?? 'device') === 'browser' ? BROWSER_PRESET_GROUP_OPTIONS : DEVICE_PRESET_GROUP_OPTIONS as never}
+                onChange={(value) => updateCondition(c.id, { userAgentPresetKey: value })}
+              />}
+            </Space.Compact>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {(c.userAgentType ?? 'device') === 'custom'
+                ? (c.userAgentCustomValue?.trim() ? `将设置为：${c.userAgentCustomValue.trim()}` : t('请输入自定义 User-Agent', 'Enter custom User-Agent'))
+                : (() => {
+                  const value = getUserAgentByPresetKey(c.userAgentPresetKey ?? '');
+                  return value ? `将设置为：${value}` : t('请选择 User-Agent', 'Select User-Agent');
+                })()}
+            </Typography.Text>
           </Space>,
         }]}
         style={{ marginBottom: 12 }}
-      />;
-    })}
+      />
+    ))}
     <Button
       type="dashed"
       style={{ marginTop: 12, width: '100%', height: 40, background: 'transparent' }}

@@ -2,38 +2,29 @@ import React, { useMemo, useState } from 'react';
 import {
   Button,
   Collapse,
-  Input,
+  Form,
+  InputNumber,
   Modal,
   Popconfirm,
+  Select,
   Space,
-} from '../ui';
-import { t } from '../i18n';
+  Typography,
+} from '../../../ui';
+import { t } from '../../../i18n';
 import {
   DeleteOutlined,
   PlusOutlined,
-} from '../ui/icons';
-import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
-import type { RedirectCondition, RedirectGroup, RedirectRule } from '../types';
-import ConditionUrlMatchEditor from './ConditionUrlMatchEditor';
-import RuleDetailToolbar from './RuleDetailToolbar';
-import RuleNameHeader from './RuleNameHeader';
-import TestRuleDrawer from './TestRuleDrawer';
-import ConditionFilterModal, { isConditionFilterConfigured } from './ConditionFilterModal';
+} from '../../../ui/icons';
+import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
+import type { RedirectCondition } from '../../../types';
+import ConditionUrlMatchEditor from '../../../components/ConditionUrlMatchEditor';
+import RuleDetailToolbar from '../../../components/RuleDetailToolbar';
+import RuleNameHeader from '../../../components/RuleNameHeader';
+import TestRuleDrawer from '../../../components/TestRuleDrawer';
+import ConditionFilterModal, { isConditionFilterConfigured } from '../../../components/ConditionFilterModal';
+import type { RuleDetailProps as Props } from '../types';
 
-type Props = {
-  groups: RedirectGroup[];
-  workingRule: RedirectRule;
-  originalRule: RedirectRule | null;
-  setWorkingRule: React.Dispatch<React.SetStateAction<RedirectRule | null>>;
-  setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
-  onBack: () => void;
-  saveDetailRule: () => void;
-  toggleDetailRuleEnabled: (ruleId: string, enabled: boolean) => void;
-  setPageToList: () => void;
-  messageApi: { warning: (content: string) => void };
-};
-
-export default function RewriteStringRuleDetail({
+export default function RequestDelayRuleDetail({
   groups,
   workingRule,
   originalRule,
@@ -140,26 +131,17 @@ export default function RewriteStringRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <div style={{ display: 'flex', width: '100%', gap: 8 }}>
-              <Space.Compact style={{ flex: 1, minWidth: 0 }}>
-                <Space.Addon style={{ flexShrink: 0 }}>{t('目标', 'Target')}</Space.Addon>
-                <Input
-                  style={{ minWidth: 0 }}
-                  value={c.rewriteFrom}
-                  onChange={(e) => updateCondition(c.id, { rewriteFrom: e.target.value })}
-                  placeholder="from"
-                />
-              </Space.Compact>
-              <Space.Compact style={{ flex: 1, minWidth: 0 }}>
-                <Space.Addon style={{ flexShrink: 0 }}>{t('替换为', 'Replace with')}</Space.Addon>
-                <Input
-                  style={{ minWidth: 0 }}
-                  value={c.rewriteTo}
-                  onChange={(e) => updateCondition(c.id, { rewriteTo: e.target.value })}
-                  placeholder="to"
-                />
-              </Space.Compact>
-            </div>
+            <Form.Item label={t('延迟（ms）', 'Delay (ms)')} style={{ marginBottom: 0 }}>
+              <InputNumber
+                style={{ width: '100%' }}
+                min={0}
+                precision={0}
+                value={c.delayMs}
+                onChange={(value) => updateCondition(c.id, { delayMs: typeof value === 'number' ? value : 0 })}
+                placeholder={t('输入请求延迟时间', 'Enter request delay')}
+              />
+            </Form.Item>
+            <Typography.Text type="secondary">{t('命中该 URL 条件后，请求将延迟指定毫秒数再继续。', 'When this URL condition matches, the request will continue after the specified delay.')}</Typography.Text>
           </Space>,
         }]}
         style={{ marginBottom: 12 }}

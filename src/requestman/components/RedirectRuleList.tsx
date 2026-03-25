@@ -505,7 +505,7 @@ export default function RedirectRuleList({
 
   const getRowGroupId = (row: TableRow) => (row.rowType === 'rule' ? row.rule.groupId : row.group.id);
 
-  return <div>
+  return <div className="rules-sidebar">
     {pointerDragState?.isDragging && dragPreviewState ? (
       <div
         className="rule-drag-preview"
@@ -527,7 +527,174 @@ export default function RedirectRuleList({
         </table>
       </div>
     ) : null}
-    <div className="sidebar-header">
+    <div className="rules-list-table-scroll">
+      <div className="rules-list-table-wrapper" ref={tableWrapperRef}>
+        {groupOverlayRect ? (
+          <div
+            className={`rule-group-drop-overlay${groupOverlayRect.roundBottom ? ' is-last-group' : ''}`}
+            style={{
+              top: groupOverlayRect.top,
+              left: groupOverlayRect.left,
+              width: groupOverlayRect.width,
+              height: groupOverlayRect.height,
+            }}
+          />
+        ) : null}
+        <Table<TableRow>
+          className="rules-list-table"
+          pagination={false}
+          dataSource={tableData}
+          rowKey="key"
+          rowClassName={(row) => {
+            if (row.rowType === 'group') return 'rule-group-row';
+            if (row.rowType !== 'rule') return 'rule-item-row';
+            const classNames = ['rule-item-row'];
+            if (dragState?.ruleId === row.rule.id) classNames.push('dragging-rule-row');
+            if (dropState?.targetRuleId === row.rule.id) {
+              classNames.push(dropState.position === 'before' ? 'drop-before-row' : 'drop-after-row');
+            }
+            return classNames.join(' ');
+          }}
+          onRow={(row) => {
+            const groupId = getRowGroupId(row);
+            const rowProps = {
+              'data-group-id': groupId,
+              'data-row-type': row.rowType,
+            };
+
+            if (row.rowType !== 'rule') return rowProps;
+
+            return {
+              ...rowProps,
+              'data-rule-id': row.rule.id,
+              onPointerDown: (event: React.PointerEvent<HTMLTableRowElement>) => handleRulePointerDown(event, row.rule),
+            };
+          }}
+          columns={[
+            {
+              title: t('名称', 'Name'),
+              dataIndex: 'name',
+              onCell: (row) => row.rowType === 'group'
+                ? {
+                  className: 'rule-group-name-cell',
+                  onClick: () => toggleGroupCollapse(row.group.id),
+                }
+                : {},
+              render: (_, row) => {
+                if (row.rowType === 'group') {
+                  const isCollapsed = collapsedGroupIds.includes(row.group.id);
+                  return (
+                    <Space>
+                      <Button
+                        type="text"
+                        className="group-collapse-btn"
+                        icon={<CaretRightOutlined className={isCollapsed ? '' : 'expanded'} />}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleGroupCollapse(row.group.id);
+                        }}
+                      />
+                      <Typography.Text strong>{row.group.name}</Typography.Text>
+                    </Space>
+                  );
+                }
+                if (row.rowType === 'group-empty') {
+                  return <Typography.Text type="secondary" style={{ marginLeft: 40 }}>{t('该规则组暂无规则', 'No rules in this group')}</Typography.Text>;
+                }
+                return <Button type="link" className="rule-name-link" style={{ paddingInline: 0, marginLeft: 40 }} onClick={() => openRuleDetail(row.rule.id)}>{row.rule.name}</Button>;
+              },
+            },
+            {
+              title: t('类型', 'Type'),
+              width: 180,
+              render: (_, row) => {
+                if (row.rowType !== 'rule') return null;
+                return <Space size={6}>{RULE_TYPE_ICON_MAP[row.rule.type]}<span>{RULE_TYPE_LABEL_MAP[row.rule.type]}</span></Space>;
+              },
+            },
+            {
+              title: t('状态', 'Status'),
+              width: 100,
+              render: (_, row) => {
+                if (row.rowType === 'group') {
+                  return (
+                    <Space size={6}>
+                      <Tooltip title={redirectEnabled ? (row.group.enabled ? t('规则组已开启，组内规则可生效', 'Group is enabled. Rules in this group can take effect.') : t('规则组已关闭，组内规则不会生效', 'Group is disabled. Rules in this group will not take effect.')) : t('总开关关闭，组内规则不会生效', 'Master switch is off. Rules in this group will not take effect.')}>
+                        <Switch size="small" checked={row.group.enabled} disabled={!redirectEnabled} onChange={(v) => handleGroupEnabledChange(row.group, v)} />
+                      </Tooltip>
+                    </Space>
+                  );
+                }
+                if (row.rowType === 'group-empty') return null;
+                const groupEnabled = currentGroupEnabled.get(row.rule.groupId) !== false;
+                return (
+                  <Space size={6}>
+                    <Tooltip title={getRuleEffectiveHint(redirectEnabled, groupEnabled, row.rule.enabled)}>
+                      <Switch
+                        size="small"
+                        checked={row.rule.enabled}
+                        disabled={!redirectEnabled || !groupEnabled}
+                        onChange={(v) => handleRuleEnabledChange(row.rule, v)}
+                      />
+                    </Tooltip>
+                  </Space>
+                );
+              },
+            },
+            {
+              title: t('操作', 'Actions'),
+              width: 80,
+              render: (_, row) => {
+                if (row.rowType === 'group') {
+                  return <Dropdown menu={{ items: [
+                    { key: 'rename', label: t('重命名', 'Rename'), icon: <EditOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: row.group.id }); setGroupInput(row.group.name); } },
+                    { key: 'copy', label: t('复制', 'Duplicate'), icon: <CopyOutlined />, onClick: () => duplicateGroup(row.group.id) },
+                    { key: 'delete', label: t('删除', 'Delete'), icon: <DeleteOutlined />, danger: true, onClick: () => deleteGroup(row.group.id) },
+                  ] }}><Button type="text" icon={<EllipsisOutlined />} /></Dropdown>;
+                }
+                if (row.rowType === 'group-empty') return null;
+                return (
+                  <Dropdown menu={{ items: [
+                    { key: 'move', label: t('修改规则组', 'Change group'), icon: <FolderOpenOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: row.rule.id }); setGroupInput(row.rule.groupId); } },
+                    {
+                      key: 'copy',
+                      label: t('复制', 'Duplicate'),
+                      icon: <CopyOutlined />,
+                      onClick: () => {
+                        setRules((prev) => {
+                          const idx = prev.findIndex((r) => r.id === row.rule.id);
+                          const next = [...prev];
+                          next.splice(idx + 1, 0, { ...row.rule, id: genId(), name: `${row.rule.name} ${t('副本', 'Copy')}` });
+                          return next;
+                        });
+                        messageApi.success(t(`规则「${row.rule.name}」已复制`, `Rule "${row.rule.name}" duplicated.`));
+                      },
+                    },
+                    {
+                      key: 'delete',
+                      label: t('删除', 'Delete'),
+                      icon: <DeleteOutlined />,
+                      danger: true,
+                      onClick: () => Modal.confirm({
+                        title: t('确认删除规则？', 'Delete this rule?'),
+                        okButtonProps: { danger: true },
+                        onOk: () => {
+                          setRules((prev) => prev.filter((r) => r.id !== row.rule.id));
+                          messageApi.warning(t(`规则「${row.rule.name}」已删除`, `Rule "${row.rule.name}" deleted.`));
+                        },
+                      }),
+                    },
+                  ] }}>
+                    <Button type="text" icon={<EllipsisOutlined />} />
+                  </Dropdown>
+                );
+              },
+            },
+          ]}
+        />
+      </div>
+    </div>
+    <div className="sidebar-header sidebar-actions">
       <Tooltip title={t('新建规则组', 'Create group')}>
         <Button
           icon={<FolderAddOutlined />}
@@ -582,171 +749,6 @@ export default function RedirectRuleList({
       >
         <Button type="primary" icon={<PlusOutlined />}>{t('新建规则', 'New rule')}</Button>
       </Dropdown>
-    </div>
-    <div className="rules-list-table-wrapper" ref={tableWrapperRef}>
-      {groupOverlayRect ? (
-        <div
-          className={`rule-group-drop-overlay${groupOverlayRect.roundBottom ? ' is-last-group' : ''}`}
-          style={{
-            top: groupOverlayRect.top,
-            left: groupOverlayRect.left,
-            width: groupOverlayRect.width,
-            height: groupOverlayRect.height,
-          }}
-        />
-      ) : null}
-      <Table<TableRow>
-        className="rules-list-table"
-        pagination={false}
-        dataSource={tableData}
-        rowKey="key"
-        rowClassName={(row) => {
-          if (row.rowType === 'group') return 'rule-group-row';
-          if (row.rowType !== 'rule') return 'rule-item-row';
-          const classNames = ['rule-item-row'];
-          if (dragState?.ruleId === row.rule.id) classNames.push('dragging-rule-row');
-          if (dropState?.targetRuleId === row.rule.id) {
-            classNames.push(dropState.position === 'before' ? 'drop-before-row' : 'drop-after-row');
-          }
-          return classNames.join(' ');
-        }}
-        onRow={(row) => {
-          const groupId = getRowGroupId(row);
-          const rowProps = {
-            'data-group-id': groupId,
-            'data-row-type': row.rowType,
-          };
-
-          if (row.rowType !== 'rule') return rowProps;
-
-          return {
-            ...rowProps,
-            'data-rule-id': row.rule.id,
-            onPointerDown: (event: React.PointerEvent<HTMLTableRowElement>) => handleRulePointerDown(event, row.rule),
-          };
-        }}
-        columns={[
-        {
-          title: t('名称', 'Name'),
-          dataIndex: 'name',
-          onCell: (row) => row.rowType === 'group'
-            ? {
-              className: 'rule-group-name-cell',
-              onClick: () => toggleGroupCollapse(row.group.id),
-            }
-            : {},
-          render: (_, row) => {
-            if (row.rowType === 'group') {
-              const isCollapsed = collapsedGroupIds.includes(row.group.id);
-              return (
-                <Space>
-                  <Button
-                    type="text"
-                    className="group-collapse-btn"
-                    icon={<CaretRightOutlined className={isCollapsed ? '' : 'expanded'} />}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      toggleGroupCollapse(row.group.id);
-                    }}
-                  />
-                  <Typography.Text strong>{row.group.name}</Typography.Text>
-                </Space>
-              );
-            }
-            if (row.rowType === 'group-empty') {
-              return <Typography.Text type="secondary" style={{ marginLeft: 40 }}>{t('该规则组暂无规则', 'No rules in this group')}</Typography.Text>;
-            }
-            return <Button type="link" className="rule-name-link" style={{ paddingInline: 0, marginLeft: 40 }} onClick={() => openRuleDetail(row.rule.id)}>{row.rule.name}</Button>;
-          },
-        },
-        {
-          title: t('类型', 'Type'),
-          width: 180,
-          render: (_, row) => {
-            if (row.rowType !== 'rule') return null;
-            return <Space size={6}>{RULE_TYPE_ICON_MAP[row.rule.type]}<span>{RULE_TYPE_LABEL_MAP[row.rule.type]}</span></Space>;
-          },
-        },
-        {
-          title: t('状态', 'Status'),
-          width: 100,
-          render: (_, row) => {
-            if (row.rowType === 'group') {
-              return (
-                <Space size={6}>
-                  <Tooltip title={redirectEnabled ? (row.group.enabled ? t('规则组已开启，组内规则可生效', 'Group is enabled. Rules in this group can take effect.') : t('规则组已关闭，组内规则不会生效', 'Group is disabled. Rules in this group will not take effect.')) : t('总开关关闭，组内规则不会生效', 'Master switch is off. Rules in this group will not take effect.')}>
-                    <Switch size="small" checked={row.group.enabled} disabled={!redirectEnabled} onChange={(v) => handleGroupEnabledChange(row.group, v)} />
-                  </Tooltip>
-                </Space>
-              );
-            }
-            if (row.rowType === 'group-empty') return null;
-            const groupEnabled = currentGroupEnabled.get(row.rule.groupId) !== false;
-            return (
-              <Space size={6}>
-                <Tooltip title={getRuleEffectiveHint(redirectEnabled, groupEnabled, row.rule.enabled)}>
-                  <Switch
-                    size="small"
-                    checked={row.rule.enabled}
-                    disabled={!redirectEnabled || !groupEnabled}
-                    onChange={(v) => handleRuleEnabledChange(row.rule, v)}
-                  />
-                </Tooltip>
-              </Space>
-            );
-          },
-        },
-        {
-          title: t('操作', 'Actions'),
-          width: 80,
-          render: (_, row) => {
-            if (row.rowType === 'group') {
-              return <Dropdown menu={{ items: [
-                { key: 'rename', label: t('重命名', 'Rename'), icon: <EditOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: row.group.id }); setGroupInput(row.group.name); } },
-                { key: 'copy', label: t('复制', 'Duplicate'), icon: <CopyOutlined />, onClick: () => duplicateGroup(row.group.id) },
-                { key: 'delete', label: t('删除', 'Delete'), icon: <DeleteOutlined />, danger: true, onClick: () => deleteGroup(row.group.id) },
-              ] }}><Button type="text" icon={<EllipsisOutlined />} /></Dropdown>;
-            }
-            if (row.rowType === 'group-empty') return null;
-            return (
-              <Dropdown menu={{ items: [
-                { key: 'move', label: t('修改规则组', 'Change group'), icon: <FolderOpenOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: row.rule.id }); setGroupInput(row.rule.groupId); } },
-                {
-                  key: 'copy',
-                  label: t('复制', 'Duplicate'),
-                  icon: <CopyOutlined />,
-                  onClick: () => {
-                    setRules((prev) => {
-                      const idx = prev.findIndex((r) => r.id === row.rule.id);
-                      const next = [...prev];
-                      next.splice(idx + 1, 0, { ...row.rule, id: genId(), name: `${row.rule.name} ${t('副本', 'Copy')}` });
-                      return next;
-                    });
-                    messageApi.success(t(`规则「${row.rule.name}」已复制`, `Rule "${row.rule.name}" duplicated.`));
-                  },
-                },
-                {
-                  key: 'delete',
-                  label: t('删除', 'Delete'),
-                  icon: <DeleteOutlined />,
-                  danger: true,
-                  onClick: () => Modal.confirm({
-                    title: t('确认删除规则？', 'Delete this rule?'),
-                    okButtonProps: { danger: true },
-                    onOk: () => {
-                      setRules((prev) => prev.filter((r) => r.id !== row.rule.id));
-                      messageApi.warning(t(`规则「${row.rule.name}」已删除`, `Rule "${row.rule.name}" deleted.`));
-                    },
-                  }),
-                },
-              ] }}>
-                <Button type="text" icon={<EllipsisOutlined />} />
-              </Dropdown>
-            );
-          },
-        },
-        ]}
-      />
     </div>
     <Modal open={groupModal.open} title={groupModal.mode === 'create' ? t('新建规则组', 'Create group') : groupModal.mode === 'rename' ? t('重命名规则组', 'Rename group') : t('修改规则组', 'Change group')} onCancel={() => setGroupModal({ open: false, mode: 'create' })} onOk={confirmGroupModal}>
       {groupModal.mode === 'move' ? (
