@@ -4,7 +4,6 @@ import {
   Button,
   Input,
   Modal,
-  Select,
   Switch,
   Tooltip,
   Typography,
@@ -55,6 +54,7 @@ import { RULE_TYPE_LABEL_MAP } from '../constants';
 import { Orbit } from '@/components/animate-ui/icons/orbit';
 import { Route } from '@/components/animate-ui/icons/route';
 import { User } from '@/components/animate-ui/icons/user';
+import GroupDropdownSelect from './GroupDropdownSelect';
 import { genId } from '../rule-utils';
 import type { RedirectGroup, RedirectRule } from '../types';
 
@@ -823,7 +823,7 @@ export default function RedirectRuleList({
           <DialogTitle>{groupDialogTitle}</DialogTitle>
         </DialogHeader>
         {groupModal.mode === 'move' ? (
-          <Select
+          <GroupDropdownSelect
             style={{ width: '100%' }}
             options={groupsOptions}
             value={groupInput}

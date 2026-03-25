@@ -1,7 +1,8 @@
 import React from 'react';
-import { Button, Input, Select, Space } from '../primitives';
+import { Button, Input, Space } from '../primitives';
 import { FilterOutlined } from '../icons';
 import { MATCH_MODE_OPTIONS, MATCH_TARGET_OPTIONS } from '../constants';
+import GroupDropdownSelect from './GroupDropdownSelect';
 import type { RedirectCondition } from '../types';
 
 type Props = {
@@ -18,16 +19,18 @@ export default function ConditionUrlMatchEditor({
   onFilterClick,
 }: Props) {
   return <Space.Compact style={{ width: '100%' }}>
-    <Select
+    <GroupDropdownSelect
       value={condition.matchTarget}
       options={MATCH_TARGET_OPTIONS as never}
       style={{ width: 90 }}
+      contentMinWidth={160}
       onChange={(value) => onConditionChange({ matchTarget: value })}
     />
-    <Select
+    <GroupDropdownSelect
       value={condition.matchMode}
       options={MATCH_MODE_OPTIONS as never}
       style={{ width: 110 }}
+      contentMinWidth={180}
       onChange={(value) => onConditionChange({ matchMode: value })}
     />
     <Input

@@ -362,6 +362,36 @@ body.rule-pointer-dragging { cursor: grabbing; user-select: none; }
 .rule-item-row__spacer { flex: 1; min-width: 0; }
 .rule-item-row__actions { justify-content: flex-end; }
 .rule-item-row__empty { padding: 14px 12px; border-top: 1px solid var(--rm-border); }
+.group-dropdown-select { display: inline-flex; width: 100%; }
+.group-dropdown-select__trigger {
+  width: 100%;
+  justify-content: stretch;
+  padding-inline: 10px;
+}
+.group-dropdown-select__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+.group-dropdown-select__label,
+.group-dropdown-select__item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-dropdown-select__label.is-placeholder {
+  color: color-mix(in srgb, var(--rm-text-secondary) 78%, transparent);
+}
+.group-dropdown-select__content {
+  max-height: min(320px, var(--radix-dropdown-menu-content-available-height));
+}
+.group-dropdown-select__item-label {
+  display: block;
+}
 .rules-list-accordion [data-slot="accordion-content"] > div {
   padding-bottom: 0;
 }

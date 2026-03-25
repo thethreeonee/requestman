@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Input, Select, Space } from '../primitives';
+import { Button, Input, Space } from '../primitives';
 import { Binary } from '@/components/animate-ui/icons/binary';
 import { Blend } from '@/components/animate-ui/icons/blend';
 import {
@@ -17,6 +17,7 @@ import { LayoutDashboard } from '@/components/animate-ui/icons/layout-dashboard'
 import { Orbit } from '@/components/animate-ui/icons/orbit';
 import { Route } from '@/components/animate-ui/icons/route';
 import { User } from '@/components/animate-ui/icons/user';
+import GroupDropdownSelect from './GroupDropdownSelect';
 import type { RedirectGroup, RedirectRule } from '../types';
 import { t } from '../i18n';
 
@@ -81,7 +82,7 @@ export default function RuleDetailToolbar({
         />
       </div>
       <Space>
-        <Select
+        <GroupDropdownSelect
           value={groupId}
           style={{ width: 220 }}
           options={groups.map((g) => ({ value: g.id, label: `${t('规则组：', 'Group: ')}${g.name}` }))}
