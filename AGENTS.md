@@ -74,6 +74,7 @@ Release packaging may also create versioned zip files such as:
 - When changing extension behavior, check whether the change belongs in the DevTools UI, background logic, injected script layer, or manifest permissions.
 - All UI implementations must use components from [src/components](/Users/0xE31/Projects/requestman/src/components); do not build ad hoc replacement components outside that directory.
 - All icons must also come from [src/components](/Users/0xE31/Projects/requestman/src/components); do not introduce custom icon implementations elsewhere.
+- Do not modify any files under [src/components](/Users/0xE31/Projects/requestman/src/components). If a change would require editing that directory, stop and tell the user it is blocked by repository rules.
 - If a required UI component or icon does not exist in [src/components](/Users/0xE31/Projects/requestman/src/components), stop and tell the user which dependency is missing so they can add it first.
 - When adding a new rule type, expect updates across UI components, shared types/constants, and background application logic.
 - Keep package version and manifest versions in sync for releases.
