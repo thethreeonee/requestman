@@ -1,5 +1,6 @@
 import React from 'react';
 import type { RedirectGroup, RedirectRule } from '../../types';
+import type { NotificationApi } from '../../components/AppProvider';
 
 export type RuleDetailProps = {
   groups: RedirectGroup[];
@@ -11,6 +12,6 @@ export type RuleDetailProps = {
   saveDetailRule: () => void;
   toggleDetailRuleEnabled: (ruleId: string, enabled: boolean) => void;
   setPageToList: () => void;
-  messageApi: { warning: (content: string) => void };
+  notifyApi: Pick<NotificationApi, 'warning'>;
   onRename?: (name: string) => void;
 };

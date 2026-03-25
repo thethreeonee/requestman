@@ -57,6 +57,7 @@ import { User } from '@/components/animate-ui/icons/user';
 import GroupDropdownSelect from './GroupDropdownSelect';
 import { genId } from '../rule-utils';
 import type { RedirectGroup, RedirectRule } from '../types';
+import type { NotificationApi } from './AppProvider';
 
 type GroupModalState = { open: boolean; mode: 'create' | 'rename' | 'move'; groupId?: string; ruleId?: string };
 
@@ -77,10 +78,7 @@ type Props = {
   confirmGroupModal: () => void;
   setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
   setGroups: React.Dispatch<React.SetStateAction<RedirectGroup[]>>;
-  messageApi: {
-    success: (content: string) => void;
-    warning: (content: string) => void;
-  };
+  notifyApi: Pick<NotificationApi, 'success' | 'warning'>;
 };
 
 type DragState = { ruleId: string; groupId: string };
@@ -248,7 +246,7 @@ export default function RedirectRuleList({
   confirmGroupModal,
   setRules,
   setGroups,
-  messageApi,
+  notifyApi,
 }: Props) {
   const listWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const [hoveredAction, setHoveredAction] = React.useState<'group' | 'rule' | null>(null);
@@ -314,16 +312,16 @@ export default function RedirectRuleList({
 
   const handleGroupEnabledChange = (group: RedirectGroup, value: boolean) => {
     setGroups((prev) => prev.map((g) => g.id === group.id ? { ...g, enabled: value } : g));
-    messageApi.success(value ? t(`规则组「${group.name}」已开启`, `Group "${group.name}" enabled.`) : t(`规则组「${group.name}」已关闭`, `Group "${group.name}" disabled.`));
+    notifyApi.success(value ? t(`规则组「${group.name}」已开启`, `Group "${group.name}" enabled.`) : t(`规则组「${group.name}」已关闭`, `Group "${group.name}" disabled.`));
   };
 
   const handleRuleEnabledChange = (rule: RedirectRule, value: boolean) => {
     setRules((prev) => prev.map((r) => r.id === rule.id ? { ...r, enabled: value } : r));
     if (value) {
-      messageApi.success(t(`规则「${rule.name}」已开启`, `Rule "${rule.name}" enabled.`));
+      notifyApi.success(t(`规则「${rule.name}」已开启`, `Rule "${rule.name}" enabled.`));
       return;
     }
-    messageApi.warning(t(`规则「${rule.name}」已关闭`, `Rule "${rule.name}" disabled.`));
+    notifyApi.warning(t(`规则「${rule.name}」已关闭`, `Rule "${rule.name}" disabled.`));
   };
 
   const clearDragState = () => {
@@ -394,7 +392,7 @@ export default function RedirectRuleList({
 
         if (currentDropState) {
           setRules((prev) => moveRuleWithinGroup(prev, activeDrag.ruleId, currentDropState.targetRuleId, currentDropState.position));
-          messageApi.success(t('规则排序已更新', 'Rule order updated'));
+          notifyApi.success(t('规则排序已更新', 'Rule order updated'));
         }
       }
 
@@ -417,7 +415,7 @@ export default function RedirectRuleList({
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerCancel);
     };
-  }, [dragState, messageApi, pointerDragState, setRules, setPointerDragStateWithRef, updatePointerDropTarget]);
+  }, [dragState, notifyApi, pointerDragState, setRules, setPointerDragStateWithRef, updatePointerDropTarget]);
 
   React.useEffect(() => {
     if (!dragState) return undefined;
@@ -517,7 +515,7 @@ export default function RedirectRuleList({
                     next.splice(idx + 1, 0, { ...rule, id: genId(), name: `${rule.name} ${t('副本', 'Copy')}` });
                     return next;
                   });
-                  messageApi.success(t(`规则「${rule.name}」已复制`, `Rule "${rule.name}" duplicated.`));
+                  notifyApi.success(t(`规则「${rule.name}」已复制`, `Rule "${rule.name}" duplicated.`));
                 },
               },
               {
@@ -532,7 +530,7 @@ export default function RedirectRuleList({
                   okButtonProps: { danger: true },
                   onOk: () => {
                     setRules((prev) => prev.filter((item) => item.id !== rule.id));
-                    messageApi.warning(t(`规则「${rule.name}」已删除`, `Rule "${rule.name}" deleted.`));
+                    notifyApi.warning(t(`规则「${rule.name}」已删除`, `Rule "${rule.name}" deleted.`));
                   },
                 }),
               },

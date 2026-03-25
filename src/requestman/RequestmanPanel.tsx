@@ -28,7 +28,7 @@ import './index.css';
 type PageState = { type: 'list' } | { type: 'detail'; ruleId: string; isNew: boolean };
 
 export default function RequestmanPanel() {
-  const { message } = App.useApp();
+  const { notification } = App.useApp();
   const [groups, setGroups] = useState<RedirectGroup[]>([]);
   const [rules, setRules] = useState<RedirectRule[]>([]);
   const [redirectEnabled, setRedirectEnabled] = useState(true);
@@ -73,7 +73,7 @@ export default function RequestmanPanel() {
 
   const handleRedirectEnabledChange = (value: boolean) => {
     setRedirectEnabled(value);
-    message.success(value ? t('总开关已开启', 'Master switch enabled') : t('总开关已关闭', 'Master switch disabled'));
+    notification.success(value ? t('总开关已开启', 'Master switch enabled') : t('总开关已关闭', 'Master switch disabled'));
   };
 
   const openRuleDetail = (ruleId: string) => {
@@ -120,14 +120,14 @@ export default function RequestmanPanel() {
     if (workingRule.type === 'redirect_request') {
       const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !getConditionRedirectTarget(c));
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
+        notification.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
         return false;
       }
     }
     if (workingRule.type === 'rewrite_string') {
       const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !c.rewriteFrom.trim());
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
+        notification.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
         return false;
       }
     }
@@ -137,7 +137,7 @@ export default function RequestmanPanel() {
         return c.queryParamModifications.some((item) => !item.key.trim() || (item.action !== 'delete' && !item.value.trim()));
       });
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
+        notification.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
         return false;
       }
     }
@@ -153,7 +153,7 @@ export default function RequestmanPanel() {
         return !c.requestBodyStaticValue.trim();
       });
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整或 JavaScript 无效', 'Some conditions are incomplete or JavaScript is invalid.'));
+        notification.warning(t('还有条件配置未输入完整或 JavaScript 无效', 'Some conditions are incomplete or JavaScript is invalid.'));
         return false;
       }
     }
@@ -169,7 +169,7 @@ export default function RequestmanPanel() {
         return !c.responseBodyStaticValue.trim();
       });
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整或 JavaScript 无效', 'Some conditions are incomplete or JavaScript is invalid.'));
+        notification.warning(t('还有条件配置未输入完整或 JavaScript 无效', 'Some conditions are incomplete or JavaScript is invalid.'));
         return false;
       }
     }
@@ -182,7 +182,7 @@ export default function RequestmanPanel() {
         return !c.userAgentPresetKey?.trim();
       });
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
+        notification.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
         return false;
       }
     }
@@ -190,7 +190,7 @@ export default function RequestmanPanel() {
     if (workingRule.type === 'request_delay') {
       const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !Number.isFinite(c.delayMs) || c.delayMs < 0);
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
+        notification.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
         return false;
       }
     }
@@ -211,7 +211,7 @@ export default function RequestmanPanel() {
         return hasInvalidPartialModification;
       });
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
+        notification.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
         return false;
       }
     }
@@ -233,10 +233,10 @@ export default function RequestmanPanel() {
     setWorkingRule((prev) => (prev?.id === ruleId ? { ...prev, enabled } : prev));
     setOriginalRule((prev) => (prev?.id === ruleId ? { ...prev, enabled } : prev));
     if (enabled) {
-      message.success({ content: t('规则已启用', 'Rule enabled'), duration: 0.8 });
+      notification.success({ content: t('规则已启用', 'Rule enabled'), duration: 0.8 });
       return;
     }
-    message.warning({ content: t('规则已停用', 'Rule disabled'), duration: 0.8 });
+    notification.warning({ content: t('规则已停用', 'Rule disabled'), duration: 0.8 });
   };
 
   const moveRuleToGroup = () => {
@@ -246,7 +246,7 @@ export default function RequestmanPanel() {
     const movedRule = rules.find((r) => r.id === groupModal.ruleId);
     if (!movedRule) return;
     setRules((prev) => prev.map((r) => (r.id === groupModal.ruleId ? { ...r, groupId: target.id } : r)));
-    message.success(t(`规则「${movedRule.name}」已移动到规则组「${target.name}」`, `Rule "${movedRule.name}" moved to group "${target.name}".`));
+    notification.success(t(`规则「${movedRule.name}」已移动到规则组「${target.name}」`, `Rule "${movedRule.name}" moved to group "${target.name}".`));
     setGroupModal({ open: false, mode: 'create' });
     setGroupInput('');
   };
@@ -257,12 +257,12 @@ export default function RequestmanPanel() {
     if (!name) return;
     if (groupModal.mode === 'create') {
       setGroups((prev) => [{ id: genId(), name, enabled: true }, ...prev]);
-      message.success(t(`规则组「${name}」已创建`, `Group "${name}" created.`));
+      notification.success(t(`规则组「${name}」已创建`, `Group "${name}" created.`));
     }
     if (groupModal.mode === 'rename' && groupModal.groupId) {
       const group = groups.find((g) => g.id === groupModal.groupId);
       setGroups((prev) => prev.map((g) => (g.id === groupModal.groupId ? { ...g, name } : g)));
-      message.success(t(`规则组「${group?.name ?? ''}」已重命名为「${name}」`, `Group "${group?.name ?? ''}" renamed to "${name}".`));
+      notification.success(t(`规则组「${group?.name ?? ''}」已重命名为「${name}」`, `Group "${group?.name ?? ''}" renamed to "${name}".`));
     }
     setGroupModal({ open: false, mode: 'create' });
     setGroupInput('');
@@ -278,7 +278,7 @@ export default function RequestmanPanel() {
         const deletedRuleCount = rules.filter((r) => r.groupId === groupId).length;
         setGroups((prev) => prev.filter((g) => g.id !== groupId));
         setRules((prev) => prev.filter((r) => r.groupId !== groupId));
-        message.success(t(`规则组「${deletedGroup?.name ?? ''}」已删除（含 ${deletedRuleCount} 条规则）`, `Group "${deletedGroup?.name ?? ''}" deleted (${deletedRuleCount} rules).`));
+        notification.success(t(`规则组「${deletedGroup?.name ?? ''}」已删除（含 ${deletedRuleCount} 条规则）`, `Group "${deletedGroup?.name ?? ''}" deleted (${deletedRuleCount} rules).`));
       },
     });
   };
@@ -298,7 +298,7 @@ export default function RequestmanPanel() {
       const selected = prev.filter((r) => r.groupId === groupId).map((r) => ({ ...r, id: genId(), groupId: newGroupId, name: `${r.name} ${t('副本', 'Copy')}` }));
       return [...prev, ...selected];
     });
-    message.success(t(`规则组「${group.name}」已复制`, `Group "${group.name}" duplicated.`));
+    notification.success(t(`规则组「${group.name}」已复制`, `Group "${group.name}" duplicated.`));
   };
 
   const currentRule = useMemo(() => {
@@ -374,9 +374,9 @@ export default function RequestmanPanel() {
 
       setGroups((prev) => [...prev, ...mergedGroups]);
       setRules((prev) => [...prev, ...mergedRules]);
-      message.success(t(`导入成功：新增 ${mergedGroups.length} 个规则组，${mergedRules.length} 条规则`, `Imported successfully: ${mergedGroups.length} new groups and ${mergedRules.length} rules.`));
+      notification.success(t(`导入成功：新增 ${mergedGroups.length} 个规则组，${mergedRules.length} 条规则`, `Imported successfully: ${mergedGroups.length} new groups and ${mergedRules.length} rules.`));
     } catch {
-      message.error(t('导入失败，请检查配置文件格式', 'Import failed. Please check the config file format.'));
+      notification.error(t('导入失败，请检查配置文件格式', 'Import failed. Please check the config file format.'));
     }
   };
   const detailProps: RuleDetailProps | null = currentRule
@@ -390,7 +390,7 @@ export default function RequestmanPanel() {
       saveDetailRule,
       toggleDetailRuleEnabled,
       setPageToList: () => setPage({ type: 'list' }),
-      messageApi: message,
+      notifyApi: notification,
     }
     : null;
 
@@ -426,7 +426,7 @@ export default function RequestmanPanel() {
         confirmGroupModal={confirmGroupModal}
         setRules={setRules}
         setGroups={setGroups}
-        messageApi={message}
+        notifyApi={notification}
       />
       <ConfigArea currentRule={currentRule} detailProps={detailProps} />
     </div>

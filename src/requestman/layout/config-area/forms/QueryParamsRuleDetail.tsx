@@ -35,7 +35,7 @@ export default function QueryParamsRuleDetail({
   setRules,
   saveDetailRule,
   setPageToList,
-  messageApi,
+  notifyApi,
 }: Props) {
   const [testDrawerOpen, setTestDrawerOpen] = useState(false);
   const [testUrl, setTestUrl] = useState('');
@@ -52,7 +52,7 @@ export default function QueryParamsRuleDetail({
 
   const removeCondition = (conditionId: string) => {
     if (workingRule.conditions.length <= 1) {
-      messageApi.warning(t('至少保留一条条件配置', 'Keep at least one condition.'));
+      notifyApi.warning(t('至少保留一条条件配置', 'Keep at least one condition.'));
       return;
     }
     setWorkingRule({ ...workingRule, conditions: workingRule.conditions.filter((c) => c.id !== conditionId) });
@@ -78,7 +78,7 @@ export default function QueryParamsRuleDetail({
   const removeModification = (conditionId: string, modificationId: string) => {
     const condition = workingRule.conditions.find((item) => item.id === conditionId);
     if (!condition) return;
-    if (condition.queryParamModifications.length <= 1) return messageApi.warning(t('至少保留一条修改配置', 'Keep at least one modification.'));
+    if (condition.queryParamModifications.length <= 1) return notifyApi.warning(t('至少保留一条修改配置', 'Keep at least one modification.'));
     updateCondition(conditionId, {
       queryParamModifications: condition.queryParamModifications.filter((item) => item.id !== modificationId),
     });

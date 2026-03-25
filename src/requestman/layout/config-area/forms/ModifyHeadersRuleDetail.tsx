@@ -85,7 +85,7 @@ export default function ModifyHeadersRuleDetail({
   setRules,
   saveDetailRule,
   setPageToList,
-  messageApi,
+  notifyApi,
 }: Props) {
   const [testDrawerOpen, setTestDrawerOpen] = useState(false);
   const [testUrl, setTestUrl] = useState('');
@@ -101,7 +101,7 @@ export default function ModifyHeadersRuleDetail({
 
   const removeCondition = (conditionId: string) => {
     if (workingRule.conditions.length <= 1) {
-      messageApi.warning(t('至少保留一条条件配置', 'Keep at least one condition.'));
+      notifyApi.warning(t('至少保留一条条件配置', 'Keep at least one condition.'));
       return;
     }
     setWorkingRule({ ...workingRule, conditions: workingRule.conditions.filter((c) => c.id !== conditionId) });
