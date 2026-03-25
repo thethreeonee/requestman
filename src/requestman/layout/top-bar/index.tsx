@@ -1,9 +1,15 @@
 import React from 'react';
-import { Button, Dropdown, Switch, Typography } from '../../primitives';
+import { Button, Switch, Typography } from '../../primitives';
 import { Moon, Sun } from 'lucide-react';
 import { Menu } from '@/components/animate-ui/icons/menu';
 import { Upload } from '@/components/animate-ui/icons/upload';
 import { Download } from '@/components/animate-ui/icons/download';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/animate-ui/components/radix/dropdown-menu';
 import { ThemeToggler } from '@/components/animate-ui/primitives/effects/theme-toggler';
 import { t } from '../../i18n';
 
@@ -38,18 +44,23 @@ export default function TopBar({
         <Switch checked={redirectEnabled} onChange={onRedirectEnabledChange} />
       </div>
       <div className="toolbar-right-tools">
-        <Dropdown
-          open={toolbarMenuOpen}
-          onOpenChange={setToolbarMenuOpen}
-          menu={{
-            items: [
-              { key: 'import', icon: <Download size={14} animateOnHover />, label: t('导入配置', 'Import'), onClick: importConfig },
-              { key: 'export', icon: <Upload size={14} animateOnHover />, label: t('导出配置', 'Export'), onClick: exportConfig },
-            ],
-          }}
-        >
-          <Button size="sm" icon={<Menu size={16} animate={toolbarMenuOpen} />} />
-        </Dropdown>
+        <DropdownMenu open={toolbarMenuOpen} onOpenChange={setToolbarMenuOpen}>
+          <DropdownMenuTrigger asChild>
+            <span>
+              <Button size="sm" icon={<Menu size={16} animate={toolbarMenuOpen} />} />
+            </span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" sideOffset={6}>
+            <DropdownMenuItem onSelect={importConfig}>
+              <Download size={14} animateOnHover />
+              {t('导入配置', 'Import')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={exportConfig}>
+              <Upload size={14} animateOnHover />
+              {t('导出配置', 'Export')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <ThemeToggler theme={themeMode} resolvedTheme={effectiveTheme} setTheme={(theme) => setThemeMode(theme as 'light' | 'dark')}>
           {({ toggleTheme }) => {
             const next = effectiveTheme === 'light' ? 'dark' : 'light';

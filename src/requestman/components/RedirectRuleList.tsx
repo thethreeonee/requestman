@@ -2,7 +2,6 @@ import React from 'react';
 import { ChevronsUpDown } from 'lucide-react';
 import {
   Button,
-  Dropdown,
   Input,
   Modal,
   Select,
@@ -23,10 +22,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/animate-ui/components/radix/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/animate-ui/components/radix/dropdown-menu';
 import { Copy } from '@/components/animate-ui/icons/copy';
 import { t } from '../i18n';
 import { MessageSquareMore } from '@/components/animate-ui/icons/message-square-more';
 import { Trash2 } from '@/components/animate-ui/icons/trash-2';
+import type {
+  RequestmanDropdownMenuBaseItem,
+  RequestmanDropdownMenuItem,
+} from '../dropdown-menu-types';
 import {
   DeleteOutlined,
   FolderOpenOutlined,
@@ -102,6 +114,39 @@ function renderRuleMenuGroupLabel(title: string) {
   );
 }
 
+function renderDropdownMenuItem(item: RequestmanDropdownMenuBaseItem, index: number, keyPrefix: string) {
+  return (
+    <DropdownMenuItem
+      key={item.key ?? `${keyPrefix}-item-${index}`}
+      disabled={item.disabled}
+      variant={item.danger ? 'destructive' : 'default'}
+      onMouseEnter={item.onMouseEnter}
+      onMouseLeave={item.onMouseLeave}
+      onSelect={() => item.onClick?.()}
+    >
+      {item.icon}
+      {item.label}
+    </DropdownMenuItem>
+  );
+}
+
+function renderDropdownMenuItems(items: RequestmanDropdownMenuItem[], keyPrefix: string) {
+  return items.map((item, index) => {
+    if (item.type === 'divider') {
+      return <DropdownMenuSeparator key={item.key ?? `${keyPrefix}-divider-${index}`} />;
+    }
+    if (item.type === 'group') {
+      return (
+        <DropdownMenuGroup key={item.key ?? `${keyPrefix}-group-${index}`}>
+          <DropdownMenuLabel>{item.label}</DropdownMenuLabel>
+          {(item.children ?? []).map((child, childIndex) => renderDropdownMenuItem(child, childIndex, `${keyPrefix}-group-${index}`))}
+        </DropdownMenuGroup>
+      );
+    }
+    return renderDropdownMenuItem(item, index, keyPrefix);
+  });
+}
+
 function moveRuleWithinGroup(
   rules: RedirectRule[],
   draggedRuleId: string,
@@ -158,13 +203,12 @@ function isInteractiveDragTarget(target: EventTarget | null) {
     'label',
     '[role="button"]',
     '[data-no-drag="true"]',
-    '.ant-btn',
-    '.ant-switch',
-    '.ant-dropdown-trigger',
-    '.ant-dropdown-menu',
-    '.ant-input',
-    '.ant-input-affix-wrapper',
-    '.ant-select',
+    '.aui-btn',
+    '.aui-input',
+    '.aui-select',
+    '[data-slot="switch"]',
+    '[data-slot="dropdown-menu-content"]',
+    '[data-slot="dropdown-menu-trigger"]',
     '.aui-collapse-header',
     '.aui-collapse-trigger',
   ].join(',')));
@@ -441,49 +485,57 @@ export default function RedirectRuleList({
           {(() => {
             const copyKey = `rule:${rule.id}:copy`;
             const deleteKey = `rule:${rule.id}:delete`;
-            return (
-          <Dropdown menu={{ items: [
-            {
-              key: 'move',
-              label: t('修改规则组', 'Change group'),
-              icon: <FolderOpenOutlined />,
-              onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: rule.id }); setGroupInput(rule.groupId); },
-            },
-            {
-              key: 'copy',
-              label: t('复制', 'Duplicate'),
-              icon: <Copy size={14} animate={hoveredMenuAction === copyKey} />,
-              onMouseEnter: () => setHoveredMenuAction(copyKey),
-              onMouseLeave: () => setHoveredMenuAction((current) => (current === copyKey ? null : current)),
-              onClick: () => {
-                setRules((prev) => {
-                  const idx = prev.findIndex((item) => item.id === rule.id);
-                  const next = [...prev];
-                  next.splice(idx + 1, 0, { ...rule, id: genId(), name: `${rule.name} ${t('副本', 'Copy')}` });
-                  return next;
-                });
-                messageApi.success(t(`规则「${rule.name}」已复制`, `Rule "${rule.name}" duplicated.`));
+            const ruleMenuItems: RequestmanDropdownMenuItem[] = [
+              {
+                key: 'move',
+                label: t('修改规则组', 'Change group'),
+                icon: <FolderOpenOutlined />,
+                onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: rule.id }); setGroupInput(rule.groupId); },
               },
-            },
-            {
-              key: 'delete',
-              label: t('删除', 'Delete'),
-              icon: <Trash2 size={14} animate={hoveredMenuAction === deleteKey} />,
-              danger: true,
-              onMouseEnter: () => setHoveredMenuAction(deleteKey),
-              onMouseLeave: () => setHoveredMenuAction((current) => (current === deleteKey ? null : current)),
-              onClick: () => Modal.confirm({
-                title: t('确认删除规则？', 'Delete this rule?'),
-                okButtonProps: { danger: true },
-                onOk: () => {
-                  setRules((prev) => prev.filter((item) => item.id !== rule.id));
-                  messageApi.warning(t(`规则「${rule.name}」已删除`, `Rule "${rule.name}" deleted.`));
+              {
+                key: 'copy',
+                label: t('复制', 'Duplicate'),
+                icon: <Copy size={14} animate={hoveredMenuAction === copyKey} />,
+                onMouseEnter: () => setHoveredMenuAction(copyKey),
+                onMouseLeave: () => setHoveredMenuAction((current) => (current === copyKey ? null : current)),
+                onClick: () => {
+                  setRules((prev) => {
+                    const idx = prev.findIndex((item) => item.id === rule.id);
+                    const next = [...prev];
+                    next.splice(idx + 1, 0, { ...rule, id: genId(), name: `${rule.name} ${t('副本', 'Copy')}` });
+                    return next;
+                  });
+                  messageApi.success(t(`规则「${rule.name}」已复制`, `Rule "${rule.name}" duplicated.`));
                 },
-              }),
-            },
-          ] }}>
-            <Button type="text" size="icon-sm" icon={<EllipsisOutlined />} />
-          </Dropdown>
+              },
+              {
+                key: 'delete',
+                label: t('删除', 'Delete'),
+                icon: <Trash2 size={14} animate={hoveredMenuAction === deleteKey} />,
+                danger: true,
+                onMouseEnter: () => setHoveredMenuAction(deleteKey),
+                onMouseLeave: () => setHoveredMenuAction((current) => (current === deleteKey ? null : current)),
+                onClick: () => Modal.confirm({
+                  title: t('确认删除规则？', 'Delete this rule?'),
+                  okButtonProps: { danger: true },
+                  onOk: () => {
+                    setRules((prev) => prev.filter((item) => item.id !== rule.id));
+                    messageApi.warning(t(`规则「${rule.name}」已删除`, `Rule "${rule.name}" deleted.`));
+                  },
+                }),
+              },
+            ];
+            return (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <span>
+                    <Button type="text" size="icon-sm" icon={<EllipsisOutlined />} />
+                  </span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" sideOffset={6}>
+                  {renderDropdownMenuItems(ruleMenuItems, `rule-${rule.id}`)}
+                </DropdownMenuContent>
+              </DropdownMenu>
             );
           })()}
         </div>
@@ -552,36 +604,44 @@ export default function RedirectRuleList({
                       const renameKey = `group:${group.id}:rename`;
                       const copyKey = `group:${group.id}:copy`;
                       const deleteKey = `group:${group.id}:delete`;
+                      const groupMenuItems: RequestmanDropdownMenuItem[] = [
+                        {
+                          key: 'rename',
+                          label: t('重命名', 'Rename'),
+                          icon: <MessageSquareMore size={14} animate={hoveredMenuAction === renameKey} />,
+                          onMouseEnter: () => setHoveredMenuAction(renameKey),
+                          onMouseLeave: () => setHoveredMenuAction((current) => (current === renameKey ? null : current)),
+                          onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: group.id }); setGroupInput(group.name); },
+                        },
+                        {
+                          key: 'copy',
+                          label: t('复制', 'Duplicate'),
+                          icon: <Copy size={14} animate={hoveredMenuAction === copyKey} />,
+                          onMouseEnter: () => setHoveredMenuAction(copyKey),
+                          onMouseLeave: () => setHoveredMenuAction((current) => (current === copyKey ? null : current)),
+                          onClick: () => duplicateGroup(group.id),
+                        },
+                        {
+                          key: 'delete',
+                          label: t('删除', 'Delete'),
+                          icon: <Trash2 size={14} animate={hoveredMenuAction === deleteKey} />,
+                          danger: true,
+                          onMouseEnter: () => setHoveredMenuAction(deleteKey),
+                          onMouseLeave: () => setHoveredMenuAction((current) => (current === deleteKey ? null : current)),
+                          onClick: () => deleteGroup(group.id),
+                        },
+                      ];
                       return (
-                    <Dropdown menu={{ items: [
-                      {
-                        key: 'rename',
-                        label: t('重命名', 'Rename'),
-                        icon: <MessageSquareMore size={14} animate={hoveredMenuAction === renameKey} />,
-                        onMouseEnter: () => setHoveredMenuAction(renameKey),
-                        onMouseLeave: () => setHoveredMenuAction((current) => (current === renameKey ? null : current)),
-                        onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: group.id }); setGroupInput(group.name); },
-                      },
-                      {
-                        key: 'copy',
-                        label: t('复制', 'Duplicate'),
-                        icon: <Copy size={14} animate={hoveredMenuAction === copyKey} />,
-                        onMouseEnter: () => setHoveredMenuAction(copyKey),
-                        onMouseLeave: () => setHoveredMenuAction((current) => (current === copyKey ? null : current)),
-                        onClick: () => duplicateGroup(group.id),
-                      },
-                      {
-                        key: 'delete',
-                        label: t('删除', 'Delete'),
-                        icon: <Trash2 size={14} animate={hoveredMenuAction === deleteKey} />,
-                        danger: true,
-                        onMouseEnter: () => setHoveredMenuAction(deleteKey),
-                        onMouseLeave: () => setHoveredMenuAction((current) => (current === deleteKey ? null : current)),
-                        onClick: () => deleteGroup(group.id),
-                      },
-                    ] }}>
-                    <Button type="text" size="icon-sm" icon={<EllipsisOutlined />} />
-                    </Dropdown>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <span>
+                              <Button type="text" size="icon-sm" icon={<EllipsisOutlined />} />
+                            </span>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" sideOffset={6}>
+                            {renderDropdownMenuItems(groupMenuItems, `group-${group.id}`)}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       );
                     })()}
                   </div>
@@ -620,9 +680,22 @@ export default function RedirectRuleList({
         </Tooltip>
       </div>
       <div className="sidebar-actions__rule">
-        <Dropdown
-          menu={{
-            items: [
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <span>
+              <Button
+                type="primary"
+                className="sidebar-actions__button"
+                icon={<GalleryVertical size={16} animate={hoveredAction === 'rule'} />}
+                onMouseEnter={() => setHoveredAction('rule')}
+                onMouseLeave={() => setHoveredAction((current) => (current === 'rule' ? null : current))}
+              >
+                {t('新建规则', 'New rule')}
+              </Button>
+            </span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" sideOffset={6} style={{ minWidth: 320 }}>
+            {renderDropdownMenuItems([
               {
                 key: 'url_rewrites_group',
                 type: 'group',
@@ -660,21 +733,9 @@ export default function RedirectRuleList({
                   { key: 'request_delay', icon: RULE_TYPE_ICON_MAP.request_delay, label: RULE_TYPE_LABEL_MAP.request_delay, onClick: () => createRule('request_delay') },
                 ],
               },
-            ],
-          }}
-          overlayStyle={{ minWidth: 320 }}
-          trigger={['click']}
-        >
-          <Button
-            type="primary"
-            className="sidebar-actions__button"
-            icon={<GalleryVertical size={16} animate={hoveredAction === 'rule'} />}
-            onMouseEnter={() => setHoveredAction('rule')}
-            onMouseLeave={() => setHoveredAction((current) => (current === 'rule' ? null : current))}
-          >
-            {t('新建规则', 'New rule')}
-          </Button>
-        </Dropdown>
+            ], 'create-rule')}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
     <Dialog open={isGroupDialogOpen} onOpenChange={(open) => { if (!open) setGroupModal({ open: false, mode: 'create' }); }}>

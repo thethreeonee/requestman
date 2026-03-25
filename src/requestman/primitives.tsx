@@ -1,14 +1,5 @@
 import React from 'react';
 import { Button as AnimateButton } from '@/components/animate-ui/components/buttons/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/animate-ui/components/radix/dropdown-menu';
 import { Switch as AnimateSwitch } from '@/components/animate-ui/components/radix/switch';
 
 type MessagePayload = string | { content: string; duration?: number };
@@ -174,54 +165,6 @@ export function Collapse({ items }: any) {
 export function Tabs({ items, activeKey, onChange }: any) {
   return <div><div className="aui-space">{items.map((item: any) => <Button key={item.key} type={item.key === activeKey ? 'primary' : 'default'} onClick={() => onChange?.(item.key)}>{item.label}</Button>)}</div><div>{items.find((item: any) => item.key === activeKey)?.children}</div></div>;
 }
-
-export function Dropdown({ menu, children, open: openProp, onOpenChange, overlayStyle }: any) {
-  return (
-    <DropdownMenu open={openProp} onOpenChange={onOpenChange}>
-      <DropdownMenuTrigger asChild>
-        {children}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" sideOffset={6} style={overlayStyle}>
-        {(menu?.items ?? []).map((item: any) => {
-          if (item?.type === 'divider') return <DropdownMenuSeparator key={item.key ?? Math.random()} />;
-          if (item?.type === 'group') {
-            return (
-              <DropdownMenuGroup key={item.key}>
-                <DropdownMenuLabel>{item.label}</DropdownMenuLabel>
-                {(item.children ?? []).map((child: any) => (
-                  <DropdownMenuItem
-                    key={child.key}
-                    variant={child.danger ? 'destructive' : 'default'}
-                    onMouseEnter={child.onMouseEnter}
-                    onMouseLeave={child.onMouseLeave}
-                    onSelect={() => child.onClick?.()}
-                  >
-                    {child.icon}
-                    {child.label}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-            );
-          }
-          return (
-            <DropdownMenuItem
-              key={item?.key}
-              variant={item?.danger ? 'destructive' : 'default'}
-              onMouseEnter={item?.onMouseEnter}
-              onMouseLeave={item?.onMouseLeave}
-              onSelect={() => item?.onClick?.()}
-            >
-              {item?.icon}
-              {item?.label}
-            </DropdownMenuItem>
-          );
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-export type MenuProps = { items: any[] };
 
 export function Form({ children }: any) { return <div>{children}</div>; }
 Form.Item = ({ label, children, style }: any) => <label style={{ display: 'block', ...style }}><div>{label}</div>{children}</label>;

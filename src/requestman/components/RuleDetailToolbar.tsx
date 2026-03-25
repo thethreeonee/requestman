@@ -1,7 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Dropdown, Select, Space, Switch, Typography } from '../primitives';
+import { Button, Select, Space, Switch, Typography } from '../primitives';
 import { ArrowLeftOutlined, CheckOutlined, EllipsisVerticalOutlined } from '../icons';
-import type { MenuProps } from '../primitives';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/animate-ui/components/radix/dropdown-menu';
+import type { RequestmanDropdownMenuBaseItem } from '../dropdown-menu-types';
 import type { RedirectGroup } from '../types';
 import { t } from '../i18n';
 
@@ -15,7 +21,7 @@ type Props = {
   onGroupChange: (groupId: string) => void;
   onTest: () => void;
   onSave: () => boolean | void;
-  menuItems: MenuProps['items'];
+  menuItems: RequestmanDropdownMenuBaseItem[];
 };
 
 export default function RuleDetailToolbar({
@@ -43,7 +49,28 @@ export default function RuleDetailToolbar({
     <Space>
       <Typography.Text type={enabled ? 'success' : 'secondary'}>{enabled ? t('生效中', 'Enabled') : t('未生效', 'Disabled')}</Typography.Text>
       <Switch checked={enabled} onChange={onEnabledChange} />
-      <Dropdown menu={{ items: menuItems }}><Button size="icon-sm" icon={<EllipsisVerticalOutlined />} /></Dropdown>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <span>
+            <Button size="icon-sm" icon={<EllipsisVerticalOutlined />} />
+          </span>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" sideOffset={6}>
+          {menuItems.map((item, index) => (
+            <DropdownMenuItem
+              key={item.key ?? `detail-toolbar-item-${index}`}
+              disabled={item.disabled}
+              variant={item.danger ? 'destructive' : 'default'}
+              onMouseEnter={item.onMouseEnter}
+              onMouseLeave={item.onMouseLeave}
+              onSelect={() => item.onClick?.()}
+            >
+              {item.icon}
+              {item.label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
       <Select
         value={groupId}
         style={{ width: 220 }}
