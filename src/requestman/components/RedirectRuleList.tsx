@@ -41,7 +41,6 @@ import type {
 } from '../dropdown-menu-types';
 import {
   DeleteOutlined,
-  FolderOpenOutlined,
   RetweetOutlined,
   EllipsisOutlined,
   ApiOutlined,
@@ -483,13 +482,16 @@ export default function RedirectRuleList({
         </div>
         <div className="rule-item-row__actions" data-no-drag="true">
           {(() => {
+            const moveKey = `rule:${rule.id}:move`;
             const copyKey = `rule:${rule.id}:copy`;
             const deleteKey = `rule:${rule.id}:delete`;
             const ruleMenuItems: RequestmanDropdownMenuItem[] = [
               {
                 key: 'move',
                 label: t('修改规则组', 'Change group'),
-                icon: <FolderOpenOutlined />,
+                icon: <GalleryHorizontalEnd size={14} animate={hoveredMenuAction === moveKey} />,
+                onMouseEnter: () => setHoveredMenuAction(moveKey),
+                onMouseLeave: () => setHoveredMenuAction((current) => (current === moveKey ? null : current)),
                 onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: rule.id }); setGroupInput(rule.groupId); },
               },
               {
