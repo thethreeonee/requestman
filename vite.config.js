@@ -1,6 +1,7 @@
 // vite.config.ts
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { resolve } from 'node:path';
 
 const buildTarget = process.env.BUILD_TARGET === 'firefox' ? 'firefox' : 'chrome';
@@ -9,7 +10,7 @@ export default defineConfig({
   // ✅ 关键：把 src 当成项目根
   root: resolve(__dirname, 'src'),
 
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
 
   // ✅ 扩展里必须相对路径
   base: './',
