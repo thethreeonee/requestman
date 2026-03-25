@@ -191,9 +191,9 @@ function normalizeDropState(
   return { targetRuleId: nextRule.id, position: 'before' };
 }
 
-function isInteractiveDragTarget(target: EventTarget | null) {
+function isInteractiveDragTarget(target: EventTarget | null, ignoredElement?: Element | null) {
   if (!(target instanceof Element)) return false;
-  return Boolean(target.closest([
+  const interactiveElement = target.closest([
     'button',
     'a',
     'input',
@@ -210,7 +210,8 @@ function isInteractiveDragTarget(target: EventTarget | null) {
     '[data-slot="dropdown-menu-trigger"]',
     '.aui-collapse-header',
     '.aui-collapse-trigger',
-  ].join(',')));
+  ].join(','));
+  return Boolean(interactiveElement && interactiveElement !== ignoredElement);
 }
 
 const RULE_TYPE_ICON_MAP: Record<RedirectRule['type'], React.ReactNode> = {
@@ -420,7 +421,7 @@ export default function RedirectRuleList({
   }, [dragState]);
 
   const handleRulePointerDown = (event: React.PointerEvent<HTMLButtonElement>, rule: RedirectRule) => {
-    if (event.button !== 0 || isInteractiveDragTarget(event.target)) return;
+    if (event.button !== 0 || isInteractiveDragTarget(event.target, event.currentTarget)) return;
     const rowElement = event.currentTarget.closest<HTMLElement>('.rule-item-row');
     if (!rowElement) return;
     const rowRect = rowElement.getBoundingClientRect();
