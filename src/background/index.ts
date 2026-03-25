@@ -92,6 +92,11 @@ const WEBREQUEST_HIT_CACHE_MAX = 2000;
 const pendingHitRuleIdsByTab = new Map<number, Set<number>>();
 let ruleCachesReady = false;
 let ruleCachesPromise: Promise<void> | null = null;
+const REQUESTMAN_PANEL_URL = chrome.runtime.getURL('requestman/index.html');
+
+chrome.action.onClicked.addListener(() => {
+  chrome.tabs.create({ url: REQUESTMAN_PANEL_URL });
+});
 
 async function hydrateManagedRuleMeta() {
   if (managedRuleMetaHydrated) return;
