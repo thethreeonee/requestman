@@ -21,6 +21,7 @@ The current package version is defined in [package.json](/Users/0xE31/Projects/r
 
 ### Core source directories
 
+- [src/components](/Users/0xE31/Projects/requestman/src/components): shared UI components and icons; all UI implementations must reuse components and icons from this directory
 - [src/requestman](/Users/0xE31/Projects/requestman/src/requestman): main DevTools panel UI, rule editors, shared types, constants, i18n, and rule utilities
 - [src/background](/Users/0xE31/Projects/requestman/src/background): extension background logic and rule application orchestration
 - [src/devtools](/Users/0xE31/Projects/requestman/src/devtools): DevTools entrypoint that registers the panel
@@ -71,6 +72,9 @@ Release packaging may also create versioned zip files such as:
 ## Change Guidelines
 
 - When changing extension behavior, check whether the change belongs in the DevTools UI, background logic, injected script layer, or manifest permissions.
+- All UI implementations must use components from [src/components](/Users/0xE31/Projects/requestman/src/components); do not build ad hoc replacement components outside that directory.
+- All icons must also come from [src/components](/Users/0xE31/Projects/requestman/src/components); do not introduce custom icon implementations elsewhere.
+- If a required UI component or icon does not exist in [src/components](/Users/0xE31/Projects/requestman/src/components), stop and tell the user which dependency is missing so they can add it first.
 - When adding a new rule type, expect updates across UI components, shared types/constants, and background application logic.
 - Keep package version and manifest versions in sync for releases.
 - Validate with `npm run build` before finalizing release-related changes.
