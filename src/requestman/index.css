@@ -250,11 +250,32 @@ body.rule-pointer-dragging { cursor: grabbing; user-select: none; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 3px;
   height: 26px;
-  line-height: 26px;
   color: color-mix(in srgb, var(--rm-text-secondary) 72%, transparent);
   font-size: 11px;
+  line-height: 1;
   white-space: nowrap;
+}
+.rule-group-header__count-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 10px;
+}
+.rule-group-header__count-bracket {
+  display: inline-block;
+  width: 4px;
+  height: 14px;
+  border: 1px solid currentColor;
+  border-right: none;
+  border-radius: 0;
+  opacity: 0.58;
+}
+.rule-group-header__count-bracket--right {
+  border-right: 1px solid currentColor;
+  border-left: none;
+  border-radius: 0;
 }
 .rule-group-header__actions { display: flex; align-items: center; align-self: center; gap: 8px; min-height: 40px; }
 .rule-group-header__switch { display: inline-flex; align-items: center; min-height: 24px; }

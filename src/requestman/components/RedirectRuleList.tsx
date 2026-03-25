@@ -591,7 +591,11 @@ export default function RedirectRuleList({
                     </div>
                   </AccordionTrigger>
                   <div className="rule-group-header__actions" data-no-drag="true">
-                    <span className="rule-group-header__count">[ {groupRules.length} ]</span>
+                    <span className="rule-group-header__count" aria-label={t(`当前分组共 ${groupRules.length} 条规则`, `${groupRules.length} rules in this group`)}>
+                      <span className="rule-group-header__count-bracket" aria-hidden="true" />
+                      <span className="rule-group-header__count-value">{groupRules.length}</span>
+                      <span className="rule-group-header__count-bracket rule-group-header__count-bracket--right" aria-hidden="true" />
+                    </span>
                     <Tooltip title={redirectEnabled ? (group.enabled ? t('规则组已开启，组内规则可生效', 'Group is enabled. Rules in this group can take effect.') : t('规则组已关闭，组内规则不会生效', 'Group is disabled. Rules in this group will not take effect.')) : t('总开关关闭，组内规则不会生效', 'Master switch is off. Rules in this group will not take effect.')}>
                       <span className="rule-group-header__switch">
                         <Switch
