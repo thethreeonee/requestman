@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button as ShadcnButton } from '@/components/ui/button';
+import { Button as AnimateButton } from '@/components/animate-ui/components/buttons/button';
 
 type MessagePayload = string | { content: string; duration?: number };
 type Notice = { id: string; type: 'success' | 'warning'; content: string };
@@ -55,15 +55,15 @@ export function ConfigProvider({ children }: { children: React.ReactNode; theme?
 
 export function Button({ children, icon, type, ...rest }: any) {
   const variant = type === 'primary'
-    ? 'primary'
+    ? 'default'
     : type === 'text'
-      ? 'text'
+      ? 'ghost'
       : type === 'link'
         ? 'link'
         : type === 'dashed'
-          ? 'dashed'
-          : 'default';
-  return <ShadcnButton variant={variant} {...rest}>{icon}{children}</ShadcnButton>;
+          ? 'outline'
+          : 'outline';
+  return <AnimateButton variant={variant} {...rest}>{icon}{children}</AnimateButton>;
 }
 
 function InputBase({ addonAfter, ...props }: any) {
