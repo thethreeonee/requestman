@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Dropdown, Select, Space, Switch, Typography } from 'antd';
-import { ArrowLeftOutlined, CheckOutlined, EllipsisOutlined } from '@ant-design/icons';
-import type { MenuProps } from 'antd';
+import { Button, Dropdown, Select, Space, Switch, Typography } from '../ui';
+import { ArrowLeftOutlined, CheckOutlined, EllipsisOutlined } from '../ui/icons';
+import type { MenuProps } from '../ui';
 import type { RedirectGroup } from '../types';
 import { t } from '../i18n';
 

@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
-import { App, Button, Modal, Segmented, Space, Switch, Typography } from 'antd';
+import { App, Button, Modal, Segmented, Space, Switch, Typography } from './ui';
 import {
   DEFAULT_GROUP_ID,
   REDIRECT_ENABLED_KEY,

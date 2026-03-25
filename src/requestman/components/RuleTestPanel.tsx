@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Input, Space, Typography } from 'antd';
+import { Button, Input, Space, Typography } from '../ui';
 import type { simulateRedirect } from '../rule-utils';
 
 type TestResult = ReturnType<typeof simulateRedirect> | null;
