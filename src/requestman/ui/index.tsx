@@ -188,7 +188,13 @@ export function Dropdown({ menu, children, open: openProp, onOpenChange }: any) 
                 <div key={item.key} className="aui-dropdown-group">
                   <div className="aui-dropdown-group-label">{item.label}</div>
                   {(item.children ?? []).map((child: any) => (
-                    <button className={`aui-dropdown-item ${child.danger ? 'danger' : ''}`} key={child.key} onClick={() => { child.onClick?.(); setOpen(false); }}>
+                    <button
+                      className={`aui-dropdown-item ${child.danger ? 'danger' : ''}`}
+                      key={child.key}
+                      onMouseEnter={child.onMouseEnter}
+                      onMouseLeave={child.onMouseLeave}
+                      onClick={() => { child.onClick?.(); setOpen(false); }}
+                    >
                       {child.icon}{child.label}
                     </button>
                   ))}
@@ -196,7 +202,13 @@ export function Dropdown({ menu, children, open: openProp, onOpenChange }: any) 
               );
             }
             return (
-              <button className={`aui-dropdown-item ${item?.danger ? 'danger' : ''}`} key={item?.key} onClick={() => { item?.onClick?.(); setOpen(false); }}>
+              <button
+                className={`aui-dropdown-item ${item?.danger ? 'danger' : ''}`}
+                key={item?.key}
+                onMouseEnter={item?.onMouseEnter}
+                onMouseLeave={item?.onMouseLeave}
+                onClick={() => { item?.onClick?.(); setOpen(false); }}
+              >
                 {item?.icon}{item?.label}
               </button>
             );

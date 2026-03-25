@@ -23,14 +23,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/animate-ui/components/radix/dialog';
+import { Copy } from '@/components/animate-ui/icons/copy';
 import { t } from '../i18n';
+import { MessageSquareMore } from '@/components/animate-ui/icons/message-square-more';
+import { Trash2 } from '@/components/animate-ui/icons/trash-2';
 import {
-  CopyOutlined,
   DeleteOutlined,
-  EditOutlined,
   FolderOpenOutlined,
   RetweetOutlined,
-  EllipsisVerticalOutlined,
+  EllipsisOutlined,
   ApiOutlined,
   CodeOutlined,
   InsertRowAboveOutlined,
@@ -236,6 +237,7 @@ export default function RedirectRuleList({
 }: Props) {
   const listWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const [hoveredAction, setHoveredAction] = React.useState<'group' | 'rule' | null>(null);
+  const [hoveredMenuAction, setHoveredMenuAction] = React.useState<string | null>(null);
   const [dragState, setDragState] = React.useState<DragState | null>(null);
   const [pointerDragState, setPointerDragState] = React.useState<PointerDragState | null>(null);
   const [dropState, setDropState] = React.useState<DropState | null>(null);
@@ -525,12 +527,24 @@ export default function RedirectRuleList({
           </Tooltip>
         </div>
         <div className="rule-item-row__actions" data-no-drag="true">
+          {(() => {
+            const moveKey = `rule:${rule.id}:move`;
+            const copyKey = `rule:${rule.id}:copy`;
+            const deleteKey = `rule:${rule.id}:delete`;
+            return (
           <Dropdown menu={{ items: [
-            { key: 'move', label: t('修改规则组', 'Change group'), icon: <FolderOpenOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: rule.id }); setGroupInput(rule.groupId); } },
+            {
+              key: 'move',
+              label: t('修改规则组', 'Change group'),
+              icon: <FolderOpenOutlined />,
+              onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: rule.id }); setGroupInput(rule.groupId); },
+            },
             {
               key: 'copy',
               label: t('复制', 'Duplicate'),
-              icon: <CopyOutlined />,
+              icon: <Copy size={14} animate={hoveredMenuAction === copyKey} />,
+              onMouseEnter: () => setHoveredMenuAction(copyKey),
+              onMouseLeave: () => setHoveredMenuAction((current) => (current === copyKey ? null : current)),
               onClick: () => {
                 setRules((prev) => {
                   const idx = prev.findIndex((item) => item.id === rule.id);
@@ -544,8 +558,10 @@ export default function RedirectRuleList({
             {
               key: 'delete',
               label: t('删除', 'Delete'),
-              icon: <DeleteOutlined />,
+              icon: <Trash2 size={14} animate={hoveredMenuAction === deleteKey} />,
               danger: true,
+              onMouseEnter: () => setHoveredMenuAction(deleteKey),
+              onMouseLeave: () => setHoveredMenuAction((current) => (current === deleteKey ? null : current)),
               onClick: () => Modal.confirm({
                 title: t('确认删除规则？', 'Delete this rule?'),
                 okButtonProps: { danger: true },
@@ -556,8 +572,10 @@ export default function RedirectRuleList({
               }),
             },
           ] }}>
-            <Button type="text" size="icon-sm" icon={<EllipsisVerticalOutlined />} />
+            <Button type="text" size="icon-sm" icon={<EllipsisOutlined />} />
           </Dropdown>
+            );
+          })()}
         </div>
       </div>
     );
@@ -583,7 +601,7 @@ export default function RedirectRuleList({
             <Typography.Text type="secondary">{activePreviewRule.enabled ? t('已开启', 'On') : t('已关闭', 'Off')}</Typography.Text>
           </div>
           <div className="rule-item-row__actions">
-            <EllipsisVerticalOutlined />
+            <EllipsisOutlined />
           </div>
         </div>
       </div>
@@ -611,11 +629,11 @@ export default function RedirectRuleList({
                     <div className="rule-group-header" data-group-id={group.id} data-row-type="group">
                       <div className="rule-group-header__title">
                         <span className="rule-group-header__title-text" style={{ fontWeight: 600 }}>{group.name}</span>
-                        <span className="rule-group-header__count">{groupRules.length}</span>
                       </div>
                     </div>
                   </AccordionTrigger>
                   <div className="rule-group-header__actions" data-no-drag="true">
+                    <span className="rule-group-header__count">[ {groupRules.length} ]</span>
                     <Tooltip title={redirectEnabled ? (group.enabled ? t('规则组已开启，组内规则可生效', 'Group is enabled. Rules in this group can take effect.') : t('规则组已关闭，组内规则不会生效', 'Group is disabled. Rules in this group will not take effect.')) : t('总开关关闭，组内规则不会生效', 'Master switch is off. Rules in this group will not take effect.')}>
                       <span className="rule-group-header__switch">
                         <Switch
@@ -627,13 +645,42 @@ export default function RedirectRuleList({
                         />
                       </span>
                     </Tooltip>
+                    {(() => {
+                      const renameKey = `group:${group.id}:rename`;
+                      const copyKey = `group:${group.id}:copy`;
+                      const deleteKey = `group:${group.id}:delete`;
+                      return (
                     <Dropdown menu={{ items: [
-                      { key: 'rename', label: t('重命名', 'Rename'), icon: <EditOutlined />, onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: group.id }); setGroupInput(group.name); } },
-                      { key: 'copy', label: t('复制', 'Duplicate'), icon: <CopyOutlined />, onClick: () => duplicateGroup(group.id) },
-                      { key: 'delete', label: t('删除', 'Delete'), icon: <DeleteOutlined />, danger: true, onClick: () => deleteGroup(group.id) },
+                      {
+                        key: 'rename',
+                        label: t('重命名', 'Rename'),
+                        icon: <MessageSquareMore size={14} animate={hoveredMenuAction === renameKey} />,
+                        onMouseEnter: () => setHoveredMenuAction(renameKey),
+                        onMouseLeave: () => setHoveredMenuAction((current) => (current === renameKey ? null : current)),
+                        onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: group.id }); setGroupInput(group.name); },
+                      },
+                      {
+                        key: 'copy',
+                        label: t('复制', 'Duplicate'),
+                        icon: <Copy size={14} animate={hoveredMenuAction === copyKey} />,
+                        onMouseEnter: () => setHoveredMenuAction(copyKey),
+                        onMouseLeave: () => setHoveredMenuAction((current) => (current === copyKey ? null : current)),
+                        onClick: () => duplicateGroup(group.id),
+                      },
+                      {
+                        key: 'delete',
+                        label: t('删除', 'Delete'),
+                        icon: <Trash2 size={14} animate={hoveredMenuAction === deleteKey} />,
+                        danger: true,
+                        onMouseEnter: () => setHoveredMenuAction(deleteKey),
+                        onMouseLeave: () => setHoveredMenuAction((current) => (current === deleteKey ? null : current)),
+                        onClick: () => deleteGroup(group.id),
+                      },
                     ] }}>
-                    <Button type="text" size="icon-sm" icon={<EllipsisVerticalOutlined />} />
+                    <Button type="text" size="icon-sm" icon={<EllipsisOutlined />} />
                     </Dropdown>
+                      );
+                    })()}
                   </div>
                 </div>
                 <AccordionContent keepRendered>
