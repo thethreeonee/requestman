@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from 'react';
-import { Typography } from '../../primitives';
+import { Typography } from '../../components';
 import { t } from '../../i18n';
 import type { RedirectRule } from '../../types';
 import type { RuleDetailProps } from './types';

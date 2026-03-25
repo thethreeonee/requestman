@@ -10,7 +10,7 @@ import {
   Space,
   Tabs,
   Tooltip,
-} from '../../../primitives';
+} from '../../../components';
 import { t } from '../../../i18n';
 import {
   DeleteOutlined,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Switch, Typography } from '../../primitives';
+import { Button, Switch, Typography } from '../../components';
 import { Moon, Sun } from 'lucide-react';
 import { Menu } from '@/components/animate-ui/icons/menu';
 import { Upload } from '@/components/animate-ui/icons/upload';

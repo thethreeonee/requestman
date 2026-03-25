@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Input, Space } from '../primitives';
+import { Button, Input, Space } from '.';
 import { FilterOutlined } from '../icons';
 import { MATCH_MODE_OPTIONS, MATCH_TARGET_OPTIONS } from '../constants';
 import GroupDropdownSelect from './GroupDropdownSelect';

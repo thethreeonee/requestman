@@ -7,7 +7,7 @@ import {
   Switch,
   Tooltip,
   Typography,
-} from '../primitives';
+} from '.';
 import {
   Accordion,
   AccordionItem,

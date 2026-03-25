@@ -7,7 +7,7 @@ import {
   Popconfirm,
   Select,
   Space,
-} from '../../../primitives';
+} from '../../../components';
 import { t } from '../../../i18n';
 import {
   DeleteOutlined,

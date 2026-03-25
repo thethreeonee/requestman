@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { App, Modal } from './primitives';
+import { App, Modal } from './components';
 import {
   DEFAULT_GROUP_ID,
   REDIRECT_ENABLED_KEY,

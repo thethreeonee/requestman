@@ -1,6 +1,6 @@
 import React from 'react';
 import { ChevronsUpDown } from 'lucide-react';
-import { Button } from '../primitives';
+import { Button } from '.';
 import {
   DropdownMenu,
   DropdownMenuContent,

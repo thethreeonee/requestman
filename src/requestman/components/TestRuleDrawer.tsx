@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Input, Space, Typography } from '../primitives';
+import { Button, Input, Space, Typography } from '.';
 import type { SimulateRuleResult } from '../rule-utils';
 import { t } from '../i18n';
 import {

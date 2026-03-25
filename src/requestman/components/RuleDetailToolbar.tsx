@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Input, Space } from '../primitives';
+import { Button, Input, Space } from '.';
 import { Binary } from '@/components/animate-ui/icons/binary';
 import { Blend } from '@/components/animate-ui/icons/blend';
 import {
