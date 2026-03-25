@@ -19,10 +19,9 @@ import {
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
 import type { HeaderModification, RedirectCondition } from '../../../types';
 import ConditionUrlMatchEditor from '../../../components/ConditionUrlMatchEditor';
-import RuleDetailToolbar from '../../../components/RuleDetailToolbar';
-import RuleNameHeader from '../../../components/RuleNameHeader';
 import TestRuleDrawer from '../../../components/TestRuleDrawer';
 import ConditionFilterModal, { isConditionFilterConfigured } from '../../../components/ConditionFilterModal';
+import RuleDetailHeader from '../RuleDetailHeader';
 import type { RuleDetailProps as Props } from '../types';
 
 const HEADER_ACTION_OPTIONS = [
@@ -84,21 +83,14 @@ export default function ModifyHeadersRuleDetail({
   originalRule,
   setWorkingRule,
   setRules,
-  onBack,
   saveDetailRule,
-  toggleDetailRuleEnabled,
   setPageToList,
   messageApi,
 }: Props) {
-  const [editRuleName, setEditRuleName] = useState(false);
   const [testDrawerOpen, setTestDrawerOpen] = useState(false);
   const [testUrl, setTestUrl] = useState('');
   const [testResult, setTestResult] = useState<SimulateRuleResult | null>(null);
   const [filterModal, setFilterModal] = useState<{ open: boolean; conditionId?: string }>({ open: false });
-
-  const { enabled: _workingEnabled, ...workingRuleWithoutEnabled } = workingRule;
-  const { enabled: _originalEnabled, ...originalRuleWithoutEnabled } = originalRule ?? workingRule;
-  const dirty = originalRule && JSON.stringify(workingRuleWithoutEnabled) !== JSON.stringify(originalRuleWithoutEnabled);
   const currentGroupEnabled = useMemo(() => new Map(groups.map((g) => [g.id, g.enabled])), [groups]);
 
   const updateCondition = (conditionId: string, patch: Partial<RedirectCondition>) => {
@@ -196,24 +188,13 @@ export default function ModifyHeadersRuleDetail({
   );
 
   return <div>
-    <RuleDetailToolbar
-      rule={workingRule}
+    <RuleDetailHeader
       groups={groups}
-      groupId={workingRule.groupId}
-      enabled={workingRule.enabled}
-      dirty={!!dirty}
-      onBack={onBack}
-      onEnabledChange={(v) => toggleDetailRuleEnabled(workingRule.id, v)}
-      onGroupChange={(v) => setWorkingRule({ ...workingRule, groupId: v })}
-      onRename={(name) => setWorkingRule({ ...workingRule, name })}
-      onTest={() => setTestDrawerOpen(true)}
-      onSave={saveDetailRule}
-    />
-    <RuleNameHeader
-      rule={workingRule}
-      editRuleName={editRuleName}
-      setEditRuleName={setEditRuleName}
+      workingRule={workingRule}
+      originalRule={originalRule}
       setWorkingRule={setWorkingRule}
+      saveDetailRule={saveDetailRule}
+      onTest={() => setTestDrawerOpen(true)}
     />
     {workingRule.conditions.map((c) => (
       <Collapse

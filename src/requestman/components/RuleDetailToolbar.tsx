@@ -24,10 +24,7 @@ type Props = {
   rule: RedirectRule;
   groups: RedirectGroup[];
   groupId: string;
-  enabled: boolean;
   dirty: boolean;
-  onBack: () => void;
-  onEnabledChange: (value: boolean) => void;
   onGroupChange: (groupId: string) => void;
   onTest: () => void;
   onSave: () => boolean | void;
