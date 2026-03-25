@@ -44,7 +44,6 @@ type Props = {
   collapsedGroupIds: string[];
   groupModal: GroupModalState;
   groupInput: string;
-  setRedirectEnabled: (value: boolean) => void;
   setCollapsedGroupIds: React.Dispatch<React.SetStateAction<string[]>>;
   setGroupModal: React.Dispatch<React.SetStateAction<GroupModalState>>;
   setGroupInput: React.Dispatch<React.SetStateAction<string>>;
@@ -59,8 +58,6 @@ type Props = {
     success: (content: string) => void;
     warning: (content: string) => void;
   };
-  exportConfig: () => void;
-  importConfig: () => void;
 };
 
 type GroupRow = { key: string; rowType: 'group'; group: RedirectGroup };
@@ -239,7 +236,6 @@ export default function RedirectRuleList({
   collapsedGroupIds,
   groupModal,
   groupInput,
-  setRedirectEnabled,
   setCollapsedGroupIds,
   setGroupModal,
   setGroupInput,
@@ -251,8 +247,6 @@ export default function RedirectRuleList({
   setRules,
   setGroups,
   messageApi,
-  exportConfig,
-  importConfig,
 }: Props) {
   const tableWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const [dragState, setDragState] = React.useState<DragState | null>(null);
@@ -351,11 +345,6 @@ export default function RedirectRuleList({
       if (prev.includes(groupId)) return prev.filter((id) => id !== groupId);
       return [...prev, groupId];
     });
-  };
-
-  const handleRedirectEnabledChange = (value: boolean) => {
-    setRedirectEnabled(value);
-    messageApi.success(value ? t('总开关已开启', 'Master switch enabled') : t('总开关已关闭', 'Master switch disabled'));
   };
 
   const handleGroupEnabledChange = (group: RedirectGroup, value: boolean) => {
@@ -538,23 +527,15 @@ export default function RedirectRuleList({
         </table>
       </div>
     ) : null}
-    <div className="detail-header">
-      <Space><Typography.Title level={4} style={{ margin: 0 }}>{t('Requestman 控制台', 'Requestman Console')}</Typography.Title><Switch checked={redirectEnabled} onChange={handleRedirectEnabledChange} /></Space>
-      <Space>
-        <Dropdown menu={{ items: [
-          { key: 'export', label: t('导出配置', 'Export config'), onClick: exportConfig },
-          { key: 'import', label: t('导入配置', 'Import config'), onClick: importConfig },
-        ] }} trigger={['click']}>
-          <Button icon={<EllipsisOutlined />} />
-        </Dropdown>
-        <Tooltip title={t('新建规则组', 'Create group')}>
-          <Button
-            icon={<FolderAddOutlined />}
-            aria-label={t('新建规则组', 'Create group')}
-            onClick={() => { setGroupModal({ open: true, mode: 'create' }); setGroupInput(''); }}
-          />
-        </Tooltip>
-        <Dropdown
+    <div className="sidebar-header">
+      <Tooltip title={t('新建规则组', 'Create group')}>
+        <Button
+          icon={<FolderAddOutlined />}
+          aria-label={t('新建规则组', 'Create group')}
+          onClick={() => { setGroupModal({ open: true, mode: 'create' }); setGroupInput(''); }}
+        />
+      </Tooltip>
+      <Dropdown
           menu={{
             items: [
               {
@@ -598,10 +579,9 @@ export default function RedirectRuleList({
           }}
           overlayStyle={{ minWidth: 320 }}
           trigger={['click']}
-        >
-          <Button type="primary" icon={<PlusOutlined />}>{t('新建规则', 'New rule')}</Button>
-        </Dropdown>
-      </Space>
+      >
+        <Button type="primary" icon={<PlusOutlined />}>{t('新建规则', 'New rule')}</Button>
+      </Dropdown>
     </div>
     <div className="rules-list-table-wrapper" ref={tableWrapperRef}>
       {groupOverlayRect ? (

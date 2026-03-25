@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
-import { App, Modal } from 'antd';
+import { App, Button, Modal, Segmented, Space, Switch, Typography } from 'antd';
 import {
   DEFAULT_GROUP_ID,
   REDIRECT_ENABLED_KEY,
@@ -17,9 +17,11 @@ import {
   hasModifyResponseBodyFunction,
   normalizeGroups,
   normalizeRules,
+  simulateRedirect,
 } from './rule-utils';
 import type { RedirectGroup, RedirectRule } from './types';
 import RedirectRuleList from './components/RedirectRuleList';
+import RuleTestPanel from './components/RuleTestPanel';
 import './index.css';
 
 const RedirectRuleDetail = lazy(() => import('./components/RedirectRuleDetail'));
@@ -48,6 +50,10 @@ export default function RequestmanPanel() {
   const [originalRule, setOriginalRule] = useState<RedirectRule | null>(null);
   const hasInitializedStorageSync = useRef(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>('system');
+  const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>('light');
+  const [testUrl, setTestUrl] = useState('');
+  const [testResult, setTestResult] = useState<ReturnType<typeof simulateRedirect> | null>(null);
 
   useEffect(() => {
     chrome.storage.local.get([REDIRECT_RULES_KEY, REDIRECT_ENABLED_KEY, REDIRECT_GROUPS_KEY], (res) => {
@@ -69,6 +75,24 @@ export default function RequestmanPanel() {
     chrome.storage.local.set({ [REDIRECT_GROUPS_KEY]: groups, [REDIRECT_RULES_KEY]: rules, [REDIRECT_ENABLED_KEY]: redirectEnabled });
     chrome.runtime.sendMessage({ type: 'redirectRules/apply', groups, rules, enabled: redirectEnabled });
   }, [groups, rules, redirectEnabled, rulesLoaded]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const applyTheme = () => setEffectiveTheme(themeMode === 'system' ? (mediaQuery.matches ? 'dark' : 'light') : themeMode);
+    applyTheme();
+    mediaQuery.addEventListener('change', applyTheme);
+    return () => mediaQuery.removeEventListener('change', applyTheme);
+  }, [themeMode]);
+
+  const handleRedirectEnabledChange = (value: boolean) => {
+    setRedirectEnabled(value);
+    message.success(value ? t('总开关已开启', 'Master switch enabled') : t('总开关已关闭', 'Master switch disabled'));
+  };
+
+  const triggerRuleTest = () => {
+    const groupEnabledMap = new Map(groups.map((g) => [g.id, g.enabled]));
+    setTestResult(simulateRedirect(testUrl, rules, groupEnabledMap));
+  };
 
   const openRuleDetail = (ruleId: string) => {
     const found = rules.find((r) => r.id === ruleId);
@@ -374,6 +398,14 @@ export default function RequestmanPanel() {
     }
   };
 
+
+  let editorNode: React.ReactNode = (
+    <div className="editor-placeholder">
+      <Typography.Title level={4} style={{ marginTop: 0 }}>{t('选择一条规则开始编辑', 'Select a rule to start editing')}</Typography.Title>
+      <Typography.Text type="secondary">{t('左侧规则列表选择规则后，可在此处编辑。', 'Select a rule from the sidebar to edit it here.')}</Typography.Text>
+    </div>
+  );
+
   if (currentRule) {
     const detailProps = {
       groups,
@@ -387,53 +419,91 @@ export default function RequestmanPanel() {
       setPageToList: () => setPage({ type: 'list' }),
     };
 
-    let detail: React.ReactNode;
     if (currentRule.type === 'redirect_request') {
-      detail = <RedirectRuleDetail {...detailProps} messageApi={message} />;
+      editorNode = <RedirectRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'rewrite_string') {
-      detail = <RewriteStringRuleDetail {...detailProps} messageApi={message} />;
+      editorNode = <RewriteStringRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'query_params') {
-      detail = <QueryParamsRuleDetail {...detailProps} messageApi={message} />;
+      editorNode = <QueryParamsRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'modify_request_body') {
-      detail = <ModifyRequestBodyRuleDetail {...detailProps} messageApi={message} />;
+      editorNode = <ModifyRequestBodyRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'modify_response_body') {
-      detail = <ModifyResponseBodyRuleDetail {...detailProps} messageApi={message} />;
+      editorNode = <ModifyResponseBodyRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'modify_headers') {
-      detail = <ModifyHeadersRuleDetail {...detailProps} messageApi={message} />;
+      editorNode = <ModifyHeadersRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'user_agent') {
-      detail = <UserAgentRuleDetail {...detailProps} messageApi={message} />;
+      editorNode = <UserAgentRuleDetail {...detailProps} messageApi={message} />;
     } else if (currentRule.type === 'cancel_request') {
-      detail = <CancelRequestRuleDetail {...detailProps} messageApi={message} />;
+      editorNode = <CancelRequestRuleDetail {...detailProps} messageApi={message} />;
     } else {
-      detail = <RequestDelayRuleDetail {...detailProps} messageApi={message} />;
+      editorNode = <RequestDelayRuleDetail {...detailProps} messageApi={message} />;
     }
-
-    return <Suspense fallback={<div style={{ padding: 16 }}>{t('加载中...', 'Loading...')}</div>}>{detail}</Suspense>;
   }
 
-  return <>
+  const groupNameMap = new Map(groups.map((group) => [group.id, group.name]));
+
+  return <div className="requestman-shell" data-theme={effectiveTheme}>
     <input ref={importInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={onImportFileChange} />
-      <RedirectRuleList
-      groups={groups}
-      rules={rules}
-      redirectEnabled={redirectEnabled}
-      collapsedGroupIds={collapsedGroupIds}
-      groupModal={groupModal}
-      groupInput={groupInput}
-      setRedirectEnabled={setRedirectEnabled}
-      setCollapsedGroupIds={setCollapsedGroupIds}
-      setGroupModal={setGroupModal}
-      setGroupInput={setGroupInput}
-      createRule={createRule}
-      openRuleDetail={openRuleDetail}
-      duplicateGroup={duplicateGroup}
-      deleteGroup={deleteGroup}
-      confirmGroupModal={confirmGroupModal}
-        setRules={setRules}
-        setGroups={setGroups}
-        messageApi={message}
-        exportConfig={exportConfig}
-        importConfig={importConfig}
-      />
-  </>;
+    <div className="global-toolbar">
+      <div className="toolbar-left-tools">
+        <span className="toolbar-logo" aria-hidden>◎</span>
+        <Typography.Text strong>Requestman</Typography.Text>
+        <Space size={8}>
+          <Typography.Text type="secondary">MASTER</Typography.Text>
+          <Switch checked={redirectEnabled} onChange={handleRedirectEnabledChange} />
+        </Space>
+      </div>
+      <div className="toolbar-right-tools">
+        <Button onClick={importConfig}>{t('导入配置', 'Import')}</Button>
+        <Button onClick={exportConfig}>{t('导出配置', 'Export')}</Button>
+        <Segmented
+          value={themeMode}
+          onChange={(value) => setThemeMode(value as 'light' | 'dark' | 'system')}
+          options={[
+            { label: 'Light', value: 'light' },
+            { label: 'Dark', value: 'dark' },
+            { label: 'System', value: 'system' },
+          ]}
+        />
+      </div>
+    </div>
+
+    <div className="main-body-layout">
+      <aside className="main-sidebar">
+        <RedirectRuleList
+          groups={groups}
+          rules={rules}
+          redirectEnabled={redirectEnabled}
+          collapsedGroupIds={collapsedGroupIds}
+          groupModal={groupModal}
+          groupInput={groupInput}
+          setCollapsedGroupIds={setCollapsedGroupIds}
+          setGroupModal={setGroupModal}
+          setGroupInput={setGroupInput}
+          createRule={createRule}
+          openRuleDetail={openRuleDetail}
+          duplicateGroup={duplicateGroup}
+          deleteGroup={deleteGroup}
+          confirmGroupModal={confirmGroupModal}
+          setRules={setRules}
+          setGroups={setGroups}
+          messageApi={message}
+        />
+      </aside>
+      <main className="main-editor">
+        <Suspense fallback={<div style={{ padding: 16 }}>{t('加载中...', 'Loading...')}</div>}>
+          {editorNode}
+        </Suspense>
+      </main>
+      <aside className="main-test-panel">
+        <RuleTestPanel
+          testUrl={testUrl}
+          setTestUrl={setTestUrl}
+          triggerTest={triggerRuleTest}
+          testResult={testResult}
+          groupNameMap={groupNameMap}
+        />
+      </aside>
+    </div>
+  </div>;
 }
