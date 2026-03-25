@@ -1,6 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/animate-ui/components/radix/tooltip';
+import {
   AutoComplete,
   Collapse,
   Input,
@@ -9,7 +14,6 @@ import {
   Select,
   Space,
   Tabs,
-  Tooltip,
 } from '../../../components';
 import { t } from '../../../i18n';
 import {
@@ -61,18 +65,23 @@ const COMMON_HEADERS = [
 const HEADER_OPTIONS = COMMON_HEADERS.map((header) => ({
   value: header,
   label: (
-    <Tooltip title={header} placement="right">
-      <span
-        style={{
-          display: 'inline-block',
-          width: '100%',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          style={{
+            display: 'inline-block',
+            width: '100%',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {header}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right" sideOffset={6}>
         {header}
-      </span>
+      </TooltipContent>
     </Tooltip>
   ),
 }));

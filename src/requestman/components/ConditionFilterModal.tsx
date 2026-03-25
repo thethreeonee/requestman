@@ -1,7 +1,12 @@
 import React from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/animate-ui/components/radix/tooltip';
 import { ReloadOutlined } from '../icons';
-import { AutoComplete, Form, Input, Modal, Select, Space, Tooltip } from '.';
+import { AutoComplete, Form, Input, Modal, Select, Space } from '.';
 import { t } from '../i18n';
 import {
   COMMON_HEADER_OPTIONS,
@@ -29,10 +34,17 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
   const filterItemStyle: React.CSSProperties = { marginBottom: 12 };
 
   const renderResetButton = (title: string, onClick: () => void) => (
-    <Tooltip title={title}>
-      <Button variant="outline" size="icon" onClick={onClick} style={{ width: 32 }}>
-        <ReloadOutlined />
-      </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">
+          <Button variant="outline" size="icon" onClick={onClick} style={{ width: 32 }}>
+            <ReloadOutlined />
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent sideOffset={6}>
+        {title}
+      </TooltipContent>
     </Tooltip>
   );
 

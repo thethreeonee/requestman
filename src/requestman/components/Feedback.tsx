@@ -21,10 +21,6 @@ Modal.confirm = ({ title, content, onOk }: any) => {
   if (window.confirm(`${title ?? ''}\n${content ?? ''}`)) onOk?.();
 };
 
-export function Tooltip({ title, children }: any) {
-  return <span title={typeof title === 'string' ? title : ''}>{children}</span>;
-}
-
 export function Popconfirm({ title, onConfirm, children }: any) {
   return <span onClick={() => { if (window.confirm(title ?? 'Confirm?')) onConfirm?.(); }}>{children}</span>;
 }

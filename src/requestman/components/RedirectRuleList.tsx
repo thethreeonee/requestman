@@ -1,11 +1,15 @@
 import React from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/animate-ui/components/radix/tooltip';
 import { ChevronsUpDown } from 'lucide-react';
 import {
   Input,
   Modal,
   Switch,
-  Tooltip,
   Typography,
 } from '.';
 import {
@@ -478,14 +482,21 @@ export default function RedirectRuleList({
         </div>
         <div className="rule-item-row__spacer" />
         <div className="rule-item-row__status">
-          <Tooltip title={getRuleEffectiveHint(redirectEnabled, groupEnabled, rule.enabled)}>
-            <Switch
-              className="rules-compact-switch"
-              pressedWidth={14}
-              checked={rule.enabled}
-              disabled={!redirectEnabled || !groupEnabled}
-              onChange={(value: boolean) => handleRuleEnabledChange(rule, value)}
-            />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <Switch
+                  className="rules-compact-switch"
+                  pressedWidth={14}
+                  checked={rule.enabled}
+                  disabled={!redirectEnabled || !groupEnabled}
+                  onChange={(value: boolean) => handleRuleEnabledChange(rule, value)}
+                />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>
+              {getRuleEffectiveHint(redirectEnabled, groupEnabled, rule.enabled)}
+            </TooltipContent>
           </Tooltip>
         </div>
         <div className="rule-item-row__actions" data-no-drag="true">
@@ -603,16 +614,25 @@ export default function RedirectRuleList({
                       <span className="rule-group-header__count-value">{groupRules.length}</span>
                       <span className="rule-group-header__count-bracket rule-group-header__count-bracket--right" aria-hidden="true" />
                     </span>
-                    <Tooltip title={redirectEnabled ? (group.enabled ? t('规则组已开启，组内规则可生效', 'Group is enabled. Rules in this group can take effect.') : t('规则组已关闭，组内规则不会生效', 'Group is disabled. Rules in this group will not take effect.')) : t('总开关关闭，组内规则不会生效', 'Master switch is off. Rules in this group will not take effect.')}>
-                      <span className="rule-group-header__switch">
-                        <Switch
-                          className="rules-compact-switch"
-                          pressedWidth={14}
-                          checked={group.enabled}
-                          disabled={!redirectEnabled}
-                          onChange={(value: boolean) => handleGroupEnabledChange(group, value)}
-                        />
-                      </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="rule-group-header__switch">
+                          <Switch
+                            className="rules-compact-switch"
+                            pressedWidth={14}
+                            checked={group.enabled}
+                            disabled={!redirectEnabled}
+                            onChange={(value: boolean) => handleGroupEnabledChange(group, value)}
+                          />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent sideOffset={6}>
+                        {redirectEnabled
+                          ? (group.enabled
+                            ? t('规则组已开启，组内规则可生效', 'Group is enabled. Rules in this group can take effect.')
+                            : t('规则组已关闭，组内规则不会生效', 'Group is disabled. Rules in this group will not take effect.'))
+                          : t('总开关关闭，组内规则不会生效', 'Master switch is off. Rules in this group will not take effect.')}
+                      </TooltipContent>
                     </Tooltip>
                     {(() => {
                       const renameKey = `group:${group.id}:rename`;
@@ -681,17 +701,24 @@ export default function RedirectRuleList({
     </div>
     <div className="sidebar-header sidebar-actions">
       <div className="sidebar-actions__group">
-        <Tooltip title={t('新建规则组', 'Create group')}>
-          <Button
-            size="icon"
-            variant="secondary"
-            aria-label={t('新建规则组', 'Create group')}
-            onMouseEnter={() => setHoveredAction('group')}
-            onMouseLeave={() => setHoveredAction((current) => (current === 'group' ? null : current))}
-            onClick={() => { setGroupModal({ open: true, mode: 'create' }); setGroupInput(''); }}
-          >
-            <GalleryHorizontalEnd size={16} animate={hoveredAction === 'group'} />
-          </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <Button
+                size="icon"
+                variant="secondary"
+                aria-label={t('新建规则组', 'Create group')}
+                onMouseEnter={() => setHoveredAction('group')}
+                onMouseLeave={() => setHoveredAction((current) => (current === 'group' ? null : current))}
+                onClick={() => { setGroupModal({ open: true, mode: 'create' }); setGroupInput(''); }}
+              >
+                <GalleryHorizontalEnd size={16} animate={hoveredAction === 'group'} />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent sideOffset={6}>
+            {t('新建规则组', 'Create group')}
+          </TooltipContent>
         </Tooltip>
       </div>
       <div className="sidebar-actions__rule">

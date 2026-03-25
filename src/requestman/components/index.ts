@@ -1,6 +1,6 @@
 export { App, ConfigProvider } from './AppProvider';
 export { Collapse, Tabs, Typography } from './Display';
-export { Modal, Popconfirm, Tooltip } from './Feedback';
+export { Modal, Popconfirm } from './Feedback';
 export { AutoComplete, Input, InputNumber } from './Input';
 export { Select, Switch, Radio, Form } from './FormControls';
 export { Space } from './Layout';
