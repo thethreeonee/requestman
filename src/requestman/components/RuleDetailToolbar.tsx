@@ -1,17 +1,27 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Select, Space, Switch, Typography } from '../primitives';
-import { ArrowLeftOutlined, CheckOutlined, EllipsisVerticalOutlined } from '../icons';
+import { Button, Input, Select, Space } from '../primitives';
+import { Binary } from '@/components/animate-ui/icons/binary';
+import { Blend } from '@/components/animate-ui/icons/blend';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/animate-ui/components/radix/dropdown-menu';
-import type { RequestmanDropdownMenuBaseItem } from '../dropdown-menu-types';
-import type { RedirectGroup } from '../types';
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/animate-ui/components/radix/dialog';
+import { Brush } from '@/components/animate-ui/icons/brush';
+import { CircleX } from '@/components/animate-ui/icons/circle-x';
+import { CircuitBoard } from '@/components/animate-ui/icons/circuit-board';
+import { Gauge } from '@/components/animate-ui/icons/gauge';
+import { LayoutDashboard } from '@/components/animate-ui/icons/layout-dashboard';
+import { Orbit } from '@/components/animate-ui/icons/orbit';
+import { Route } from '@/components/animate-ui/icons/route';
+import { User } from '@/components/animate-ui/icons/user';
+import type { RedirectGroup, RedirectRule } from '../types';
 import { t } from '../i18n';
 
 type Props = {
+  rule: RedirectRule;
   groups: RedirectGroup[];
   groupId: string;
   enabled: boolean;
@@ -21,76 +31,97 @@ type Props = {
   onGroupChange: (groupId: string) => void;
   onTest: () => void;
   onSave: () => boolean | void;
-  menuItems: RequestmanDropdownMenuBaseItem[];
+  onRename: (name: string) => void;
+};
+
+const RULE_TYPE_ICON_MAP: Record<RedirectRule['type'], React.ReactNode> = {
+  redirect_request: <Route size={16} />,
+  rewrite_string: <CircuitBoard size={16} />,
+  query_params: <Orbit size={16} />,
+  modify_request_body: <LayoutDashboard size={16} />,
+  modify_response_body: <Binary size={16} />,
+  modify_headers: <Blend size={16} />,
+  user_agent: <User size={16} />,
+  cancel_request: <CircleX size={16} />,
+  request_delay: <Gauge size={16} />,
 };
 
 export default function RuleDetailToolbar({
+  rule,
   groups,
   groupId,
-  enabled,
   dirty,
-  onBack,
-  onEnabledChange,
   onGroupChange,
   onTest,
   onSave,
-  menuItems,
+  onRename,
 }: Props) {
-  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState(rule.name);
 
   useEffect(() => {
-    if (!showSaveSuccess) return;
-    const timer = window.setTimeout(() => setShowSaveSuccess(false), 2000);
-    return () => window.clearTimeout(timer);
-  }, [showSaveSuccess]);
+    setRenameValue(rule.name);
+  }, [rule.name]);
 
-  return <div className="detail-header">
-    <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack}>{t('返回', 'Back')}</Button>
-    <Space>
-      <Typography.Text type={enabled ? 'success' : 'secondary'}>{enabled ? t('生效中', 'Enabled') : t('未生效', 'Disabled')}</Typography.Text>
-      <Switch checked={enabled} onChange={onEnabledChange} />
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <span>
-            <Button size="icon-sm" icon={<EllipsisVerticalOutlined />} />
-          </span>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" sideOffset={6}>
-          {menuItems.map((item, index) => (
-            <DropdownMenuItem
-              key={item.key ?? `detail-toolbar-item-${index}`}
-              disabled={item.disabled}
-              variant={item.danger ? 'destructive' : 'default'}
-              onMouseEnter={item.onMouseEnter}
-              onMouseLeave={item.onMouseLeave}
-              onSelect={() => item.onClick?.()}
-            >
-              {item.icon}
-              {item.label}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <Select
-        value={groupId}
-        style={{ width: 220 }}
-        options={groups.map((g) => ({ value: g.id, label: `${t('规则组：', 'Group: ')}${g.name}` }))}
-        onChange={onGroupChange}
-        placeholder={t('规则组：请选择', 'Select group')}
-      />
-      <Button onClick={onTest}>{t('测试', 'Test')}</Button>
-      <Button
-        type="primary"
-        onClick={() => {
-          const isSaved = onSave();
-          if (isSaved) setShowSaveSuccess(true);
-        }}
-      >
-        <Space size={4}>
-          {showSaveSuccess ? <CheckOutlined /> : null}
-          <span>{dirty ? `* ${t('保存规则', 'Save rule')}` : t('保存规则', 'Save rule')}</span>
-        </Space>
-      </Button>
-    </Space>
-  </div>;
+  const confirmRename = () => {
+    const nextName = renameValue.trim();
+    if (!nextName) return;
+    onRename(nextName);
+    setRenameDialogOpen(false);
+  };
+
+  return <>
+    <div className="detail-header">
+      <div className="detail-header__title">
+        <span className="detail-header__title-icon" aria-hidden="true">{RULE_TYPE_ICON_MAP[rule.type]}</span>
+        <span className="detail-header__title-text">{rule.name || t('未命名规则', 'Untitled rule')}</span>
+        <Button
+          type="text"
+          className="detail-header__rename-btn"
+          aria-label={t('重命名规则', 'Rename rule')}
+          onClick={() => setRenameDialogOpen(true)}
+          icon={<Brush size={16} />}
+        />
+      </div>
+      <Space>
+        <Select
+          value={groupId}
+          style={{ width: 220 }}
+          options={groups.map((g) => ({ value: g.id, label: `${t('规则组：', 'Group: ')}${g.name}` }))}
+          onChange={onGroupChange}
+          placeholder={t('规则组：请选择', 'Select group')}
+        />
+        <Button onClick={onTest}>{t('测试', 'Test')}</Button>
+        <Button
+          type="primary"
+          disabled={!dirty}
+          onClick={() => {
+            onSave();
+          }}
+        >
+          <span>{t('保存规则', 'Save rule')}</span>
+        </Button>
+      </Space>
+    </div>
+    <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+      <DialogContent showCloseButton>
+        <DialogHeader>
+          <DialogTitle>{t('重命名规则', 'Rename rule')}</DialogTitle>
+        </DialogHeader>
+        <Input
+          autoFocus
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') confirmRename();
+          }}
+          placeholder={t('请输入规则名称', 'Enter rule name')}
+        />
+        <DialogFooter>
+          <Button onClick={() => setRenameDialogOpen(false)}>{t('取消', 'Cancel')}</Button>
+          <Button type="primary" onClick={confirmRename} disabled={!renameValue.trim()}>{t('确定', 'OK')}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  </>;
 }

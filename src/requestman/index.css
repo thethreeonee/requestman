@@ -239,6 +239,38 @@ html.dark .theme-toggle-icons .theme-icon-moon {
   gap: 12px;
 }
 
+.detail-header__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.detail-header__title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--rm-text-secondary);
+  flex-shrink: 0;
+}
+
+.detail-header__title-text {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-header__rename-btn {
+  padding: 6px;
+  min-width: 32px;
+  min-height: 32px;
+  flex-shrink: 0;
+}
+
 .group-collapse-btn .anticon {
   transition: transform 0.2s ease;
 }

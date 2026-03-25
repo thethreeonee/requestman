@@ -12,4 +12,5 @@ export type RuleDetailProps = {
   toggleDetailRuleEnabled: (ruleId: string, enabled: boolean) => void;
   setPageToList: () => void;
   messageApi: { warning: (content: string) => void };
+  onRename?: (name: string) => void;
 };

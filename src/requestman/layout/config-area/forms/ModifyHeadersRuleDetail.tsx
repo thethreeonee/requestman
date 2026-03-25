@@ -197,6 +197,7 @@ export default function ModifyHeadersRuleDetail({
 
   return <div>
     <RuleDetailToolbar
+      rule={workingRule}
       groups={groups}
       groupId={workingRule.groupId}
       enabled={workingRule.enabled}
@@ -204,12 +205,9 @@ export default function ModifyHeadersRuleDetail({
       onBack={onBack}
       onEnabledChange={(v) => toggleDetailRuleEnabled(workingRule.id, v)}
       onGroupChange={(v) => setWorkingRule({ ...workingRule, groupId: v })}
+      onRename={(name) => setWorkingRule({ ...workingRule, name })}
       onTest={() => setTestDrawerOpen(true)}
       onSave={saveDetailRule}
-      menuItems={[
-        { key: 'copy', label: t('复制', 'Duplicate'), onClick: () => setWorkingRule({ ...workingRule, id: genId(), name: `${workingRule.name} ${t('副本', 'Copy')}` }) },
-        { key: 'delete', label: t('删除', 'Delete'), danger: true, onClick: () => Modal.confirm({ title: t('确认删除规则？', 'Delete this rule?'), okButtonProps: { danger: true }, onOk: () => { setRules((prev) => prev.filter((r) => r.id !== workingRule.id)); setPageToList(); } }) },
-      ]}
     />
     <RuleNameHeader
       rule={workingRule}
