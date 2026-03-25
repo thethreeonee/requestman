@@ -209,7 +209,16 @@ html.dark .theme-toggle-icons .theme-icon-moon {
   width: 100%;
 }
 
+.sidebar-actions__rule > .sidebar-actions__trigger {
+  display: block;
+  width: 100%;
+}
+
 .sidebar-actions__group > span > button {
+  width: 100%;
+}
+
+.sidebar-actions__rule > .sidebar-actions__trigger > button {
   width: 100%;
 }
 
@@ -343,7 +352,15 @@ body.rule-pointer-dragging { cursor: grabbing; user-select: none; }
 .requestman-body-editor .cm-gutters { background: var(--rm-surface-bg); border-right: 1px solid var(--rm-border); }
 .requestman-body-editor .cm-focused { outline: none; }
 
-.rule-menu-group-title { display: flex; align-items: center; gap: 8px; width: 100%; color: var(--rm-text-secondary); }
+.rule-menu-group-label {
+  position: relative;
+  z-index: 3;
+  display: block;
+  background: var(--rm-elevated-bg);
+  isolation: isolate;
+}
+
+.rule-menu-group-title { display: flex; align-items: center; gap: 8px; width: 100%; color: var(--rm-text-secondary); background: var(--rm-elevated-bg); }
 .rule-menu-group-title__line { flex: 1; height: 1px; background: currentColor; opacity: 0.2; }
 .rule-name-link,
 .rule-name-link:focus,

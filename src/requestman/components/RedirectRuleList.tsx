@@ -137,7 +137,7 @@ function renderDropdownMenuItems(items: RequestmanDropdownMenuItem[], keyPrefix:
     if (item.type === 'group') {
       return (
         <DropdownMenuGroup key={item.key ?? `${keyPrefix}-group-${index}`}>
-          <DropdownMenuLabel>{item.label}</DropdownMenuLabel>
+          <DropdownMenuLabel className="rule-menu-group-label">{item.label}</DropdownMenuLabel>
           {(item.children ?? []).map((child, childIndex) => renderDropdownMenuItem(child, childIndex, `${keyPrefix}-group-${index}`))}
         </DropdownMenuGroup>
       );
@@ -689,7 +689,7 @@ export default function RedirectRuleList({
       <div className="sidebar-actions__rule">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <span>
+            <span className="sidebar-actions__trigger">
               <Button
                 type="primary"
                 className="sidebar-actions__button"
