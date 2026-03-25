@@ -1,5 +1,10 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
-import { App, Button, Modal, Segmented, Space, Switch, Typography } from './ui';
+import { App, Button, Dropdown, Modal, Space, Switch, Typography } from './ui';
+import { Moon, Sun } from 'lucide-react';
+import { Menu } from '@/components/animate-ui/icons/menu';
+import { Upload } from '@/components/animate-ui/icons/upload';
+import { Download } from '@/components/animate-ui/icons/download';
+import { ThemeToggler, type ThemeSelection } from '@/components/animate-ui/primitives/effects/theme-toggler';
 import {
   DEFAULT_GROUP_ID,
   REDIRECT_ENABLED_KEY,
@@ -50,10 +55,11 @@ export default function RequestmanPanel() {
   const [originalRule, setOriginalRule] = useState<RedirectRule | null>(null);
   const hasInitializedStorageSync = useRef(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
-  const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>('system');
+  const [themeMode, setThemeMode] = useState<'light' | 'dark'>('light');
   const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>('light');
   const [testUrl, setTestUrl] = useState('');
   const [testResult, setTestResult] = useState<ReturnType<typeof simulateRedirect> | null>(null);
+  const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
 
   useEffect(() => {
     chrome.storage.local.get([REDIRECT_RULES_KEY, REDIRECT_ENABLED_KEY, REDIRECT_GROUPS_KEY], (res) => {
@@ -77,11 +83,8 @@ export default function RequestmanPanel() {
   }, [groups, rules, redirectEnabled, rulesLoaded]);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const applyTheme = () => setEffectiveTheme(themeMode === 'system' ? (mediaQuery.matches ? 'dark' : 'light') : themeMode);
-    applyTheme();
-    mediaQuery.addEventListener('change', applyTheme);
-    return () => mediaQuery.removeEventListener('change', applyTheme);
+    setEffectiveTheme(themeMode);
+    document.documentElement.classList.toggle('dark', themeMode === 'dark');
   }, [themeMode]);
 
   const handleRedirectEnabledChange = (value: boolean) => {
@@ -442,29 +445,40 @@ export default function RequestmanPanel() {
 
   const groupNameMap = new Map(groups.map((group) => [group.id, group.name]));
 
-  return <div className="requestman-shell" data-theme={effectiveTheme}>
+  return <div className="requestman-shell">
     <input ref={importInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={onImportFileChange} />
     <div className="global-toolbar">
       <div className="toolbar-left-tools">
-        <span className="toolbar-logo" aria-hidden>◎</span>
-        <Typography.Text strong>Requestman</Typography.Text>
-        <Space size={8}>
-          <Typography.Text type="secondary">MASTER</Typography.Text>
-          <Switch checked={redirectEnabled} onChange={handleRedirectEnabledChange} />
-        </Space>
+        <img className="toolbar-logo" src="/assets/icon-source.png" alt="logo" style={{ width: 24, height: 24 }} />
+        <Typography.Text strong>REQUESTMAN</Typography.Text>
+        <Switch checked={redirectEnabled} onChange={handleRedirectEnabledChange} />
       </div>
       <div className="toolbar-right-tools">
-        <Button onClick={importConfig}>{t('导入配置', 'Import')}</Button>
-        <Button onClick={exportConfig}>{t('导出配置', 'Export')}</Button>
-        <Segmented
-          value={themeMode}
-          onChange={(value) => setThemeMode(value as 'light' | 'dark' | 'system')}
-          options={[
-            { label: 'Light', value: 'light' },
-            { label: 'Dark', value: 'dark' },
-            { label: 'System', value: 'system' },
-          ]}
-        />
+        <Dropdown
+          open={toolbarMenuOpen}
+          onOpenChange={setToolbarMenuOpen}
+          menu={{ items: [
+            { key: 'import', icon: <Download size={14} animateOnHover />, label: t('导入配置', 'Import'), onClick: importConfig },
+            { key: 'export', icon: <Upload size={14} animateOnHover />, label: t('导出配置', 'Export'), onClick: exportConfig },
+          ] }}
+        >
+          <Button size="sm" icon={<Menu size={16} animate={toolbarMenuOpen} />} />
+        </Dropdown>
+        <ThemeToggler
+          theme={themeMode}
+          resolvedTheme={effectiveTheme}
+          setTheme={(t) => setThemeMode(t as 'light' | 'dark')}
+        >
+          {({ toggleTheme }) => {
+            const next = effectiveTheme === 'light' ? 'dark' : 'light';
+            return <Button size="sm" onClick={() => toggleTheme(next)} icon={
+              <span className="theme-toggle-icons">
+                <Sun size={16} className="theme-icon-sun" />
+                <Moon size={16} className="theme-icon-moon" />
+              </span>
+            } />;
+          }}
+        </ThemeToggler>
       </div>
     </div>
 

@@ -12,25 +12,24 @@
   --rm-surface-bg: #f8f8f8;
   --rm-input-bg: #f0f0f0;
   --rm-elevated-bg: #ffffff;
-  --rm-active-bg: #f9e9e3;
+  --rm-active-bg: #f0f0f0;
   --rm-border: #e0e0e0;
   --rm-text-primary: #1a1a1a;
   --rm-text-secondary: #666666;
   --rm-text-tertiary: #999999;
   --rm-text-placeholder: #aaaaaa;
-  --rm-accent-primary: #cc4e26;
-  --rm-accent-soft-bg: #f9e9e3;
+  --rm-accent-primary: #1a1a1a;
+  --rm-accent-soft-bg: #f0f0f0;
   --rm-on-accent: #ffffff;
-  --rm-icon-accent-alt: #cc4e26;
+  --rm-icon-accent-alt: #1a1a1a;
 
   min-height: 100vh;
   background: var(--rm-page-bg);
   color: var(--rm-text-primary);
-  padding: var(--rm-space-16);
   box-sizing: border-box;
 }
 
-.requestman-shell[data-theme='dark'] {
+html.dark .requestman-shell {
   --rm-page-bg: #0c0c0c;
   --rm-content-bg: #0c0c0c;
   --rm-surface-bg: #141414;
@@ -42,10 +41,10 @@
   --rm-text-secondary: #999999;
   --rm-text-tertiary: #666666;
   --rm-text-placeholder: #555555;
-  --rm-accent-primary: #eec147;
-  --rm-accent-soft-bg: #333333;
-  --rm-on-accent: #ffffff;
-  --rm-icon-accent-alt: #ff8700;
+  --rm-accent-primary: #ffffff;
+  --rm-accent-soft-bg: #2a2a2a;
+  --rm-on-accent: #000000;
+  --rm-icon-accent-alt: #ffffff;
 }
 
 body {
@@ -54,10 +53,6 @@ body {
   background: transparent;
 }
 
-.global-toolbar,
-.main-sidebar,
-.main-editor,
-.main-test-panel,
 .rules-list-table,
 .rule-drag-preview__table,
 .requestman-body-editor {
@@ -67,12 +62,30 @@ body {
 }
 
 .global-toolbar {
+  background: var(--rm-content-bg);
+  border-bottom: 1px solid var(--rm-border);
+}
+
+.main-sidebar {
+  background: var(--rm-content-bg);
+  border-right: 1px solid var(--rm-border);
+}
+
+.main-editor {
+  background: var(--rm-content-bg);
+}
+
+.main-test-panel {
+  background: var(--rm-content-bg);
+  border-left: 1px solid var(--rm-border);
+}
+
+.global-toolbar {
   height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 var(--rm-space-16);
-  margin-bottom: var(--rm-space-16);
 }
 
 .toolbar-left-tools,
@@ -83,14 +96,42 @@ body {
 }
 
 .toolbar-logo {
-  color: var(--rm-icon-accent-alt);
+  display: block;
+}
+
+.theme-toggle-icons {
+  position: relative;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+
+.theme-toggle-icons .theme-icon-sun {
+  position: absolute;
+  inset: 0;
+  opacity: 1;
+  transition: none;
+}
+
+.theme-toggle-icons .theme-icon-moon {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: none;
+}
+
+html.dark .theme-toggle-icons .theme-icon-sun {
+  opacity: 0;
+}
+
+html.dark .theme-toggle-icons .theme-icon-moon {
+  opacity: 1;
 }
 
 .main-body-layout {
   display: grid;
   grid-template-columns: 320px 1fr 340px;
-  gap: var(--rm-space-16);
-  min-height: calc(100vh - 104px);
+  min-height: calc(100vh - 57px);
 }
 
 .main-sidebar,
@@ -173,10 +214,10 @@ body.rule-pointer-dragging { cursor: grabbing; user-select: none; }
 .requestman-shell .ant-switch.ant-switch-checked {
   background: var(--rm-accent-primary);
 }
-.requestman-shell[data-theme='dark'] .ant-switch.ant-switch-checked {
+html.dark .requestman-shell .ant-switch.ant-switch-checked {
   background: var(--rm-active-bg);
 }
-.requestman-shell[data-theme='dark'] .ant-switch.ant-switch-checked .ant-switch-handle::before {
+html.dark .requestman-shell .ant-switch.ant-switch-checked .ant-switch-handle::before {
   background: var(--rm-icon-accent-alt);
 }
 
@@ -184,17 +225,17 @@ body.rule-pointer-dragging { cursor: grabbing; user-select: none; }
 .aui-space.vertical { display: flex; flex-direction: column; align-items: stretch; }
 .aui-btn { border: 1px solid #d0d7de; background: #fff; border-radius: 10px; padding: 5px 10px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; transition: transform .2s ease, box-shadow .2s ease, background .2s ease; }
 .aui-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08); }
-.aui-btn-primary { background: #ff8700; color: #fff; border-color: #ff8700; }
-.aui-btn-link { border: none; background: transparent; color: #ff8700; box-shadow: none; }
+.aui-btn-primary { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+.aui-btn-link { border: none; background: transparent; color: #1a1a1a; box-shadow: none; }
 .aui-btn-text { border: none; background: transparent; box-shadow: none; }
 .aui-btn-danger { color: #c00; }
 .aui-input, .aui-select, .aui-textarea { border: 1px solid #d0d7de; border-radius: 10px; padding: 6px 8px; width: 100%; background: #fff; transition: border-color .2s ease, box-shadow .2s ease; }
-.aui-input:focus, .aui-select:focus, .aui-textarea:focus { outline: none; border-color: #ff8700; box-shadow: 0 0 0 3px rgba(255,135,0,.2); }
+.aui-input:focus, .aui-select:focus, .aui-textarea:focus { outline: none; border-color: #1a1a1a; box-shadow: 0 0 0 3px rgba(26,26,26,.15); }
 .aui-input-wrap { display: flex; gap: 6px; width: 100%; }
 .aui-compact { display: flex; gap: 6px; width: 100%; }
 .aui-addon { padding: 6px 8px; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 10px; }
 .aui-switch { width: 38px; height: 22px; border-radius: 999px; border: none; background: #c7d2da; padding: 2px; cursor: pointer; transition: background .2s ease; }
-.aui-switch.is-on { background: #ff8700; }
+.aui-switch.is-on { background: #1a1a1a; }
 .aui-switch-thumb { width: 18px; height: 18px; background: #fff; border-radius: 50%; display: block; transform: translateX(0); transition: transform .2s ease; }
 .aui-switch.is-on .aui-switch-thumb { transform: translateX(16px); }
 .aui-segmented { display: inline-flex; padding: 3px; background: #f1f5f9; border-radius: 12px; gap: 4px; }
@@ -214,6 +255,12 @@ body.rule-pointer-dragging { cursor: grabbing; user-select: none; }
 .aui-toast { color: #fff; border-radius: 10px; padding: 8px 10px; box-shadow: 0 12px 24px rgba(0,0,0,.2); animation: auiSlideDown .2s ease; }
 .aui-toast-success { background: #16a34a; }
 .aui-toast-warning { background: #f59e0b; }
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
 
 @keyframes auiFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes auiScaleIn { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }

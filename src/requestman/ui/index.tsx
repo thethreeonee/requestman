@@ -166,8 +166,14 @@ export function Tabs({ items, activeKey, onChange }: any) {
   return <div><div className="aui-space">{items.map((item: any) => <Button key={item.key} type={item.key === activeKey ? 'primary' : 'default'} onClick={() => onChange?.(item.key)}>{item.label}</Button>)}</div><div>{items.find((item: any) => item.key === activeKey)?.children}</div></div>;
 }
 
-export function Dropdown({ menu, children }: any) {
-  const [open, setOpen] = React.useState(false);
+export function Dropdown({ menu, children, open: openProp, onOpenChange }: any) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false);
+  const open = openProp ?? uncontrolledOpen;
+  const setOpen = (next: boolean | ((value: boolean) => boolean)) => {
+    const resolved = typeof next === 'function' ? next(open) : next;
+    if (openProp === undefined) setUncontrolledOpen(resolved);
+    onOpenChange?.(resolved);
+  };
   return (
     <span className="aui-dropdown">
       <span onClick={() => setOpen((v) => !v)}>{children}</span>
