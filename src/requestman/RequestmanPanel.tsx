@@ -17,13 +17,11 @@ import {
   hasModifyResponseBodyFunction,
   normalizeGroups,
   normalizeRules,
-  simulateRedirect,
 } from './rule-utils';
 import type { RedirectGroup, RedirectRule } from './types';
 import TopBar from './layout/top-bar';
 import Sidebar from './layout/sidebar';
 import ConfigArea from './layout/config-area';
-import TestArea from './layout/test-area';
 import type { RuleDetailProps } from './layout/config-area/types';
 import './index.css';
 
@@ -45,8 +43,6 @@ export default function RequestmanPanel() {
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [themeMode, setThemeMode] = useState<'light' | 'dark'>('light');
   const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>('light');
-  const [testUrl, setTestUrl] = useState('');
-  const [testResult, setTestResult] = useState<ReturnType<typeof simulateRedirect> | null>(null);
   const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -78,11 +74,6 @@ export default function RequestmanPanel() {
   const handleRedirectEnabledChange = (value: boolean) => {
     setRedirectEnabled(value);
     message.success(value ? t('总开关已开启', 'Master switch enabled') : t('总开关已关闭', 'Master switch disabled'));
-  };
-
-  const triggerRuleTest = () => {
-    const groupEnabledMap = new Map(groups.map((g) => [g.id, g.enabled]));
-    setTestResult(simulateRedirect(testUrl, rules, groupEnabledMap));
   };
 
   const openRuleDetail = (ruleId: string) => {
@@ -388,7 +379,6 @@ export default function RequestmanPanel() {
       message.error(t('导入失败，请检查配置文件格式', 'Import failed. Please check the config file format.'));
     }
   };
-  const groupNameMap = new Map(groups.map((group) => [group.id, group.name]));
   const detailProps: RuleDetailProps | null = currentRule
     ? {
       groups,
@@ -439,13 +429,6 @@ export default function RequestmanPanel() {
         messageApi={message}
       />
       <ConfigArea currentRule={currentRule} detailProps={detailProps} />
-      <TestArea
-        testUrl={testUrl}
-        setTestUrl={setTestUrl}
-        triggerTest={triggerRuleTest}
-        testResult={testResult}
-        groupNameMap={groupNameMap}
-      />
     </div>
   </div>;
 }

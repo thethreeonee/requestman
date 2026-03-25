@@ -78,11 +78,6 @@ body {
   background: var(--rm-content-bg);
 }
 
-.main-test-panel {
-  background: var(--rm-content-bg);
-  border-left: 1px solid var(--rm-border);
-}
-
 .global-toolbar {
   height: 56px;
   display: flex;
@@ -133,13 +128,12 @@ html.dark .theme-toggle-icons .theme-icon-moon {
 
 .main-body-layout {
   display: grid;
-  grid-template-columns: 352px 1fr 340px;
+  grid-template-columns: 352px minmax(0, 1fr);
   min-height: calc(100vh - 57px);
 }
 
 .main-sidebar,
-.main-editor,
-.main-test-panel {
+.main-editor {
   padding: var(--rm-space-12);
   min-height: 0;
 }
@@ -148,8 +142,7 @@ html.dark .theme-toggle-icons .theme-icon-moon {
   padding: 0;
 }
 
-.main-editor,
-.main-test-panel {
+.main-editor {
   overflow: auto;
 }
 
@@ -476,7 +469,6 @@ html.dark .requestman-shell .ant-switch.ant-switch-checked .ant-switch-handle::b
 .aui-segmented { display: inline-flex; padding: 3px; background: #f1f5f9; border-radius: 12px; gap: 4px; }
 .aui-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 999; animation: auiFade .18s ease; }
 .aui-modal { background: #fff; border-radius: 14px; min-width: 360px; max-width: 90vw; padding: 16px; display:flex; flex-direction:column; gap: 12px; animation: auiScaleIn .18s ease; }
-.aui-drawer { background: #fff; width: 420px; max-width: 90vw; height: 100vh; margin-left: auto; padding: 16px; overflow: auto; animation: auiSlideIn .22s ease; }
 .aui-table { width: 100%; border-collapse: collapse; }
 .aui-table th, .aui-table td { border-bottom: 1px solid #eaeef2; padding: 8px; text-align: left; }
 .aui-toast-stack { position: fixed; top: 12px; right: 12px; z-index: 1100; display: flex; flex-direction: column; gap: 8px; }
