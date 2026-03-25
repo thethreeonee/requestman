@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button as AnimateButton } from '@/components/animate-ui/components/buttons/button';
+import { Switch as AnimateSwitch } from '@/components/animate-ui/components/radix/switch';
 
 type MessagePayload = string | { content: string; duration?: number };
 type Notice = { id: string; type: 'success' | 'warning'; content: string };
@@ -94,9 +95,7 @@ export function Select({ options = [], value, onChange, style, disabled, placeho
 
 export function Switch({ checked, onChange, disabled }: any) {
   return (
-    <button type="button" className={`aui-switch ${checked ? 'is-on' : ''}`} disabled={disabled} onClick={() => onChange?.(!checked)}>
-      <span className="aui-switch-thumb" />
-    </button>
+    <AnimateSwitch checked={checked} onCheckedChange={onChange} disabled={disabled} />
   );
 }
 
