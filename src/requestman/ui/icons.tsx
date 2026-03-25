@@ -1,0 +1,29 @@
+import React from 'react';
+
+const icon = (symbol: string) => function Icon(props: React.HTMLAttributes<HTMLSpanElement>) { return <span {...props}>{symbol}</span>; };
+
+export const EditOutlined = icon('✏️');
+export const FilterOutlined = icon('🔎');
+export const PlusOutlined = icon('➕');
+export const DeleteOutlined = icon('🗑️');
+export const ReloadOutlined = icon('🔄');
+export const ArrowLeftOutlined = icon('⬅️');
+export const CheckOutlined = icon('✅');
+export const EllipsisOutlined = icon('⋯');
+export const CopyOutlined = icon('📄');
+export const FolderOpenOutlined = icon('📂');
+export const FolderAddOutlined = icon('📁');
+export const CaretRightOutlined = icon('▶');
+export const RetweetOutlined = icon('🔁');
+export const ApiOutlined = icon('🧩');
+export const CodeOutlined = icon('💻');
+export const InsertRowAboveOutlined = icon('↕️');
+export const FileSearchOutlined = icon('🔍');
+export const FileDoneOutlined = icon('📃');
+export const UserOutlined = icon('👤');
+export const StopOutlined = icon('⛔');
+export const ClockCircleOutlined = icon('🕒');
+export const FileOutlined = icon('📎');
+export const ExclamationCircleOutlined = icon('❗');
+export const LinkOutlined = icon('🔗');
+export const CloseCircleOutlined = icon('❌');

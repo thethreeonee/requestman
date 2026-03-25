@@ -10,7 +10,7 @@ import {
   Table,
   Tooltip,
   Typography,
-} from 'antd';
+} from '../ui';
 import { t } from '../i18n';
 import {
   CopyOutlined,
@@ -30,7 +30,7 @@ import {
   StopOutlined,
   ClockCircleOutlined,
   PlusOutlined,
-} from '@ant-design/icons';
+} from '../ui/icons';
 import { RULE_TYPE_LABEL_MAP } from '../constants';
 import { genId } from '../rule-utils';
 import type { RedirectGroup, RedirectRule } from '../types';

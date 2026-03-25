@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Modal, Typography } from 'antd';
+import { Modal, Typography } from '../ui';
 import { genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
 import type { RedirectGroup, RedirectRule } from '../types';
 import RuleDetailToolbar from './RuleDetailToolbar';

@@ -10,12 +10,12 @@ import {
   Space,
   Tabs,
   Tooltip,
-} from 'antd';
+} from '../ui';
 import { t } from '../i18n';
 import {
   DeleteOutlined,
   PlusOutlined,
-} from '@ant-design/icons';
+} from '../ui/icons';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../rule-utils';
 import type { HeaderModification, RedirectCondition, RedirectGroup, RedirectRule } from '../types';
 import ConditionUrlMatchEditor from './ConditionUrlMatchEditor';

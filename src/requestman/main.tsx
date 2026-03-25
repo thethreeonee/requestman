@@ -1,7 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { App, ConfigProvider } from 'antd';
-import 'antd/dist/reset.css';
+import { App, ConfigProvider } from './ui';
 import './index.css';
 import RequestmanPanel from './RequestmanPanel';
 
