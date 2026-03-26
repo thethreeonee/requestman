@@ -1,7 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import {
-  Input,
-} from '../../../components';
+import { Input } from '@/components/ui/input';
 import { t } from '../../../i18n';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
 import type { RedirectCondition } from '../../../types';

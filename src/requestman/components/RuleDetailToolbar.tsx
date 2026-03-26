@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
-import { Input } from '.';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Binary } from '@/components/animate-ui/icons/binary';
 import { Blend } from '@/components/animate-ui/icons/blend';
 import {
@@ -18,7 +25,6 @@ import { LayoutDashboard } from '@/components/animate-ui/icons/layout-dashboard'
 import { Orbit } from '@/components/animate-ui/icons/orbit';
 import { Route } from '@/components/animate-ui/icons/route';
 import { User } from '@/components/animate-ui/icons/user';
-import GroupDropdownSelect from './GroupDropdownSelect';
 import type { RedirectGroup, RedirectRule } from '../types';
 import { t } from '../i18n';
 
@@ -85,13 +91,16 @@ export default function RuleDetailToolbar({
         </Button>
       </div>
       <div className="aui-space">
-        <GroupDropdownSelect
-          value={groupId}
-          style={{ width: 220 }}
-          options={groups.map((g) => ({ value: g.id, label: `${t('规则组：', 'Group: ')}${g.name}` }))}
-          onChange={onGroupChange}
-          placeholder={t('规则组：请选择', 'Select group')}
-        />
+        <Select value={groupId || undefined} onValueChange={onGroupChange}>
+          <SelectTrigger style={{ width: 220 }}>
+            <SelectValue placeholder={t('规则组：请选择', 'Select group')} />
+          </SelectTrigger>
+          <SelectContent>
+            {groups.map((g) => (
+              <SelectItem key={g.id} value={g.id}>{t('规则组：', 'Group: ')}{g.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button variant="outline" onClick={onTest}>{t('测试', 'Test')}</Button>
         <Button
           variant="default"

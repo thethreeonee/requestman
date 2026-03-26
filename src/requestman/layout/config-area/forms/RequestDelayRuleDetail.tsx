@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { InputNumber } from '../../../components';
+import { Input } from '@/components/ui/input';
 import { t } from '../../../i18n';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
 import type { RedirectCondition } from '../../../types';
@@ -71,12 +71,12 @@ export default function RequestDelayRuleDetail({
           />
           <label style={{ display: 'block', marginBottom: 0 }}>
             <div>{t('延迟（ms）', 'Delay (ms)')}</div>
-            <InputNumber
+            <Input
+              type="number"
               style={{ width: '100%' }}
               min={0}
-              precision={0}
-              value={c.delayMs}
-              onChange={(value) => updateCondition(c.id, { delayMs: typeof value === 'number' ? value : 0 })}
+              value={c.delayMs ?? ''}
+              onChange={(e) => updateCondition(c.id, { delayMs: Number(e.target.value) || 0 })}
               placeholder={t('输入请求延迟时间', 'Enter request delay')}
             />
           </label>

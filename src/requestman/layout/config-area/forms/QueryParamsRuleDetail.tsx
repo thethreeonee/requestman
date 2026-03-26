@@ -1,9 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
+import { Input } from '@/components/ui/input';
 import {
-  Input,
   Select,
-} from '../../../components';
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { t } from '../../../i18n';
 import {
   DeleteOutlined,
@@ -112,10 +116,17 @@ export default function QueryParamsRuleDetail({
             <div key={modification.id} style={{ display: 'flex', gap: 6, width: '100%' }}>
               <Select
                 value={modification.action}
-                options={QUERY_ACTION_OPTIONS as never}
-                style={{ width: 100 }}
-                onChange={(value) => updateModification(c.id, modification.id, { action: value })}
-              />
+                onValueChange={(value) => updateModification(c.id, modification.id, { action: value })}
+              >
+                <SelectTrigger style={{ width: 100 }}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {QUERY_ACTION_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Input
                 placeholder={t('参数名', 'Parameter key')}
                 value={modification.key}

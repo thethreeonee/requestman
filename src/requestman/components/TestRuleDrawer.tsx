@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
-import { Input } from '.';
+import { Input } from '@/components/ui/input';
 import type { SimulateRuleResult } from '../rule-utils';
 import { t } from '../i18n';
 import {

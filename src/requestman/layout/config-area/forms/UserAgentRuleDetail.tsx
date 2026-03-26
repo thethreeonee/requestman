@@ -1,5 +1,14 @@
 import React, { useMemo, useState } from 'react';
-import { Input, Select } from '../../../components';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { t } from '../../../i18n';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
 import type { RedirectCondition } from '../../../types';
@@ -102,24 +111,41 @@ export default function UserAgentRuleDetail({
             onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
           />
           <div style={{ display: 'flex', gap: 6, width: '100%' }}>
-            <Select
-              value={c.userAgentType ?? 'device'}
-              options={USER_AGENT_TYPE_OPTIONS as never}
-              style={{ width: 110 }}
-              onChange={(value) => onUserAgentTypeChange(c, value)}
-            />
+            <Select value={c.userAgentType ?? 'device'} onValueChange={(value) => onUserAgentTypeChange(c, value as UserAgentType)}>
+              <SelectTrigger style={{ width: 110 }}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {USER_AGENT_TYPE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             {c.userAgentType === 'custom' ? <Input
               style={{ flex: 1, minWidth: 0 }}
               placeholder={t('请输入自定义 User-Agent', 'Enter custom User-Agent')}
               value={c.userAgentCustomValue ?? ''}
               onChange={(e) => updateCondition(c.id, { userAgentCustomValue: e.target.value })}
-            /> : <Select
-              style={{ flex: 1, minWidth: 0 }}
-              placeholder={t('请选择 User-Agent', 'Select User-Agent')}
-              value={c.userAgentPresetKey}
-              options={(c.userAgentType ?? 'device') === 'browser' ? BROWSER_PRESET_GROUP_OPTIONS : DEVICE_PRESET_GROUP_OPTIONS as never}
-              onChange={(value) => updateCondition(c.id, { userAgentPresetKey: value })}
-            />}
+            /> : (
+              <Select
+                value={c.userAgentPresetKey || undefined}
+                onValueChange={(value) => updateCondition(c.id, { userAgentPresetKey: value })}
+              >
+                <SelectTrigger style={{ flex: 1, minWidth: 0 }}>
+                  <SelectValue placeholder={t('请选择 User-Agent', 'Select User-Agent')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {((c.userAgentType ?? 'device') === 'browser' ? BROWSER_PRESET_GROUP_OPTIONS : DEVICE_PRESET_GROUP_OPTIONS).map((group) => (
+                    <SelectGroup key={group.key}>
+                      <SelectLabel>{group.label}</SelectLabel>
+                      {group.options.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
           <span style={{ fontSize: 12, opacity: 0.7 }}>
             {(c.userAgentType ?? 'device') === 'custom'

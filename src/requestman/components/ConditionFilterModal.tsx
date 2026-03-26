@@ -12,8 +12,16 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/animate-ui/components/radix/tooltip';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { AutoComplete } from './AutoComplete';
 import { ReloadOutlined } from '../icons';
-import { AutoComplete, Input, Select } from '.';
 import { t } from '../i18n';
 import {
   COMMON_HEADER_OPTIONS,
@@ -83,11 +91,19 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
             <div className="aui-compact">
               <Select
                 value={condition.filter.resourceType}
-                options={RESOURCE_TYPE_OPTIONS as never}
-                onChange={(v) => onConditionChange(condition.id, {
+                onValueChange={(v) => onConditionChange(condition.id, {
                   filter: { ...condition.filter, resourceType: v },
                 })}
-              />
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {RESOURCE_TYPE_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {renderResetButton(t('重置资源类型', 'Reset resource type'), () => onConditionChange(condition.id, {
                 filter: { ...condition.filter, resourceType: 'all' },
               }))}
@@ -99,11 +115,19 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
             <div className="aui-compact">
               <Select
                 value={condition.filter.requestMethod}
-                options={REQUEST_METHOD_OPTIONS as never}
-                onChange={(v) => onConditionChange(condition.id, {
+                onValueChange={(v) => onConditionChange(condition.id, {
                   filter: { ...condition.filter, requestMethod: v },
                 })}
-              />
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {REQUEST_METHOD_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {renderResetButton(t('重置请求方法', 'Reset request method'), () => onConditionChange(condition.id, {
                 filter: { ...condition.filter, requestMethod: 'all' },
               }))}
@@ -124,12 +148,19 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
               />
               <Select
                 value={condition.filter.requestHeaderOperator}
-                options={REQUEST_HEADER_FILTER_OPERATOR_OPTIONS as never}
-                style={{ width: '22%' }}
-                onChange={(value) => onConditionChange(condition.id, {
+                onValueChange={(value) => onConditionChange(condition.id, {
                   filter: { ...condition.filter, requestHeaderOperator: value },
                 })}
-              />
+              >
+                <SelectTrigger style={{ width: '22%' }}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {REQUEST_HEADER_FILTER_OPERATOR_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Input
                 value={condition.filter.requestHeaderValue}
                 placeholder={t('目标值', 'Target value')}

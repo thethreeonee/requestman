@@ -6,7 +6,14 @@ import {
   TooltipTrigger,
 } from '@/components/animate-ui/components/radix/tooltip';
 import { ChevronsUpDown } from 'lucide-react';
-import { Input } from '.';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Switch } from '@/components/animate-ui/components/radix/switch';
 import {
   AlertDialog,
@@ -63,7 +70,6 @@ import { RULE_TYPE_LABEL_MAP } from '../constants';
 import { Orbit } from '@/components/animate-ui/icons/orbit';
 import { Route } from '@/components/animate-ui/icons/route';
 import { User } from '@/components/animate-ui/icons/user';
-import GroupDropdownSelect from './GroupDropdownSelect';
 import { genId } from '../rule-utils';
 import type { RedirectGroup, RedirectRule } from '../types';
 import type { NotificationApi } from './AppProvider';
@@ -848,13 +854,16 @@ export default function RedirectRuleList({
           <DialogTitle>{groupDialogTitle}</DialogTitle>
         </DialogHeader>
         {groupModal.mode === 'move' ? (
-          <GroupDropdownSelect
-            style={{ width: '100%' }}
-            options={groupsOptions}
-            value={groupInput}
-            onChange={setGroupInput}
-            placeholder={t('请选择规则组', 'Select a group')}
-          />
+          <Select value={groupInput || undefined} onValueChange={setGroupInput}>
+            <SelectTrigger style={{ width: '100%' }}>
+              <SelectValue placeholder={t('请选择规则组', 'Select a group')} />
+            </SelectTrigger>
+            <SelectContent>
+              {groupsOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         ) : (
           <div style={{ width: '100%' }}>
             <Input

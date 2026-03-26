@@ -5,11 +5,15 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/animate-ui/components/radix/tooltip';
+import { Input } from '@/components/ui/input';
 import {
-  AutoComplete,
-  Input,
   Select,
-} from '../../../components';
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { AutoComplete } from '../../../components/AutoComplete';
 import { Tabs, TabsList, TabsTrigger, TabsContents, TabsContent } from '@/components/animate-ui/components/animate/tabs';
 import { t } from '../../../i18n';
 import {
@@ -161,10 +165,17 @@ export default function ModifyHeadersRuleDetail({
         <div key={modification.id} style={{ display: 'flex', gap: 6, width: '100%' }}>
           <Select
             value={modification.action}
-            options={HEADER_ACTION_OPTIONS as never}
-            style={{ width: 100 }}
-            onChange={(value) => updateHeaderModification(condition.id, tabKey, modification.id, { action: value })}
-          />
+            onValueChange={(value) => updateHeaderModification(condition.id, tabKey, modification.id, { action: value })}
+          >
+            <SelectTrigger style={{ width: 100 }}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {HEADER_ACTION_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <AutoComplete
             style={{ width: 400 }}
             options={HEADER_OPTIONS}
