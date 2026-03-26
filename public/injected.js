@@ -6,7 +6,6 @@
  */
 (() => {
   const MESSAGE_TYPE = '__REQUESTMAN_RUNTIME_RULES__';
-  const HIT_MESSAGE_TYPE = '__REQUESTMAN_RULE_HIT__';
   const SOURCE = 'requestman-extension';
   let delayRules = [];
   let modifyRequestBodyRules = [];
@@ -137,15 +136,10 @@
   }
 
   function reportRuleHit(rule) {
-    window.postMessage({
-      source: SOURCE,
-      type: HIT_MESSAGE_TYPE,
-      payload: {
-        ruleId: typeof rule?.ruleId === 'string' ? rule.ruleId : '',
-        ruleName: typeof rule?.ruleName === 'string' ? rule.ruleName : '',
-        ruleType: typeof rule?.ruleType === 'string' ? rule.ruleType : 'redirect_request',
-      },
-    }, '*');
+    const ruleType = typeof rule?.ruleType === 'string' ? rule.ruleType : 'redirect_request';
+    const ruleName = typeof rule?.ruleName === 'string' ? rule.ruleName.trim() : '';
+    if (!ruleName) return;
+    console.log(`[🔀 REQUESTMAN] 🧭 Rule hit: ${ruleType} ::: ${ruleName}`);
   }
 
   function getDelayMs(url, method, resourceType, headers) {
