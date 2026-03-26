@@ -3,6 +3,12 @@
   const RULES_KEY = 'asap_redirect_rules_v1';
   const GROUPS_KEY = 'asap_redirect_groups_v1';
   const ENABLED_KEY = 'asap_redirect_enabled_v1';
+  function logRuleHit(record) {
+    const ruleType = typeof record?.ruleType === 'string' ? record.ruleType : 'redirect_request';
+    const ruleName = typeof record?.ruleName === 'string' ? record.ruleName.trim() : '';
+    if (!ruleName) return;
+    console.log(`[🔀 REQUESTMAN] 🧭 Rule hit: ${ruleType} ::: ${ruleName}`);
+  }
 
   function isGroupEnabled(groupEnabled, groupId) {
     if (!groupId) return true;
@@ -148,5 +154,11 @@
     if (!(RULES_KEY in changes) && !(GROUPS_KEY in changes) && !(ENABLED_KEY in changes)) return;
     broadcastRules();
   });
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (!message || message.type !== 'requestman:rule-hit') return;
+    logRuleHit(message.payload || {});
+  });
+
   broadcastRules();
 })();
