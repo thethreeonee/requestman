@@ -1,9 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import {
-  Input,
-  Select,
-  Typography,
-} from '../../../components';
+import { Input, Select } from '../../../components';
 import { t } from '../../../i18n';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
 import type { RedirectCondition } from '../../../types';
@@ -125,14 +121,14 @@ export default function UserAgentRuleDetail({
               onChange={(value) => updateCondition(c.id, { userAgentPresetKey: value })}
             />}
           </div>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          <span style={{ fontSize: 12, opacity: 0.7 }}>
             {(c.userAgentType ?? 'device') === 'custom'
               ? (c.userAgentCustomValue?.trim() ? `将设置为：${c.userAgentCustomValue.trim()}` : t('请输入自定义 User-Agent', 'Enter custom User-Agent'))
               : (() => {
                 const value = getUserAgentByPresetKey(c.userAgentPresetKey ?? '');
                 return value ? `将设置为：${value}` : t('请选择 User-Agent', 'Select User-Agent');
               })()}
-          </Typography.Text>
+          </span>
         </div>
       )}
     />

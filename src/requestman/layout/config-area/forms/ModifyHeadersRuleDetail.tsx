@@ -9,8 +9,8 @@ import {
   AutoComplete,
   Input,
   Select,
-  Tabs,
 } from '../../../components';
+import { Tabs, TabsList, TabsTrigger, TabsContents, TabsContent } from '@/components/animate-ui/components/animate/tabs';
 import { t } from '../../../i18n';
 import {
   DeleteOutlined,
@@ -220,20 +220,16 @@ export default function ModifyHeadersRuleDetail({
             onConditionChange={(patch) => updateCondition(c.id, patch)}
             onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
           />
-          <Tabs
-            items={[
-              {
-                key: 'requestHeaderModifications',
-                label: t('请求 Headers', 'Request headers'),
-                children: renderHeaderTabContent(c, 'requestHeaderModifications'),
-              },
-              {
-                key: 'responseHeaderModifications',
-                label: t('响应 Headers', 'Response headers'),
-                children: renderHeaderTabContent(c, 'responseHeaderModifications'),
-              },
-            ]}
-          />
+          <Tabs defaultValue="requestHeaderModifications">
+            <TabsList>
+              <TabsTrigger value="requestHeaderModifications">{t('请求 Headers', 'Request headers')}</TabsTrigger>
+              <TabsTrigger value="responseHeaderModifications">{t('响应 Headers', 'Response headers')}</TabsTrigger>
+            </TabsList>
+            <TabsContents>
+              <TabsContent value="requestHeaderModifications">{renderHeaderTabContent(c, 'requestHeaderModifications')}</TabsContent>
+              <TabsContent value="responseHeaderModifications">{renderHeaderTabContent(c, 'responseHeaderModifications')}</TabsContent>
+            </TabsContents>
+          </Tabs>
         </div>
       )}
     />

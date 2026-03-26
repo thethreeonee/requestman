@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
-import { Switch, Typography } from '../../components';
+import { Switch } from '@/components/animate-ui/components/radix/switch';
 import { Moon, Sun } from 'lucide-react';
 import { Menu } from '@/components/animate-ui/icons/menu';
 import { Upload } from '@/components/animate-ui/icons/upload';
@@ -41,8 +41,8 @@ export default function TopBar({
     <div className="global-toolbar">
       <div className="toolbar-left-tools">
         <img className="toolbar-logo" src="/assets/icon-source.png" alt="logo" style={{ width: 24, height: 24 }} />
-        <Typography.Text strong>REQUESTMAN</Typography.Text>
-        <Switch checked={redirectEnabled} onChange={onRedirectEnabledChange} />
+        <strong>REQUESTMAN</strong>
+        <Switch checked={redirectEnabled} onCheckedChange={onRedirectEnabledChange} />
       </div>
       <div className="toolbar-right-tools">
         <DropdownMenu open={toolbarMenuOpen} onOpenChange={setToolbarMenuOpen}>

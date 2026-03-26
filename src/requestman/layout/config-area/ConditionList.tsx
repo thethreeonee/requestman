@@ -7,7 +7,16 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/animate-ui/components/radix/accordion';
-import { Popconfirm } from '../../components';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/animate-ui/components/radix/alert-dialog';
 import { t } from '../../i18n';
 import { PlusOutlined } from '../../icons';
 import type { RedirectCondition } from '../../types';
@@ -35,35 +44,36 @@ export default function ConditionList({ conditions, onAdd, onRemove, renderConte
             <AccordionTrigger className="px-4">
               <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'space-between' }}>
                 <span>{t('请求条件配置', 'Request conditions')}</span>
-                <Popconfirm
-                  title={t('确认删除该条件配置？', 'Delete this condition?')}
-                  okText={t('删除', 'Delete')}
-                  cancelText={t('取消', 'Cancel')}
-                  okButtonProps={{ danger: true, type: 'primary' }}
-                  onCancel={(e) => e?.stopPropagation()}
-                  onConfirm={(e) => {
-                    e?.stopPropagation();
-                    onRemove(c.id);
-                  }}
-                >
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    aria-label={t('删除条件', 'Delete condition')}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }
-                    }}
-                    style={{ color: '#ff4d4f', cursor: 'pointer', padding: '0 4px' }}
-                  >
-                    <Trash2 size={14} />
-                  </span>
-                </Popconfirm>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label={t('删除条件', 'Delete condition')}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }
+                      }}
+                      style={{ color: '#ff4d4f', cursor: 'pointer', padding: '0 4px' }}
+                    >
+                      <Trash2 size={14} />
+                    </span>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>{t('确认删除该条件配置？', 'Delete this condition?')}</AlertDialogTitle>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>{t('取消', 'Cancel')}</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => onRemove(c.id)}>{t('删除', 'Delete')}</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             </AccordionTrigger>
             <AccordionContent className="px-4 pt-2">

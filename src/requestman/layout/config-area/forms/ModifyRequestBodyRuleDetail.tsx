@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
-  FieldGroup,
   RadioGroup,
-} from '../../../components';
+  RadioGroupItem,
+} from '@/components/animate-ui/components/radix/radio-group';
 import { t } from '../../../i18n';
 import {
   createDefaultCondition,
@@ -114,23 +114,22 @@ export default function ModifyRequestBodyRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <FieldGroup label={t('修改方式', 'Modify mode')} style={{ marginBottom: 8 }}>
-              <RadioGroup
-                value={c.requestBodyMode}
-                onChange={(e) => updateConditionMode(c.id, e.target.value)}
-                options={[
+            <label style={{ display: 'block', marginBottom: 8 }}>
+              <div>{t('修改方式', 'Modify mode')}</div>
+              <RadioGroup value={c.requestBodyMode} onValueChange={(v) => updateConditionMode(c.id, v)} className="aui-space">
+                {[
                   { label: t('静态数据', 'Static'), value: 'static' },
                   { label: t('动态（JavaScript）', 'Dynamic (JavaScript)'), value: 'dynamic' },
-                ]}
-              />
-            </FieldGroup>
-            <FieldGroup
-              label={c.requestBodyMode === 'dynamic' ? t('JavaScript 代码', 'JavaScript code') : t('替换后的请求体', 'Replaced request body')}
-              validateStatus={dynamicScriptError ? 'error' : ''}
-              help={dynamicScriptError ?? (c.requestBodyMode === 'dynamic' ? t('需定义 modifyRequestBody(args) 并返回最终请求体', 'Define modifyRequestBody(args) and return the final request body.') : t('命中后会直接替换原始请求 body', 'Will directly replace the original request body when matched.'))}
-              layout="vertical"
-              style={{ marginBottom: 0 }}
-            >
+                ].map((opt) => (
+                  <label key={opt.value} className="flex items-center gap-2">
+                    <RadioGroupItem value={opt.value} />
+                    <span>{opt.label}</span>
+                  </label>
+                ))}
+              </RadioGroup>
+            </label>
+            <label style={{ display: 'block', marginBottom: 0 }}>
+              <div>{c.requestBodyMode === 'dynamic' ? t('JavaScript 代码', 'JavaScript code') : t('替换后的请求体', 'Replaced request body')}</div>
               <CodeEditor
                 mode={c.requestBodyMode}
                 value={c.requestBodyMode === 'dynamic' ? c.requestBodyDynamicValue : c.requestBodyStaticValue}
@@ -138,7 +137,12 @@ export default function ModifyRequestBodyRuleDetail({
                   ? { requestBodyDynamicValue: value, requestBodyValue: value }
                   : { requestBodyStaticValue: value, requestBodyValue: value })}
               />
-            </FieldGroup>
+              {(dynamicScriptError ?? (c.requestBodyMode === 'dynamic' ? t('需定义 modifyRequestBody(args) 并返回最终请求体', 'Define modifyRequestBody(args) and return the final request body.') : t('命中后会直接替换原始请求 body', 'Will directly replace the original request body when matched.'))) ? (
+                <div style={{ marginTop: 4, fontSize: 12, opacity: dynamicScriptError ? 1 : 0.75, color: dynamicScriptError ? '#c00' : undefined }}>
+                  {dynamicScriptError ?? (c.requestBodyMode === 'dynamic' ? t('需定义 modifyRequestBody(args) 并返回最终请求体', 'Define modifyRequestBody(args) and return the final request body.') : t('命中后会直接替换原始请求 body', 'Will directly replace the original request body when matched.'))}
+                </div>
+              ) : null}
+            </label>
           </div>
         );
       }}

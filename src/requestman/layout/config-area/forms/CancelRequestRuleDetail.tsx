@@ -1,7 +1,4 @@
 import React, { useMemo, useState } from 'react';
-import {
-  Typography,
-} from '../../../components';
 import { t } from '../../../i18n';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
 import type { RedirectCondition } from '../../../types';
@@ -70,7 +67,7 @@ export default function CancelRequestRuleDetail({
             onConditionChange={(patch) => updateCondition(c.id, patch)}
             onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
           />
-          <Typography.Text type="secondary">{t('命中该 URL 条件后，将直接取消请求。', 'When this URL condition matches, the request will be cancelled immediately.')}</Typography.Text>
+          <span style={{ opacity: 0.7 }}>{t('命中该 URL 条件后，将直接取消请求。', 'When this URL condition matches, the request will be cancelled immediately.')}</span>
         </div>
       )}
     />

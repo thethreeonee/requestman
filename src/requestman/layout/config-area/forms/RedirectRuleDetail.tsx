@@ -1,9 +1,10 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
+import { Input } from '../../../components';
 import {
-  Input,
   RadioGroup,
-} from '../../../components';
+  RadioGroupItem,
+} from '@/components/animate-ui/components/radix/radio-group';
 import { t } from '../../../i18n';
 import {
   FileOutlined,
@@ -112,14 +113,17 @@ export default function RedirectRuleDetail({
             onConditionChange={(patch) => updateCondition(c.id, patch)}
             onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
           />
-          <RadioGroup
-            value={c.redirectType}
-            onChange={(e) => updateRedirectType(c, e.target.value as 'url' | 'file')}
-            options={[
+          <RadioGroup value={c.redirectType} onValueChange={(v) => updateRedirectType(c, v as 'url' | 'file')} className="aui-space">
+            {[
               { label: 'URL', value: 'url' },
               { label: t('本地文件', 'Local file'), value: 'file' },
-            ]}
-          />
+            ].map((opt) => (
+              <label key={opt.value} className="flex items-center gap-2">
+                <RadioGroupItem value={opt.value} />
+                <span>{opt.label}</span>
+              </label>
+            ))}
+          </RadioGroup>
           {c.redirectType === 'file'
             ? <>
               <div style={{ display: 'flex', gap: 6, width: '100%' }}>

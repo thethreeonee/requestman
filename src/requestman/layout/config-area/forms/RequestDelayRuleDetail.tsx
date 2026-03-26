@@ -1,9 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import {
-  FieldGroup,
-  InputNumber,
-  Typography,
-} from '../../../components';
+import { InputNumber } from '../../../components';
 import { t } from '../../../i18n';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
 import type { RedirectCondition } from '../../../types';
@@ -73,7 +69,8 @@ export default function RequestDelayRuleDetail({
             onConditionChange={(patch) => updateCondition(c.id, patch)}
             onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
           />
-          <FieldGroup label={t('延迟（ms）', 'Delay (ms)')} style={{ marginBottom: 0 }}>
+          <label style={{ display: 'block', marginBottom: 0 }}>
+            <div>{t('延迟（ms）', 'Delay (ms)')}</div>
             <InputNumber
               style={{ width: '100%' }}
               min={0}
@@ -82,8 +79,8 @@ export default function RequestDelayRuleDetail({
               onChange={(value) => updateCondition(c.id, { delayMs: typeof value === 'number' ? value : 0 })}
               placeholder={t('输入请求延迟时间', 'Enter request delay')}
             />
-          </FieldGroup>
-          <Typography.Text type="secondary">{t('命中该 URL 条件后，请求将延迟指定毫秒数再继续。', 'When this URL condition matches, the request will continue after the specified delay.')}</Typography.Text>
+          </label>
+          <span style={{ opacity: 0.7 }}>{t('命中该 URL 条件后，请求将延迟指定毫秒数再继续。', 'When this URL condition matches, the request will continue after the specified delay.')}</span>
         </div>
       )}
     />
