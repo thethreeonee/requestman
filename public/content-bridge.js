@@ -503,12 +503,14 @@
     const data = event.data;
     if (!data || data.source !== 'requestman-extension' || data.type !== HIT_MESSAGE_TYPE) return;
     const payload = data.payload || {};
+    logRuleHit(payload);
     renderHitRecord(payload);
     forwardInjectedHit(payload);
   });
 
   chrome.runtime.onMessage.addListener((message) => {
     if (!message || message.type !== 'requestman:rule-hit') return;
+    logRuleHit(message.payload || {});
     renderHitRecord(message.payload || {});
   });
 
