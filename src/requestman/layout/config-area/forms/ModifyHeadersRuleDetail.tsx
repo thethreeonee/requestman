@@ -6,18 +6,10 @@ import {
   TooltipTrigger,
 } from '@/components/animate-ui/components/radix/tooltip';
 import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/animate-ui/components/radix/accordion';
-import {
   AutoComplete,
   Input,
   Modal,
-  Popconfirm,
   Select,
-  Space,
   Tabs,
 } from '../../../components';
 import { t } from '../../../i18n';
@@ -30,6 +22,7 @@ import type { HeaderModification, RedirectCondition } from '../../../types';
 import ConditionUrlMatchEditor from '../../../components/ConditionUrlMatchEditor';
 import TestRuleDrawer from '../../../components/TestRuleDrawer';
 import ConditionFilterModal, { isConditionFilterConfigured } from '../../../components/ConditionFilterModal';
+import ConditionList from '../ConditionList';
 import RuleDetailHeader from '../RuleDetailHeader';
 import type { RuleDetailProps as Props } from '../types';
 
@@ -105,7 +98,6 @@ export default function ModifyHeadersRuleDetail({
   const [testUrl, setTestUrl] = useState('');
   const [testResult, setTestResult] = useState<SimulateRuleResult | null>(null);
   const [filterModal, setFilterModal] = useState<{ open: boolean; conditionId?: string }>({ open: false });
-  const [openConditions, setOpenConditions] = useState<string[]>(() => workingRule.conditions.map((c) => c.id));
   const currentGroupEnabled = useMemo(() => new Map(groups.map((g) => [g.id, g.enabled])), [groups]);
 
   const updateCondition = (conditionId: string, patch: Partial<RedirectCondition>) => {
@@ -165,9 +157,9 @@ export default function ModifyHeadersRuleDetail({
     condition: RedirectCondition,
     tabKey: 'requestHeaderModifications' | 'responseHeaderModifications',
   ) => (
-    <Space direction="vertical" style={{ width: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
       {condition[tabKey].map((modification) => (
-        <Space.Compact key={modification.id} style={{ width: '100%' }}>
+        <div key={modification.id} style={{ display: 'flex', gap: 6, width: '100%' }}>
           <Select
             value={modification.action}
             options={HEADER_ACTION_OPTIONS as never}
@@ -198,10 +190,10 @@ export default function ModifyHeadersRuleDetail({
           <Button variant="destructive" size="icon" onClick={() => removeHeaderModification(condition.id, tabKey, modification.id)}>
             <DeleteOutlined />
           </Button>
-        </Space.Compact>
+        </div>
       ))}
       <Button variant="outline" onClick={() => addHeaderModification(condition.id, tabKey)}><PlusOutlined />{t('添加 Header', 'Add header')}</Button>
-    </Space>
+    </div>
   );
 
   return <div>
@@ -213,82 +205,39 @@ export default function ModifyHeadersRuleDetail({
       saveDetailRule={saveDetailRule}
       onTest={() => setTestDrawerOpen(true)}
     />
-    <Accordion type="multiple" value={openConditions} onValueChange={setOpenConditions}>
-      {workingRule.conditions.map((c) => (
-        <AccordionItem key={c.id} value={c.id} className="mb-3 border rounded-lg overflow-hidden">
-          <AccordionTrigger className="px-4 hover:no-underline">
-            <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'space-between' }}>
-              <span>{t('请求条件配置', 'Request conditions')}</span>
-              <Popconfirm
-                title={t('确认删除该条件配置？', 'Delete this condition?')}
-                okText={t('删除', 'Delete')}
-                cancelText={t('取消', 'Cancel')}
-                okButtonProps={{ danger: true, type: 'primary' }}
-                onCancel={(e) => e?.stopPropagation()}
-                onConfirm={(e) => {
-                  e?.stopPropagation();
-                  removeCondition(c.id);
-                }}
-              >
-                <span
-                  role="button"
-                  tabIndex={0}
-                  aria-label={t('删除条件', 'Delete condition')}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                    }
-                  }}
-                  style={{ color: '#ff4d4f', cursor: 'pointer', padding: '0 4px' }}
-                >
-                  <DeleteOutlined />
-                </span>
-              </Popconfirm>
-            </div>
-          </AccordionTrigger>
-          <AccordionContent className="px-4">
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <ConditionUrlMatchEditor
-                condition={c}
-                filterConfigured={isConditionFilterConfigured(c)}
-                onConditionChange={(patch) => updateCondition(c.id, patch)}
-                onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
-              />
-              <Tabs
-                items={[
-                  {
-                    key: 'requestHeaderModifications',
-                    label: t('请求 Headers', 'Request headers'),
-                    children: renderHeaderTabContent(c, 'requestHeaderModifications'),
-                  },
-                  {
-                    key: 'responseHeaderModifications',
-                    label: t('响应 Headers', 'Response headers'),
-                    children: renderHeaderTabContent(c, 'responseHeaderModifications'),
-                  },
-                ]}
-              />
-            </Space>
-          </AccordionContent>
-        </AccordionItem>
-      ))}
-    </Accordion>
-    <Button
-      variant="outline"
-      style={{ marginTop: 12, width: '100%', height: 40, background: 'transparent' }}
-      onClick={() => {
+    <ConditionList
+      conditions={workingRule.conditions}
+      onAdd={() => {
         const newCondition = createDefaultCondition();
         setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, newCondition] });
-        setOpenConditions((prev) => [...prev, newCondition.id]);
+        return newCondition.id;
       }}
-    >
-      <PlusOutlined />
-      {t('添加新条件配置', 'Add condition')}
-    </Button>
+      onRemove={removeCondition}
+      renderContent={(c) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+          <ConditionUrlMatchEditor
+            condition={c}
+            filterConfigured={isConditionFilterConfigured(c)}
+            onConditionChange={(patch) => updateCondition(c.id, patch)}
+            onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+          />
+          <Tabs
+            items={[
+              {
+                key: 'requestHeaderModifications',
+                label: t('请求 Headers', 'Request headers'),
+                children: renderHeaderTabContent(c, 'requestHeaderModifications'),
+              },
+              {
+                key: 'responseHeaderModifications',
+                label: t('响应 Headers', 'Response headers'),
+                children: renderHeaderTabContent(c, 'responseHeaderModifications'),
+              },
+            ]}
+          />
+        </div>
+      )}
+    />
     <TestRuleDrawer
       open={testDrawerOpen}
       testUrl={testUrl}

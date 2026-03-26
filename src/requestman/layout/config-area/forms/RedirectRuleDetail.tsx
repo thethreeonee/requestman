@@ -1,29 +1,20 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
 import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/animate-ui/components/radix/accordion';
-import {
   Input,
   Modal,
-  Popconfirm,
   Radio,
-  Space,
 } from '../../../components';
 import { t } from '../../../i18n';
 import {
-  DeleteOutlined,
   FileOutlined,
-  PlusOutlined,
 } from '../../../icons';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
 import type { RedirectCondition } from '../../../types';
 import ConditionUrlMatchEditor from '../../../components/ConditionUrlMatchEditor';
 import TestRuleDrawer from '../../../components/TestRuleDrawer';
 import ConditionFilterModal, { isConditionFilterConfigured } from '../../../components/ConditionFilterModal';
+import ConditionList from '../ConditionList';
 import RuleDetailHeader from '../RuleDetailHeader';
 import type { RuleDetailProps as Props } from '../types';
 
@@ -41,7 +32,6 @@ export default function RedirectRuleDetail({
   const [testUrl, setTestUrl] = useState('');
   const [testResult, setTestResult] = useState<SimulateRuleResult | null>(null);
   const [filterModal, setFilterModal] = useState<{ open: boolean; conditionId?: string }>({ open: false });
-  const [openConditions, setOpenConditions] = useState<string[]>(() => workingRule.conditions.map((c) => c.id));
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const getRedirectTarget = (condition: RedirectCondition) => (condition.redirectType === 'file'
@@ -107,87 +97,44 @@ export default function RedirectRuleDetail({
       saveDetailRule={saveDetailRule}
       onTest={() => setTestDrawerOpen(true)}
     />
-    <Accordion type="multiple" value={openConditions} onValueChange={setOpenConditions}>
-      {workingRule.conditions.map((c) => (
-        <AccordionItem key={c.id} value={c.id} className="mb-3 border rounded-lg overflow-hidden">
-          <AccordionTrigger className="px-4 hover:no-underline">
-            <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'space-between' }}>
-              <span>{t('请求条件配置', 'Request conditions')}</span>
-              <Popconfirm
-                title={t('确认删除该条件配置？', 'Delete this condition?')}
-                okText={t('删除', 'Delete')}
-                cancelText={t('取消', 'Cancel')}
-                okButtonProps={{ danger: true, type: 'primary' }}
-                onCancel={(e) => e?.stopPropagation()}
-                onConfirm={(e) => {
-                  e?.stopPropagation();
-                  removeCondition(c.id);
-                }}
-              >
-                <span
-                  role="button"
-                  tabIndex={0}
-                  aria-label={t('删除条件', 'Delete condition')}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                    }
-                  }}
-                  style={{ color: '#ff4d4f', cursor: 'pointer', padding: '0 4px' }}
-                >
-                  <DeleteOutlined />
-                </span>
-              </Popconfirm>
-            </div>
-          </AccordionTrigger>
-          <AccordionContent className="px-4">
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <ConditionUrlMatchEditor
-                condition={c}
-                filterConfigured={isConditionFilterConfigured(c)}
-                onConditionChange={(patch) => updateCondition(c.id, patch)}
-                onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
-              />
-              <Radio.Group value={c.redirectType} onChange={(e) => updateRedirectType(c, e.target.value as 'url' | 'file')}><Radio value="url">URL</Radio><Radio value="file">{t('本地文件', 'Local file')}</Radio></Radio.Group>
-              {c.redirectType === 'file'
-                ? <>
-                  <Space.Compact style={{ width: '100%' }}>
-                    <Input
-                      value={getRedirectTarget(c)}
-                      onChange={(e) => updateRedirectTarget(c, e.target.value)}
-                      placeholder={t('请输入本地文件绝对路径', 'Enter absolute local file path')}
-                    />
-                    <Button variant="outline" onClick={() => pickFile(c.id)}><FileOutlined />{t('选择文件', 'Select file')}</Button>
-                  </Space.Compact>
-                  <input
-                    ref={(el) => { fileInputRefs.current[c.id] = el; }}
-                    type="file"
-                    style={{ display: 'none' }}
-                    onChange={(e) => onFilePicked(c, e)}
-                  />
-                </>
-                : <Input value={getRedirectTarget(c)} onChange={(e) => updateRedirectTarget(c, e.target.value)} placeholder="重定向目标 URL" />}
-            </Space>
-          </AccordionContent>
-        </AccordionItem>
-      ))}
-    </Accordion>
-    <Button
-      variant="outline"
-      style={{ marginTop: 12, width: '100%', height: 40, background: 'transparent' }}
-      onClick={() => {
+    <ConditionList
+      conditions={workingRule.conditions}
+      onAdd={() => {
         const newCondition = createDefaultCondition();
         setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, newCondition] });
-        setOpenConditions((prev) => [...prev, newCondition.id]);
+        return newCondition.id;
       }}
-    >
-      <PlusOutlined />
-      {t('添加新条件配置', 'Add condition')}
-    </Button>
+      onRemove={removeCondition}
+      renderContent={(c) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+          <ConditionUrlMatchEditor
+            condition={c}
+            filterConfigured={isConditionFilterConfigured(c)}
+            onConditionChange={(patch) => updateCondition(c.id, patch)}
+            onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+          />
+          <Radio.Group value={c.redirectType} onChange={(e) => updateRedirectType(c, e.target.value as 'url' | 'file')}><Radio value="url">URL</Radio><Radio value="file">{t('本地文件', 'Local file')}</Radio></Radio.Group>
+          {c.redirectType === 'file'
+            ? <>
+              <div style={{ display: 'flex', gap: 6, width: '100%' }}>
+                <Input
+                  value={getRedirectTarget(c)}
+                  onChange={(e) => updateRedirectTarget(c, e.target.value)}
+                  placeholder={t('请输入本地文件绝对路径', 'Enter absolute local file path')}
+                />
+                <Button variant="outline" onClick={() => pickFile(c.id)}><FileOutlined />{t('选择文件', 'Select file')}</Button>
+              </div>
+              <input
+                ref={(el) => { fileInputRefs.current[c.id] = el; }}
+                type="file"
+                style={{ display: 'none' }}
+                onChange={(e) => onFilePicked(c, e)}
+              />
+            </>
+            : <Input value={getRedirectTarget(c)} onChange={(e) => updateRedirectTarget(c, e.target.value)} placeholder="重定向目标 URL" />}
+        </div>
+      )}
+    />
     <TestRuleDrawer
       open={testDrawerOpen}
       testUrl={testUrl}
