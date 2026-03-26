@@ -135,7 +135,13 @@
     container.style.color = '#f1f5f9';
     container.style.border = '1px solid rgba(148, 163, 184, 0.35)';
     container.style.borderRadius = '12px';
-    container.style.boxShadow = '0 12px 32px rgba(0, 0, 0, 0.36)';
+    container.style.boxShadow = [
+      '0 0 0 0.5px rgba(0, 0, 0, 0.18)',
+      '0 2px 4px rgba(0, 0, 0, 0.12)',
+      '0 8px 16px rgba(0, 0, 0, 0.10)',
+      '0 24px 48px rgba(0, 0, 0, 0.18)',
+      '0 48px 80px rgba(0, 0, 0, 0.14)',
+    ].join(', ');
     container.style.padding = '12px';
     container.style.boxSizing = 'border-box';
     container.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
