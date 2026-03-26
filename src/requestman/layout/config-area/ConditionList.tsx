@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Trash2 } from '@/components/animate-ui/icons/trash-2';
+import { AnimateIcon } from '@/components/animate-ui/icons/icon';
 import { Button } from '@/components/animate-ui/components/buttons/button';
 import {
   Accordion,
@@ -46,23 +47,25 @@ export default function ConditionList({ conditions, onAdd, onRemove, renderConte
                 <span>{t('请求条件配置', 'Request conditions')}</span>
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      aria-label={t('删除条件', 'Delete condition')}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          e.stopPropagation();
-                        }
-                      }}
-                      style={{ color: '#ff4d4f', cursor: 'pointer', padding: '0 4px' }}
-                    >
-                      <Trash2 size={14} />
-                    </span>
+                    <AnimateIcon animateOnHover asChild>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        aria-label={t('删除条件', 'Delete condition')}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }
+                        }}
+                        style={{ color: '#ff4d4f', cursor: 'pointer', padding: '0 4px' }}
+                      >
+                        <Trash2 size={14} />
+                      </span>
+                    </AnimateIcon>
                   </AlertDialogTrigger>
                   <AlertDialogContent>
                     <AlertDialogHeader>
@@ -84,7 +87,8 @@ export default function ConditionList({ conditions, onAdd, onRemove, renderConte
       </Accordion>
       <Button
         variant="outline"
-        style={{ marginTop: 12, width: '100%', height: 40, background: 'transparent' }}
+        className="w-full mt-3"
+        hoverScale={1.01}
         onClick={handleAdd}
       >
         <PlusOutlined />
