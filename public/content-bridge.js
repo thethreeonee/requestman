@@ -335,7 +335,7 @@
     const ruleName = typeof record?.ruleName === 'string' ? record.ruleName.trim() : '';
     const matchedUrl = typeof record?.url === 'string' ? record.url : '';
     if (!ruleName) return;
-    const title = `[🔀 REQUESTMAN] 🧭 Rule hit ::: ${ruleTypeLabel} / ${ruleName}`;
+    const title = `[🔀 REQUESTMAN] 🧭 Rule HIT >> ${ruleTypeLabel} / ${ruleName} <<`;
     if (typeof console.groupCollapsed === 'function' && typeof console.groupEnd === 'function') {
       console.groupCollapsed(title);
       console.log({ rule: ruleTypeLabel, ruleName, matchedUrl });
