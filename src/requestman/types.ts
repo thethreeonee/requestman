@@ -63,6 +63,8 @@ export type RedirectCondition = {
   redirectTarget: string;
   redirectUrlTarget?: string;
   redirectFileTarget?: string;
+  redirectFileName?: string;
+  redirectFileSource?: string;
   queryParamModifications: QueryParamModification[];
   requestHeaderModifications: HeaderModification[];
   responseHeaderModifications: HeaderModification[];

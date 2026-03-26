@@ -32,6 +32,8 @@ export function createDefaultCondition(): RedirectCondition {
     redirectTarget: '',
     redirectUrlTarget: '',
     redirectFileTarget: '',
+    redirectFileName: '',
+    redirectFileSource: '',
     queryParamModifications: [{ id: genId(), action: 'add', key: '', value: '' }],
     requestHeaderModifications: [],
     responseHeaderModifications: [],
@@ -164,6 +166,12 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
                     ? c.redirectUrl
                     : '')
                 : '',
+            redirectFileName: typeof c.redirectFileName === 'string'
+              ? c.redirectFileName
+              : '',
+            redirectFileSource: typeof c.redirectFileSource === 'string'
+              ? c.redirectFileSource
+              : '',
             queryParamModifications: Array.isArray(c.queryParamModifications) && c.queryParamModifications.length > 0
               ? c.queryParamModifications
                 .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')

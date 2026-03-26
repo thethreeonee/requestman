@@ -1,14 +1,17 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Button } from '@/components/animate-ui/components/buttons/button';
 import { Input } from '@/components/ui/input';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from '@/components/ui/input-group';
+import { Plus } from '@/components/animate-ui/icons/plus';
 import {
   RadioGroup,
   RadioGroupItem,
 } from '@/components/animate-ui/components/radix/radio-group';
 import { t } from '../../../i18n';
-import {
-  FileOutlined,
-} from '../../../icons';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
 import type { RedirectCondition } from '../../../types';
 import ConditionUrlMatchEditor from '../../../components/ConditionUrlMatchEditor';
@@ -17,6 +20,9 @@ import ConditionFilterModal, { isConditionFilterConfigured } from '../../../comp
 import ConditionList from '../ConditionList';
 import RuleDetailHeader from '../RuleDetailHeader';
 import type { RuleDetailProps as Props } from '../types';
+
+const MAX_LOCAL_FILE_SIZE = 1024 * 1024;
+const FAKE_PATH_PREFIX = /^C:\\fakepath\\/i;
 
 export default function RedirectRuleDetail({
   groups,
@@ -37,6 +43,13 @@ export default function RedirectRuleDetail({
   const getRedirectTarget = (condition: RedirectCondition) => (condition.redirectType === 'file'
     ? condition.redirectFileTarget ?? condition.redirectTarget
     : condition.redirectUrlTarget ?? condition.redirectTarget);
+  const getRedirectFileDisplayValue = (condition: RedirectCondition) => {
+    if (condition.redirectType !== 'file') return '';
+    return (condition.redirectFileSource ?? '').trim().replace(FAKE_PATH_PREFIX, '')
+      || (condition.redirectFileName ?? '').trim()
+      || (condition.redirectFileTarget ?? '').trim()
+      || condition.redirectTarget.trim();
+  };
 
   const currentGroupEnabled = useMemo(() => new Map(groups.map((g) => [g.id, g.enabled])), [groups]);
 
@@ -48,7 +61,12 @@ export default function RedirectRuleDetail({
 
   const updateRedirectTarget = (condition: RedirectCondition, value: string) => {
     if (condition.redirectType === 'file') {
-      updateCondition(condition.id, { redirectFileTarget: value, redirectTarget: value });
+      updateCondition(condition.id, {
+        redirectFileTarget: value,
+        redirectTarget: value,
+        redirectFileName: '',
+        redirectFileSource: '',
+      });
       return;
     }
     updateCondition(condition.id, { redirectUrlTarget: value, redirectTarget: value });
@@ -69,11 +87,30 @@ export default function RedirectRuleDetail({
   const onFilePicked = (condition: RedirectCondition, event: React.ChangeEvent<HTMLInputElement>) => {
     const selected = event.target.files?.[0] as (File & { path?: string }) | undefined;
     if (!selected) return;
-    const nativePath = selected.path
-      || event.target.value
-      || '';
-    const fullPath = nativePath.replace(/^C:\\fakepath\\/i, '').trim();
-    updateCondition(condition.id, { redirectFileTarget: fullPath, redirectTarget: fullPath });
+    if (selected.size > MAX_LOCAL_FILE_SIZE) {
+      notifyApi.warning(t('本地文件不能超过 1MB', 'Local files must be 1MB or smaller.'));
+      event.target.value = '';
+      return;
+    }
+    const source = (selected.path || event.target.value || '').trim().replace(FAKE_PATH_PREFIX, '');
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUrl) {
+        notifyApi.error(t('读取本地文件失败', 'Failed to read the local file.'));
+        return;
+      }
+      updateCondition(condition.id, {
+        redirectFileTarget: dataUrl,
+        redirectTarget: dataUrl,
+        redirectFileName: selected.name,
+        redirectFileSource: source || selected.name,
+      });
+    };
+    reader.onerror = () => {
+      notifyApi.error(t('读取本地文件失败', 'Failed to read the local file.'));
+    };
+    reader.readAsDataURL(selected);
     event.target.value = '';
   };
 
@@ -128,14 +165,19 @@ export default function RedirectRuleDetail({
           </RadioGroup>
           {c.redirectType === 'file'
             ? <>
-              <div style={{ display: 'flex', gap: 6, width: '100%' }}>
-                <Input
-                  value={getRedirectTarget(c)}
-                  onChange={(e) => updateRedirectTarget(c, e.target.value)}
-                  placeholder={t('请输入本地文件绝对路径', 'Enter absolute local file path')}
+              <InputGroup>
+                <InputGroupInput
+                  value={getRedirectFileDisplayValue(c)}
+                  readOnly
+                  placeholder={t('请选择要导入并重定向的本地文件', 'Select a local file to import and redirect')}
                 />
-                <Button variant="outline" onClick={() => pickFile(c.id)}><FileOutlined />{t('选择文件', 'Select file')}</Button>
-              </div>
+                <InputGroupAddon align="inline-end">
+                  <InputGroupButton variant="ghost" onClick={() => pickFile(c.id)}>
+                    <Plus size={14} />
+                    {t('选择文件', 'Select file')}
+                  </InputGroupButton>
+                </InputGroupAddon>
+              </InputGroup>
               <input
                 ref={(el) => { fileInputRefs.current[c.id] = el; }}
                 type="file"

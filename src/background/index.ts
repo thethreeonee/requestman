@@ -25,6 +25,8 @@ type RedirectCondition = {
   redirectTarget?: string;
   redirectUrlTarget?: string;
   redirectFileTarget?: string;
+  redirectFileName?: string;
+  redirectFileSource?: string;
   rewriteFrom?: string;
   rewriteTo?: string;
   queryParamModifications?: Array<{
