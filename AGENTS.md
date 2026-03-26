@@ -78,6 +78,7 @@ Release packaging may also create versioned zip files such as:
 - If a required UI component or icon does not exist in [src/components](/Users/0xE31/Projects/requestman/src/components), stop and tell the user which dependency is missing so they can add it first.
 - When adding a new rule type, expect updates across UI components, shared types/constants, and background application logic.
 - Keep package version and manifest versions in sync for releases.
+- After modifying any source code, run `npm run build:chrome` to verify the build succeeds before considering the change complete.
 - Validate with `npm run build` before finalizing release-related changes.
 
 ## Release Process
