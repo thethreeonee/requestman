@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   Input,
-  Modal,
 } from '../../../components';
 import { t } from '../../../i18n';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';

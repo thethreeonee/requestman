@@ -1,9 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Form,
-  Modal,
-  Radio,
-  Select,
+  FieldGroup,
+  RadioGroup,
 } from '../../../components';
 import { t } from '../../../i18n';
 import {
@@ -116,8 +114,8 @@ export default function ModifyRequestBodyRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <Form.Item label={t('修改方式', 'Modify mode')} style={{ marginBottom: 8 }}>
-              <Radio.Group
+            <FieldGroup label={t('修改方式', 'Modify mode')} style={{ marginBottom: 8 }}>
+              <RadioGroup
                 value={c.requestBodyMode}
                 onChange={(e) => updateConditionMode(c.id, e.target.value)}
                 options={[
@@ -125,8 +123,8 @@ export default function ModifyRequestBodyRuleDetail({
                   { label: t('动态（JavaScript）', 'Dynamic (JavaScript)'), value: 'dynamic' },
                 ]}
               />
-            </Form.Item>
-            <Form.Item
+            </FieldGroup>
+            <FieldGroup
               label={c.requestBodyMode === 'dynamic' ? t('JavaScript 代码', 'JavaScript code') : t('替换后的请求体', 'Replaced request body')}
               validateStatus={dynamicScriptError ? 'error' : ''}
               help={dynamicScriptError ?? (c.requestBodyMode === 'dynamic' ? t('需定义 modifyRequestBody(args) 并返回最终请求体', 'Define modifyRequestBody(args) and return the final request body.') : t('命中后会直接替换原始请求 body', 'Will directly replace the original request body when matched.'))}
@@ -140,7 +138,7 @@ export default function ModifyRequestBodyRuleDetail({
                   ? { requestBodyDynamicValue: value, requestBodyValue: value }
                   : { requestBodyStaticValue: value, requestBodyValue: value })}
               />
-            </Form.Item>
+            </FieldGroup>
           </div>
         );
       }}

@@ -1,26 +1,29 @@
-import { Button } from '@/components/animate-ui/components/buttons/button';
-
-export function Modal({ open, title, children, onCancel, onOk }: any) {
-  if (!open) return null;
-
-  return (
-    <div className="aui-modal-backdrop">
-      <div className="aui-modal">
-        <h3>{title}</h3>
-        <div>{children}</div>
-        <div className="aui-space">
-          <Button variant="outline" onClick={onCancel}>Cancel</Button>
-          <Button variant="default" onClick={onOk}>OK</Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-Modal.confirm = ({ title, content, onOk }: any) => {
-  if (window.confirm(`${title ?? ''}\n${content ?? ''}`)) onOk?.();
-};
-
+import React from 'react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/animate-ui/components/radix/alert-dialog';
 export function Popconfirm({ title, onConfirm, children }: any) {
-  return <span onClick={() => { if (window.confirm(title ?? 'Confirm?')) onConfirm?.(); }}>{children}</span>;
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <span>{children}</span>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm}>OK</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 }

@@ -1,9 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Form,
-  Modal,
-  Radio,
-  Select,
+  FieldGroup,
+  RadioGroup,
 } from '../../../components';
 import { t } from '../../../i18n';
 import {
@@ -116,8 +114,8 @@ export default function ModifyResponseBodyRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <Form.Item label={t('修改方式', 'Modify mode')} style={{ marginBottom: 8 }}>
-              <Radio.Group
+            <FieldGroup label={t('修改方式', 'Modify mode')} style={{ marginBottom: 8 }}>
+              <RadioGroup
                 value={c.responseBodyMode}
                 onChange={(e) => updateConditionMode(c.id, e.target.value)}
                 options={[
@@ -125,8 +123,8 @@ export default function ModifyResponseBodyRuleDetail({
                   { label: t('动态（JavaScript）', 'Dynamic (JavaScript)'), value: 'dynamic' },
                 ]}
               />
-            </Form.Item>
-            <Form.Item
+            </FieldGroup>
+            <FieldGroup
               label={c.responseBodyMode === 'dynamic' ? t('JavaScript 代码', 'JavaScript code') : t('替换后的响应体', 'Replaced response body')}
               validateStatus={dynamicScriptError ? 'error' : ''}
               help={dynamicScriptError ?? (c.responseBodyMode === 'dynamic' ? t('需定义 modifyResponse(args) 并返回最终响应体', 'Define modifyResponse(args) and return the final response body.') : t('命中后会直接替换原始响应 body', 'Will directly replace the original response body when matched.'))}
@@ -140,7 +138,7 @@ export default function ModifyResponseBodyRuleDetail({
                   ? { responseBodyDynamicValue: value, responseBodyValue: value }
                   : { responseBodyStaticValue: value, responseBodyValue: value })}
               />
-            </Form.Item>
+            </FieldGroup>
           </div>
         );
       }}

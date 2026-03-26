@@ -8,7 +8,6 @@ import {
 import {
   AutoComplete,
   Input,
-  Modal,
   Select,
   Tabs,
 } from '../../../components';

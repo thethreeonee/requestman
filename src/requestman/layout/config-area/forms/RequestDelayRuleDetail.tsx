@@ -1,9 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Form,
+  FieldGroup,
   InputNumber,
-  Modal,
-  Select,
   Typography,
 } from '../../../components';
 import { t } from '../../../i18n';
@@ -75,7 +73,7 @@ export default function RequestDelayRuleDetail({
             onConditionChange={(patch) => updateCondition(c.id, patch)}
             onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
           />
-          <Form.Item label={t('延迟（ms）', 'Delay (ms)')} style={{ marginBottom: 0 }}>
+          <FieldGroup label={t('延迟（ms）', 'Delay (ms)')} style={{ marginBottom: 0 }}>
             <InputNumber
               style={{ width: '100%' }}
               min={0}
@@ -84,7 +82,7 @@ export default function RequestDelayRuleDetail({
               onChange={(value) => updateCondition(c.id, { delayMs: typeof value === 'number' ? value : 0 })}
               placeholder={t('输入请求延迟时间', 'Enter request delay')}
             />
-          </Form.Item>
+          </FieldGroup>
           <Typography.Text type="secondary">{t('命中该 URL 条件后，请求将延迟指定毫秒数再继续。', 'When this URL condition matches, the request will continue after the specified delay.')}</Typography.Text>
         </div>
       )}
