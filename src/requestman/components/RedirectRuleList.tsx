@@ -5,7 +5,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/animate-ui/components/radix/tooltip';
-import { ChevronsUpDown } from 'lucide-react';
+import { ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -25,11 +25,14 @@ import {
   AlertDialogTitle,
 } from '@/components/animate-ui/components/radix/alert-dialog';
 import {
-  Accordion,
-  AccordionItem,
-  AccordionTrigger,
-  AccordionContent,
-} from '@/components/animate-ui/components/radix/accordion';
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from '@/components/animate-ui/components/radix/sidebar';
 import {
   Dialog,
   DialogContent,
@@ -79,6 +82,7 @@ type GroupModalState = { open: boolean; mode: 'create' | 'rename' | 'move'; grou
 type Props = {
   groups: RedirectGroup[];
   rules: RedirectRule[];
+  selectedRuleId: string | null;
   redirectEnabled: boolean;
   collapsedGroupIds: string[];
   groupModal: GroupModalState;
@@ -247,6 +251,7 @@ function renderRuleTypeIcon(type: RedirectRule['type'], animate = false) {
 export default function RedirectRuleList({
   groups,
   rules,
+  selectedRuleId,
   redirectEnabled,
   collapsedGroupIds,
   groupModal,
@@ -316,14 +321,12 @@ export default function RedirectRuleList({
     });
   }, []);
 
-  const handleExpandedGroupsChange = (nextActiveKeys: string[] | string | undefined) => {
-    const nextExpandedGroupIds = Array.isArray(nextActiveKeys)
-      ? nextActiveKeys.map(String)
-      : nextActiveKeys == null
-        ? []
-        : [String(nextActiveKeys)];
-    const nextExpandedSet = new Set(nextExpandedGroupIds);
-    setCollapsedGroupIds(groups.map((group) => group.id).filter((groupId) => !nextExpandedSet.has(groupId)));
+  const toggleGroupExpanded = (groupId: string) => {
+    setCollapsedGroupIds((prev) => (
+      prev.includes(groupId)
+        ? prev.filter((id) => id !== groupId)
+        : [...prev, groupId]
+    ));
   };
 
   const handleGroupEnabledChange = (group: RedirectGroup, value: boolean) => {
@@ -463,109 +466,122 @@ export default function RedirectRuleList({
   const renderRuleRow = (rule: RedirectRule) => {
     const groupEnabled = currentGroupEnabled.get(rule.groupId) !== false;
     const classNames = ['rule-item-row'];
+    const isSelected = selectedRuleId === rule.id;
     if (dragState?.ruleId === rule.id) classNames.push('dragging-rule-row');
     if (dropState?.targetRuleId === rule.id) classNames.push(dropState.position === 'before' ? 'drop-before-row' : 'drop-after-row');
 
     return (
-      <div
+      <SidebarMenuItem
         key={rule.id}
-        className={classNames.join(' ')}
-        data-group-id={rule.groupId}
-        data-row-type="rule"
-        data-rule-id={rule.id}
-        onMouseEnter={() => setHoveredRuleId(rule.id)}
-        onMouseLeave={() => setHoveredRuleId((current) => (current === rule.id ? null : current))}
       >
-        <button
-          type="button"
-          className="rule-item-row__drag-handle"
-          aria-label={t('拖拽排序', 'Drag to reorder')}
-          onPointerDown={(event) => handleRulePointerDown(event, rule)}
-        >
-          <ChevronsUpDown size={13} />
-        </button>
-        <div className="rule-item-row__type-icon" aria-hidden="true">
-          {renderRuleTypeIcon(rule.type, hoveredRuleId === rule.id)}
-        </div>
-        <div className="rule-item-row__name">
-          <Button variant="link" className="rule-name-link" style={{ paddingInline: 0 }} onClick={() => openRuleDetail(rule.id)}>
-            {rule.name}
-          </Button>
-        </div>
-        <div className="rule-item-row__spacer" />
-        <div className="rule-item-row__status">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="inline-flex">
-                <Switch
-                  className="rules-compact-switch"
-                  pressedWidth={14}
-                  checked={rule.enabled}
-                  disabled={!redirectEnabled || !groupEnabled}
-                  onCheckedChange={(value: boolean) => handleRuleEnabledChange(rule, value)}
-                />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent sideOffset={6}>
-              {getRuleEffectiveHint(redirectEnabled, groupEnabled, rule.enabled)}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        <div className="rule-item-row__actions" data-no-drag="true">
-          {(() => {
-            const moveKey = `rule:${rule.id}:move`;
-            const copyKey = `rule:${rule.id}:copy`;
-            const deleteKey = `rule:${rule.id}:delete`;
-            const ruleMenuItems: RequestmanDropdownMenuItem[] = [
-              {
-                key: 'move',
-                label: t('修改规则组', 'Change group'),
-                icon: <GalleryHorizontalEnd size={14} animate={hoveredMenuAction === moveKey} />,
-                onMouseEnter: () => setHoveredMenuAction(moveKey),
-                onMouseLeave: () => setHoveredMenuAction((current) => (current === moveKey ? null : current)),
-                onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: rule.id }); setGroupInput(rule.groupId); },
-              },
-              {
-                key: 'copy',
-                label: t('复制', 'Duplicate'),
-                icon: <Copy size={14} animate={hoveredMenuAction === copyKey} />,
-                onMouseEnter: () => setHoveredMenuAction(copyKey),
-                onMouseLeave: () => setHoveredMenuAction((current) => (current === copyKey ? null : current)),
-                onClick: () => {
-                  setRules((prev) => {
-                    const idx = prev.findIndex((item) => item.id === rule.id);
-                    const next = [...prev];
-                    next.splice(idx + 1, 0, { ...rule, id: genId(), name: `${rule.name} ${t('副本', 'Copy')}` });
-                    return next;
-                  });
-                  notifyApi.success(t(`规则「${rule.name}」已复制`, `Rule "${rule.name}" duplicated.`));
-                },
-              },
-              {
-                key: 'delete',
-                label: t('删除', 'Delete'),
-                icon: <Trash2 size={14} animate={hoveredMenuAction === deleteKey} />,
-                danger: true,
-                onMouseEnter: () => setHoveredMenuAction(deleteKey),
-                onMouseLeave: () => setHoveredMenuAction((current) => (current === deleteKey ? null : current)),
-                onClick: () => setPendingDeleteRule(rule),
-              },
-            ];
-            return (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <span>
-                    <Button variant="ghost" size="icon-sm"><EllipsisOutlined /></Button>
+        <SidebarMenuButton asChild isActive={isSelected} className="rule-item-row-button">
+          <div
+            className={classNames.join(' ')}
+            data-group-id={rule.groupId}
+            data-row-type="rule"
+            data-rule-id={rule.id}
+            role="button"
+            tabIndex={0}
+            onClick={() => openRuleDetail(rule.id)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') return;
+              event.preventDefault();
+              openRuleDetail(rule.id);
+            }}
+            onMouseEnter={() => setHoveredRuleId(rule.id)}
+            onMouseLeave={() => setHoveredRuleId((current) => (current === rule.id ? null : current))}
+          >
+            <button
+              type="button"
+              className="rule-item-row__drag-handle"
+              aria-label={t('拖拽排序', 'Drag to reorder')}
+              onClick={(event) => event.stopPropagation()}
+              onPointerDown={(event) => handleRulePointerDown(event, rule)}
+            >
+              <ChevronsUpDown size={13} />
+            </button>
+            <div className="rule-item-row__type-icon" aria-hidden="true">
+              {renderRuleTypeIcon(rule.type, hoveredRuleId === rule.id)}
+            </div>
+            <div className="rule-item-row__name">
+              <span className="rule-name-link">{rule.name}</span>
+            </div>
+            <div className="rule-item-row__spacer" />
+            <div className="rule-item-row__status" onClick={(event) => event.stopPropagation()}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Switch
+                      className="rules-compact-switch"
+                      pressedWidth={14}
+                      checked={rule.enabled}
+                      disabled={!redirectEnabled || !groupEnabled}
+                      onCheckedChange={(value: boolean) => handleRuleEnabledChange(rule, value)}
+                    />
                   </span>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" sideOffset={6}>
-                  {renderDropdownMenuItems(ruleMenuItems, `rule-${rule.id}`)}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            );
-          })()}
-        </div>
-      </div>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={6}>
+                  {getRuleEffectiveHint(redirectEnabled, groupEnabled, rule.enabled)}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="rule-item-row__actions" data-no-drag="true" onClick={(event) => event.stopPropagation()}>
+              {(() => {
+                const moveKey = `rule:${rule.id}:move`;
+                const copyKey = `rule:${rule.id}:copy`;
+                const deleteKey = `rule:${rule.id}:delete`;
+                const ruleMenuItems: RequestmanDropdownMenuItem[] = [
+                  {
+                    key: 'move',
+                    label: t('修改规则组', 'Change group'),
+                    icon: <GalleryHorizontalEnd size={14} animate={hoveredMenuAction === moveKey} />,
+                    onMouseEnter: () => setHoveredMenuAction(moveKey),
+                    onMouseLeave: () => setHoveredMenuAction((current) => (current === moveKey ? null : current)),
+                    onClick: () => { setGroupModal({ open: true, mode: 'move', ruleId: rule.id }); setGroupInput(rule.groupId); },
+                  },
+                  {
+                    key: 'copy',
+                    label: t('复制', 'Duplicate'),
+                    icon: <Copy size={14} animate={hoveredMenuAction === copyKey} />,
+                    onMouseEnter: () => setHoveredMenuAction(copyKey),
+                    onMouseLeave: () => setHoveredMenuAction((current) => (current === copyKey ? null : current)),
+                    onClick: () => {
+                      setRules((prev) => {
+                        const idx = prev.findIndex((item) => item.id === rule.id);
+                        const next = [...prev];
+                        next.splice(idx + 1, 0, { ...rule, id: genId(), name: `${rule.name} ${t('副本', 'Copy')}` });
+                        return next;
+                      });
+                      notifyApi.success(t(`规则「${rule.name}」已复制`, `Rule "${rule.name}" duplicated.`));
+                    },
+                  },
+                  {
+                    key: 'delete',
+                    label: t('删除', 'Delete'),
+                    icon: <Trash2 size={14} animate={hoveredMenuAction === deleteKey} />,
+                    danger: true,
+                    onMouseEnter: () => setHoveredMenuAction(deleteKey),
+                    onMouseLeave: () => setHoveredMenuAction((current) => (current === deleteKey ? null : current)),
+                    onClick: () => setPendingDeleteRule(rule),
+                  },
+                ];
+                return (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <span>
+                        <Button variant="ghost" size="icon-sm"><EllipsisOutlined /></Button>
+                      </span>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" sideOffset={6}>
+                      {renderDropdownMenuItems(ruleMenuItems, `rule-${rule.id}`)}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                );
+              })()}
+            </div>
+          </div>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
     );
   };
 
@@ -598,98 +614,124 @@ export default function RedirectRuleList({
         </div>
       </div>
     ) : null}
-    <div className="rules-list-accordion-scroll">
-      <div className="rules-list-accordion" ref={listWrapperRef}>
-        <Accordion type="multiple" value={expandedGroupIds} onValueChange={handleExpandedGroupsChange}>
+    <SidebarContent className="rules-sidebar__content">
+      <div className="rules-list-accordion-scroll">
+        <div className="rules-list-accordion" ref={listWrapperRef}>
           {groups.map((group) => {
             const groupRules = groupRuleMap.get(group.id) ?? [];
+            const isExpanded = expandedGroupIds.includes(group.id);
             return (
-              <AccordionItem key={group.id} value={group.id}>
-                <div className="rule-group-accordion-header">
-                  <AccordionTrigger className="rule-group-accordion-trigger">
-                    <div className="rule-group-header" data-group-id={group.id} data-row-type="group">
-                      <div className="rule-group-header__title">
-                        <span className="rule-group-header__title-text" style={{ fontWeight: 600 }}>{group.name}</span>
+              <SidebarGroup key={group.id} className="rule-sidebar-group">
+                <SidebarGroupLabel asChild>
+                  <div
+                    className="rule-group-label-row"
+                    data-state={isExpanded ? 'open' : 'closed'}
+                    data-group-id={group.id}
+                    data-row-type="group"
+                  >
+                    <button
+                      type="button"
+                      className="rule-group-label-button"
+                      onClick={() => toggleGroupExpanded(group.id)}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                        event.preventDefault();
+                        toggleGroupExpanded(group.id);
+                      }}
+                    >
+                      <div className="rule-group-header">
+                        <div className="rule-group-header__title">
+                          <span className="rule-group-header__title-text" style={{ fontWeight: 600 }}>{group.name}</span>
+                        </div>
                       </div>
+                    </button>
+                    <div className="rule-group-label-actions" data-no-drag="true">
+                      <span className="rule-group-header__count" aria-label={t(`当前分组共 ${groupRules.length} 条规则`, `${groupRules.length} rules in this group`)}>
+                        {groupRules.length}
+                      </span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="rule-group-header__switch" onClick={(event) => event.stopPropagation()}>
+                            <Switch
+                              className="rules-compact-switch"
+                              pressedWidth={14}
+                              checked={group.enabled}
+                              disabled={!redirectEnabled}
+                              onCheckedChange={(value: boolean) => handleGroupEnabledChange(group, value)}
+                            />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent sideOffset={6}>
+                          {redirectEnabled
+                            ? (group.enabled
+                              ? t('规则组已开启，组内规则可生效', 'Group is enabled. Rules in this group can take effect.')
+                              : t('规则组已关闭，组内规则不会生效', 'Group is disabled. Rules in this group will not take effect.'))
+                            : t('总开关关闭，组内规则不会生效', 'Master switch is off. Rules in this group will not take effect.')}
+                        </TooltipContent>
+                      </Tooltip>
+                      {(() => {
+                        const renameKey = `group:${group.id}:rename`;
+                        const copyKey = `group:${group.id}:copy`;
+                        const deleteKey = `group:${group.id}:delete`;
+                        const groupMenuItems: RequestmanDropdownMenuItem[] = [
+                          {
+                            key: 'rename',
+                            label: t('重命名', 'Rename'),
+                            icon: <MessageSquareMore size={14} animate={hoveredMenuAction === renameKey} />,
+                            onMouseEnter: () => setHoveredMenuAction(renameKey),
+                            onMouseLeave: () => setHoveredMenuAction((current) => (current === renameKey ? null : current)),
+                            onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: group.id }); setGroupInput(group.name); },
+                          },
+                          {
+                            key: 'copy',
+                            label: t('复制', 'Duplicate'),
+                            icon: <Copy size={14} animate={hoveredMenuAction === copyKey} />,
+                            onMouseEnter: () => setHoveredMenuAction(copyKey),
+                            onMouseLeave: () => setHoveredMenuAction((current) => (current === copyKey ? null : current)),
+                            onClick: () => duplicateGroup(group.id),
+                          },
+                          {
+                            key: 'delete',
+                            label: t('删除', 'Delete'),
+                            icon: <Trash2 size={14} animate={hoveredMenuAction === deleteKey} />,
+                            danger: true,
+                            onMouseEnter: () => setHoveredMenuAction(deleteKey),
+                            onMouseLeave: () => setHoveredMenuAction((current) => (current === deleteKey ? null : current)),
+                            onClick: () => deleteGroup(group.id),
+                          },
+                        ];
+                        return (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <span onClick={(event) => event.stopPropagation()}>
+                                <Button variant="ghost" size="icon-sm"><EllipsisOutlined /></Button>
+                              </span>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" sideOffset={6}>
+                              {renderDropdownMenuItems(groupMenuItems, `group-${group.id}`)}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        );
+                      })()}
+                      <button
+                        type="button"
+                        className="rule-group-chevron-button"
+                        aria-label={isExpanded ? t('收起规则组', 'Collapse group') : t('展开规则组', 'Expand group')}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleGroupExpanded(group.id);
+                        }}
+                      >
+                        <ChevronDown className="rule-group-row-toggle__chevron" size={16} aria-hidden="true" />
+                      </button>
                     </div>
-                  </AccordionTrigger>
-                  <div className="rule-group-header__actions" data-no-drag="true">
-                    <span className="rule-group-header__count" aria-label={t(`当前分组共 ${groupRules.length} 条规则`, `${groupRules.length} rules in this group`)}>
-                      <span className="rule-group-header__count-bracket" aria-hidden="true" />
-                      <span className="rule-group-header__count-value">{groupRules.length}</span>
-                      <span className="rule-group-header__count-bracket rule-group-header__count-bracket--right" aria-hidden="true" />
-                    </span>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="rule-group-header__switch">
-                          <Switch
-                            className="rules-compact-switch"
-                            pressedWidth={14}
-                            checked={group.enabled}
-                            disabled={!redirectEnabled}
-                            onCheckedChange={(value: boolean) => handleGroupEnabledChange(group, value)}
-                          />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent sideOffset={6}>
-                        {redirectEnabled
-                          ? (group.enabled
-                            ? t('规则组已开启，组内规则可生效', 'Group is enabled. Rules in this group can take effect.')
-                            : t('规则组已关闭，组内规则不会生效', 'Group is disabled. Rules in this group will not take effect.'))
-                          : t('总开关关闭，组内规则不会生效', 'Master switch is off. Rules in this group will not take effect.')}
-                      </TooltipContent>
-                    </Tooltip>
-                    {(() => {
-                      const renameKey = `group:${group.id}:rename`;
-                      const copyKey = `group:${group.id}:copy`;
-                      const deleteKey = `group:${group.id}:delete`;
-                      const groupMenuItems: RequestmanDropdownMenuItem[] = [
-                        {
-                          key: 'rename',
-                          label: t('重命名', 'Rename'),
-                          icon: <MessageSquareMore size={14} animate={hoveredMenuAction === renameKey} />,
-                          onMouseEnter: () => setHoveredMenuAction(renameKey),
-                          onMouseLeave: () => setHoveredMenuAction((current) => (current === renameKey ? null : current)),
-                          onClick: () => { setGroupModal({ open: true, mode: 'rename', groupId: group.id }); setGroupInput(group.name); },
-                        },
-                        {
-                          key: 'copy',
-                          label: t('复制', 'Duplicate'),
-                          icon: <Copy size={14} animate={hoveredMenuAction === copyKey} />,
-                          onMouseEnter: () => setHoveredMenuAction(copyKey),
-                          onMouseLeave: () => setHoveredMenuAction((current) => (current === copyKey ? null : current)),
-                          onClick: () => duplicateGroup(group.id),
-                        },
-                        {
-                          key: 'delete',
-                          label: t('删除', 'Delete'),
-                          icon: <Trash2 size={14} animate={hoveredMenuAction === deleteKey} />,
-                          danger: true,
-                          onMouseEnter: () => setHoveredMenuAction(deleteKey),
-                          onMouseLeave: () => setHoveredMenuAction((current) => (current === deleteKey ? null : current)),
-                          onClick: () => deleteGroup(group.id),
-                        },
-                      ];
-                      return (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <span>
-                              <Button variant="ghost" size="icon-sm"><EllipsisOutlined /></Button>
-                            </span>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" sideOffset={6}>
-                            {renderDropdownMenuItems(groupMenuItems, `group-${group.id}`)}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      );
-                    })()}
                   </div>
-                </div>
-                <AccordionContent keepRendered>
+                </SidebarGroupLabel>
+                {isExpanded ? (
                   <div className="rule-group-panel" data-group-id={group.id} data-row-type="group">
                     <div className="rule-group-body" data-group-id={group.id} data-row-type="group">
                       {groupRules.length > 0
-                        ? groupRules.map(renderRuleRow)
+                        ? <SidebarMenu className="rule-group-menu">{groupRules.map(renderRuleRow)}</SidebarMenu>
                         : (
                           <div className="rule-item-row__empty" data-group-id={group.id} data-row-type="group">
                             <span style={{ opacity: 0.7 }}>{t('该规则组暂无规则', 'No rules in this group')}</span>
@@ -697,14 +739,14 @@ export default function RedirectRuleList({
                         )}
                     </div>
                   </div>
-                </AccordionContent>
-              </AccordionItem>
+                ) : null}
+              </SidebarGroup>
             );
           })}
-        </Accordion>
+        </div>
       </div>
-    </div>
-    <div className="sidebar-header sidebar-actions">
+    </SidebarContent>
+    <SidebarFooter className="sidebar-header sidebar-actions">
       <div className="sidebar-actions__group">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -847,7 +889,7 @@ export default function RedirectRuleList({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-    </div>
+    </SidebarFooter>
     <Dialog open={isGroupDialogOpen} onOpenChange={(open) => { if (!open) setGroupModal({ open: false, mode: 'create' }); }}>
       <DialogContent showCloseButton>
         <DialogHeader>

@@ -409,6 +409,7 @@ export default function RequestmanPanel() {
       <Sidebar
         groups={groups}
         rules={rules}
+        selectedRuleId={page.type === 'detail' ? page.ruleId : null}
         redirectEnabled={redirectEnabled}
         collapsedGroupIds={collapsedGroupIds}
         groupModal={groupModal}
