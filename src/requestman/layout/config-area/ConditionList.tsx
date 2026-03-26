@@ -18,6 +18,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/animate-ui/components/radix/alert-dialog';
+import { Separator } from '@/components/ui/separator';
 import { t } from '../../i18n';
 import { PlusOutlined } from '../../icons';
 import type { RedirectCondition } from '../../types';
@@ -26,10 +27,11 @@ type Props = {
   conditions: RedirectCondition[];
   onAdd: () => string;
   onRemove: (conditionId: string) => void;
-  renderContent: (condition: RedirectCondition) => React.ReactNode;
+  renderConditionContent: (condition: RedirectCondition) => React.ReactNode;
+  renderExecutionContent: (condition: RedirectCondition) => React.ReactNode;
 };
 
-export default function ConditionList({ conditions, onAdd, onRemove, renderContent }: Props) {
+export default function ConditionList({ conditions, onAdd, onRemove, renderConditionContent, renderExecutionContent }: Props) {
   const [openConditions, setOpenConditions] = useState<string[]>(() => conditions.map((c) => c.id));
 
   const handleAdd = () => {
@@ -80,7 +82,11 @@ export default function ConditionList({ conditions, onAdd, onRemove, renderConte
               </div>
             </AccordionTrigger>
             <AccordionContent className="px-4 pt-2">
-              {renderContent(c)}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+                {renderConditionContent(c)}
+                <Separator className="my-4" />
+                {renderExecutionContent(c)}
+              </div>
             </AccordionContent>
           </AccordionItem>
         ))}

@@ -104,14 +104,16 @@ export default function QueryParamsRuleDetail({
         return newCondition.id;
       }}
       onRemove={removeCondition}
-      renderContent={(c) => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
-          <ConditionUrlMatchEditor
-            condition={c}
-            filterConfigured={isConditionFilterConfigured(c)}
-            onConditionChange={(patch) => updateCondition(c.id, patch)}
-            onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
-          />
+      renderConditionContent={(c) => (
+        <ConditionUrlMatchEditor
+          condition={c}
+          filterConfigured={isConditionFilterConfigured(c)}
+          onConditionChange={(patch) => updateCondition(c.id, patch)}
+          onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+        />
+      )}
+      renderExecutionContent={(c) => (
+        <>
           {c.queryParamModifications.map((modification) => (
             <div key={modification.id} style={{ display: 'flex', gap: 6, width: '100%' }}>
               <Select
@@ -144,7 +146,7 @@ export default function QueryParamsRuleDetail({
             </div>
           ))}
           <Button variant="outline" onClick={() => addModification(c.id)}><PlusOutlined />{t('添加修改', 'Add modification')}</Button>
-        </div>
+        </>
       )}
     />
     <TestRuleDrawer

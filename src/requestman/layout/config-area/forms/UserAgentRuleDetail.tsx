@@ -102,14 +102,16 @@ export default function UserAgentRuleDetail({
         return newCondition.id;
       }}
       onRemove={removeCondition}
-      renderContent={(c) => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
-          <ConditionUrlMatchEditor
-            condition={c}
-            filterConfigured={isConditionFilterConfigured(c)}
-            onConditionChange={(patch) => updateCondition(c.id, patch)}
-            onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
-          />
+      renderConditionContent={(c) => (
+        <ConditionUrlMatchEditor
+          condition={c}
+          filterConfigured={isConditionFilterConfigured(c)}
+          onConditionChange={(patch) => updateCondition(c.id, patch)}
+          onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+        />
+      )}
+      renderExecutionContent={(c) => (
+        <>
           <div style={{ display: 'flex', gap: 6, width: '100%' }}>
             <Select value={c.userAgentType ?? 'device'} onValueChange={(value) => onUserAgentTypeChange(c, value as UserAgentType)}>
               <SelectTrigger style={{ width: 110 }}>
@@ -155,7 +157,7 @@ export default function UserAgentRuleDetail({
                 return value ? `将设置为：${value}` : t('请选择 User-Agent', 'Select User-Agent');
               })()}
           </span>
-        </div>
+        </>
       )}
     />
     <TestRuleDrawer

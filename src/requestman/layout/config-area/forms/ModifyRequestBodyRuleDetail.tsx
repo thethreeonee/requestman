@@ -104,16 +104,18 @@ export default function ModifyRequestBodyRuleDetail({
         return newCondition.id;
       }}
       onRemove={removeCondition}
-      renderContent={(c) => {
+      renderConditionContent={(c) => (
+        <ConditionUrlMatchEditor
+          condition={c}
+          filterConfigured={isConditionFilterConfigured(c)}
+          onConditionChange={(patch) => updateCondition(c.id, patch)}
+          onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+        />
+      )}
+      renderExecutionContent={(c) => {
         const dynamicScriptError = c.requestBodyMode === 'dynamic' ? validateDynamicScript(c.requestBodyDynamicValue) : null;
         return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
-            <ConditionUrlMatchEditor
-              condition={c}
-              filterConfigured={isConditionFilterConfigured(c)}
-              onConditionChange={(patch) => updateCondition(c.id, patch)}
-              onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
-            />
+          <>
             <label style={{ display: 'block', marginBottom: 8 }}>
               <div>{t('修改方式', 'Modify mode')}</div>
               <RadioGroup value={c.requestBodyMode} onValueChange={(v) => updateConditionMode(c.id, v)} className="aui-space">
@@ -143,7 +145,7 @@ export default function ModifyRequestBodyRuleDetail({
                 </div>
               ) : null}
             </label>
-          </div>
+          </>
         );
       }}
     />

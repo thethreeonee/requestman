@@ -59,16 +59,16 @@ export default function CancelRequestRuleDetail({
         return newCondition.id;
       }}
       onRemove={removeCondition}
-      renderContent={(c) => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
-          <ConditionUrlMatchEditor
-            condition={c}
-            filterConfigured={isConditionFilterConfigured(c)}
-            onConditionChange={(patch) => updateCondition(c.id, patch)}
-            onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
-          />
-          <span style={{ opacity: 0.7 }}>{t('命中该 URL 条件后，将直接取消请求。', 'When this URL condition matches, the request will be cancelled immediately.')}</span>
-        </div>
+      renderConditionContent={(c) => (
+        <ConditionUrlMatchEditor
+          condition={c}
+          filterConfigured={isConditionFilterConfigured(c)}
+          onConditionChange={(patch) => updateCondition(c.id, patch)}
+          onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+        />
+      )}
+      renderExecutionContent={(c) => (
+        <span style={{ opacity: 0.7 }}>{t('命中该 URL 条件后，将直接取消请求。', 'When this URL condition matches, the request will be cancelled immediately.')}</span>
       )}
     />
     <TestRuleDrawer

@@ -105,14 +105,16 @@ export default function RedirectRuleDetail({
         return newCondition.id;
       }}
       onRemove={removeCondition}
-      renderContent={(c) => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
-          <ConditionUrlMatchEditor
-            condition={c}
-            filterConfigured={isConditionFilterConfigured(c)}
-            onConditionChange={(patch) => updateCondition(c.id, patch)}
-            onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
-          />
+      renderConditionContent={(c) => (
+        <ConditionUrlMatchEditor
+          condition={c}
+          filterConfigured={isConditionFilterConfigured(c)}
+          onConditionChange={(patch) => updateCondition(c.id, patch)}
+          onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+        />
+      )}
+      renderExecutionContent={(c) => (
+        <>
           <RadioGroup value={c.redirectType} onValueChange={(v) => updateRedirectType(c, v as 'url' | 'file')} className="aui-space">
             {[
               { label: 'URL', value: 'url' },
@@ -142,7 +144,7 @@ export default function RedirectRuleDetail({
               />
             </>
             : <Input value={getRedirectTarget(c)} onChange={(e) => updateRedirectTarget(c, e.target.value)} placeholder="重定向目标 URL" />}
-        </div>
+        </>
       )}
     />
     <TestRuleDrawer

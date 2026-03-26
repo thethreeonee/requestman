@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { FilterOutlined } from '../icons';
+import { Funnel } from 'lucide-react';
 import { MATCH_MODE_OPTIONS, MATCH_TARGET_OPTIONS } from '../constants';
 import type { RedirectCondition } from '../types';
 
@@ -53,10 +53,10 @@ export default function ConditionUrlMatchEditor({
     />
     <Button
       variant="outline"
-      size="icon"
+      size="icon-sm"
       onClick={onFilterClick}
     >
-      <FilterOutlined style={filterConfigured ? { color: '#FF8700' } : undefined} />
+      <Funnel style={filterConfigured ? { color: '#FF8700' } : undefined} />
     </Button>
   </div>;
 }

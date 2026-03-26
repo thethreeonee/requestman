@@ -61,14 +61,16 @@ export default function RequestDelayRuleDetail({
         return newCondition.id;
       }}
       onRemove={removeCondition}
-      renderContent={(c) => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
-          <ConditionUrlMatchEditor
-            condition={c}
-            filterConfigured={isConditionFilterConfigured(c)}
-            onConditionChange={(patch) => updateCondition(c.id, patch)}
-            onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
-          />
+      renderConditionContent={(c) => (
+        <ConditionUrlMatchEditor
+          condition={c}
+          filterConfigured={isConditionFilterConfigured(c)}
+          onConditionChange={(patch) => updateCondition(c.id, patch)}
+          onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+        />
+      )}
+      renderExecutionContent={(c) => (
+        <>
           <label style={{ display: 'block', marginBottom: 0 }}>
             <div>{t('延迟（ms）', 'Delay (ms)')}</div>
             <Input
@@ -81,7 +83,7 @@ export default function RequestDelayRuleDetail({
             />
           </label>
           <span style={{ opacity: 0.7 }}>{t('命中该 URL 条件后，请求将延迟指定毫秒数再继续。', 'When this URL condition matches, the request will continue after the specified delay.')}</span>
-        </div>
+        </>
       )}
     />
     <TestRuleDrawer

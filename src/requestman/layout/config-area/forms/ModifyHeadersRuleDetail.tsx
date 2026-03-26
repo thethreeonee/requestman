@@ -223,25 +223,25 @@ export default function ModifyHeadersRuleDetail({
         return newCondition.id;
       }}
       onRemove={removeCondition}
-      renderContent={(c) => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
-          <ConditionUrlMatchEditor
-            condition={c}
-            filterConfigured={isConditionFilterConfigured(c)}
-            onConditionChange={(patch) => updateCondition(c.id, patch)}
-            onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
-          />
-          <Tabs defaultValue="requestHeaderModifications">
-            <TabsList>
-              <TabsTrigger value="requestHeaderModifications">{t('请求 Headers', 'Request headers')}</TabsTrigger>
-              <TabsTrigger value="responseHeaderModifications">{t('响应 Headers', 'Response headers')}</TabsTrigger>
-            </TabsList>
-            <TabsContents>
-              <TabsContent value="requestHeaderModifications">{renderHeaderTabContent(c, 'requestHeaderModifications')}</TabsContent>
-              <TabsContent value="responseHeaderModifications">{renderHeaderTabContent(c, 'responseHeaderModifications')}</TabsContent>
-            </TabsContents>
-          </Tabs>
-        </div>
+      renderConditionContent={(c) => (
+        <ConditionUrlMatchEditor
+          condition={c}
+          filterConfigured={isConditionFilterConfigured(c)}
+          onConditionChange={(patch) => updateCondition(c.id, patch)}
+          onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+        />
+      )}
+      renderExecutionContent={(c) => (
+        <Tabs defaultValue="requestHeaderModifications">
+          <TabsList>
+            <TabsTrigger value="requestHeaderModifications">{t('请求 Headers', 'Request headers')}</TabsTrigger>
+            <TabsTrigger value="responseHeaderModifications">{t('响应 Headers', 'Response headers')}</TabsTrigger>
+          </TabsList>
+          <TabsContents>
+            <TabsContent value="requestHeaderModifications">{renderHeaderTabContent(c, 'requestHeaderModifications')}</TabsContent>
+            <TabsContent value="responseHeaderModifications">{renderHeaderTabContent(c, 'responseHeaderModifications')}</TabsContent>
+          </TabsContents>
+        </Tabs>
       )}
     />
     <TestRuleDrawer
