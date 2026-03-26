@@ -6,6 +6,7 @@
  */
 (() => {
   const MESSAGE_TYPE = '__REQUESTMAN_RUNTIME_RULES__';
+  const HIT_MESSAGE_TYPE = '__REQUESTMAN_RULE_HIT__';
   const SOURCE = 'requestman-extension';
   const RULE_TYPE_LABEL_MAP = {
     redirect_request: 'Redirect Request',
@@ -157,6 +158,15 @@
     const ruleName = typeof rule?.ruleName === 'string' ? rule.ruleName.trim() : '';
     const matchedUrl = typeof url === 'string' ? url : '';
     if (!ruleName) return;
+    window.postMessage({
+      source: SOURCE,
+      type: HIT_MESSAGE_TYPE,
+      payload: {
+        ruleId: typeof rule?.ruleId === 'string' ? rule.ruleId : '',
+        ruleName: typeof rule?.ruleName === 'string' ? rule.ruleName : '',
+        ruleType: typeof rule?.ruleType === 'string' ? rule.ruleType : 'redirect_request',
+      },
+    }, '*');
     const title = `[🔀 REQUESTMAN] 🧭 Rule hit ::: ${ruleTypeLabel} / ${ruleName}`;
     if (typeof console.groupCollapsed === 'function' && typeof console.groupEnd === 'function') {
       console.groupCollapsed(title);

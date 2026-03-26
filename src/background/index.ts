@@ -67,6 +67,7 @@ export const REDIRECT_GROUPS_KEY = 'asap_redirect_groups_v1';
 export const REDIRECT_RULE_ID_BASE = 10000;
 export const REDIRECT_RULE_ID_MAX = 19999;
 const managedRuleMeta = new Map<number, { ruleName: string; ruleType: string }>();
+const pendingHitRuleIdsByTab = new Map<number, Set<number>>();
 let ruleCachesReady = false;
 let ruleCachesPromise: Promise<void> | null = null;
 const REQUESTMAN_PANEL_URL = chrome.runtime.getURL('requestman/index.html');
@@ -388,12 +389,39 @@ const normalizeNumericId = (value: unknown) => {
   return null;
 };
 
-function notifyMatchedRule(tabId: number, ruleId: number, url?: string) {
+function queuePendingHit(tabId: number, ruleId: number) {
+  let set = pendingHitRuleIdsByTab.get(tabId);
+  if (!set) {
+    set = new Set<number>();
+    pendingHitRuleIdsByTab.set(tabId, set);
+  }
+  set.add(ruleId);
+}
+
+function notifyMatchedRule(tabId: number, ruleId: number, url?: string, allowQueue = true): Promise<boolean> {
   const meta = managedRuleMeta.get(ruleId);
-  if (!meta || !meta.ruleName.trim()) return;
-  chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: { ...meta, url: typeof url === 'string' ? url : '' } }, () => {
-    void chrome.runtime.lastError;
+  if (!meta || !meta.ruleName.trim()) return Promise.resolve(false);
+  return new Promise<boolean>((resolve) => {
+    chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: { ...meta, url: typeof url === 'string' ? url : '' } }, () => {
+      if (chrome.runtime.lastError) {
+        if (allowQueue) queuePendingHit(tabId, ruleId);
+        resolve(false);
+        return;
+      }
+      resolve(true);
+    });
   });
+}
+
+async function flushPendingHitsForTab(tabId: number) {
+  const pending = pendingHitRuleIdsByTab.get(tabId);
+  if (!pending || !pending.size) return;
+  const list = Array.from(pending);
+  for (const ruleId of list) {
+    const delivered = await notifyMatchedRule(tabId, ruleId, undefined, false);
+    if (delivered) pending.delete(ruleId);
+  }
+  if (!pending.size) pendingHitRuleIdsByTab.delete(tabId);
 }
 
 async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: RedirectRule[]; enabled?: boolean; }) {
@@ -469,7 +497,13 @@ async function ensureRuleCachesReady() {
 
 chrome.runtime.onStartup.addListener(() => { void ensureRuleCachesReady(); });
 chrome.runtime.onInstalled.addListener(() => { void ensureRuleCachesReady(); });
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'requestman:content-ready') {
+    const tabId = normalizeNumericId(sender?.tab?.id);
+    if (tabId !== null && tabId >= 0) void flushPendingHitsForTab(tabId);
+    sendResponse({ ok: true });
+    return;
+  }
   if (message?.type !== 'redirectRules/apply') return;
   applyRedirectRules(message).then((result) => sendResponse(result)).catch((err: unknown) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }));
   return true;
