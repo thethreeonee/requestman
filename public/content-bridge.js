@@ -3,11 +3,30 @@
   const RULES_KEY = 'asap_redirect_rules_v1';
   const GROUPS_KEY = 'asap_redirect_groups_v1';
   const ENABLED_KEY = 'asap_redirect_enabled_v1';
+  const RULE_TYPE_LABEL_MAP = {
+    redirect_request: 'Redirect Request',
+    rewrite_string: 'Rewrite String',
+    query_params: 'Query Params',
+    modify_request_body: 'Modify Request Body',
+    modify_response_body: 'Modify Response Body',
+    modify_headers: 'Modify Headers',
+    user_agent: 'User Agent',
+    cancel_request: 'Cancel Request',
+    request_delay: 'Request Delay',
+  };
+
+  function toRuleTypeLabel(ruleType) {
+    if (typeof ruleType !== 'string') return 'Redirect Request';
+    return RULE_TYPE_LABEL_MAP[ruleType] || ruleType;
+  }
+
   function logRuleHit(record) {
     const ruleType = typeof record?.ruleType === 'string' ? record.ruleType : 'redirect_request';
+    const ruleTypeLabel = toRuleTypeLabel(ruleType);
     const ruleName = typeof record?.ruleName === 'string' ? record.ruleName.trim() : '';
+    const matchedUrl = typeof record?.url === 'string' ? record.url : '';
     if (!ruleName) return;
-    console.log(`[🔀 REQUESTMAN] 🧭 Rule hit: ${ruleType} ::: ${ruleName}`);
+    console.log(`[🔀 REQUESTMAN] 🧭 Rule hit: ${ruleTypeLabel} ::: ${ruleName} ::: ${matchedUrl}`);
   }
 
   function isGroupEnabled(groupEnabled, groupId) {
