@@ -1,7 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/animate-ui/components/radix/accordion';
+import {
   Button,
-  Collapse,
   Form,
   Modal,
   Popconfirm,
@@ -69,6 +74,7 @@ export default function ModifyRequestBodyRuleDetail({
   const [testUrl, setTestUrl] = useState('');
   const [testResult, setTestResult] = useState<SimulateRuleResult | null>(null);
   const [filterModal, setFilterModal] = useState<{ open: boolean; conditionId?: string }>({ open: false });
+  const [openConditions, setOpenConditions] = useState<string[]>(() => workingRule.conditions.map((c) => c.id));
 
   const currentGroupEnabled = useMemo(() => new Map(groups.map((g) => [g.id, g.enabled])), [groups]);
 
@@ -105,86 +111,92 @@ export default function ModifyRequestBodyRuleDetail({
       saveDetailRule={saveDetailRule}
       onTest={() => setTestDrawerOpen(true)}
     />
-    {workingRule.conditions.map((c) => {
-      const dynamicScriptError = c.requestBodyMode === 'dynamic' ? validateDynamicScript(c.requestBodyDynamicValue) : null;
-      return <Collapse
-        key={c.id}
-        defaultActiveKey={[c.id]}
-        items={[{
-          key: c.id,
-          label: t('请求条件配置', 'Request conditions'),
-          extra: (
-            <Popconfirm
-              title={t('确认删除该条件配置？', 'Delete this condition?')}
-              okText={t('删除', 'Delete')}
-              cancelText={t('取消', 'Cancel')}
-              okButtonProps={{ danger: true, type: 'primary' }}
-              onCancel={(e) => e?.stopPropagation()}
-              onConfirm={(e) => {
-                e?.stopPropagation();
-                removeCondition(c.id);
-              }}
-            >
-              <span
-                role="button"
-                tabIndex={0}
-                aria-label={t('删除条件', 'Delete condition')}
-                onMouseDown={(e) => e.stopPropagation()}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }
-                }}
-                style={{ color: '#ff4d4f', cursor: 'pointer', padding: '0 4px' }}
-              >
-                <DeleteOutlined />
-              </span>
-            </Popconfirm>
-          ),
-          children: <Space direction="vertical" style={{ width: '100%' }}>
-            <ConditionUrlMatchEditor
-              condition={c}
-              filterConfigured={isConditionFilterConfigured(c)}
-              onConditionChange={(patch) => updateCondition(c.id, patch)}
-              onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
-            />
-            <Form.Item label={t('修改方式', 'Modify mode')} style={{ marginBottom: 8 }}>
-              <Radio.Group
-                value={c.requestBodyMode}
-                onChange={(e) => updateConditionMode(c.id, e.target.value)}
-                options={[
-                  { label: t('静态数据', 'Static'), value: 'static' },
-                  { label: t('动态（JavaScript）', 'Dynamic (JavaScript)'), value: 'dynamic' },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item
-              label={c.requestBodyMode === 'dynamic' ? t('JavaScript 代码', 'JavaScript code') : t('替换后的请求体', 'Replaced request body')}
-              validateStatus={dynamicScriptError ? 'error' : ''}
-              help={dynamicScriptError ?? (c.requestBodyMode === 'dynamic' ? t('需定义 modifyRequestBody(args) 并返回最终请求体', 'Define modifyRequestBody(args) and return the final request body.') : t('命中后会直接替换原始请求 body', 'Will directly replace the original request body when matched.'))}
-              layout="vertical"
-              style={{ marginBottom: 0 }}
-            >
-              <CodeEditor
-                mode={c.requestBodyMode}
-                value={c.requestBodyMode === 'dynamic' ? c.requestBodyDynamicValue : c.requestBodyStaticValue}
-                onChange={(value) => updateCondition(c.id, c.requestBodyMode === 'dynamic'
-                  ? { requestBodyDynamicValue: value, requestBodyValue: value }
-                  : { requestBodyStaticValue: value, requestBodyValue: value })}
-              />
-            </Form.Item>
-          </Space>,
-        }]}
-        style={{ marginBottom: 12 }}
-      />;
-    })}
+    <Accordion type="multiple" value={openConditions} onValueChange={setOpenConditions}>
+      {workingRule.conditions.map((c) => {
+        const dynamicScriptError = c.requestBodyMode === 'dynamic' ? validateDynamicScript(c.requestBodyDynamicValue) : null;
+        return (
+          <AccordionItem key={c.id} value={c.id} className="mb-3 border rounded-lg overflow-hidden">
+            <AccordionTrigger className="px-4 hover:no-underline">
+              <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>{t('请求条件配置', 'Request conditions')}</span>
+                <Popconfirm
+                  title={t('确认删除该条件配置？', 'Delete this condition?')}
+                  okText={t('删除', 'Delete')}
+                  cancelText={t('取消', 'Cancel')}
+                  okButtonProps={{ danger: true, type: 'primary' }}
+                  onCancel={(e) => e?.stopPropagation()}
+                  onConfirm={(e) => {
+                    e?.stopPropagation();
+                    removeCondition(c.id);
+                  }}
+                >
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={t('删除条件', 'Delete condition')}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }
+                    }}
+                    style={{ color: '#ff4d4f', cursor: 'pointer', padding: '0 4px' }}
+                  >
+                    <DeleteOutlined />
+                  </span>
+                </Popconfirm>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="px-4">
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <ConditionUrlMatchEditor
+                  condition={c}
+                  filterConfigured={isConditionFilterConfigured(c)}
+                  onConditionChange={(patch) => updateCondition(c.id, patch)}
+                  onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+                />
+                <Form.Item label={t('修改方式', 'Modify mode')} style={{ marginBottom: 8 }}>
+                  <Radio.Group
+                    value={c.requestBodyMode}
+                    onChange={(e) => updateConditionMode(c.id, e.target.value)}
+                    options={[
+                      { label: t('静态数据', 'Static'), value: 'static' },
+                      { label: t('动态（JavaScript）', 'Dynamic (JavaScript)'), value: 'dynamic' },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label={c.requestBodyMode === 'dynamic' ? t('JavaScript 代码', 'JavaScript code') : t('替换后的请求体', 'Replaced request body')}
+                  validateStatus={dynamicScriptError ? 'error' : ''}
+                  help={dynamicScriptError ?? (c.requestBodyMode === 'dynamic' ? t('需定义 modifyRequestBody(args) 并返回最终请求体', 'Define modifyRequestBody(args) and return the final request body.') : t('命中后会直接替换原始请求 body', 'Will directly replace the original request body when matched.'))}
+                  layout="vertical"
+                  style={{ marginBottom: 0 }}
+                >
+                  <CodeEditor
+                    mode={c.requestBodyMode}
+                    value={c.requestBodyMode === 'dynamic' ? c.requestBodyDynamicValue : c.requestBodyStaticValue}
+                    onChange={(value) => updateCondition(c.id, c.requestBodyMode === 'dynamic'
+                      ? { requestBodyDynamicValue: value, requestBodyValue: value }
+                      : { requestBodyStaticValue: value, requestBodyValue: value })}
+                  />
+                </Form.Item>
+              </Space>
+            </AccordionContent>
+          </AccordionItem>
+        );
+      })}
+    </Accordion>
     <Button
       variant="outline"
       style={{ marginTop: 12, width: '100%', height: 40, background: 'transparent' }}
-      onClick={() => setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, createDefaultCondition()] })}
+      onClick={() => {
+        const newCondition = createDefaultCondition();
+        setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, newCondition] });
+        setOpenConditions((prev) => [...prev, newCondition.id]);
+      }}
     >
       <PlusOutlined />
       {t('添加新条件配置', 'Add condition')}

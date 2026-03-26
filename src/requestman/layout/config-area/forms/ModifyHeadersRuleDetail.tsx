@@ -6,8 +6,13 @@ import {
   TooltipTrigger,
 } from '@/components/animate-ui/components/radix/tooltip';
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/animate-ui/components/radix/accordion';
+import {
   AutoComplete,
-  Collapse,
   Input,
   Modal,
   Popconfirm,
@@ -100,6 +105,7 @@ export default function ModifyHeadersRuleDetail({
   const [testUrl, setTestUrl] = useState('');
   const [testResult, setTestResult] = useState<SimulateRuleResult | null>(null);
   const [filterModal, setFilterModal] = useState<{ open: boolean; conditionId?: string }>({ open: false });
+  const [openConditions, setOpenConditions] = useState<string[]>(() => workingRule.conditions.map((c) => c.id));
   const currentGroupEnabled = useMemo(() => new Map(groups.map((g) => [g.id, g.enabled])), [groups]);
 
   const updateCondition = (conditionId: string, patch: Partial<RedirectCondition>) => {
@@ -207,74 +213,78 @@ export default function ModifyHeadersRuleDetail({
       saveDetailRule={saveDetailRule}
       onTest={() => setTestDrawerOpen(true)}
     />
-    {workingRule.conditions.map((c) => (
-      <Collapse
-        key={c.id}
-        defaultActiveKey={[c.id]}
-        items={[{
-          key: c.id,
-          label: t('请求条件配置', 'Request conditions'),
-          extra: (
-            <Popconfirm
-              title={t('确认删除该条件配置？', 'Delete this condition?')}
-              okText={t('删除', 'Delete')}
-              cancelText={t('取消', 'Cancel')}
-              okButtonProps={{ danger: true, type: 'primary' }}
-              onCancel={(e) => e?.stopPropagation()}
-              onConfirm={(e) => {
-                e?.stopPropagation();
-                removeCondition(c.id);
-              }}
-            >
-              <span
-                role="button"
-                tabIndex={0}
-                aria-label={t('删除条件', 'Delete condition')}
-                onMouseDown={(e) => e.stopPropagation()}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }
+    <Accordion type="multiple" value={openConditions} onValueChange={setOpenConditions}>
+      {workingRule.conditions.map((c) => (
+        <AccordionItem key={c.id} value={c.id} className="mb-3 border rounded-lg overflow-hidden">
+          <AccordionTrigger className="px-4 hover:no-underline">
+            <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>{t('请求条件配置', 'Request conditions')}</span>
+              <Popconfirm
+                title={t('确认删除该条件配置？', 'Delete this condition?')}
+                okText={t('删除', 'Delete')}
+                cancelText={t('取消', 'Cancel')}
+                okButtonProps={{ danger: true, type: 'primary' }}
+                onCancel={(e) => e?.stopPropagation()}
+                onConfirm={(e) => {
+                  e?.stopPropagation();
+                  removeCondition(c.id);
                 }}
-                style={{ color: '#ff4d4f', cursor: 'pointer', padding: '0 4px' }}
               >
-                <DeleteOutlined />
-              </span>
-            </Popconfirm>
-          ),
-          children: <Space direction="vertical" style={{ width: '100%' }}>
-            <ConditionUrlMatchEditor
-              condition={c}
-              filterConfigured={isConditionFilterConfigured(c)}
-              onConditionChange={(patch) => updateCondition(c.id, patch)}
-              onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
-            />
-            <Tabs
-              items={[
-                {
-                  key: 'requestHeaderModifications',
-                  label: t('请求 Headers', 'Request headers'),
-                  children: renderHeaderTabContent(c, 'requestHeaderModifications'),
-                },
-                {
-                  key: 'responseHeaderModifications',
-                  label: t('响应 Headers', 'Response headers'),
-                  children: renderHeaderTabContent(c, 'responseHeaderModifications'),
-                },
-              ]}
-            />
-          </Space>,
-        }]}
-        style={{ marginBottom: 12 }}
-      />
-    ))}
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={t('删除条件', 'Delete condition')}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }
+                  }}
+                  style={{ color: '#ff4d4f', cursor: 'pointer', padding: '0 4px' }}
+                >
+                  <DeleteOutlined />
+                </span>
+              </Popconfirm>
+            </div>
+          </AccordionTrigger>
+          <AccordionContent className="px-4">
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <ConditionUrlMatchEditor
+                condition={c}
+                filterConfigured={isConditionFilterConfigured(c)}
+                onConditionChange={(patch) => updateCondition(c.id, patch)}
+                onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+              />
+              <Tabs
+                items={[
+                  {
+                    key: 'requestHeaderModifications',
+                    label: t('请求 Headers', 'Request headers'),
+                    children: renderHeaderTabContent(c, 'requestHeaderModifications'),
+                  },
+                  {
+                    key: 'responseHeaderModifications',
+                    label: t('响应 Headers', 'Response headers'),
+                    children: renderHeaderTabContent(c, 'responseHeaderModifications'),
+                  },
+                ]}
+              />
+            </Space>
+          </AccordionContent>
+        </AccordionItem>
+      ))}
+    </Accordion>
     <Button
       variant="outline"
       style={{ marginTop: 12, width: '100%', height: 40, background: 'transparent' }}
-      onClick={() => setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, createDefaultCondition()] })}
+      onClick={() => {
+        const newCondition = createDefaultCondition();
+        setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, newCondition] });
+        setOpenConditions((prev) => [...prev, newCondition.id]);
+      }}
     >
       <PlusOutlined />
       {t('添加新条件配置', 'Add condition')}
