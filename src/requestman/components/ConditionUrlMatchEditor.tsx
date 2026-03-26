@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
-import { Input, Space } from '.';
+import { Input } from '.';
 import { FilterOutlined } from '../icons';
 import { MATCH_MODE_OPTIONS, MATCH_TARGET_OPTIONS } from '../constants';
 import GroupDropdownSelect from './GroupDropdownSelect';
@@ -19,7 +19,7 @@ export default function ConditionUrlMatchEditor({
   onConditionChange,
   onFilterClick,
 }: Props) {
-  return <Space.Compact style={{ width: '100%' }}>
+  return <div className="aui-compact" style={{ width: '100%' }}>
     <GroupDropdownSelect
       value={condition.matchTarget}
       options={MATCH_TARGET_OPTIONS as never}
@@ -46,5 +46,5 @@ export default function ConditionUrlMatchEditor({
     >
       <FilterOutlined style={filterConfigured ? { color: '#FF8700' } : undefined} />
     </Button>
-  </Space.Compact>;
+  </div>;
 }

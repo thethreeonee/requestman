@@ -422,32 +422,6 @@ body.rule-pointer-dragging { cursor: grabbing; user-select: none; }
 .rule-name-link:active { color: var(--rm-icon-accent-alt); }
 .rule-name-link:hover { color: var(--rm-accent-primary); }
 
-.requestman-shell .ant-btn-primary {
-  background: var(--rm-accent-primary);
-  color: var(--rm-on-accent);
-}
-.requestman-shell .ant-btn-default {
-  background: var(--rm-surface-bg);
-  border-color: var(--rm-border);
-  color: var(--rm-text-primary);
-}
-.requestman-shell .ant-segmented {
-  background: var(--rm-surface-bg);
-}
-.requestman-shell .ant-segmented .ant-segmented-item-selected {
-  background: var(--rm-accent-soft-bg);
-  color: var(--rm-accent-primary);
-  box-shadow: inset 0 0 0 1px var(--rm-accent-primary);
-}
-.requestman-shell .ant-switch.ant-switch-checked {
-  background: var(--rm-accent-primary);
-}
-html.dark .requestman-shell .ant-switch.ant-switch-checked {
-  background: var(--rm-active-bg);
-}
-html.dark .requestman-shell .ant-switch.ant-switch-checked .ant-switch-handle::before {
-  background: var(--rm-icon-accent-alt);
-}
 
 .aui-space { display: inline-flex; gap: 8px; align-items: center; }
 .aui-space.vertical { display: flex; flex-direction: column; align-items: stretch; }

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
-import { Input, Space, Typography } from '.';
+import { Input } from '.';
 import type { SimulateRuleResult } from '../rule-utils';
 import { t } from '../i18n';
 import {
@@ -67,39 +67,39 @@ export default function TestRuleDrawer({
         </SheetHeader>
 
         <div style={bodyStyle}>
-          <Space.Compact style={{ width: '100%' }}>
+          <div className="aui-compact" style={{ width: '100%' }}>
             <Input
               value={testUrl}
               onChange={(e) => onTestUrlChange(e.target.value)}
-              onPressEnter={onTest}
+              onKeyDown={(e) => { if (e.key === 'Enter') onTest(); }}
               placeholder={t('输入测试URL', 'Enter URL to test')}
             />
             <Button variant="outline" onClick={onTest}>{t('测试', 'Test')}</Button>
-          </Space.Compact>
+          </div>
 
           <div style={resultBlockStyle}>
-            {!testResult && <Typography.Text type="secondary">{t('输入 URL 后点击测试（或按 Enter）', 'Enter URL and click Test (or press Enter).')}</Typography.Text>}
+            {!testResult && <span style={{ opacity: 0.7 }}>{t('输入 URL 后点击测试（或按 Enter）', 'Enter URL and click Test (or press Enter).')}</span>}
 
             {testResult && testResult.ok && (
               <>
                 <div style={rowStyle}>
-                  <Typography.Text strong>{t('命中条件配置', 'Matched condition')}</Typography.Text>
-                  <Typography.Text style={valueStyle}>
+                  <strong>{t('命中条件配置', 'Matched condition')}</strong>
+                  <span style={valueStyle}>
                     {t('条件', 'Condition')} {matchedConditionIndex >= 0 ? matchedConditionIndex + 1 : '-'}（{testResult.matchedCondition.matchTarget}/{testResult.matchedCondition.matchMode}）
-                  </Typography.Text>
+                  </span>
                 </div>
                 <div style={rowStyle}>
-                  <Typography.Text strong>{t('最终结果', 'Final result')}</Typography.Text>
-                  <Typography.Text style={valueStyle} copyable={{ text: testResult.redirectedUrl }}>
+                  <strong>{t('最终结果', 'Final result')}</strong>
+                  <span style={valueStyle}>
                     {testResult.redirectedUrl}
-                  </Typography.Text>
+                  </span>
                 </div>
               </>
             )}
 
             {testResult && !testResult.ok && (
               <div style={rowStyle}>
-                <Typography.Text type="secondary">{testResult.reason}</Typography.Text>
+                <span style={{ opacity: 0.7 }}>{testResult.reason}</span>
               </div>
             )}
           </div>

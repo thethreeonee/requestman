@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
-  FieldGroup,
   RadioGroup,
-} from '../../../components';
+  RadioGroupItem,
+} from '@/components/animate-ui/components/radix/radio-group';
 import { t } from '../../../i18n';
 import {
   createDefaultCondition,
@@ -114,23 +114,22 @@ export default function ModifyResponseBodyRuleDetail({
               onConditionChange={(patch) => updateCondition(c.id, patch)}
               onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
             />
-            <FieldGroup label={t('修改方式', 'Modify mode')} style={{ marginBottom: 8 }}>
-              <RadioGroup
-                value={c.responseBodyMode}
-                onChange={(e) => updateConditionMode(c.id, e.target.value)}
-                options={[
+            <label style={{ display: 'block', marginBottom: 8 }}>
+              <div>{t('修改方式', 'Modify mode')}</div>
+              <RadioGroup value={c.responseBodyMode} onValueChange={(v) => updateConditionMode(c.id, v)} className="aui-space">
+                {[
                   { label: t('静态数据', 'Static'), value: 'static' },
                   { label: t('动态（JavaScript）', 'Dynamic (JavaScript)'), value: 'dynamic' },
-                ]}
-              />
-            </FieldGroup>
-            <FieldGroup
-              label={c.responseBodyMode === 'dynamic' ? t('JavaScript 代码', 'JavaScript code') : t('替换后的响应体', 'Replaced response body')}
-              validateStatus={dynamicScriptError ? 'error' : ''}
-              help={dynamicScriptError ?? (c.responseBodyMode === 'dynamic' ? t('需定义 modifyResponse(args) 并返回最终响应体', 'Define modifyResponse(args) and return the final response body.') : t('命中后会直接替换原始响应 body', 'Will directly replace the original response body when matched.'))}
-              layout="vertical"
-              style={{ marginBottom: 0 }}
-            >
+                ].map((opt) => (
+                  <label key={opt.value} className="flex items-center gap-2">
+                    <RadioGroupItem value={opt.value} />
+                    <span>{opt.label}</span>
+                  </label>
+                ))}
+              </RadioGroup>
+            </label>
+            <label style={{ display: 'block', marginBottom: 0 }}>
+              <div>{c.responseBodyMode === 'dynamic' ? t('JavaScript 代码', 'JavaScript code') : t('替换后的响应体', 'Replaced response body')}</div>
               <CodeEditor
                 mode={c.responseBodyMode}
                 value={c.responseBodyMode === 'dynamic' ? c.responseBodyDynamicValue : c.responseBodyStaticValue}
@@ -138,7 +137,12 @@ export default function ModifyResponseBodyRuleDetail({
                   ? { responseBodyDynamicValue: value, responseBodyValue: value }
                   : { responseBodyStaticValue: value, responseBodyValue: value })}
               />
-            </FieldGroup>
+              {(dynamicScriptError ?? (c.responseBodyMode === 'dynamic' ? t('需定义 modifyResponse(args) 并返回最终响应体', 'Define modifyResponse(args) and return the final response body.') : t('命中后会直接替换原始响应 body', 'Will directly replace the original response body when matched.'))) ? (
+                <div style={{ marginTop: 4, fontSize: 12, opacity: dynamicScriptError ? 1 : 0.75, color: dynamicScriptError ? '#c00' : undefined }}>
+                  {dynamicScriptError ?? (c.responseBodyMode === 'dynamic' ? t('需定义 modifyResponse(args) 并返回最终响应体', 'Define modifyResponse(args) and return the final response body.') : t('命中后会直接替换原始响应 body', 'Will directly replace the original response body when matched.'))}
+                </div>
+              ) : null}
+            </label>
           </div>
         );
       }}

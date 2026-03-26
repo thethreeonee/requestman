@@ -1,5 +1,4 @@
 import React, { Suspense, lazy } from 'react';
-import { Typography } from '../../components';
 import { t } from '../../i18n';
 import type { RedirectRule } from '../../types';
 import type { RuleDetailProps } from './types';
@@ -39,8 +38,8 @@ export default function ConfigArea({ currentRule, detailProps }: Props) {
           ? renderRuleEditor(currentRule, detailProps)
           : (
             <div className="editor-placeholder">
-              <Typography.Title level={4} style={{ marginTop: 0 }}>{t('选择一条规则开始编辑', 'Select a rule to start editing')}</Typography.Title>
-              <Typography.Text type="secondary">{t('左侧规则列表选择规则后，可在此处编辑。', 'Select a rule from the sidebar to edit it here.')}</Typography.Text>
+              <h4 style={{ marginTop: 0 }}>{t('选择一条规则开始编辑', 'Select a rule to start editing')}</h4>
+              <span style={{ opacity: 0.7 }}>{t('左侧规则列表选择规则后，可在此处编辑。', 'Select a rule from the sidebar to edit it here.')}</span>
             </div>
           )}
       </Suspense>

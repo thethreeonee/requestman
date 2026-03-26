@@ -13,7 +13,7 @@ import {
   TooltipTrigger,
 } from '@/components/animate-ui/components/radix/tooltip';
 import { ReloadOutlined } from '../icons';
-import { AutoComplete, FieldGroup, Input, Select, Space } from '.';
+import { AutoComplete, Input, Select } from '.';
 import { t } from '../i18n';
 import {
   COMMON_HEADER_OPTIONS,
@@ -63,8 +63,9 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
         </DialogHeader>
         {condition && (
           <div>
-          <FieldGroup label={t('页面域名', 'Page domain')} style={filterItemStyle}>
-            <Space.Compact style={{ width: '100%' }} block>
+          <label style={{ display: 'block', ...filterItemStyle }}>
+            <div>{t('页面域名', 'Page domain')}</div>
+            <div className="aui-compact">
               <Input
                 value={condition.filter.pageDomain}
                 onChange={(e) => onConditionChange(condition.id, {
@@ -74,11 +75,12 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
               {renderResetButton(t('重置页面域名', 'Reset page domain'), () => onConditionChange(condition.id, {
                 filter: { ...condition.filter, pageDomain: '' },
               }))}
-            </Space.Compact>
-          </FieldGroup>
+            </div>
+          </label>
 
-          <FieldGroup label={t('资源类型', 'Resource type')} style={filterItemStyle}>
-            <Space.Compact style={{ width: '100%' }} block>
+          <label style={{ display: 'block', ...filterItemStyle }}>
+            <div>{t('资源类型', 'Resource type')}</div>
+            <div className="aui-compact">
               <Select
                 value={condition.filter.resourceType}
                 options={RESOURCE_TYPE_OPTIONS as never}
@@ -89,11 +91,12 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
               {renderResetButton(t('重置资源类型', 'Reset resource type'), () => onConditionChange(condition.id, {
                 filter: { ...condition.filter, resourceType: 'all' },
               }))}
-            </Space.Compact>
-          </FieldGroup>
+            </div>
+          </label>
 
-          <FieldGroup label={t('请求方法', 'Request method')} style={filterItemStyle}>
-            <Space.Compact style={{ width: '100%' }} block>
+          <label style={{ display: 'block', ...filterItemStyle }}>
+            <div>{t('请求方法', 'Request method')}</div>
+            <div className="aui-compact">
               <Select
                 value={condition.filter.requestMethod}
                 options={REQUEST_METHOD_OPTIONS as never}
@@ -104,11 +107,12 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
               {renderResetButton(t('重置请求方法', 'Reset request method'), () => onConditionChange(condition.id, {
                 filter: { ...condition.filter, requestMethod: 'all' },
               }))}
-            </Space.Compact>
-          </FieldGroup>
+            </div>
+          </label>
 
-          <FieldGroup label={t('请求 Header 过滤', 'Request header filter')} style={filterItemStyle}>
-            <Space.Compact style={{ width: '100%' }} block>
+          <label style={{ display: 'block', ...filterItemStyle }}>
+            <div>{t('请求 Header 过滤', 'Request header filter')}</div>
+            <div className="aui-compact">
               <AutoComplete
                 options={COMMON_HEADER_OPTIONS}
                 value={condition.filter.requestHeaderKey}
@@ -142,8 +146,8 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
                   requestHeaderValue: '',
                 },
               }))}
-            </Space.Compact>
-          </FieldGroup>
+            </div>
+          </label>
           </div>
         )}
         <DialogFooter>

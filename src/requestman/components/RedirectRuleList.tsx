@@ -6,11 +6,8 @@ import {
   TooltipTrigger,
 } from '@/components/animate-ui/components/radix/tooltip';
 import { ChevronsUpDown } from 'lucide-react';
-import {
-  Input,
-  Switch,
-  Typography,
-} from '.';
+import { Input } from '.';
+import { Switch } from '@/components/animate-ui/components/radix/switch';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -499,7 +496,7 @@ export default function RedirectRuleList({
                   pressedWidth={14}
                   checked={rule.enabled}
                   disabled={!redirectEnabled || !groupEnabled}
-                  onChange={(value: boolean) => handleRuleEnabledChange(rule, value)}
+                  onCheckedChange={(value: boolean) => handleRuleEnabledChange(rule, value)}
                 />
               </span>
             </TooltipTrigger>
@@ -583,11 +580,11 @@ export default function RedirectRuleList({
             {renderRuleTypeIcon(activePreviewRule.type)}
           </div>
           <div className="rule-item-row__name">
-            <Typography.Text strong>{activePreviewRule.name}</Typography.Text>
+            <strong>{activePreviewRule.name}</strong>
           </div>
           <div className="rule-item-row__spacer" />
           <div className="rule-item-row__status">
-            <Typography.Text type="secondary">{activePreviewRule.enabled ? t('已开启', 'On') : t('已关闭', 'Off')}</Typography.Text>
+            <span style={{ opacity: 0.7 }}>{activePreviewRule.enabled ? t('已开启', 'On') : t('已关闭', 'Off')}</span>
           </div>
           <div className="rule-item-row__actions">
             <EllipsisOutlined />
@@ -624,7 +621,7 @@ export default function RedirectRuleList({
                             pressedWidth={14}
                             checked={group.enabled}
                             disabled={!redirectEnabled}
-                            onChange={(value: boolean) => handleGroupEnabledChange(group, value)}
+                            onCheckedChange={(value: boolean) => handleGroupEnabledChange(group, value)}
                           />
                         </span>
                       </TooltipTrigger>
@@ -689,7 +686,7 @@ export default function RedirectRuleList({
                         ? groupRules.map(renderRuleRow)
                         : (
                           <div className="rule-item-row__empty" data-group-id={group.id} data-row-type="group">
-                            <Typography.Text type="secondary">{t('该规则组暂无规则', 'No rules in this group')}</Typography.Text>
+                            <span style={{ opacity: 0.7 }}>{t('该规则组暂无规则', 'No rules in this group')}</span>
                           </div>
                         )}
                     </div>

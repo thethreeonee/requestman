@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
-import { Input, Space } from '.';
+import { Input } from '.';
 import { Binary } from '@/components/animate-ui/icons/binary';
 import { Blend } from '@/components/animate-ui/icons/blend';
 import {
@@ -84,7 +84,7 @@ export default function RuleDetailToolbar({
           <Brush size={16} />
         </Button>
       </div>
-      <Space>
+      <div className="aui-space">
         <GroupDropdownSelect
           value={groupId}
           style={{ width: 220 }}
@@ -102,7 +102,7 @@ export default function RuleDetailToolbar({
         >
           <span>{t('保存规则', 'Save rule')}</span>
         </Button>
-      </Space>
+      </div>
     </div>
     <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
       <DialogContent showCloseButton>
