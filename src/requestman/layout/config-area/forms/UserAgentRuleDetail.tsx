@@ -3,7 +3,6 @@ import {
   Input,
   Modal,
   Select,
-  Space,
   Typography,
 } from '../../../components';
 import { t } from '../../../i18n';
@@ -100,14 +99,14 @@ export default function UserAgentRuleDetail({
       }}
       onRemove={removeCondition}
       renderContent={(c) => (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
           <ConditionUrlMatchEditor
             condition={c}
             filterConfigured={isConditionFilterConfigured(c)}
             onConditionChange={(patch) => updateCondition(c.id, patch)}
             onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
           />
-          <Space.Compact style={{ width: '100%' }}>
+          <div style={{ display: 'flex', gap: 6, width: '100%' }}>
             <Select
               value={c.userAgentType ?? 'device'}
               options={USER_AGENT_TYPE_OPTIONS as never}
@@ -126,7 +125,7 @@ export default function UserAgentRuleDetail({
               options={(c.userAgentType ?? 'device') === 'browser' ? BROWSER_PRESET_GROUP_OPTIONS : DEVICE_PRESET_GROUP_OPTIONS as never}
               onChange={(value) => updateCondition(c.id, { userAgentPresetKey: value })}
             />}
-          </Space.Compact>
+          </div>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {(c.userAgentType ?? 'device') === 'custom'
               ? (c.userAgentCustomValue?.trim() ? `将设置为：${c.userAgentCustomValue.trim()}` : t('请输入自定义 User-Agent', 'Enter custom User-Agent'))
@@ -135,7 +134,7 @@ export default function UserAgentRuleDetail({
                 return value ? `将设置为：${value}` : t('请选择 User-Agent', 'Select User-Agent');
               })()}
           </Typography.Text>
-        </Space>
+        </div>
       )}
     />
     <TestRuleDrawer

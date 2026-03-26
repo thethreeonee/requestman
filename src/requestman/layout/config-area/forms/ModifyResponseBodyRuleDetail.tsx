@@ -4,7 +4,6 @@ import {
   Modal,
   Radio,
   Select,
-  Space,
 } from '../../../components';
 import { t } from '../../../i18n';
 import {
@@ -110,7 +109,7 @@ export default function ModifyResponseBodyRuleDetail({
       renderContent={(c) => {
         const dynamicScriptError = c.responseBodyMode === 'dynamic' ? validateDynamicScript(c.responseBodyDynamicValue) : null;
         return (
-          <Space direction="vertical" style={{ width: '100%' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
             <ConditionUrlMatchEditor
               condition={c}
               filterConfigured={isConditionFilterConfigured(c)}
@@ -142,7 +141,7 @@ export default function ModifyResponseBodyRuleDetail({
                   : { responseBodyStaticValue: value, responseBodyValue: value })}
               />
             </Form.Item>
-          </Space>
+          </div>
         );
       }}
     />

@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   Modal,
-  Space,
   Typography,
 } from '../../../components';
 import { t } from '../../../i18n';
@@ -65,7 +64,7 @@ export default function CancelRequestRuleDetail({
       }}
       onRemove={removeCondition}
       renderContent={(c) => (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
           <ConditionUrlMatchEditor
             condition={c}
             filterConfigured={isConditionFilterConfigured(c)}
@@ -73,7 +72,7 @@ export default function CancelRequestRuleDetail({
             onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
           />
           <Typography.Text type="secondary">{t('命中该 URL 条件后，将直接取消请求。', 'When this URL condition matches, the request will be cancelled immediately.')}</Typography.Text>
-        </Space>
+        </div>
       )}
     />
     <TestRuleDrawer

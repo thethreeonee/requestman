@@ -4,7 +4,6 @@ import {
   Input,
   Modal,
   Radio,
-  Space,
 } from '../../../components';
 import { t } from '../../../i18n';
 import {
@@ -107,7 +106,7 @@ export default function RedirectRuleDetail({
       }}
       onRemove={removeCondition}
       renderContent={(c) => (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
           <ConditionUrlMatchEditor
             condition={c}
             filterConfigured={isConditionFilterConfigured(c)}
@@ -117,14 +116,14 @@ export default function RedirectRuleDetail({
           <Radio.Group value={c.redirectType} onChange={(e) => updateRedirectType(c, e.target.value as 'url' | 'file')}><Radio value="url">URL</Radio><Radio value="file">{t('本地文件', 'Local file')}</Radio></Radio.Group>
           {c.redirectType === 'file'
             ? <>
-              <Space.Compact style={{ width: '100%' }}>
+              <div style={{ display: 'flex', gap: 6, width: '100%' }}>
                 <Input
                   value={getRedirectTarget(c)}
                   onChange={(e) => updateRedirectTarget(c, e.target.value)}
                   placeholder={t('请输入本地文件绝对路径', 'Enter absolute local file path')}
                 />
                 <Button variant="outline" onClick={() => pickFile(c.id)}><FileOutlined />{t('选择文件', 'Select file')}</Button>
-              </Space.Compact>
+              </div>
               <input
                 ref={(el) => { fileInputRefs.current[c.id] = el; }}
                 type="file"
@@ -133,7 +132,7 @@ export default function RedirectRuleDetail({
               />
             </>
             : <Input value={getRedirectTarget(c)} onChange={(e) => updateRedirectTarget(c, e.target.value)} placeholder="重定向目标 URL" />}
-        </Space>
+        </div>
       )}
     />
     <TestRuleDrawer

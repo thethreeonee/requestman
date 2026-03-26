@@ -10,7 +10,6 @@ import {
   Input,
   Modal,
   Select,
-  Space,
   Tabs,
 } from '../../../components';
 import { t } from '../../../i18n';
@@ -158,9 +157,9 @@ export default function ModifyHeadersRuleDetail({
     condition: RedirectCondition,
     tabKey: 'requestHeaderModifications' | 'responseHeaderModifications',
   ) => (
-    <Space direction="vertical" style={{ width: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
       {condition[tabKey].map((modification) => (
-        <Space.Compact key={modification.id} style={{ width: '100%' }}>
+        <div key={modification.id} style={{ display: 'flex', gap: 6, width: '100%' }}>
           <Select
             value={modification.action}
             options={HEADER_ACTION_OPTIONS as never}
@@ -191,10 +190,10 @@ export default function ModifyHeadersRuleDetail({
           <Button variant="destructive" size="icon" onClick={() => removeHeaderModification(condition.id, tabKey, modification.id)}>
             <DeleteOutlined />
           </Button>
-        </Space.Compact>
+        </div>
       ))}
       <Button variant="outline" onClick={() => addHeaderModification(condition.id, tabKey)}><PlusOutlined />{t('添加 Header', 'Add header')}</Button>
-    </Space>
+    </div>
   );
 
   return <div>
@@ -215,7 +214,7 @@ export default function ModifyHeadersRuleDetail({
       }}
       onRemove={removeCondition}
       renderContent={(c) => (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
           <ConditionUrlMatchEditor
             condition={c}
             filterConfigured={isConditionFilterConfigured(c)}
@@ -236,7 +235,7 @@ export default function ModifyHeadersRuleDetail({
               },
             ]}
           />
-        </Space>
+        </div>
       )}
     />
     <TestRuleDrawer

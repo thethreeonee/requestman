@@ -4,7 +4,6 @@ import {
   InputNumber,
   Modal,
   Select,
-  Space,
   Typography,
 } from '../../../components';
 import { t } from '../../../i18n';
@@ -69,7 +68,7 @@ export default function RequestDelayRuleDetail({
       }}
       onRemove={removeCondition}
       renderContent={(c) => (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
           <ConditionUrlMatchEditor
             condition={c}
             filterConfigured={isConditionFilterConfigured(c)}
@@ -87,7 +86,7 @@ export default function RequestDelayRuleDetail({
             />
           </Form.Item>
           <Typography.Text type="secondary">{t('命中该 URL 条件后，请求将延迟指定毫秒数再继续。', 'When this URL condition matches, the request will continue after the specified delay.')}</Typography.Text>
-        </Space>
+        </div>
       )}
     />
     <TestRuleDrawer

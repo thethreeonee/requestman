@@ -4,7 +4,6 @@ import {
   Input,
   Modal,
   Select,
-  Space,
 } from '../../../components';
 import { t } from '../../../i18n';
 import {
@@ -103,7 +102,7 @@ export default function QueryParamsRuleDetail({
       }}
       onRemove={removeCondition}
       renderContent={(c) => (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
           <ConditionUrlMatchEditor
             condition={c}
             filterConfigured={isConditionFilterConfigured(c)}
@@ -111,7 +110,7 @@ export default function QueryParamsRuleDetail({
             onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
           />
           {c.queryParamModifications.map((modification) => (
-            <Space.Compact key={modification.id} style={{ width: '100%' }}>
+            <div key={modification.id} style={{ display: 'flex', gap: 6, width: '100%' }}>
               <Select
                 value={modification.action}
                 options={QUERY_ACTION_OPTIONS as never}
@@ -132,10 +131,10 @@ export default function QueryParamsRuleDetail({
               <Button variant="destructive" size="icon" onClick={() => removeModification(c.id, modification.id)}>
                 <DeleteOutlined />
               </Button>
-            </Space.Compact>
+            </div>
           ))}
           <Button variant="outline" onClick={() => addModification(c.id)}><PlusOutlined />{t('添加修改', 'Add modification')}</Button>
-        </Space>
+        </div>
       )}
     />
     <TestRuleDrawer

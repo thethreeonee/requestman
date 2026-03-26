@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import {
   Input,
   Modal,
-  Space,
 } from '../../../components';
 import { t } from '../../../i18n';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
@@ -66,7 +65,7 @@ export default function RewriteStringRuleDetail({
       }}
       onRemove={removeCondition}
       renderContent={(c) => (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
           <ConditionUrlMatchEditor
             condition={c}
             filterConfigured={isConditionFilterConfigured(c)}
@@ -74,26 +73,26 @@ export default function RewriteStringRuleDetail({
             onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
           />
           <div style={{ display: 'flex', width: '100%', gap: 8 }}>
-            <Space.Compact style={{ flex: 1, minWidth: 0 }}>
-              <Space.Addon style={{ flexShrink: 0 }}>{t('目标', 'Target')}</Space.Addon>
+            <div style={{ display: 'flex', gap: 6, flex: 1, minWidth: 0 }}>
+              <span className="aui-addon" style={{ flexShrink: 0 }}>{t('目标', 'Target')}</span>
               <Input
                 style={{ minWidth: 0 }}
                 value={c.rewriteFrom}
                 onChange={(e) => updateCondition(c.id, { rewriteFrom: e.target.value })}
                 placeholder="from"
               />
-            </Space.Compact>
-            <Space.Compact style={{ flex: 1, minWidth: 0 }}>
-              <Space.Addon style={{ flexShrink: 0 }}>{t('替换为', 'Replace with')}</Space.Addon>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flex: 1, minWidth: 0 }}>
+              <span className="aui-addon" style={{ flexShrink: 0 }}>{t('替换为', 'Replace with')}</span>
               <Input
                 style={{ minWidth: 0 }}
                 value={c.rewriteTo}
                 onChange={(e) => updateCondition(c.id, { rewriteTo: e.target.value })}
                 placeholder="to"
               />
-            </Space.Compact>
+            </div>
           </div>
-        </Space>
+        </div>
       )}
     />
     <TestRuleDrawer
