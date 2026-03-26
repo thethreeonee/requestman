@@ -66,30 +66,6 @@ export const REDIRECT_ENABLED_KEY = 'asap_redirect_enabled_v1';
 export const REDIRECT_GROUPS_KEY = 'asap_redirect_groups_v1';
 export const REDIRECT_RULE_ID_BASE = 10000;
 export const REDIRECT_RULE_ID_MAX = 19999;
-const MANAGED_RULE_META_KEY = 'asap_redirect_rule_meta_v1';
-const managedRuleMeta = new Map<number, { ruleName: string; ruleType: string }>();
-let managedRuleMetaHydrated = false;
-const matchedRulesTimestampByTab = new Map<number, number>();
-type ManagedRuleMatcher = {
-  regex: RegExp;
-  resourceTypes: Set<string> | null;
-  requestMethods: Set<string> | null;
-  initiatorDomains: Set<string> | null;
-};
-type WebRequestDetailsSnapshot = {
-  tabId: unknown;
-  url: string;
-  type?: string;
-  method?: string;
-  initiator?: string;
-  documentUrl?: string;
-  originUrl?: string;
-};
-const managedRuleMatchers = new Map<number, ManagedRuleMatcher>();
-const recentWebRequestHitAt = new Map<string, number>();
-const WEBREQUEST_HIT_DEDUPE_MS = 1000;
-const WEBREQUEST_HIT_CACHE_MAX = 2000;
-const pendingHitRuleIdsByTab = new Map<number, Set<number>>();
 let ruleCachesReady = false;
 let ruleCachesPromise: Promise<void> | null = null;
 const REQUESTMAN_PANEL_URL = chrome.runtime.getURL('requestman/index.html');
@@ -97,30 +73,6 @@ const REQUESTMAN_PANEL_URL = chrome.runtime.getURL('requestman/index.html');
 chrome.action.onClicked.addListener(() => {
   chrome.tabs.create({ url: REQUESTMAN_PANEL_URL });
 });
-
-async function hydrateManagedRuleMeta() {
-  if (managedRuleMetaHydrated) return;
-  managedRuleMetaHydrated = true;
-  const stored = await chrome.storage.local.get([MANAGED_RULE_META_KEY]);
-  const list = Array.isArray(stored?.[MANAGED_RULE_META_KEY]) ? stored[MANAGED_RULE_META_KEY] : [];
-  for (const item of list) {
-    const ruleId = typeof item?.ruleId === 'number' && Number.isInteger(item.ruleId) ? item.ruleId : null;
-    if (ruleId === null) continue;
-    managedRuleMeta.set(ruleId, {
-      ruleName: typeof item?.ruleName === 'string' ? item.ruleName : '',
-      ruleType: typeof item?.ruleType === 'string' ? item.ruleType : 'redirect_request',
-    });
-  }
-}
-
-async function persistManagedRuleMeta() {
-  const serialized = Array.from(managedRuleMeta.entries()).map(([ruleId, meta]) => ({
-    ruleId,
-    ruleName: meta.ruleName,
-    ruleType: meta.ruleType,
-  }));
-  await chrome.storage.local.set({ [MANAGED_RULE_META_KEY]: serialized });
-}
 
 function escapeRegex(value: string) { return value.replace(/[|\\{}()[\]^$+?.]/g, '\\$&'); }
 function wildcardToRegexBody(pattern: string) { return escapeRegex(pattern).replace(/\*/g, '.*'); }
@@ -430,26 +382,6 @@ function toCancelRequestRule(condition: RedirectCondition, index: number): chrom
 
 function getManagedRuleIds() { return Array.from({ length: REDIRECT_RULE_ID_MAX - REDIRECT_RULE_ID_BASE + 1 }, (_, i) => REDIRECT_RULE_ID_BASE + i); }
 
-function toManagedRuleMatcher(rule: chrome.declarativeNetRequest.Rule): ManagedRuleMatcher | null {
-  const regexFilter = typeof rule?.condition?.regexFilter === 'string' ? rule.condition.regexFilter : '';
-  if (!regexFilter) return null;
-  try {
-    const regex = new RegExp(regexFilter);
-    const resourceTypes = Array.isArray(rule.condition?.resourceTypes) && rule.condition.resourceTypes.length
-      ? new Set(rule.condition.resourceTypes.map((item) => String(item).toLowerCase()))
-      : null;
-    const requestMethods = Array.isArray(rule.condition?.requestMethods) && rule.condition.requestMethods.length
-      ? new Set(rule.condition.requestMethods.map((item) => String(item).toLowerCase()))
-      : null;
-    const initiatorDomains = Array.isArray(rule.condition?.initiatorDomains) && rule.condition.initiatorDomains.length
-      ? new Set(rule.condition.initiatorDomains.map((item) => String(item).toLowerCase()))
-      : null;
-    return { regex, resourceTypes, requestMethods, initiatorDomains };
-  } catch {
-    return null;
-  }
-}
-
 async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: RedirectRule[]; enabled?: boolean; }) {
   const groups = Array.isArray(payload.groups) ? payload.groups : [];
   const rules = Array.isArray(payload.rules) ? payload.rules : [];
@@ -458,8 +390,6 @@ async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: R
   for (const group of groups) if (typeof group?.id === 'string' && group.id) groupEnabled.set(group.id, group.enabled !== false);
 
   const nextRules: chrome.declarativeNetRequest.Rule[] = [];
-  managedRuleMeta.clear();
-  managedRuleMatchers.clear();
   if (enabled) {
     let index = 0;
     for (const rule of rules) {
@@ -486,19 +416,12 @@ async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: R
         index += 1;
         if (dnr) {
           nextRules.push(dnr);
-          managedRuleMeta.set(dnr.id, {
-            ruleName: typeof rule.name === 'string' ? rule.name : '',
-            ruleType: typeof rule.type === 'string' ? rule.type : 'redirect_request',
-          });
-          const matcher = toManagedRuleMatcher(dnr);
-          if (matcher) managedRuleMatchers.set(dnr.id, matcher);
         }
       }
     }
   }
 
   await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: getManagedRuleIds(), addRules: nextRules });
-  await persistManagedRuleMeta();
   ruleCachesReady = true;
   return { ok: true, activeCount: nextRules.length };
 }
@@ -527,184 +450,10 @@ async function ensureRuleCachesReady() {
 
 chrome.runtime.onStartup.addListener(() => { void ensureRuleCachesReady(); });
 chrome.runtime.onInstalled.addListener(() => { void ensureRuleCachesReady(); });
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type === 'requestman:content-ready') {
-    const tabId = normalizeNumericId(sender?.tab?.id);
-    if (tabId !== null && tabId >= 0) void flushPendingHitsForTab(tabId);
-    sendResponse({ ok: true });
-    return;
-  }
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type !== 'redirectRules/apply') return;
   applyRedirectRules(message).then((result) => sendResponse(result)).catch((err: unknown) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }));
   return true;
 });
-
-const normalizeNumericId = (value: unknown) => {
-  if (typeof value === 'number' && Number.isInteger(value)) return value;
-  if (typeof value === 'string' && /^\d+$/.test(value)) return Number(value);
-  return null;
-};
-
-function queuePendingHit(tabId: number, ruleId: number) {
-  let set = pendingHitRuleIdsByTab.get(tabId);
-  if (!set) {
-    set = new Set<number>();
-    pendingHitRuleIdsByTab.set(tabId, set);
-  }
-  set.add(ruleId);
-}
-
-async function notifyMatchedRule(tabId: number, ruleId: number, allowQueue = true) {
-  let meta = managedRuleMeta.get(ruleId);
-  if (!meta) {
-    await hydrateManagedRuleMeta();
-    meta = managedRuleMeta.get(ruleId);
-  }
-  if (!meta || !meta.ruleName.trim()) return false;
-  return new Promise<boolean>((resolve) => {
-    chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: meta }, () => {
-      if (chrome.runtime.lastError) {
-        if (allowQueue) queuePendingHit(tabId, ruleId);
-        resolve(false);
-        return;
-      }
-      resolve(true);
-    });
-  });
-}
-
-async function notifyMatchedRulesByTab(tabId: number) {
-  if (!chrome.declarativeNetRequest.getMatchedRules) return;
-  const lastTimestamp = matchedRulesTimestampByTab.get(tabId) ?? 0;
-  const result = await chrome.declarativeNetRequest.getMatchedRules({ tabId, minTimeStamp: lastTimestamp + 1 });
-  const matchedRules = Array.isArray(result?.rulesMatchedInfo) ? result.rulesMatchedInfo : [];
-  if (!matchedRules.length) return;
-
-  let nextTimestamp = lastTimestamp;
-  for (const item of matchedRules) {
-    const ruleId = normalizeNumericId(item?.rule?.ruleId);
-    if (ruleId === null) continue;
-    await notifyMatchedRule(tabId, ruleId);
-    const timestamp = Number.isFinite(item?.timeStamp) ? Number(item.timeStamp) : 0;
-    if (timestamp > nextTimestamp) nextTimestamp = timestamp;
-  }
-  matchedRulesTimestampByTab.set(tabId, nextTimestamp || Date.now());
-}
-
-async function flushPendingHitsForTab(tabId: number) {
-  const pending = pendingHitRuleIdsByTab.get(tabId);
-  if (!pending || !pending.size) return;
-  const list = Array.from(pending);
-  for (const ruleId of list) {
-    const delivered = await notifyMatchedRule(tabId, ruleId, false);
-    if (delivered) pending.delete(ruleId);
-  }
-  if (!pending.size) pendingHitRuleIdsByTab.delete(tabId);
-}
-
-function toInitiatorHost(details: WebRequestDetailsSnapshot): string {
-  const candidates = [details.initiator, details.documentUrl, details.originUrl];
-  for (const value of candidates) {
-    if (typeof value !== 'string' || !value) continue;
-    try {
-      const host = new URL(value).hostname.toLowerCase();
-      if (host) return host;
-    } catch {
-      // ignore
-    }
-  }
-  return '';
-}
-
-function shouldNotifyFromWebRequest(details: WebRequestDetailsSnapshot, matcher: ManagedRuleMatcher): boolean {
-  if (!matcher.regex.test(details.url)) return false;
-
-  if (matcher.resourceTypes) {
-    const resourceType = String(details.type || '').toLowerCase();
-    if (!resourceType || !matcher.resourceTypes.has(resourceType)) return false;
-  }
-
-  if (matcher.requestMethods) {
-    const requestMethod = String(details.method || '').toLowerCase();
-    if (!requestMethod || !matcher.requestMethods.has(requestMethod)) return false;
-  }
-
-  if (matcher.initiatorDomains) {
-    const initiatorHost = toInitiatorHost(details);
-    if (!initiatorHost || !matcher.initiatorDomains.has(initiatorHost)) return false;
-  }
-
-  return true;
-}
-
-function markWebRequestHit(tabId: number, ruleId: number, url: string): boolean {
-  const now = Date.now();
-  const key = `${tabId}:${ruleId}:${url}`;
-  const prev = recentWebRequestHitAt.get(key) ?? 0;
-  if (now - prev < WEBREQUEST_HIT_DEDUPE_MS) return false;
-  recentWebRequestHitAt.set(key, now);
-
-  if (recentWebRequestHitAt.size > WEBREQUEST_HIT_CACHE_MAX) {
-    const expiredBefore = now - 30_000;
-    for (const [cacheKey, time] of recentWebRequestHitAt) {
-      if (time >= expiredBefore) continue;
-      recentWebRequestHitAt.delete(cacheKey);
-    }
-  }
-  return true;
-}
-
-if (chrome.declarativeNetRequest.onRuleMatchedDebug) {
-  chrome.declarativeNetRequest.onRuleMatchedDebug.addListener((info) => {
-    const tabId = normalizeNumericId(info.request?.tabId);
-    const ruleId = normalizeNumericId(info.rule?.ruleId);
-    if (tabId === null || ruleId === null) return;
-
-    void notifyMatchedRule(tabId, ruleId);
-  });
-} else if (chrome.declarativeNetRequest.getMatchedRules) {
-  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo.status !== 'complete') return;
-    void notifyMatchedRulesByTab(tabId).catch(() => undefined);
-  });
-
-  chrome.tabs.onActivated.addListener((activeInfo) => {
-    void notifyMatchedRulesByTab(activeInfo.tabId).catch(() => undefined);
-  });
-}
-
-if (chrome.webRequest?.onBeforeRequest) {
-  const notifyByWebRequest = (details: WebRequestDetailsSnapshot) => {
-    const tabId = normalizeNumericId(details.tabId);
-    if (tabId === null || tabId < 0) return;
-
-    for (const [ruleId, matcher] of managedRuleMatchers) {
-      if (!shouldNotifyFromWebRequest(details, matcher)) continue;
-      if (!markWebRequestHit(tabId, ruleId, details.url)) continue;
-      void notifyMatchedRule(tabId, ruleId);
-    }
-  };
-
-  const toWebRequestSnapshot = (details: chrome.webRequest.WebRequestBodyDetails): WebRequestDetailsSnapshot => ({
-    tabId: details.tabId,
-    url: details.url,
-    type: details.type,
-    method: details.method,
-    initiator: details.initiator,
-    documentUrl: details.documentUrl,
-    originUrl: details.originUrl,
-  });
-
-  chrome.webRequest.onBeforeRequest.addListener((details) => {
-    if (!ruleCachesReady && managedRuleMatchers.size === 0) {
-      const snapshot = toWebRequestSnapshot(details);
-      void ensureRuleCachesReady().then(() => {
-        notifyByWebRequest(snapshot);
-      });
-      return;
-    }
-    notifyByWebRequest(details);
-  }, { urls: ['<all_urls>'] });
-}
 
 void ensureRuleCachesReady();
