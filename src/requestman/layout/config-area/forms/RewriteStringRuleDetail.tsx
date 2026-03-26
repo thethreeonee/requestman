@@ -13,8 +13,8 @@ import {
   Space,
 } from '../../../components';
 import { t } from '../../../i18n';
+import { Trash2 } from '@/components/animate-ui/icons/trash-2';
 import {
-  DeleteOutlined,
   PlusOutlined,
 } from '../../../icons';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
@@ -101,7 +101,7 @@ export default function RewriteStringRuleDetail({
                   }}
                   style={{ color: '#ff4d4f', cursor: 'pointer', padding: '0 4px' }}
                 >
-                  <DeleteOutlined />
+                  <Trash2 size={14} />
                 </span>
               </Popconfirm>
             </div>

@@ -13,6 +13,7 @@ import {
   Select,
   Space,
 } from '../../../components';
+import { Trash2 } from '@/components/animate-ui/icons/trash-2';
 import { t } from '../../../i18n';
 import {
   DeleteOutlined,
@@ -133,7 +134,7 @@ export default function QueryParamsRuleDetail({
                   }}
                   style={{ color: '#ff4d4f', cursor: 'pointer', padding: '0 4px' }}
                 >
-                  <DeleteOutlined />
+                  <Trash2 size={14} />
                 </span>
               </Popconfirm>
             </div>
