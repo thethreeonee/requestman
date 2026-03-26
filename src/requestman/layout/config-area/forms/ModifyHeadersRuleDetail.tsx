@@ -10,7 +10,7 @@ import {
   Input,
   Select,
 } from '../../../components';
-import { Tabs, TabsList, TabsTrigger, TabsContents, TabsContent } from '@/components/animate-ui/primitives/animate/tabs';
+import { Tabs, TabsList, TabsTrigger, TabsContents, TabsContent } from '@/components/animate-ui/components/animate/tabs';
 import { t } from '../../../i18n';
 import {
   DeleteOutlined,
