@@ -26,7 +26,15 @@
     const ruleName = typeof record?.ruleName === 'string' ? record.ruleName.trim() : '';
     const matchedUrl = typeof record?.url === 'string' ? record.url : '';
     if (!ruleName) return;
-    console.log(`[🔀 REQUESTMAN] 🧭 Rule hit :::`, { rule: ruleTypeLabel, ruleName, matchedUrl });
+    const shortUrl = matchedUrl.length > 120 ? `${matchedUrl.slice(0, 117)}...` : matchedUrl;
+    const title = `[🔀 REQUESTMAN] 🧭 Rule hit ::: ${ruleTypeLabel} / ${ruleName}${shortUrl ? ` / ${shortUrl}` : ''}`;
+    if (typeof console.groupCollapsed === 'function' && typeof console.groupEnd === 'function') {
+      console.groupCollapsed(title);
+      console.log({ rule: ruleTypeLabel, ruleName, matchedUrl });
+      console.groupEnd();
+      return;
+    }
+    console.log(title, { rule: ruleTypeLabel, ruleName, matchedUrl });
   }
 
   function isGroupEnabled(groupEnabled, groupId) {
