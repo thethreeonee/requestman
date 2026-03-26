@@ -388,10 +388,10 @@ const normalizeNumericId = (value: unknown) => {
   return null;
 };
 
-function notifyMatchedRule(tabId: number, ruleId: number) {
+function notifyMatchedRule(tabId: number, ruleId: number, url?: string) {
   const meta = managedRuleMeta.get(ruleId);
   if (!meta || !meta.ruleName.trim()) return;
-  chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: meta }, () => {
+  chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: { ...meta, url: typeof url === 'string' ? url : '' } }, () => {
     void chrome.runtime.lastError;
   });
 }
@@ -480,7 +480,7 @@ if (chrome.declarativeNetRequest.onRuleMatchedDebug) {
     const tabId = normalizeNumericId(info.request?.tabId);
     const ruleId = normalizeNumericId(info.rule?.ruleId);
     if (tabId === null || tabId < 0 || ruleId === null) return;
-    notifyMatchedRule(tabId, ruleId);
+    notifyMatchedRule(tabId, ruleId, typeof info.request?.url === 'string' ? info.request.url : '');
   });
 }
 
