@@ -1,5 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { Input } from '@/components/ui/input';
+import { CaseLower, CaseUpper } from 'lucide-react';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from '@/components/ui/input-group';
 import { t } from '../../../i18n';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
 import type { RedirectCondition } from '../../../types';
@@ -71,24 +76,34 @@ export default function RewriteStringRuleDetail({
       )}
       renderExecutionContent={(c) => (
         <div style={{ display: 'flex', width: '100%', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 6, flex: 1, minWidth: 0 }}>
-            <span className="aui-addon" style={{ flexShrink: 0 }}>{t('目标', 'Target')}</span>
-            <Input
-              style={{ minWidth: 0 }}
+          <InputGroup style={{ flex: 1, minWidth: 0 }}>
+            <InputGroupAddon
+              align="inline-start"
+              className="flex h-full items-center gap-1.5 self-stretch whitespace-nowrap"
+            >
+              <CaseLower size={16} />
+              <span>{t('目标', 'Target')}</span>
+            </InputGroupAddon>
+            <InputGroupInput
               value={c.rewriteFrom}
               onChange={(e) => updateCondition(c.id, { rewriteFrom: e.target.value })}
               placeholder="from"
             />
-          </div>
-          <div style={{ display: 'flex', gap: 6, flex: 1, minWidth: 0 }}>
-            <span className="aui-addon" style={{ flexShrink: 0 }}>{t('替换为', 'Replace with')}</span>
-            <Input
-              style={{ minWidth: 0 }}
+          </InputGroup>
+          <InputGroup style={{ flex: 1, minWidth: 0 }}>
+            <InputGroupAddon
+              align="inline-start"
+              className="flex h-full items-center gap-1.5 self-stretch whitespace-nowrap"
+            >
+              <CaseUpper size={16} />
+              <span>{t('替换为', 'Replace with')}</span>
+            </InputGroupAddon>
+            <InputGroupInput
               value={c.rewriteTo}
               onChange={(e) => updateCondition(c.id, { rewriteTo: e.target.value })}
               placeholder="to"
             />
-          </div>
+          </InputGroup>
         </div>
       )}
     />
