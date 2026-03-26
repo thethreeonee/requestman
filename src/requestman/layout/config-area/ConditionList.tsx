@@ -66,7 +66,7 @@ export default function ConditionList({ conditions, onAdd, onRemove, renderConte
                 </Popconfirm>
               </div>
             </AccordionTrigger>
-            <AccordionContent className="px-4">
+            <AccordionContent className="px-4 pt-2">
               {renderContent(c)}
             </AccordionContent>
           </AccordionItem>
