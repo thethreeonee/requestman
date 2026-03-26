@@ -1,12 +1,19 @@
 import React from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
 import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/animate-ui/components/radix/dialog';
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/animate-ui/components/radix/tooltip';
 import { ReloadOutlined } from '../icons';
-import { AutoComplete, Form, Input, Modal, Select, Space } from '.';
+import { AutoComplete, FieldGroup, Input, Select, Space } from '.';
 import { t } from '../i18n';
 import {
   COMMON_HEADER_OPTIONS,
@@ -49,10 +56,14 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
   );
 
   return (
-    <Modal open={open} title={t('过滤条件', 'Filter conditions')} onCancel={onClose} onOk={onClose}>
-      {condition && (
-        <Form layout="vertical">
-          <Form.Item label={t('页面域名', 'Page domain')} style={filterItemStyle}>
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
+      <DialogContent showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle>{t('过滤条件', 'Filter conditions')}</DialogTitle>
+        </DialogHeader>
+        {condition && (
+          <div>
+          <FieldGroup label={t('页面域名', 'Page domain')} style={filterItemStyle}>
             <Space.Compact style={{ width: '100%' }} block>
               <Input
                 value={condition.filter.pageDomain}
@@ -64,9 +75,9 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
                 filter: { ...condition.filter, pageDomain: '' },
               }))}
             </Space.Compact>
-          </Form.Item>
+          </FieldGroup>
 
-          <Form.Item label={t('资源类型', 'Resource type')} style={filterItemStyle}>
+          <FieldGroup label={t('资源类型', 'Resource type')} style={filterItemStyle}>
             <Space.Compact style={{ width: '100%' }} block>
               <Select
                 value={condition.filter.resourceType}
@@ -79,9 +90,9 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
                 filter: { ...condition.filter, resourceType: 'all' },
               }))}
             </Space.Compact>
-          </Form.Item>
+          </FieldGroup>
 
-          <Form.Item label={t('请求方法', 'Request method')} style={filterItemStyle}>
+          <FieldGroup label={t('请求方法', 'Request method')} style={filterItemStyle}>
             <Space.Compact style={{ width: '100%' }} block>
               <Select
                 value={condition.filter.requestMethod}
@@ -94,9 +105,9 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
                 filter: { ...condition.filter, requestMethod: 'all' },
               }))}
             </Space.Compact>
-          </Form.Item>
+          </FieldGroup>
 
-          <Form.Item label={t('请求 Header 过滤', 'Request header filter')} style={filterItemStyle}>
+          <FieldGroup label={t('请求 Header 过滤', 'Request header filter')} style={filterItemStyle}>
             <Space.Compact style={{ width: '100%' }} block>
               <AutoComplete
                 options={COMMON_HEADER_OPTIONS}
@@ -132,9 +143,14 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
                 },
               }))}
             </Space.Compact>
-          </Form.Item>
-        </Form>
-      )}
-    </Modal>
+          </FieldGroup>
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{t('取消', 'Cancel')}</Button>
+          <Button variant="default" onClick={onClose}>OK</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

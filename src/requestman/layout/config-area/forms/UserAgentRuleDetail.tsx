@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   Input,
-  Modal,
   Select,
   Typography,
 } from '../../../components';

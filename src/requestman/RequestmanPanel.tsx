@@ -1,5 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { App, Modal } from './components';
+import { App } from './components';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/animate-ui/components/radix/alert-dialog';
 import {
   DEFAULT_GROUP_ID,
   REDIRECT_ENABLED_KEY,
@@ -44,6 +54,8 @@ export default function RequestmanPanel() {
   const [themeMode, setThemeMode] = useState<'light' | 'dark'>('light');
   const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>('light');
   const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [deleteGroupId, setDeleteGroupId] = useState<string | null>(null);
 
   useEffect(() => {
     chrome.storage.local.get([REDIRECT_RULES_KEY, REDIRECT_ENABLED_KEY, REDIRECT_GROUPS_KEY], (res) => {
@@ -105,11 +117,7 @@ export default function RequestmanPanel() {
     const { enabled: _workingEnabled, ...workingRuleWithoutEnabled } = workingRule;
     const { enabled: _originalEnabled, ...originalRuleWithoutEnabled } = originalRule;
     if (JSON.stringify(workingRuleWithoutEnabled) !== JSON.stringify(originalRuleWithoutEnabled)) {
-      Modal.confirm({
-        title: t('存在未保存修改', 'Unsaved changes'),
-        content: t('修改不会被保存，确认返回吗？', 'Changes will not be saved. Leave anyway?'),
-        onOk: () => setPage({ type: 'list' }),
-      });
+      setLeaveConfirmOpen(true);
       return;
     }
     setPage({ type: 'list' });
@@ -269,18 +277,7 @@ export default function RequestmanPanel() {
   };
 
   const deleteGroup = (groupId: string) => {
-    Modal.confirm({
-      title: t('确认删除该规则组？', 'Delete this group?'),
-      content: t('删除规则组会同时删除组内所有规则。', 'Deleting a group will also remove all rules in it.'),
-      okButtonProps: { danger: true },
-      onOk: () => {
-        const deletedGroup = groups.find((g) => g.id === groupId);
-        const deletedRuleCount = rules.filter((r) => r.groupId === groupId).length;
-        setGroups((prev) => prev.filter((g) => g.id !== groupId));
-        setRules((prev) => prev.filter((r) => r.groupId !== groupId));
-        notification.success(t(`规则组「${deletedGroup?.name ?? ''}」已删除（含 ${deletedRuleCount} 条规则）`, `Group "${deletedGroup?.name ?? ''}" deleted (${deletedRuleCount} rules).`));
-      },
-    });
+    setDeleteGroupId(groupId);
   };
 
   const duplicateGroup = (groupId: string) => {
@@ -430,5 +427,48 @@ export default function RequestmanPanel() {
       />
       <ConfigArea currentRule={currentRule} detailProps={detailProps} />
     </div>
+    <AlertDialog open={leaveConfirmOpen} onOpenChange={setLeaveConfirmOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('存在未保存修改', 'Unsaved changes')}</AlertDialogTitle>
+          <AlertDialogDescription>{t('修改不会被保存，确认返回吗？', 'Changes will not be saved. Leave anyway?')}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('取消', 'Cancel')}</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              setLeaveConfirmOpen(false);
+              setPage({ type: 'list' });
+            }}
+          >
+            {t('确认', 'Confirm')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    <AlertDialog open={!!deleteGroupId} onOpenChange={(open) => { if (!open) setDeleteGroupId(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('确认删除该规则组？', 'Delete this group?')}</AlertDialogTitle>
+          <AlertDialogDescription>{t('删除规则组会同时删除组内所有规则。', 'Deleting a group will also remove all rules in it.')}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('取消', 'Cancel')}</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              if (!deleteGroupId) return;
+              const deletedGroup = groups.find((g) => g.id === deleteGroupId);
+              const deletedRuleCount = rules.filter((r) => r.groupId === deleteGroupId).length;
+              setGroups((prev) => prev.filter((g) => g.id !== deleteGroupId));
+              setRules((prev) => prev.filter((r) => r.groupId !== deleteGroupId));
+              notification.success(t(`规则组「${deletedGroup?.name ?? ''}」已删除（含 ${deletedRuleCount} 条规则）`, `Group "${deletedGroup?.name ?? ''}" deleted (${deletedRuleCount} rules).`));
+              setDeleteGroupId(null);
+            }}
+          >
+            {t('删除', 'Delete')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>;
 }

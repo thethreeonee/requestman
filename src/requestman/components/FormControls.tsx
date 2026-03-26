@@ -1,5 +1,8 @@
-import React from 'react';
 import { Switch as AnimateSwitch } from '@/components/animate-ui/components/radix/switch';
+import {
+  RadioGroup as AnimateRadioGroup,
+  RadioGroupItem,
+} from '@/components/animate-ui/components/radix/radio-group';
 
 export function Select({ options = [], value, onChange, style, disabled, placeholder, ...rest }: any) {
   return (
@@ -21,18 +24,25 @@ export function Switch({ checked, onChange, disabled, ...rest }: any) {
   return <AnimateSwitch checked={checked} onCheckedChange={onChange} disabled={disabled} {...rest} />;
 }
 
-function RadioBase({ checked, onChange, value, children, name }: any) {
-  return <label><input type="radio" checked={checked} value={value} name={name} onChange={(e) => onChange?.(e)} /> {children}</label>;
+export function RadioGroup({ options = [], value, onChange }: any) {
+  return (
+    <AnimateRadioGroup value={value} onValueChange={(nextValue) => onChange?.({ target: { value: nextValue } })} className="aui-space">
+      {options.map((opt: any) => (
+        <label key={opt.value} className="flex items-center gap-2">
+          <RadioGroupItem value={opt.value} />
+          <span>{opt.label}</span>
+        </label>
+      ))}
+    </AnimateRadioGroup>
+  );
 }
 
-RadioBase.Group = function Group({ options = [], value, onChange }: any) {
-  return <div className="aui-space">{options.map((opt: any) => <RadioBase key={opt.value} name="radio-group" value={opt.value} checked={opt.value === value} onChange={() => onChange?.({ target: { value: opt.value } })}>{opt.label}</RadioBase>)}</div>;
-};
-
-export const Radio = RadioBase as any;
-
-export function Form({ children }: any) {
-  return <div>{children}</div>;
+export function FieldGroup({ label, help, children, style }: any) {
+  return (
+    <label style={{ display: 'block', ...style }}>
+      <div>{label}</div>
+      {children}
+      {help ? <div style={{ marginTop: 4, fontSize: 12, opacity: 0.75 }}>{help}</div> : null}
+    </label>
+  );
 }
-
-Form.Item = ({ label, children, style }: any) => <label style={{ display: 'block', ...style }}><div>{label}</div>{children}</label>;

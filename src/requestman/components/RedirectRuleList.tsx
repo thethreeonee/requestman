@@ -8,10 +8,18 @@ import {
 import { ChevronsUpDown } from 'lucide-react';
 import {
   Input,
-  Modal,
   Switch,
   Typography,
 } from '.';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/animate-ui/components/radix/alert-dialog';
 import {
   Accordion,
   AccordionItem,
@@ -260,6 +268,7 @@ export default function RedirectRuleList({
   const [dragState, setDragState] = React.useState<DragState | null>(null);
   const [pointerDragState, setPointerDragState] = React.useState<PointerDragState | null>(null);
   const [dropState, setDropState] = React.useState<DropState | null>(null);
+  const [pendingDeleteRule, setPendingDeleteRule] = React.useState<RedirectRule | null>(null);
   const pointerDragStateRef = React.useRef<PointerDragState | null>(null);
   const dropStateRef = React.useRef<DropState | null>(null);
 
@@ -536,14 +545,7 @@ export default function RedirectRuleList({
                 danger: true,
                 onMouseEnter: () => setHoveredMenuAction(deleteKey),
                 onMouseLeave: () => setHoveredMenuAction((current) => (current === deleteKey ? null : current)),
-                onClick: () => Modal.confirm({
-                  title: t('确认删除规则？', 'Delete this rule?'),
-                  okButtonProps: { danger: true },
-                  onOk: () => {
-                    setRules((prev) => prev.filter((item) => item.id !== rule.id));
-                    notifyApi.warning(t(`规则「${rule.name}」已删除`, `Rule "${rule.name}" deleted.`));
-                  },
-                }),
+                onClick: () => setPendingDeleteRule(rule),
               },
             ];
             return (
@@ -872,5 +874,25 @@ export default function RedirectRuleList({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <AlertDialog open={!!pendingDeleteRule} onOpenChange={(open) => { if (!open) setPendingDeleteRule(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('确认删除规则？', 'Delete this rule?')}</AlertDialogTitle>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('取消', 'Cancel')}</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              if (!pendingDeleteRule) return;
+              setRules((prev) => prev.filter((item) => item.id !== pendingDeleteRule.id));
+              notifyApi.warning(t(`规则「${pendingDeleteRule.name}」已删除`, `Rule "${pendingDeleteRule.name}" deleted.`));
+              setPendingDeleteRule(null);
+            }}
+          >
+            {t('删除', 'Delete')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>;
 }

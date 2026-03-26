@@ -2,8 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
 import {
   Input,
-  Modal,
-  Radio,
+  RadioGroup,
 } from '../../../components';
 import { t } from '../../../i18n';
 import {
@@ -113,7 +112,14 @@ export default function RedirectRuleDetail({
             onConditionChange={(patch) => updateCondition(c.id, patch)}
             onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
           />
-          <Radio.Group value={c.redirectType} onChange={(e) => updateRedirectType(c, e.target.value as 'url' | 'file')}><Radio value="url">URL</Radio><Radio value="file">{t('本地文件', 'Local file')}</Radio></Radio.Group>
+          <RadioGroup
+            value={c.redirectType}
+            onChange={(e) => updateRedirectType(c, e.target.value as 'url' | 'file')}
+            options={[
+              { label: 'URL', value: 'url' },
+              { label: t('本地文件', 'Local file'), value: 'file' },
+            ]}
+          />
           {c.redirectType === 'file'
             ? <>
               <div style={{ display: 'flex', gap: 6, width: '100%' }}>

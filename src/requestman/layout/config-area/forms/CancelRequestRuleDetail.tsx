@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Modal,
   Typography,
 } from '../../../components';
 import { t } from '../../../i18n';

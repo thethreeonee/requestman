@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
 import {
   Input,
-  Modal,
   Select,
 } from '../../../components';
 import { t } from '../../../i18n';
