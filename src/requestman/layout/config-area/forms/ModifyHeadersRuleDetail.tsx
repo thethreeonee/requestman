@@ -10,7 +10,7 @@ import {
   Input,
   Select,
 } from '../../../components';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/animate-ui/components/radix/tabs';
+import { Tabs, TabsList, TabsTrigger, TabsContents, TabsContent } from '@/components/animate-ui/primitives/animate/tabs';
 import { t } from '../../../i18n';
 import {
   DeleteOutlined,
@@ -225,8 +225,10 @@ export default function ModifyHeadersRuleDetail({
               <TabsTrigger value="requestHeaderModifications">{t('请求 Headers', 'Request headers')}</TabsTrigger>
               <TabsTrigger value="responseHeaderModifications">{t('响应 Headers', 'Response headers')}</TabsTrigger>
             </TabsList>
-            <TabsContent value="requestHeaderModifications">{renderHeaderTabContent(c, 'requestHeaderModifications')}</TabsContent>
-            <TabsContent value="responseHeaderModifications">{renderHeaderTabContent(c, 'responseHeaderModifications')}</TabsContent>
+            <TabsContents>
+              <TabsContent value="requestHeaderModifications">{renderHeaderTabContent(c, 'requestHeaderModifications')}</TabsContent>
+              <TabsContent value="responseHeaderModifications">{renderHeaderTabContent(c, 'responseHeaderModifications')}</TabsContent>
+            </TabsContents>
           </Tabs>
         </div>
       )}
