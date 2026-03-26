@@ -123,12 +123,15 @@
     const container = document.createElement('div');
     container.id = '__requestman-hit-toast';
     container.style.position = 'fixed';
-    container.style.top = '16px';
-    container.style.right = '16px';
+    container.style.top = '20px';
+    container.style.left = '50%';
+    container.style.transform = 'translateX(-50%)';
     container.style.zIndex = '2147483647';
     container.style.minWidth = '375px';
     container.style.maxWidth = '560px';
-    container.style.background = 'rgba(20, 20, 24, 0.95)';
+    container.style.background = 'rgba(20, 20, 24, 0.82)';
+    container.style.backdropFilter = 'blur(12px)';
+    container.style.webkitBackdropFilter = 'blur(12px)';
     container.style.color = '#f1f5f9';
     container.style.border = '1px solid rgba(148, 163, 184, 0.35)';
     container.style.borderRadius = '12px';
@@ -139,7 +142,6 @@
     container.style.setProperty('text-align', 'left', 'important');
     container.style.display = 'none';
     container.style.opacity = '0';
-    container.style.transform = 'translateX(12px)';
     container.style.transition = `opacity ${TOAST_ENTER_MS}ms ease, transform ${TOAST_ENTER_MS}ms ease`;
 
     const header = document.createElement('div');
@@ -225,16 +227,16 @@
     if (container.style.display !== 'block') {
       container.style.display = 'block';
       container.style.opacity = '0';
-      container.style.transform = 'translateX(12px)';
+      container.style.transform = 'translateX(-50%) translateY(-8px)';
       requestAnimationFrame(() => {
         container.style.opacity = '1';
-        container.style.transform = 'translateX(0)';
+        container.style.transform = 'translateX(-50%) translateY(0)';
       });
       return;
     }
 
     container.style.opacity = '1';
-    container.style.transform = 'translateX(0)';
+    container.style.transform = 'translateX(-50%) translateY(0)';
   }
 
   function hideHitToast() {
@@ -245,7 +247,7 @@
     if (!hitToast) return;
 
     hitToast.style.opacity = '0';
-    hitToast.style.transform = 'translateX(12px)';
+    hitToast.style.transform = 'translateX(-50%) translateY(-8px)';
 
     if (hideAnimationTimer) clearTimeout(hideAnimationTimer);
     hideAnimationTimer = setTimeout(() => {
