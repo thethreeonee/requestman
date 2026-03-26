@@ -157,8 +157,7 @@
     const ruleName = typeof rule?.ruleName === 'string' ? rule.ruleName.trim() : '';
     const matchedUrl = typeof url === 'string' ? url : '';
     if (!ruleName) return;
-    const shortUrl = matchedUrl.length > 120 ? `${matchedUrl.slice(0, 117)}...` : matchedUrl;
-    const title = `[🔀 REQUESTMAN] 🧭 Rule hit ::: ${ruleTypeLabel} / ${ruleName}${shortUrl ? ` / ${shortUrl}` : ''}`;
+    const title = `[🔀 REQUESTMAN] 🧭 Rule hit ::: ${ruleTypeLabel} / ${ruleName}`;
     if (typeof console.groupCollapsed === 'function' && typeof console.groupEnd === 'function') {
       console.groupCollapsed(title);
       console.log({ rule: ruleTypeLabel, ruleName, matchedUrl });
