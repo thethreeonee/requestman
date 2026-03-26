@@ -49,11 +49,9 @@ export function createDefaultCondition(): RedirectCondition {
     responseBodyValue: '',
     filter: {
       pageDomain: '',
-      resourceType: 'all',
-      requestMethod: 'all',
-      requestHeaderKey: '',
-      requestHeaderOperator: 'equals',
-      requestHeaderValue: '',
+      resourceTypes: [],
+      requestMethods: [],
+      requestHeaderFilters: [],
     },
   };
 }
@@ -210,11 +208,23 @@ export function normalizeRules(input: unknown, groupIds: Set<string>, fallbackGr
             responseBodyValue: responseBodyMode === 'dynamic' ? responseBodyDynamicValue : responseBodyStaticValue,
             filter: {
               pageDomain: typeof filterObj.pageDomain === 'string' ? filterObj.pageDomain : '',
-              resourceType: typeof filterObj.resourceType === 'string' ? (filterObj.resourceType as RedirectCondition['filter']['resourceType']) : 'all',
-              requestMethod: typeof filterObj.requestMethod === 'string' ? (filterObj.requestMethod as RedirectCondition['filter']['requestMethod']) : 'all',
-              requestHeaderKey: typeof filterObj.requestHeaderKey === 'string' ? filterObj.requestHeaderKey : '',
-              requestHeaderOperator: filterObj.requestHeaderOperator === 'not_equals' || filterObj.requestHeaderOperator === 'contains' ? filterObj.requestHeaderOperator : 'equals',
-              requestHeaderValue: typeof filterObj.requestHeaderValue === 'string' ? filterObj.requestHeaderValue : '',
+              resourceTypes: Array.isArray(filterObj.resourceTypes)
+                ? (filterObj.resourceTypes as unknown[]).filter((v): v is RedirectCondition['filter']['resourceTypes'][number] => typeof v === 'string')
+                : (typeof filterObj.resourceType === 'string' && filterObj.resourceType !== 'all' ? [filterObj.resourceType as RedirectCondition['filter']['resourceTypes'][number]] : []),
+              requestMethods: Array.isArray(filterObj.requestMethods)
+                ? (filterObj.requestMethods as unknown[]).filter((v): v is RedirectCondition['filter']['requestMethods'][number] => typeof v === 'string')
+                : (typeof filterObj.requestMethod === 'string' && filterObj.requestMethod !== 'all' ? [filterObj.requestMethod as RedirectCondition['filter']['requestMethods'][number]] : []),
+              requestHeaderFilters: Array.isArray(filterObj.requestHeaderFilters)
+                ? (filterObj.requestHeaderFilters as unknown[])
+                    .filter((f): f is Record<string, unknown> => !!f && typeof f === 'object')
+                    .map((f) => ({
+                      key: typeof f.key === 'string' ? f.key : '',
+                      operator: (f.operator === 'not_equals' || f.operator === 'contains' ? f.operator : 'equals') as 'equals' | 'not_equals' | 'contains',
+                      value: typeof f.value === 'string' ? f.value : '',
+                    }))
+                : (typeof filterObj.requestHeaderKey === 'string' && filterObj.requestHeaderKey.trim()
+                  ? [{ key: filterObj.requestHeaderKey as string, operator: (filterObj.requestHeaderOperator === 'not_equals' || filterObj.requestHeaderOperator === 'contains' ? filterObj.requestHeaderOperator : 'equals') as 'equals' | 'not_equals' | 'contains', value: typeof filterObj.requestHeaderValue === 'string' ? filterObj.requestHeaderValue : '' }]
+                  : []),
             },
           };
         })

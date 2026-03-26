@@ -22,13 +22,17 @@ export type RequestMethodFilter =
   | 'head'
   | 'options';
 
+export type RequestHeaderFilterEntry = {
+  key: string;
+  operator: 'equals' | 'not_equals' | 'contains';
+  value: string;
+};
+
 export type RedirectFilter = {
   pageDomain: string;
-  resourceType: ResourceTypeFilter;
-  requestMethod: RequestMethodFilter;
-  requestHeaderKey: string;
-  requestHeaderOperator: 'equals' | 'not_equals' | 'contains';
-  requestHeaderValue: string;
+  resourceTypes: ResourceTypeFilter[];
+  requestMethods: RequestMethodFilter[];
+  requestHeaderFilters: RequestHeaderFilterEntry[];
 };
 
 export type QueryParamModification = {

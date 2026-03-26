@@ -4,6 +4,11 @@ export type MatchMode = 'equals' | 'contains' | 'regex' | 'wildcard';
 
 type RedirectFilter = {
   pageDomain?: string;
+  // New multi-value fields
+  resourceTypes?: string[];
+  requestMethods?: string[];
+  requestHeaderFilters?: Array<{ key?: string; operator?: 'equals' | 'not_equals' | 'contains'; value?: string }>;
+  // Legacy single-value fields (backward compat)
   resourceType?: string;
   requestMethod?: string;
   requestHeaderKey?: string;
@@ -130,29 +135,56 @@ function applyConditionFilters(conditionRule: chrome.declarativeNetRequest.RuleC
   const pageDomain = typeof filter?.pageDomain === 'string' ? normalizeDomainFilter(filter.pageDomain) : '';
   if (pageDomain) conditionRule.initiatorDomains = [pageDomain];
 
-  const resourceType = typeof filter?.resourceType === 'string' ? filter.resourceType.trim().toLowerCase() : '';
-  if (resourceType && resourceType !== 'all' && VALID_RESOURCE_TYPES.has(resourceType)) {
-    conditionRule.resourceTypes = [resourceType as chrome.declarativeNetRequest.ResourceType];
+  // resourceTypes (new) with legacy fallback
+  const resourceTypes: chrome.declarativeNetRequest.ResourceType[] = [];
+  if (Array.isArray(filter?.resourceTypes) && filter.resourceTypes.length > 0) {
+    for (const rt of filter.resourceTypes) {
+      if (typeof rt === 'string' && rt !== 'all' && VALID_RESOURCE_TYPES.has(rt.trim().toLowerCase())) {
+        resourceTypes.push(rt.trim().toLowerCase() as chrome.declarativeNetRequest.ResourceType);
+      }
+    }
+  } else {
+    const rt = typeof filter?.resourceType === 'string' ? filter.resourceType.trim().toLowerCase() : '';
+    if (rt && rt !== 'all' && VALID_RESOURCE_TYPES.has(rt)) resourceTypes.push(rt as chrome.declarativeNetRequest.ResourceType);
   }
+  if (resourceTypes.length > 0) conditionRule.resourceTypes = resourceTypes;
 
-  const requestMethod = typeof filter?.requestMethod === 'string' ? filter.requestMethod.trim().toLowerCase() : '';
-  if (requestMethod && requestMethod !== 'all' && VALID_REQUEST_METHODS.has(requestMethod)) {
-    conditionRule.requestMethods = [requestMethod as chrome.declarativeNetRequest.RequestMethod];
+  // requestMethods (new) with legacy fallback
+  const requestMethods: chrome.declarativeNetRequest.RequestMethod[] = [];
+  if (Array.isArray(filter?.requestMethods) && filter.requestMethods.length > 0) {
+    for (const m of filter.requestMethods) {
+      if (typeof m === 'string' && m !== 'all' && VALID_REQUEST_METHODS.has(m.trim().toLowerCase())) {
+        requestMethods.push(m.trim().toLowerCase() as chrome.declarativeNetRequest.RequestMethod);
+      }
+    }
+  } else {
+    const m = typeof filter?.requestMethod === 'string' ? filter.requestMethod.trim().toLowerCase() : '';
+    if (m && m !== 'all' && VALID_REQUEST_METHODS.has(m)) requestMethods.push(m as chrome.declarativeNetRequest.RequestMethod);
   }
+  if (requestMethods.length > 0) conditionRule.requestMethods = requestMethods;
 
-  const requestHeaderKey = typeof filter?.requestHeaderKey === 'string' ? filter.requestHeaderKey.trim().toLowerCase() : '';
-  const requestHeaderValue = typeof filter?.requestHeaderValue === 'string' ? filter.requestHeaderValue.trim() : '';
-  const requestHeaderOperator = filter?.requestHeaderOperator;
-  if (requestHeaderKey && requestHeaderValue) {
-    const headerFilter: chrome.declarativeNetRequest.HeaderInfo = {
-      header: requestHeaderKey,
-      ...(requestHeaderOperator === 'contains'
-        ? { values: [`*${escapeHeaderPattern(requestHeaderValue)}*`] }
-        : requestHeaderOperator === 'not_equals'
-          ? { excludedValues: [escapeHeaderPattern(requestHeaderValue)] }
-          : { values: [escapeHeaderPattern(requestHeaderValue)] }),
-    };
-    conditionRule.requestHeaders = [headerFilter];
+  // requestHeaderFilters (new) with legacy fallback
+  const headerEntries: Array<{ key: string; operator: 'equals' | 'not_equals' | 'contains'; value: string }> = [];
+  if (Array.isArray(filter?.requestHeaderFilters) && filter.requestHeaderFilters.length > 0) {
+    for (const entry of filter.requestHeaderFilters) {
+      const key = typeof entry.key === 'string' ? entry.key.trim().toLowerCase() : '';
+      const value = typeof entry.value === 'string' ? entry.value.trim() : '';
+      if (key && value) headerEntries.push({ key, operator: entry.operator ?? 'equals', value });
+    }
+  } else {
+    const key = typeof filter?.requestHeaderKey === 'string' ? filter.requestHeaderKey.trim().toLowerCase() : '';
+    const value = typeof filter?.requestHeaderValue === 'string' ? filter.requestHeaderValue.trim() : '';
+    if (key && value) headerEntries.push({ key, operator: filter?.requestHeaderOperator ?? 'equals', value });
+  }
+  if (headerEntries.length > 0) {
+    conditionRule.requestHeaders = headerEntries.map(({ key, operator, value }) => ({
+      header: key,
+      ...(operator === 'contains'
+        ? { values: [`*${escapeHeaderPattern(value)}*`] }
+        : operator === 'not_equals'
+          ? { excludedValues: [escapeHeaderPattern(value)] }
+          : { values: [escapeHeaderPattern(value)] }),
+    }));
   }
 }
 

@@ -73,9 +73,11 @@ Release packaging may also create versioned zip files such as:
 
 - When changing extension behavior, check whether the change belongs in the DevTools UI, background logic, injected script layer, or manifest permissions.
 - All UI implementations must use components from [src/components](/Users/0xE31/Projects/requestman/src/components); do not build ad hoc replacement components outside that directory.
+- When choosing UI components, prefer existing components from `src/components/animate-ui` first. If no suitable component exists there, then look in [src/components/ui](/Users/0xE31/Projects/requestman/src/components/ui). Only if neither provides what is needed should work stop and the missing dependency be reported.
 - All icons must also come from [src/components](/Users/0xE31/Projects/requestman/src/components); do not introduce custom icon implementations elsewhere.
 - Do not modify any files under [src/components](/Users/0xE31/Projects/requestman/src/components). If a change would require editing that directory, stop and tell the user it is blocked by repository rules.
 - If a required UI component or icon does not exist in [src/components](/Users/0xE31/Projects/requestman/src/components), stop and tell the user which dependency is missing so they can add it first.
+- When a button needs icon hover animation, do not change the button's own visual style just to create the effect. Keep the existing button variant/shape, and animate the icon itself using the existing animated icon pattern already used in the repo, typically `AnimateIcon animateOnHover asChild` wrapped around a colored icon container.
 - When adding a new rule type, expect updates across UI components, shared types/constants, and background application logic.
 - Keep package version and manifest versions in sync for releases.
 - After modifying any source code, run `npm run build:chrome` to verify the build succeeds before considering the change complete.
