@@ -407,6 +407,21 @@ body.rule-pointer-dragging { cursor: grabbing; user-select: none; }
 .requestman-body-editor .cm-gutters { background: var(--rm-surface-bg); border-right: 1px solid var(--rm-border); }
 .requestman-body-editor .cm-focused { outline: none; }
 
+[data-slot="input-group"] [data-slot="input-group-control"] {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+[data-slot="input-group"] [data-slot="input-group-control"]:focus,
+[data-slot="input-group"] [data-slot="input-group-control"]:focus-visible {
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
 .rule-menu-group-label {
   position: relative;
   z-index: 3;
