@@ -29,7 +29,7 @@ export default function ConditionList({ conditions, onAdd, onRemove, renderConte
 
   return (
     <>
-      <Accordion type="multiple" value={openConditions} onValueChange={setOpenConditions}>
+      <Accordion type="multiple" value={openConditions} onValueChange={setOpenConditions} className="condition-accordion">
         {conditions.map((c) => (
           <AccordionItem key={c.id} value={c.id} className="mb-3 border rounded-lg">
             <AccordionTrigger className="px-4">

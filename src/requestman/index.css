@@ -543,3 +543,7 @@ html.dark .requestman-shell .ant-switch.ant-switch-checked .ant-switch-handle::b
 @keyframes auiScaleIn { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes auiSlideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
 @keyframes auiSlideDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+
+.condition-accordion [data-slot="accordion-trigger"]:hover {
+  text-decoration: none;
+}
