@@ -72,8 +72,25 @@ let ruleCachesReady = false;
 let ruleCachesPromise: Promise<void> | null = null;
 const REQUESTMAN_PANEL_URL = chrome.runtime.getURL('requestman/index.html');
 
-chrome.action.onClicked.addListener(() => {
-  chrome.tabs.create({ url: REQUESTMAN_PANEL_URL });
+type TabHitEntry = { ruleName: string; ruleType: string; url: string; ts: number };
+const tabHitsMap = new Map<number, TabHitEntry[]>();
+const MAX_TAB_HITS = 50;
+
+function recordTabHit(tabId: number, ruleName: string, ruleType: string, url: string) {
+  if (!ruleName.trim()) return;
+  let hits = tabHitsMap.get(tabId);
+  if (!hits) { hits = []; tabHitsMap.set(tabId, hits); }
+  hits.unshift({ ruleName, ruleType, url, ts: Date.now() });
+  if (hits.length > MAX_TAB_HITS) hits.length = MAX_TAB_HITS;
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === 'loading') tabHitsMap.delete(tabId);
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  tabHitsMap.delete(tabId);
+  pendingHitRuleIdsByTab.delete(tabId);
 });
 
 function escapeRegex(value: string) { return value.replace(/[|\\{}()[\]^$+?.]/g, '\\$&'); }
@@ -401,6 +418,7 @@ function queuePendingHit(tabId: number, ruleId: number) {
 function notifyMatchedRule(tabId: number, ruleId: number, url?: string, allowQueue = true): Promise<boolean> {
   const meta = managedRuleMeta.get(ruleId);
   if (!meta || !meta.ruleName.trim()) return Promise.resolve(false);
+  recordTabHit(tabId, meta.ruleName, meta.ruleType, typeof url === 'string' ? url : '');
   return new Promise<boolean>((resolve) => {
     chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: { ...meta, url: typeof url === 'string' ? url : '' } }, () => {
       if (chrome.runtime.lastError) {
@@ -501,6 +519,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'requestman:content-ready') {
     const tabId = normalizeNumericId(sender?.tab?.id);
     if (tabId !== null && tabId >= 0) void flushPendingHitsForTab(tabId);
+    sendResponse({ ok: true });
+    return;
+  }
+  if (message?.type === 'requestman:get-tab-hits') {
+    const tabId = normalizeNumericId(message.tabId);
+    sendResponse({ hits: tabId !== null ? (tabHitsMap.get(tabId) ?? []) : [] });
+    return;
+  }
+  if (message?.type === 'requestman:add-injected-hit') {
+    const tabId = normalizeNumericId(sender?.tab?.id);
+    if (tabId !== null && tabId >= 0) {
+      const p = message.payload || {};
+      recordTabHit(tabId, typeof p.ruleName === 'string' ? p.ruleName : '', typeof p.ruleType === 'string' ? p.ruleType : 'redirect_request', typeof p.url === 'string' ? p.url : '');
+    }
     sendResponse({ ok: true });
     return;
   }
