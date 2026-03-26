@@ -157,7 +157,7 @@
     const ruleName = typeof rule?.ruleName === 'string' ? rule.ruleName.trim() : '';
     const matchedUrl = typeof url === 'string' ? url : '';
     if (!ruleName) return;
-    console.log(`[🔀 REQUESTMAN] 🧭 Rule hit: ${ruleTypeLabel} ::: ${ruleName} ::: ${matchedUrl}`);
+    console.log(`[🔀 REQUESTMAN] 🧭 Rule hit :::`, { rule: ruleTypeLabel, ruleName, matchedUrl });
   }
 
   function getDelayMs(url, method, resourceType, headers) {
