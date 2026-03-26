@@ -26,7 +26,7 @@
     const ruleName = typeof record?.ruleName === 'string' ? record.ruleName.trim() : '';
     const matchedUrl = typeof record?.url === 'string' ? record.url : '';
     if (!ruleName) return;
-    console.log(`[🔀 REQUESTMAN] 🧭 Rule hit: ${ruleTypeLabel} ::: ${ruleName} ::: ${matchedUrl}`);
+    console.log(`[🔀 REQUESTMAN] 🧭 Rule hit :::`, { rule: ruleTypeLabel, ruleName, matchedUrl });
   }
 
   function isGroupEnabled(groupEnabled, groupId) {
