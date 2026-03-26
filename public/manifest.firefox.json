@@ -10,7 +10,8 @@
   },
   "devtools_page": "devtools/index.html",
   "action": {
-    "default_title": "Requestman"
+    "default_title": "Requestman",
+    "default_popup": "popup/index.html"
   },
   "background": {
     "service_worker": "background/index.js",

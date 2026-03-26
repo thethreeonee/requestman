@@ -335,7 +335,7 @@
     const ruleName = typeof record?.ruleName === 'string' ? record.ruleName.trim() : '';
     const matchedUrl = typeof record?.url === 'string' ? record.url : '';
     if (!ruleName) return;
-    const title = `[🔀 REQUESTMAN] 🧭 Rule hit ::: ${ruleTypeLabel} / ${ruleName}`;
+    const title = `[🔀 REQUESTMAN] 🧭 Rule HIT >> ${ruleTypeLabel} / ${ruleName} <<`;
     if (typeof console.groupCollapsed === 'function' && typeof console.groupEnd === 'function') {
       console.groupCollapsed(title);
       console.log({ rule: ruleTypeLabel, ruleName, matchedUrl });
@@ -490,14 +490,27 @@
     broadcastRules();
   });
 
+  function forwardInjectedHit(record) {
+    const ruleName = typeof record.ruleName === 'string' ? record.ruleName.trim() : '';
+    if (!ruleName) return;
+    chrome.runtime.sendMessage({
+      type: 'requestman:add-injected-hit',
+      payload: { ruleName, ruleType: typeof record.ruleType === 'string' ? record.ruleType : 'redirect_request', url: typeof record.url === 'string' ? record.url : '' },
+    }, () => { void chrome.runtime.lastError; });
+  }
+
   window.addEventListener('message', (event) => {
     const data = event.data;
     if (!data || data.source !== 'requestman-extension' || data.type !== HIT_MESSAGE_TYPE) return;
-    renderHitRecord(data.payload || {});
+    const payload = data.payload || {};
+    logRuleHit(payload);
+    renderHitRecord(payload);
+    forwardInjectedHit(payload);
   });
 
   chrome.runtime.onMessage.addListener((message) => {
     if (!message || message.type !== 'requestman:rule-hit') return;
+    logRuleHit(message.payload || {});
     renderHitRecord(message.payload || {});
   });
 

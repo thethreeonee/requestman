@@ -30,6 +30,7 @@ export default defineConfig({
       input: {
         requestman: resolve(__dirname, 'src/requestman/index.html'),
         devtools: resolve(__dirname, 'src/devtools/index.html'),
+        popup: resolve(__dirname, 'src/popup/index.html'),
 
         // 纯脚本入口
         background: resolve(__dirname, 'src/background/index.ts'),
