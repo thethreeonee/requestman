@@ -1,19 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
 import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/animate-ui/components/radix/accordion';
-import {
   Input,
   Modal,
-  Popconfirm,
   Select,
   Space,
 } from '../../../components';
-import { Trash2 } from '@/components/animate-ui/icons/trash-2';
 import { t } from '../../../i18n';
 import {
   DeleteOutlined,
@@ -24,6 +16,7 @@ import type { QueryParamModification, RedirectCondition } from '../../../types';
 import ConditionUrlMatchEditor from '../../../components/ConditionUrlMatchEditor';
 import TestRuleDrawer from '../../../components/TestRuleDrawer';
 import ConditionFilterModal, { isConditionFilterConfigured } from '../../../components/ConditionFilterModal';
+import ConditionList from '../ConditionList';
 import RuleDetailHeader from '../RuleDetailHeader';
 import type { RuleDetailProps as Props } from '../types';
 
@@ -47,7 +40,6 @@ export default function QueryParamsRuleDetail({
   const [testUrl, setTestUrl] = useState('');
   const [testResult, setTestResult] = useState<SimulateRuleResult | null>(null);
   const [filterModal, setFilterModal] = useState<{ open: boolean; conditionId?: string }>({ open: false });
-  const [openConditions, setOpenConditions] = useState<string[]>(() => workingRule.conditions.map((c) => c.id));
 
   const currentGroupEnabled = useMemo(() => new Map(groups.map((g) => [g.id, g.enabled])), [groups]);
 
@@ -102,93 +94,50 @@ export default function QueryParamsRuleDetail({
       saveDetailRule={saveDetailRule}
       onTest={() => setTestDrawerOpen(true)}
     />
-    <Accordion type="multiple" value={openConditions} onValueChange={setOpenConditions}>
-      {workingRule.conditions.map((c) => (
-        <AccordionItem key={c.id} value={c.id} className="mb-3 border rounded-lg">
-          <AccordionTrigger className="px-4 hover:no-underline">
-            <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'space-between' }}>
-              <span>{t('请求条件配置', 'Request conditions')}</span>
-              <Popconfirm
-                title={t('确认删除该条件配置？', 'Delete this condition?')}
-                okText={t('删除', 'Delete')}
-                cancelText={t('取消', 'Cancel')}
-                okButtonProps={{ danger: true, type: 'primary' }}
-                onCancel={(e) => e?.stopPropagation()}
-                onConfirm={(e) => {
-                  e?.stopPropagation();
-                  removeCondition(c.id);
-                }}
-              >
-                <span
-                  role="button"
-                  tabIndex={0}
-                  aria-label={t('删除条件', 'Delete condition')}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                    }
-                  }}
-                  style={{ color: '#ff4d4f', cursor: 'pointer', padding: '0 4px' }}
-                >
-                  <Trash2 size={14} />
-                </span>
-              </Popconfirm>
-            </div>
-          </AccordionTrigger>
-          <AccordionContent className="px-4">
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <ConditionUrlMatchEditor
-                condition={c}
-                filterConfigured={isConditionFilterConfigured(c)}
-                onConditionChange={(patch) => updateCondition(c.id, patch)}
-                onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
-              />
-              {c.queryParamModifications.map((modification) => (
-                <Space.Compact key={modification.id} style={{ width: '100%' }}>
-                  <Select
-                    value={modification.action}
-                    options={QUERY_ACTION_OPTIONS as never}
-                    style={{ width: 100 }}
-                    onChange={(value) => updateModification(c.id, modification.id, { action: value })}
-                  />
-                  <Input
-                    placeholder={t('参数名', 'Parameter key')}
-                    value={modification.key}
-                    onChange={(e) => updateModification(c.id, modification.id, { key: e.target.value })}
-                  />
-                  <Input
-                    placeholder={t('参数值', 'Parameter value')}
-                    value={modification.value}
-                    disabled={modification.action === 'delete'}
-                    onChange={(e) => updateModification(c.id, modification.id, { value: e.target.value })}
-                  />
-                  <Button variant="destructive" size="icon" onClick={() => removeModification(c.id, modification.id)}>
-                    <DeleteOutlined />
-                  </Button>
-                </Space.Compact>
-              ))}
-              <Button variant="outline" onClick={() => addModification(c.id)}><PlusOutlined />{t('添加修改', 'Add modification')}</Button>
-            </Space>
-          </AccordionContent>
-        </AccordionItem>
-      ))}
-    </Accordion>
-    <Button
-      variant="outline"
-      style={{ marginTop: 12, width: '100%', height: 40, background: 'transparent' }}
-      onClick={() => {
+    <ConditionList
+      conditions={workingRule.conditions}
+      onAdd={() => {
         const newCondition = createDefaultCondition();
         setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, newCondition] });
-        setOpenConditions((prev) => [...prev, newCondition.id]);
+        return newCondition.id;
       }}
-    >
-      <PlusOutlined />
-      {t('添加新条件配置', 'Add condition')}
-    </Button>
+      onRemove={removeCondition}
+      renderContent={(c) => (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <ConditionUrlMatchEditor
+            condition={c}
+            filterConfigured={isConditionFilterConfigured(c)}
+            onConditionChange={(patch) => updateCondition(c.id, patch)}
+            onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+          />
+          {c.queryParamModifications.map((modification) => (
+            <Space.Compact key={modification.id} style={{ width: '100%' }}>
+              <Select
+                value={modification.action}
+                options={QUERY_ACTION_OPTIONS as never}
+                style={{ width: 100 }}
+                onChange={(value) => updateModification(c.id, modification.id, { action: value })}
+              />
+              <Input
+                placeholder={t('参数名', 'Parameter key')}
+                value={modification.key}
+                onChange={(e) => updateModification(c.id, modification.id, { key: e.target.value })}
+              />
+              <Input
+                placeholder={t('参数值', 'Parameter value')}
+                value={modification.value}
+                disabled={modification.action === 'delete'}
+                onChange={(e) => updateModification(c.id, modification.id, { value: e.target.value })}
+              />
+              <Button variant="destructive" size="icon" onClick={() => removeModification(c.id, modification.id)}>
+                <DeleteOutlined />
+              </Button>
+            </Space.Compact>
+          ))}
+          <Button variant="outline" onClick={() => addModification(c.id)}><PlusOutlined />{t('添加修改', 'Add modification')}</Button>
+        </Space>
+      )}
+    />
     <TestRuleDrawer
       open={testDrawerOpen}
       testUrl={testUrl}

@@ -1,24 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/animate-ui/components/radix/accordion';
-import {
-  Button,
   Form,
   Modal,
-  Popconfirm,
   Radio,
   Select,
   Space,
 } from '../../../components';
 import { t } from '../../../i18n';
-import { Trash2 } from '@/components/animate-ui/icons/trash-2';
-import {
-  PlusOutlined,
-} from '../../../icons';
 import {
   createDefaultCondition,
   genId,
@@ -33,6 +21,7 @@ import type { RedirectCondition, ResponseBodyModifyMode } from '../../../types';
 import ConditionUrlMatchEditor from '../../../components/ConditionUrlMatchEditor';
 import TestRuleDrawer from '../../../components/TestRuleDrawer';
 import ConditionFilterModal, { isConditionFilterConfigured } from '../../../components/ConditionFilterModal';
+import ConditionList from '../ConditionList';
 import RuleDetailHeader from '../RuleDetailHeader';
 import type { RuleDetailProps as Props } from '../types';
 
@@ -74,7 +63,6 @@ export default function ModifyResponseBodyRuleDetail({
   const [testUrl, setTestUrl] = useState('');
   const [testResult, setTestResult] = useState<SimulateRuleResult | null>(null);
   const [filterModal, setFilterModal] = useState<{ open: boolean; conditionId?: string }>({ open: false });
-  const [openConditions, setOpenConditions] = useState<string[]>(() => workingRule.conditions.map((c) => c.id));
 
   const currentGroupEnabled = useMemo(() => new Map(groups.map((g) => [g.id, g.enabled])), [groups]);
 
@@ -111,96 +99,53 @@ export default function ModifyResponseBodyRuleDetail({
       saveDetailRule={saveDetailRule}
       onTest={() => setTestDrawerOpen(true)}
     />
-    <Accordion type="multiple" value={openConditions} onValueChange={setOpenConditions}>
-      {workingRule.conditions.map((c) => {
-        const dynamicScriptError = c.responseBodyMode === 'dynamic' ? validateDynamicScript(c.responseBodyDynamicValue) : null;
-        return (
-          <AccordionItem key={c.id} value={c.id} className="mb-3 border rounded-lg">
-            <AccordionTrigger className="px-4 hover:no-underline">
-              <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>{t('请求条件配置', 'Request conditions')}</span>
-                <Popconfirm
-                  title={t('确认删除该条件配置？', 'Delete this condition?')}
-                  okText={t('删除', 'Delete')}
-                  cancelText={t('取消', 'Cancel')}
-                  okButtonProps={{ danger: true, type: 'primary' }}
-                  onCancel={(e) => e?.stopPropagation()}
-                  onConfirm={(e) => {
-                    e?.stopPropagation();
-                    removeCondition(c.id);
-                  }}
-                >
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    aria-label={t('删除条件', 'Delete condition')}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }
-                    }}
-                    style={{ color: '#ff4d4f', cursor: 'pointer', padding: '0 4px' }}
-                  >
-                    <Trash2 size={14} />
-                  </span>
-                </Popconfirm>
-              </div>
-            </AccordionTrigger>
-            <AccordionContent className="px-4">
-              <Space direction="vertical" style={{ width: '100%' }}>
-                <ConditionUrlMatchEditor
-                  condition={c}
-                  filterConfigured={isConditionFilterConfigured(c)}
-                  onConditionChange={(patch) => updateCondition(c.id, patch)}
-                  onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
-                />
-                <Form.Item label={t('修改方式', 'Modify mode')} style={{ marginBottom: 8 }}>
-                  <Radio.Group
-                    value={c.responseBodyMode}
-                    onChange={(e) => updateConditionMode(c.id, e.target.value)}
-                    options={[
-                      { label: t('静态数据', 'Static'), value: 'static' },
-                      { label: t('动态（JavaScript）', 'Dynamic (JavaScript)'), value: 'dynamic' },
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item
-                  label={c.responseBodyMode === 'dynamic' ? t('JavaScript 代码', 'JavaScript code') : t('替换后的响应体', 'Replaced response body')}
-                  validateStatus={dynamicScriptError ? 'error' : ''}
-                  help={dynamicScriptError ?? (c.responseBodyMode === 'dynamic' ? t('需定义 modifyResponse(args) 并返回最终响应体', 'Define modifyResponse(args) and return the final response body.') : t('命中后会直接替换原始响应 body', 'Will directly replace the original response body when matched.'))}
-                  layout="vertical"
-                  style={{ marginBottom: 0 }}
-                >
-                  <CodeEditor
-                    mode={c.responseBodyMode}
-                    value={c.responseBodyMode === 'dynamic' ? c.responseBodyDynamicValue : c.responseBodyStaticValue}
-                    onChange={(value) => updateCondition(c.id, c.responseBodyMode === 'dynamic'
-                      ? { responseBodyDynamicValue: value, responseBodyValue: value }
-                      : { responseBodyStaticValue: value, responseBodyValue: value })}
-                  />
-                </Form.Item>
-              </Space>
-            </AccordionContent>
-          </AccordionItem>
-        );
-      })}
-    </Accordion>
-    <Button
-      variant="outline"
-      style={{ marginTop: 12, width: '100%', height: 40, background: 'transparent' }}
-      onClick={() => {
+    <ConditionList
+      conditions={workingRule.conditions}
+      onAdd={() => {
         const newCondition = createDefaultCondition();
         setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, newCondition] });
-        setOpenConditions((prev) => [...prev, newCondition.id]);
+        return newCondition.id;
       }}
-    >
-      <PlusOutlined />
-      {t('添加新条件配置', 'Add condition')}
-    </Button>
+      onRemove={removeCondition}
+      renderContent={(c) => {
+        const dynamicScriptError = c.responseBodyMode === 'dynamic' ? validateDynamicScript(c.responseBodyDynamicValue) : null;
+        return (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <ConditionUrlMatchEditor
+              condition={c}
+              filterConfigured={isConditionFilterConfigured(c)}
+              onConditionChange={(patch) => updateCondition(c.id, patch)}
+              onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+            />
+            <Form.Item label={t('修改方式', 'Modify mode')} style={{ marginBottom: 8 }}>
+              <Radio.Group
+                value={c.responseBodyMode}
+                onChange={(e) => updateConditionMode(c.id, e.target.value)}
+                options={[
+                  { label: t('静态数据', 'Static'), value: 'static' },
+                  { label: t('动态（JavaScript）', 'Dynamic (JavaScript)'), value: 'dynamic' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item
+              label={c.responseBodyMode === 'dynamic' ? t('JavaScript 代码', 'JavaScript code') : t('替换后的响应体', 'Replaced response body')}
+              validateStatus={dynamicScriptError ? 'error' : ''}
+              help={dynamicScriptError ?? (c.responseBodyMode === 'dynamic' ? t('需定义 modifyResponse(args) 并返回最终响应体', 'Define modifyResponse(args) and return the final response body.') : t('命中后会直接替换原始响应 body', 'Will directly replace the original response body when matched.'))}
+              layout="vertical"
+              style={{ marginBottom: 0 }}
+            >
+              <CodeEditor
+                mode={c.responseBodyMode}
+                value={c.responseBodyMode === 'dynamic' ? c.responseBodyDynamicValue : c.responseBodyStaticValue}
+                onChange={(value) => updateCondition(c.id, c.responseBodyMode === 'dynamic'
+                  ? { responseBodyDynamicValue: value, responseBodyValue: value }
+                  : { responseBodyStaticValue: value, responseBodyValue: value })}
+              />
+            </Form.Item>
+          </Space>
+        );
+      }}
+    />
     <TestRuleDrawer
       open={testDrawerOpen}
       testUrl={testUrl}
