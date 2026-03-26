@@ -32,7 +32,7 @@ export default function ConditionList({ conditions, onAdd, onRemove, renderConte
       <Accordion type="multiple" value={openConditions} onValueChange={setOpenConditions}>
         {conditions.map((c) => (
           <AccordionItem key={c.id} value={c.id} className="mb-3 border rounded-lg">
-            <AccordionTrigger className="px-4 hover:no-underline">
+            <AccordionTrigger className="px-4">
               <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'space-between' }}>
                 <span>{t('请求条件配置', 'Request conditions')}</span>
                 <Popconfirm
