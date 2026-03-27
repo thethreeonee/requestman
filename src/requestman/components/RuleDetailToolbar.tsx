@@ -8,8 +8,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Binary } from '@/components/animate-ui/icons/binary';
-import { Blend } from '@/components/animate-ui/icons/blend';
 import {
   Dialog,
   DialogContent,
@@ -18,15 +16,9 @@ import {
   DialogTitle,
 } from '@/components/animate-ui/components/radix/dialog';
 import { Brush } from '@/components/animate-ui/icons/brush';
-import { CircleX } from '@/components/animate-ui/icons/circle-x';
-import { CircuitBoard } from '@/components/animate-ui/icons/circuit-board';
-import { Gauge } from '@/components/animate-ui/icons/gauge';
-import { LayoutDashboard } from '@/components/animate-ui/icons/layout-dashboard';
-import { Orbit } from '@/components/animate-ui/icons/orbit';
-import { Route } from '@/components/animate-ui/icons/route';
-import { User } from '@/components/animate-ui/icons/user';
 import type { RedirectGroup, RedirectRule } from '../types';
 import { t } from '../i18n';
+import { renderRuleTypeIcon } from '../rule-type-meta';
 
 type Props = {
   rule: RedirectRule;
@@ -37,18 +29,6 @@ type Props = {
   onTest: () => void;
   onSave: () => boolean | void;
   onRename: (name: string) => void;
-};
-
-const RULE_TYPE_ICON_MAP: Record<RedirectRule['type'], React.ReactNode> = {
-  redirect_request: <Route size={16} />,
-  rewrite_string: <CircuitBoard size={16} />,
-  query_params: <Orbit size={16} />,
-  modify_request_body: <LayoutDashboard size={16} />,
-  modify_response_body: <Binary size={16} />,
-  modify_headers: <Blend size={16} />,
-  user_agent: <User size={16} />,
-  cancel_request: <CircleX size={16} />,
-  request_delay: <Gauge size={16} />,
 };
 
 export default function RuleDetailToolbar({
@@ -78,7 +58,7 @@ export default function RuleDetailToolbar({
   return <>
     <div className="detail-header">
       <div className="detail-header__title">
-        <span className="detail-header__title-icon" aria-hidden="true">{RULE_TYPE_ICON_MAP[rule.type]}</span>
+        <span className="detail-header__title-icon" aria-hidden="true">{renderRuleTypeIcon(rule.type)}</span>
         <span className="detail-header__title-text">{rule.name || t('未命名规则', 'Untitled rule')}</span>
         <Button
           variant="ghost"

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { App } from './components';
+import { App, Button } from './components';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,6 +10,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/animate-ui/components/radix/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/animate-ui/components/radix/dialog';
+import { Input } from '@/components/ui/input';
 import {
   DEFAULT_GROUP_ID,
   REDIRECT_ENABLED_KEY,
@@ -31,6 +39,7 @@ import {
 import type { RedirectGroup, RedirectRule } from './types';
 import TopBar from './layout/top-bar';
 import ConfigArea from './layout/config-area';
+import RuleTree from './layout/rule-tree';
 import type { RuleDetailProps } from './layout/config-area/types';
 import './index.css';
 
@@ -405,8 +414,65 @@ export default function RequestmanPanel() {
     />
 
     <div className="main-body-layout">
+      <RuleTree
+        groups={groups}
+        rules={rules}
+        activeRuleId={currentRule?.id}
+        onSelectRule={openRuleDetail}
+        onCreateGroup={() => {
+          setGroupInput('');
+          setGroupModal({ open: true, mode: 'create' });
+        }}
+        onCreateRule={createRule}
+      />
       <ConfigArea currentRule={currentRule} detailProps={detailProps} />
     </div>
+    <Dialog
+      open={groupModal.open}
+      onOpenChange={(open) => {
+        setGroupModal((prev) => ({ ...prev, open }));
+        if (!open) setGroupInput('');
+      }}
+    >
+      <DialogContent showCloseButton>
+        <DialogHeader>
+          <DialogTitle>
+            {groupModal.mode === 'create'
+              ? t('新建规则组', 'Create group')
+              : groupModal.mode === 'rename'
+                ? t('重命名规则组', 'Rename group')
+                : t('移动到规则组', 'Move to group')}
+          </DialogTitle>
+        </DialogHeader>
+        <Input
+          autoFocus
+          value={groupInput}
+          onChange={(e) => setGroupInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') confirmGroupModal();
+          }}
+          placeholder={t('请输入规则组名称', 'Enter group name')}
+        />
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setGroupModal({ open: false, mode: 'create' });
+              setGroupInput('');
+            }}
+          >
+              {t('取消', 'Cancel')}
+          </Button>
+          <Button
+            variant="default"
+            onClick={confirmGroupModal}
+            disabled={!groupInput.trim()}
+          >
+            {t('确定', 'OK')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <AlertDialog open={leaveConfirmOpen} onOpenChange={setLeaveConfirmOpen}>
       <AlertDialogContent>
         <AlertDialogHeader>
