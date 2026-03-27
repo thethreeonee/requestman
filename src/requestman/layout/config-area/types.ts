@@ -6,11 +6,14 @@ export type RuleDetailProps = {
   groups: RedirectGroup[];
   workingRule: RedirectRule;
   originalRule: RedirectRule | null;
+  isNewRule: boolean;
   setWorkingRule: React.Dispatch<React.SetStateAction<RedirectRule | null>>;
   setRules: React.Dispatch<React.SetStateAction<RedirectRule[]>>;
   onBack: () => void;
   saveDetailRule: () => void;
   toggleDetailRuleEnabled: (ruleId: string, enabled: boolean) => void;
+  duplicateDetailRule: (ruleId: string) => void;
+  deleteDetailRule: (ruleId: string) => void;
   setPageToList: () => void;
   notifyApi: Pick<NotificationApi, 'warning'>;
   onRename?: (name: string) => void;

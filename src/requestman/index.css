@@ -289,6 +289,7 @@ html.dark .theme-toggle-icons .theme-icon-moon {
 }
 
 .detail-header__title-text {
+  min-width: 0;
   font-size: 16px;
   font-weight: 600;
   line-height: 1.4;
@@ -297,7 +298,11 @@ html.dark .theme-toggle-icons .theme-icon-moon {
   white-space: nowrap;
 }
 
-.detail-header__rename-btn {
+.detail-header__enabled-switch {
+  flex-shrink: 0;
+}
+
+.detail-header__menu-btn {
   padding: 6px;
   min-width: 32px;
   min-height: 32px;

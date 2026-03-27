@@ -255,6 +255,45 @@ export default function RequestmanPanel() {
     notification.warning({ content: t('规则已停用', 'Rule disabled'), duration: 0.8 });
   };
 
+  const duplicateDetailRule = (ruleId: string) => {
+    const sourceRule = workingRule?.id === ruleId ? workingRule : rules.find((rule) => rule.id === ruleId);
+    if (!sourceRule) return;
+    const sourceName = sourceRule.name || t('未命名规则', 'Untitled rule');
+
+    const duplicatedRule = JSON.parse(JSON.stringify(sourceRule)) as RedirectRule;
+    duplicatedRule.id = genId();
+    duplicatedRule.name = `${sourceName} ${t('副本', 'Copy')}`;
+    duplicatedRule.conditions = duplicatedRule.conditions.map((condition) => ({
+      ...condition,
+      id: genId(),
+      queryParamModifications: condition.queryParamModifications.map((item) => ({ ...item, id: genId() })),
+      requestHeaderModifications: condition.requestHeaderModifications.map((item) => ({ ...item, id: genId() })),
+      responseHeaderModifications: condition.responseHeaderModifications.map((item) => ({ ...item, id: genId() })),
+    }));
+
+    setRules((prev) => {
+      const sourceIndex = prev.findIndex((rule) => rule.id === ruleId);
+      if (sourceIndex === -1) return [duplicatedRule, ...prev];
+      const next = [...prev];
+      next.splice(sourceIndex + 1, 0, duplicatedRule);
+      return next;
+    });
+    setWorkingRule(JSON.parse(JSON.stringify(duplicatedRule)));
+    setOriginalRule(JSON.parse(JSON.stringify(duplicatedRule)));
+    setPage({ type: 'detail', ruleId: duplicatedRule.id, isNew: false });
+    notification.success(t(`规则「${sourceName}」已复制`, `Rule "${sourceName}" duplicated.`));
+  };
+
+  const deleteDetailRule = (ruleId: string) => {
+    const targetRule = workingRule?.id === ruleId ? workingRule : rules.find((rule) => rule.id === ruleId);
+    const targetName = targetRule?.name || t('未命名规则', 'Untitled rule');
+    setRules((prev) => prev.filter((rule) => rule.id !== ruleId));
+    setWorkingRule((prev) => (prev?.id === ruleId ? null : prev));
+    setOriginalRule((prev) => (prev?.id === ruleId ? null : prev));
+    setPage({ type: 'list' });
+    notification.success(t(`规则「${targetName}」已删除`, `Rule "${targetName}" deleted.`));
+  };
+
   const moveRuleToGroup = () => {
     if (!groupModal.ruleId) return;
     const target = groups.find((g) => g.id === groupInput);
@@ -389,11 +428,14 @@ export default function RequestmanPanel() {
       groups,
       workingRule: currentRule,
       originalRule,
+      isNewRule: page.type === 'detail' ? page.isNew : false,
       setWorkingRule,
       setRules,
       onBack,
       saveDetailRule,
       toggleDetailRuleEnabled,
+      duplicateDetailRule,
+      deleteDetailRule,
       setPageToList: () => setPage({ type: 'list' }),
       notifyApi: notification,
     }

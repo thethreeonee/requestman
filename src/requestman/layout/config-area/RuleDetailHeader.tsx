@@ -4,7 +4,15 @@ import type { RuleDetailProps } from './types';
 
 type Props = Pick<
   RuleDetailProps,
-  'groups' | 'workingRule' | 'originalRule' | 'setWorkingRule' | 'saveDetailRule'
+  'groups'
+  | 'workingRule'
+  | 'originalRule'
+  | 'isNewRule'
+  | 'setWorkingRule'
+  | 'saveDetailRule'
+  | 'toggleDetailRuleEnabled'
+  | 'duplicateDetailRule'
+  | 'deleteDetailRule'
 > & {
   onTest: () => void;
 };
@@ -13,8 +21,12 @@ export default function RuleDetailHeader({
   groups,
   workingRule,
   originalRule,
+  isNewRule,
   setWorkingRule,
   saveDetailRule,
+  toggleDetailRuleEnabled,
+  duplicateDetailRule,
+  deleteDetailRule,
   onTest,
 }: Props) {
   const { enabled: _workingEnabled, ...workingRuleWithoutEnabled } = workingRule;
@@ -26,9 +38,13 @@ export default function RuleDetailHeader({
       rule={workingRule}
       groups={groups}
       groupId={workingRule.groupId}
+      isNewRule={isNewRule}
       dirty={dirty}
       onGroupChange={(value) => setWorkingRule({ ...workingRule, groupId: value })}
+      onEnabledChange={(enabled) => toggleDetailRuleEnabled(workingRule.id, enabled)}
       onRename={(name) => setWorkingRule({ ...workingRule, name })}
+      onDuplicate={() => duplicateDetailRule(workingRule.id)}
+      onDelete={() => deleteDetailRule(workingRule.id)}
       onTest={onTest}
       onSave={saveDetailRule}
     />
