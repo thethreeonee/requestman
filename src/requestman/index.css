@@ -24,9 +24,11 @@
   --rm-icon-accent-alt: #1a1a1a;
 
   min-height: 100vh;
+  min-width: 900px;
   background: var(--rm-page-bg);
   color: var(--rm-text-primary);
   box-sizing: border-box;
+  overflow-x: auto;
 }
 
 html.dark .requestman-shell {
@@ -240,23 +242,6 @@ html.dark .theme-toggle-icons .theme-icon-moon {
   font-style: italic;
   line-height: 28px;
   color: var(--rm-text-secondary);
-}
-
-@media (max-width: 960px) {
-  .main-body-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .main-sidebar {
-    min-height: 280px;
-    border-right: 0;
-    border-bottom: 1px solid var(--rm-border);
-  }
-
-  .rule-tree-sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--rm-border);
-  }
 }
 
 
