@@ -30,7 +30,6 @@ import {
 } from './rule-utils';
 import type { RedirectGroup, RedirectRule } from './types';
 import TopBar from './layout/top-bar';
-import Sidebar from './layout/sidebar';
 import ConfigArea from './layout/config-area';
 import type { RuleDetailProps } from './layout/config-area/types';
 import './index.css';
@@ -406,26 +405,6 @@ export default function RequestmanPanel() {
     />
 
     <div className="main-body-layout">
-      <Sidebar
-        groups={groups}
-        rules={rules}
-        selectedRuleId={page.type === 'detail' ? page.ruleId : null}
-        redirectEnabled={redirectEnabled}
-        collapsedGroupIds={collapsedGroupIds}
-        groupModal={groupModal}
-        groupInput={groupInput}
-        setCollapsedGroupIds={setCollapsedGroupIds}
-        setGroupModal={setGroupModal}
-        setGroupInput={setGroupInput}
-        createRule={createRule}
-        openRuleDetail={openRuleDetail}
-        duplicateGroup={duplicateGroup}
-        deleteGroup={deleteGroup}
-        confirmGroupModal={confirmGroupModal}
-        setRules={setRules}
-        setGroups={setGroups}
-        notifyApi={notification}
-      />
       <ConfigArea currentRule={currentRule} detailProps={detailProps} />
     </div>
     <AlertDialog open={leaveConfirmOpen} onOpenChange={setLeaveConfirmOpen}>
