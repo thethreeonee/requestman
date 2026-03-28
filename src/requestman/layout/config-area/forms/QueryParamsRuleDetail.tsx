@@ -1,0 +1,178 @@
+import React, { useMemo, useState } from 'react';
+import { Button } from '@/components/animate-ui/components/buttons/button';
+import { Trash2 } from '@/components/animate-ui/icons/trash-2';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { t } from '../../../i18n';
+import {
+  PlusOutlined,
+} from '../../../icons';
+import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
+import type { QueryParamModification, RedirectCondition } from '../../../types';
+import ConditionUrlMatchEditor from '../../../components/ConditionUrlMatchEditor';
+import TestRuleDrawer from '../../../components/TestRuleDrawer';
+import ConditionFilterModal, { isConditionFilterConfigured } from '../../../components/ConditionFilterModal';
+import ConditionList from '../ConditionList';
+import RuleDetailHeader from '../RuleDetailHeader';
+import type { RuleDetailProps as Props } from '../types';
+
+const QUERY_ACTION_OPTIONS = [
+  { label: t('添加', 'Add'), value: 'add' },
+  { label: t('修改', 'Update'), value: 'update' },
+  { label: t('删除', 'Delete'), value: 'delete' },
+] as const;
+
+export default function QueryParamsRuleDetail({
+  groups,
+  workingRule,
+  originalRule,
+  isNewRule,
+  setWorkingRule,
+  setRules,
+  saveDetailRule,
+  toggleDetailRuleEnabled,
+  duplicateDetailRule,
+  deleteDetailRule,
+  renameRule,
+  moveRuleToGroupById,
+  setPageToList,
+  notifyApi,
+}: Props) {
+  const [testDrawerOpen, setTestDrawerOpen] = useState(false);
+  const [testUrl, setTestUrl] = useState('');
+  const [testResult, setTestResult] = useState<SimulateRuleResult | null>(null);
+  const [filterModal, setFilterModal] = useState<{ open: boolean; conditionId?: string }>({ open: false });
+
+  const currentGroupEnabled = useMemo(() => new Map(groups.map((g) => [g.id, g.enabled])), [groups]);
+
+  const updateCondition = (conditionId: string, patch: Partial<RedirectCondition>) => {
+    setWorkingRule((prev) => (prev
+      ? { ...prev, conditions: prev.conditions.map((c) => (c.id === conditionId ? { ...c, ...patch } : c)) }
+      : prev));
+  };
+
+  const removeCondition = (conditionId: string) => {
+    if (workingRule.conditions.length <= 1) {
+      notifyApi.warning(t('至少保留一条条件配置', 'Keep at least one condition.'));
+      return;
+    }
+    setWorkingRule({ ...workingRule, conditions: workingRule.conditions.filter((c) => c.id !== conditionId) });
+  };
+
+
+  const updateModification = (conditionId: string, modificationId: string, patch: Partial<QueryParamModification>) => {
+    const condition = workingRule.conditions.find((item) => item.id === conditionId);
+    if (!condition) return;
+    updateCondition(conditionId, {
+      queryParamModifications: condition.queryParamModifications.map((item) => (item.id === modificationId ? { ...item, ...patch } : item)),
+    });
+  };
+
+  const addModification = (conditionId: string) => {
+    const condition = workingRule.conditions.find((item) => item.id === conditionId);
+    if (!condition) return;
+    updateCondition(conditionId, {
+      queryParamModifications: [...condition.queryParamModifications, { id: genId(), action: 'add', key: '', value: '' }],
+    });
+  };
+
+  const removeModification = (conditionId: string, modificationId: string) => {
+    const condition = workingRule.conditions.find((item) => item.id === conditionId);
+    if (!condition) return;
+    if (condition.queryParamModifications.length <= 1) return notifyApi.warning(t('至少保留一条修改配置', 'Keep at least one modification.'));
+    updateCondition(conditionId, {
+      queryParamModifications: condition.queryParamModifications.filter((item) => item.id !== modificationId),
+    });
+  };
+
+  const activeCondition = workingRule.conditions.find((c) => c.id === filterModal.conditionId);
+
+  return <div>
+    <RuleDetailHeader
+      groups={groups}
+      workingRule={workingRule}
+      originalRule={originalRule}
+      isNewRule={isNewRule}
+      saveDetailRule={saveDetailRule}
+      toggleDetailRuleEnabled={toggleDetailRuleEnabled}
+      duplicateDetailRule={duplicateDetailRule}
+      deleteDetailRule={deleteDetailRule}
+      renameRule={renameRule}
+      moveRuleToGroupById={moveRuleToGroupById}
+      onTest={() => setTestDrawerOpen(true)}
+    />
+    <ConditionList
+      conditions={workingRule.conditions}
+      onAdd={() => {
+        const newCondition = createDefaultCondition();
+        setWorkingRule({ ...workingRule, conditions: [...workingRule.conditions, newCondition] });
+        return newCondition.id;
+      }}
+      onRemove={removeCondition}
+      renderConditionContent={(c) => (
+        <ConditionUrlMatchEditor
+          condition={c}
+          filterConfigured={isConditionFilterConfigured(c)}
+          onConditionChange={(patch) => updateCondition(c.id, patch)}
+          onFilterClick={() => setFilterModal({ open: true, conditionId: c.id })}
+        />
+      )}
+      renderExecutionContent={(c) => (
+        <>
+          {c.queryParamModifications.map((modification) => (
+            <div key={modification.id} style={{ display: 'flex', gap: 6, width: '100%' }}>
+              <Select
+                value={modification.action}
+                onValueChange={(value) => updateModification(c.id, modification.id, { action: value })}
+              >
+                <SelectTrigger style={{ width: 100 }}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {QUERY_ACTION_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                placeholder={t('参数名', 'Parameter key')}
+                value={modification.key}
+                onChange={(e) => updateModification(c.id, modification.id, { key: e.target.value })}
+              />
+              <Input
+                placeholder={t('参数值', 'Parameter value')}
+                value={modification.value}
+                disabled={modification.action === 'delete'}
+                onChange={(e) => updateModification(c.id, modification.id, { value: e.target.value })}
+              />
+              <Button variant="outline" size="icon-sm" onClick={() => removeModification(c.id, modification.id)}>
+                <Trash2 size={14} animateOnHover style={{ color: '#ff4d4f' }} />
+              </Button>
+            </div>
+          ))}
+          <Button variant="outline" onClick={() => addModification(c.id)}><PlusOutlined />{t('添加修改', 'Add modification')}</Button>
+        </>
+      )}
+    />
+    <TestRuleDrawer
+      open={testDrawerOpen}
+      testUrl={testUrl}
+      testResult={testResult}
+      onClose={() => setTestDrawerOpen(false)}
+      onTest={() => setTestResult(simulateRuleEffect(testUrl, [workingRule], currentGroupEnabled, { includeDisabled: true }))}
+      onTestUrlChange={setTestUrl}
+    />
+    <ConditionFilterModal
+      open={filterModal.open}
+      condition={activeCondition}
+      onClose={() => setFilterModal({ open: false })}
+      onConditionChange={updateCondition}
+    />
+  </div>;
+}

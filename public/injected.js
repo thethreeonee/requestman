@@ -137,6 +137,8 @@
   }
 
   function reportRuleHit(rule) {
+    const ruleName = typeof rule?.ruleName === 'string' ? rule.ruleName.trim() : '';
+    if (!ruleName) return;
     window.postMessage({
       source: SOURCE,
       type: HIT_MESSAGE_TYPE,

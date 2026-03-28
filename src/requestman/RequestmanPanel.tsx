@@ -1,5 +1,23 @@
-import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
-import { App, Modal } from 'antd';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { App, Button } from './components';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/animate-ui/components/radix/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/animate-ui/components/radix/dialog';
+import { Input } from '@/components/ui/input';
 import {
   DEFAULT_GROUP_ID,
   REDIRECT_ENABLED_KEY,
@@ -19,23 +37,16 @@ import {
   normalizeRules,
 } from './rule-utils';
 import type { RedirectGroup, RedirectRule } from './types';
-import RedirectRuleList from './components/RedirectRuleList';
+import TopBar from './layout/top-bar';
+import ConfigArea from './layout/config-area';
+import RuleTree from './layout/rule-tree';
+import type { RuleDetailProps } from './layout/config-area/types';
 import './index.css';
-
-const RedirectRuleDetail = lazy(() => import('./components/RedirectRuleDetail'));
-const RewriteStringRuleDetail = lazy(() => import('./components/RewriteStringRuleDetail'));
-const QueryParamsRuleDetail = lazy(() => import('./components/QueryParamsRuleDetail'));
-const ModifyRequestBodyRuleDetail = lazy(() => import('./components/ModifyRequestBodyRuleDetail'));
-const ModifyResponseBodyRuleDetail = lazy(() => import('./components/ModifyResponseBodyRuleDetail'));
-const ModifyHeadersRuleDetail = lazy(() => import('./components/ModifyHeadersRuleDetail'));
-const UserAgentRuleDetail = lazy(() => import('./components/UserAgentRuleDetail'));
-const CancelRequestRuleDetail = lazy(() => import('./components/CancelRequestRuleDetail'));
-const RequestDelayRuleDetail = lazy(() => import('./components/RequestDelayRuleDetail'));
 
 type PageState = { type: 'list' } | { type: 'detail'; ruleId: string; isNew: boolean };
 
 export default function RequestmanPanel() {
-  const { message } = App.useApp();
+  const { notification } = App.useApp();
   const [groups, setGroups] = useState<RedirectGroup[]>([]);
   const [rules, setRules] = useState<RedirectRule[]>([]);
   const [redirectEnabled, setRedirectEnabled] = useState(true);
@@ -48,6 +59,11 @@ export default function RequestmanPanel() {
   const [originalRule, setOriginalRule] = useState<RedirectRule | null>(null);
   const hasInitializedStorageSync = useRef(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [themeMode, setThemeMode] = useState<'light' | 'dark'>('light');
+  const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>('light');
+  const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [deleteGroupId, setDeleteGroupId] = useState<string | null>(null);
 
   useEffect(() => {
     chrome.storage.local.get([REDIRECT_RULES_KEY, REDIRECT_ENABLED_KEY, REDIRECT_GROUPS_KEY], (res) => {
@@ -69,6 +85,16 @@ export default function RequestmanPanel() {
     chrome.storage.local.set({ [REDIRECT_GROUPS_KEY]: groups, [REDIRECT_RULES_KEY]: rules, [REDIRECT_ENABLED_KEY]: redirectEnabled });
     chrome.runtime.sendMessage({ type: 'redirectRules/apply', groups, rules, enabled: redirectEnabled });
   }, [groups, rules, redirectEnabled, rulesLoaded]);
+
+  useEffect(() => {
+    setEffectiveTheme(themeMode);
+    document.documentElement.classList.toggle('dark', themeMode === 'dark');
+  }, [themeMode]);
+
+  const handleRedirectEnabledChange = (value: boolean) => {
+    setRedirectEnabled(value);
+    notification.success(value ? t('总开关已开启', 'Master switch enabled') : t('总开关已关闭', 'Master switch disabled'));
+  };
 
   const openRuleDetail = (ruleId: string) => {
     const found = rules.find((r) => r.id === ruleId);
@@ -99,29 +125,32 @@ export default function RequestmanPanel() {
     const { enabled: _workingEnabled, ...workingRuleWithoutEnabled } = workingRule;
     const { enabled: _originalEnabled, ...originalRuleWithoutEnabled } = originalRule;
     if (JSON.stringify(workingRuleWithoutEnabled) !== JSON.stringify(originalRuleWithoutEnabled)) {
-      Modal.confirm({
-        title: t('存在未保存修改', 'Unsaved changes'),
-        content: t('修改不会被保存，确认返回吗？', 'Changes will not be saved. Leave anyway?'),
-        onOk: () => setPage({ type: 'list' }),
-      });
+      setLeaveConfirmOpen(true);
       return;
     }
     setPage({ type: 'list' });
   };
+
+  const currentRuleDirty = useMemo(() => {
+    if (!workingRule || !originalRule) return false;
+    const { enabled: _workingEnabled, ...workingRuleWithoutEnabled } = workingRule;
+    const { enabled: _originalEnabled, ...originalRuleWithoutEnabled } = originalRule;
+    return JSON.stringify(workingRuleWithoutEnabled) !== JSON.stringify(originalRuleWithoutEnabled);
+  }, [workingRule, originalRule]);
 
   const saveDetailRule = () => {
     if (!workingRule || page.type !== 'detail') return false;
     if (workingRule.type === 'redirect_request') {
       const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !getConditionRedirectTarget(c));
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
+        notification.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
         return false;
       }
     }
     if (workingRule.type === 'rewrite_string') {
       const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !c.rewriteFrom.trim());
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
+        notification.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
         return false;
       }
     }
@@ -131,7 +160,7 @@ export default function RequestmanPanel() {
         return c.queryParamModifications.some((item) => !item.key.trim() || (item.action !== 'delete' && !item.value.trim()));
       });
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
+        notification.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
         return false;
       }
     }
@@ -147,7 +176,7 @@ export default function RequestmanPanel() {
         return !c.requestBodyStaticValue.trim();
       });
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整或 JavaScript 无效', 'Some conditions are incomplete or JavaScript is invalid.'));
+        notification.warning(t('还有条件配置未输入完整或 JavaScript 无效', 'Some conditions are incomplete or JavaScript is invalid.'));
         return false;
       }
     }
@@ -163,7 +192,7 @@ export default function RequestmanPanel() {
         return !c.responseBodyStaticValue.trim();
       });
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整或 JavaScript 无效', 'Some conditions are incomplete or JavaScript is invalid.'));
+        notification.warning(t('还有条件配置未输入完整或 JavaScript 无效', 'Some conditions are incomplete or JavaScript is invalid.'));
         return false;
       }
     }
@@ -176,7 +205,7 @@ export default function RequestmanPanel() {
         return !c.userAgentPresetKey?.trim();
       });
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
+        notification.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
         return false;
       }
     }
@@ -184,7 +213,7 @@ export default function RequestmanPanel() {
     if (workingRule.type === 'request_delay') {
       const invalid = workingRule.conditions.some((c) => !c.expression.trim() || !Number.isFinite(c.delayMs) || c.delayMs < 0);
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
+        notification.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
         return false;
       }
     }
@@ -205,7 +234,7 @@ export default function RequestmanPanel() {
         return hasInvalidPartialModification;
       });
       if (invalid) {
-        message.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
+        notification.warning(t('还有条件配置未输入完整', 'Some conditions are incomplete.'));
         return false;
       }
     }
@@ -227,10 +256,83 @@ export default function RequestmanPanel() {
     setWorkingRule((prev) => (prev?.id === ruleId ? { ...prev, enabled } : prev));
     setOriginalRule((prev) => (prev?.id === ruleId ? { ...prev, enabled } : prev));
     if (enabled) {
-      message.success({ content: t('规则已启用', 'Rule enabled'), duration: 0.8 });
+      notification.success({ content: t('规则已启用', 'Rule enabled'), duration: 0.8 });
       return;
     }
-    message.warning({ content: t('规则已停用', 'Rule disabled'), duration: 0.8 });
+    notification.warning({ content: t('规则已停用', 'Rule disabled'), duration: 0.8 });
+  };
+
+  const toggleGroupEnabled = (groupId: string, enabled: boolean) => {
+    setGroups((prev) => prev.map((group) => (group.id === groupId ? { ...group, enabled } : group)));
+    if (enabled) {
+      notification.success({ content: t('规则组已启用', 'Group enabled'), duration: 0.8 });
+      return;
+    }
+    notification.warning({ content: t('规则组已停用', 'Group disabled'), duration: 0.8 });
+  };
+
+  const duplicateDetailRule = (ruleId: string) => {
+    const sourceRule = workingRule?.id === ruleId ? workingRule : rules.find((rule) => rule.id === ruleId);
+    if (!sourceRule) return;
+    const sourceName = sourceRule.name || t('未命名规则', 'Untitled rule');
+
+    const duplicatedRule = JSON.parse(JSON.stringify(sourceRule)) as RedirectRule;
+    duplicatedRule.id = genId();
+    duplicatedRule.name = `${sourceName} ${t('副本', 'Copy')}`;
+    duplicatedRule.conditions = duplicatedRule.conditions.map((condition) => ({
+      ...condition,
+      id: genId(),
+      queryParamModifications: condition.queryParamModifications.map((item) => ({ ...item, id: genId() })),
+      requestHeaderModifications: condition.requestHeaderModifications.map((item) => ({ ...item, id: genId() })),
+      responseHeaderModifications: condition.responseHeaderModifications.map((item) => ({ ...item, id: genId() })),
+    }));
+
+    setRules((prev) => {
+      const sourceIndex = prev.findIndex((rule) => rule.id === ruleId);
+      if (sourceIndex === -1) return [duplicatedRule, ...prev];
+      const next = [...prev];
+      next.splice(sourceIndex + 1, 0, duplicatedRule);
+      return next;
+    });
+    setWorkingRule(JSON.parse(JSON.stringify(duplicatedRule)));
+    setOriginalRule(JSON.parse(JSON.stringify(duplicatedRule)));
+    setPage({ type: 'detail', ruleId: duplicatedRule.id, isNew: false });
+    notification.success(t(`规则「${sourceName}」已复制`, `Rule "${sourceName}" duplicated.`));
+  };
+
+  const deleteDetailRule = (ruleId: string) => {
+    const targetRule = workingRule?.id === ruleId ? workingRule : rules.find((rule) => rule.id === ruleId);
+    const targetName = targetRule?.name || t('未命名规则', 'Untitled rule');
+    setRules((prev) => prev.filter((rule) => rule.id !== ruleId));
+    setWorkingRule((prev) => (prev?.id === ruleId ? null : prev));
+    setOriginalRule((prev) => (prev?.id === ruleId ? null : prev));
+    if (page.type === 'detail' && page.ruleId === ruleId) {
+      setPage({ type: 'list' });
+    }
+    notification.success(t(`规则「${targetName}」已删除`, `Rule "${targetName}" deleted.`));
+  };
+
+  const renameRule = (ruleId: string, name: string) => {
+    const nextName = name.trim();
+    if (!nextName) return;
+    const targetRule = workingRule?.id === ruleId ? workingRule : rules.find((rule) => rule.id === ruleId);
+    if (!targetRule || targetRule.name === nextName) return;
+    const targetName = targetRule.name || t('未命名规则', 'Untitled rule');
+    setRules((prev) => prev.map((rule) => (rule.id === ruleId ? { ...rule, name: nextName } : rule)));
+    setWorkingRule((prev) => (prev?.id === ruleId ? { ...prev, name: nextName } : prev));
+    setOriginalRule((prev) => (prev?.id === ruleId ? { ...prev, name: nextName } : prev));
+    notification.success(t(`规则「${targetName}」已重命名为「${nextName}」`, `Rule "${targetName}" renamed to "${nextName}".`));
+  };
+
+  const moveRuleToGroupById = (ruleId: string, groupId: string) => {
+    const targetGroup = groups.find((group) => group.id === groupId);
+    const targetRule = workingRule?.id === ruleId ? workingRule : rules.find((rule) => rule.id === ruleId);
+    if (!targetGroup || !targetRule || targetRule.groupId === groupId) return;
+    const targetName = targetRule.name || t('未命名规则', 'Untitled rule');
+    setRules((prev) => prev.map((rule) => (rule.id === ruleId ? { ...rule, groupId } : rule)));
+    setWorkingRule((prev) => (prev?.id === ruleId ? { ...prev, groupId } : prev));
+    setOriginalRule((prev) => (prev?.id === ruleId ? { ...prev, groupId } : prev));
+    notification.success(t(`规则「${targetName}」已移动到规则组「${targetGroup.name}」`, `Rule "${targetName}" moved to group "${targetGroup.name}".`));
   };
 
   const moveRuleToGroup = () => {
@@ -240,7 +342,7 @@ export default function RequestmanPanel() {
     const movedRule = rules.find((r) => r.id === groupModal.ruleId);
     if (!movedRule) return;
     setRules((prev) => prev.map((r) => (r.id === groupModal.ruleId ? { ...r, groupId: target.id } : r)));
-    message.success(t(`规则「${movedRule.name}」已移动到规则组「${target.name}」`, `Rule "${movedRule.name}" moved to group "${target.name}".`));
+    notification.success(t(`规则「${movedRule.name}」已移动到规则组「${target.name}」`, `Rule "${movedRule.name}" moved to group "${target.name}".`));
     setGroupModal({ open: false, mode: 'create' });
     setGroupInput('');
   };
@@ -251,30 +353,19 @@ export default function RequestmanPanel() {
     if (!name) return;
     if (groupModal.mode === 'create') {
       setGroups((prev) => [{ id: genId(), name, enabled: true }, ...prev]);
-      message.success(t(`规则组「${name}」已创建`, `Group "${name}" created.`));
+      notification.success(t(`规则组「${name}」已创建`, `Group "${name}" created.`));
     }
     if (groupModal.mode === 'rename' && groupModal.groupId) {
       const group = groups.find((g) => g.id === groupModal.groupId);
       setGroups((prev) => prev.map((g) => (g.id === groupModal.groupId ? { ...g, name } : g)));
-      message.success(t(`规则组「${group?.name ?? ''}」已重命名为「${name}」`, `Group "${group?.name ?? ''}" renamed to "${name}".`));
+      notification.success(t(`规则组「${group?.name ?? ''}」已重命名为「${name}」`, `Group "${group?.name ?? ''}" renamed to "${name}".`));
     }
     setGroupModal({ open: false, mode: 'create' });
     setGroupInput('');
   };
 
   const deleteGroup = (groupId: string) => {
-    Modal.confirm({
-      title: t('确认删除该规则组？', 'Delete this group?'),
-      content: t('删除规则组会同时删除组内所有规则。', 'Deleting a group will also remove all rules in it.'),
-      okButtonProps: { danger: true },
-      onOk: () => {
-        const deletedGroup = groups.find((g) => g.id === groupId);
-        const deletedRuleCount = rules.filter((r) => r.groupId === groupId).length;
-        setGroups((prev) => prev.filter((g) => g.id !== groupId));
-        setRules((prev) => prev.filter((r) => r.groupId !== groupId));
-        message.success(t(`规则组「${deletedGroup?.name ?? ''}」已删除（含 ${deletedRuleCount} 条规则）`, `Group "${deletedGroup?.name ?? ''}" deleted (${deletedRuleCount} rules).`));
-      },
-    });
+    setDeleteGroupId(groupId);
   };
 
   const duplicateGroup = (groupId: string) => {
@@ -289,10 +380,22 @@ export default function RequestmanPanel() {
       return next;
     });
     setRules((prev) => {
-      const selected = prev.filter((r) => r.groupId === groupId).map((r) => ({ ...r, id: genId(), groupId: newGroupId, name: `${r.name} ${t('副本', 'Copy')}` }));
+      const selected = prev.filter((r) => r.groupId === groupId).map((r) => ({
+        ...r,
+        id: genId(),
+        groupId: newGroupId,
+        name: `${r.name} ${t('副本', 'Copy')}`,
+        conditions: r.conditions.map((condition) => ({
+          ...condition,
+          id: genId(),
+          queryParamModifications: condition.queryParamModifications.map((item) => ({ ...item, id: genId() })),
+          requestHeaderModifications: condition.requestHeaderModifications.map((item) => ({ ...item, id: genId() })),
+          responseHeaderModifications: condition.responseHeaderModifications.map((item) => ({ ...item, id: genId() })),
+        })),
+      }));
       return [...prev, ...selected];
     });
-    message.success(t(`规则组「${group.name}」已复制`, `Group "${group.name}" duplicated.`));
+    notification.success(t(`规则组「${group.name}」已复制`, `Group "${group.name}" duplicated.`));
   };
 
   const currentRule = useMemo(() => {
@@ -368,72 +471,170 @@ export default function RequestmanPanel() {
 
       setGroups((prev) => [...prev, ...mergedGroups]);
       setRules((prev) => [...prev, ...mergedRules]);
-      message.success(t(`导入成功：新增 ${mergedGroups.length} 个规则组，${mergedRules.length} 条规则`, `Imported successfully: ${mergedGroups.length} new groups and ${mergedRules.length} rules.`));
+      notification.success(t(`导入成功：新增 ${mergedGroups.length} 个规则组，${mergedRules.length} 条规则`, `Imported successfully: ${mergedGroups.length} new groups and ${mergedRules.length} rules.`));
     } catch {
-      message.error(t('导入失败，请检查配置文件格式', 'Import failed. Please check the config file format.'));
+      notification.error(t('导入失败，请检查配置文件格式', 'Import failed. Please check the config file format.'));
     }
   };
-
-  if (currentRule) {
-    const detailProps = {
+  const detailProps: RuleDetailProps | null = currentRule
+    ? {
       groups,
       workingRule: currentRule,
       originalRule,
+      isNewRule: page.type === 'detail' ? page.isNew : false,
       setWorkingRule,
       setRules,
       onBack,
       saveDetailRule,
       toggleDetailRuleEnabled,
+      duplicateDetailRule,
+      deleteDetailRule,
+      renameRule,
+      moveRuleToGroupById,
       setPageToList: () => setPage({ type: 'list' }),
-    };
-
-    let detail: React.ReactNode;
-    if (currentRule.type === 'redirect_request') {
-      detail = <RedirectRuleDetail {...detailProps} messageApi={message} />;
-    } else if (currentRule.type === 'rewrite_string') {
-      detail = <RewriteStringRuleDetail {...detailProps} messageApi={message} />;
-    } else if (currentRule.type === 'query_params') {
-      detail = <QueryParamsRuleDetail {...detailProps} messageApi={message} />;
-    } else if (currentRule.type === 'modify_request_body') {
-      detail = <ModifyRequestBodyRuleDetail {...detailProps} messageApi={message} />;
-    } else if (currentRule.type === 'modify_response_body') {
-      detail = <ModifyResponseBodyRuleDetail {...detailProps} messageApi={message} />;
-    } else if (currentRule.type === 'modify_headers') {
-      detail = <ModifyHeadersRuleDetail {...detailProps} messageApi={message} />;
-    } else if (currentRule.type === 'user_agent') {
-      detail = <UserAgentRuleDetail {...detailProps} messageApi={message} />;
-    } else if (currentRule.type === 'cancel_request') {
-      detail = <CancelRequestRuleDetail {...detailProps} messageApi={message} />;
-    } else {
-      detail = <RequestDelayRuleDetail {...detailProps} messageApi={message} />;
+      notifyApi: notification,
     }
+    : null;
 
-    return <Suspense fallback={<div style={{ padding: 16 }}>{t('加载中...', 'Loading...')}</div>}>{detail}</Suspense>;
-  }
-
-  return <>
+  return <div className="requestman-shell">
     <input ref={importInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={onImportFileChange} />
-      <RedirectRuleList
-      groups={groups}
-      rules={rules}
+    <TopBar
       redirectEnabled={redirectEnabled}
-      collapsedGroupIds={collapsedGroupIds}
-      groupModal={groupModal}
-      groupInput={groupInput}
-      setRedirectEnabled={setRedirectEnabled}
-      setCollapsedGroupIds={setCollapsedGroupIds}
-      setGroupModal={setGroupModal}
-      setGroupInput={setGroupInput}
-      createRule={createRule}
-      openRuleDetail={openRuleDetail}
-      duplicateGroup={duplicateGroup}
-      deleteGroup={deleteGroup}
-      confirmGroupModal={confirmGroupModal}
-        setRules={setRules}
-        setGroups={setGroups}
-        messageApi={message}
-        exportConfig={exportConfig}
-        importConfig={importConfig}
+      onRedirectEnabledChange={handleRedirectEnabledChange}
+      toolbarMenuOpen={toolbarMenuOpen}
+      setToolbarMenuOpen={setToolbarMenuOpen}
+      importConfig={importConfig}
+      exportConfig={exportConfig}
+      themeMode={themeMode}
+      effectiveTheme={effectiveTheme}
+      setThemeMode={setThemeMode}
+    />
+
+    <div className="main-body-layout">
+      <RuleTree
+        groups={groups}
+        rules={rules}
+        activeRuleId={currentRule?.id}
+        activeRuleDirty={currentRuleDirty}
+        activeRuleIsNew={page.type === 'detail' ? page.isNew : false}
+        onSaveActiveRule={saveDetailRule}
+        onSelectRule={openRuleDetail}
+        onCreateGroup={() => {
+          setGroupInput('');
+          setGroupModal({ open: true, mode: 'create' });
+        }}
+        onCreateRule={createRule}
+        onRenameGroup={(groupId) => {
+          const group = groups.find((item) => item.id === groupId);
+          if (!group) return;
+          setGroupInput(group.name);
+          setGroupModal({ open: true, mode: 'rename', groupId });
+        }}
+        onToggleGroupEnabled={toggleGroupEnabled}
+        onDuplicateGroup={duplicateGroup}
+        onDeleteGroup={deleteGroup}
+        onToggleRuleEnabled={toggleDetailRuleEnabled}
+        onRenameRule={renameRule}
+        onMoveRuleToGroup={moveRuleToGroupById}
+        onDuplicateRule={duplicateDetailRule}
+        onDeleteRule={deleteDetailRule}
       />
-  </>;
+      <ConfigArea currentRule={currentRule} detailProps={detailProps} />
+    </div>
+    <Dialog
+      open={groupModal.open}
+      onOpenChange={(open) => {
+        setGroupModal((prev) => ({ ...prev, open }));
+        if (!open) setGroupInput('');
+      }}
+    >
+      <DialogContent showCloseButton>
+        <DialogHeader>
+          <DialogTitle>
+            {groupModal.mode === 'create'
+              ? t('新建规则组', 'New group')
+              : groupModal.mode === 'rename'
+                ? t('重命名规则组', 'Rename group')
+                : t('移动到规则组', 'Move to group')}
+          </DialogTitle>
+        </DialogHeader>
+        <Input
+          autoFocus
+          value={groupInput}
+          onChange={(e) => setGroupInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') confirmGroupModal();
+          }}
+          placeholder={t('请输入规则组名称', 'Enter group name')}
+        />
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setGroupModal({ open: false, mode: 'create' });
+              setGroupInput('');
+            }}
+          >
+              {t('取消', 'Cancel')}
+          </Button>
+          <Button
+            variant="default"
+            onClick={confirmGroupModal}
+            disabled={!groupInput.trim()}
+          >
+            {t('确定', 'OK')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <AlertDialog open={leaveConfirmOpen} onOpenChange={setLeaveConfirmOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('存在未保存修改', 'Unsaved changes')}</AlertDialogTitle>
+          <AlertDialogDescription>{t('修改不会被保存，确认返回吗？', 'Changes will not be saved. Leave anyway?')}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('取消', 'Cancel')}</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              setLeaveConfirmOpen(false);
+              setPage({ type: 'list' });
+            }}
+          >
+            {t('确认', 'Confirm')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    <AlertDialog open={!!deleteGroupId} onOpenChange={(open) => { if (!open) setDeleteGroupId(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('确认删除该规则组？', 'Delete this group?')}</AlertDialogTitle>
+          <AlertDialogDescription>{t('删除规则组会同时删除组内所有规则。', 'Deleting a group will also remove all rules in it.')}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('取消', 'Cancel')}</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              if (!deleteGroupId) return;
+              const deletedGroup = groups.find((g) => g.id === deleteGroupId);
+              const deletedRuleCount = rules.filter((r) => r.groupId === deleteGroupId).length;
+              const deletingActiveRule = page.type === 'detail' && workingRule?.groupId === deleteGroupId;
+              setGroups((prev) => prev.filter((g) => g.id !== deleteGroupId));
+              setRules((prev) => prev.filter((r) => r.groupId !== deleteGroupId));
+              if (deletingActiveRule) {
+                setWorkingRule(null);
+                setOriginalRule(null);
+                setPage({ type: 'list' });
+              }
+              notification.success(t(`规则组「${deletedGroup?.name ?? ''}」已删除（含 ${deletedRuleCount} 条规则）`, `Group "${deletedGroup?.name ?? ''}" deleted (${deletedRuleCount} rules).`));
+              setDeleteGroupId(null);
+            }}
+          >
+            {t('删除', 'Delete')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  </div>;
 }

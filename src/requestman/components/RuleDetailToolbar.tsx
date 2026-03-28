@@ -1,69 +1,86 @@
-import React, { useEffect, useState } from 'react';
-import { Button, Dropdown, Select, Space, Switch, Typography } from 'antd';
-import { ArrowLeftOutlined, CheckOutlined, EllipsisOutlined } from '@ant-design/icons';
-import type { MenuProps } from 'antd';
-import type { RedirectGroup } from '../types';
+import React from 'react';
+import { Button } from '@/components/animate-ui/components/buttons/button';
+import { Switch } from '@/components/animate-ui/components/radix/switch';
+import { Ellipsis } from '@/components/animate-ui/icons/ellipsis';
+import type { RedirectGroup, RedirectRule } from '../types';
 import { t } from '../i18n';
+import { renderRuleTypeIcon } from '../rule-type-meta';
+import RuleActionsMenu from './RuleActionsMenu';
 
 type Props = {
+  rule: RedirectRule;
   groups: RedirectGroup[];
-  groupId: string;
-  enabled: boolean;
+  isNewRule: boolean;
   dirty: boolean;
-  onBack: () => void;
-  onEnabledChange: (value: boolean) => void;
   onGroupChange: (groupId: string) => void;
+  onEnabledChange: (enabled: boolean) => void;
   onTest: () => void;
   onSave: () => boolean | void;
-  menuItems: MenuProps['items'];
+  onRename: (name: string) => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
 };
 
 export default function RuleDetailToolbar({
+  rule,
   groups,
-  groupId,
-  enabled,
+  isNewRule,
   dirty,
-  onBack,
-  onEnabledChange,
   onGroupChange,
+  onEnabledChange,
   onTest,
   onSave,
-  menuItems,
+  onRename,
+  onDuplicate,
+  onDelete,
 }: Props) {
-  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
-
-  useEffect(() => {
-    if (!showSaveSuccess) return;
-    const timer = window.setTimeout(() => setShowSaveSuccess(false), 2000);
-    return () => window.clearTimeout(timer);
-  }, [showSaveSuccess]);
-
-  return <div className="detail-header">
-    <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack}>{t('返回', 'Back')}</Button>
-    <Space>
-      <Typography.Text type={enabled ? 'success' : 'secondary'}>{enabled ? t('生效中', 'Enabled') : t('未生效', 'Disabled')}</Typography.Text>
-      <Switch checked={enabled} onChange={onEnabledChange} />
-      <Dropdown menu={{ items: menuItems }}><Button icon={<EllipsisOutlined />} /></Dropdown>
-      <Select
-        value={groupId}
-        style={{ width: 220 }}
-        options={groups.map((g) => ({ value: g.id, label: `${t('规则组：', 'Group: ')}${g.name}` }))}
-        onChange={onGroupChange}
-        placeholder={t('规则组：请选择', 'Select group')}
-      />
-      <Button onClick={onTest}>{t('测试', 'Test')}</Button>
-      <Button
-        type="primary"
-        onClick={() => {
-          const isSaved = onSave();
-          if (isSaved) setShowSaveSuccess(true);
-        }}
-      >
-        <Space size={4}>
-          {showSaveSuccess ? <CheckOutlined /> : null}
-          <span>{dirty ? `* ${t('保存规则', 'Save rule')}` : t('保存规则', 'Save rule')}</span>
-        </Space>
-      </Button>
-    </Space>
-  </div>;
+  return <>
+    <div className="detail-header">
+      <div className="detail-header__title">
+        <span className="detail-header__title-icon" aria-hidden="true">{renderRuleTypeIcon(rule.type)}</span>
+        <span className="detail-header__title-text">{rule.name || t('未命名规则', 'Untitled rule')}</span>
+        <Switch
+          checked={rule.enabled}
+          onCheckedChange={onEnabledChange}
+          aria-label={rule.enabled ? t('禁用规则', 'Disable rule') : t('启用规则', 'Enable rule')}
+          className="detail-header__enabled-switch"
+        />
+      </div>
+      <div className="aui-space">
+        <RuleActionsMenu
+          rule={rule}
+          groups={groups}
+          dirty={dirty}
+          isNewRule={isNewRule}
+          onGroupChange={onGroupChange}
+          onRename={onRename}
+          onDuplicate={onDuplicate}
+          onDelete={onDelete}
+          onSave={onSave}
+          trigger={(
+            <span>
+              <Button
+                variant="outline"
+                size="icon"
+                className="detail-header__menu-btn"
+                aria-label={t('规则操作', 'Rule actions')}
+              >
+                <Ellipsis size={16} />
+              </Button>
+            </span>
+          )}
+        />
+        <Button variant="outline" onClick={onTest}>{t('测试', 'Test')}</Button>
+        <Button
+          variant="default"
+          disabled={!dirty}
+          onClick={() => {
+            onSave();
+          }}
+        >
+          <span>{t('保存规则', 'Save rule')}</span>
+        </Button>
+      </div>
+    </div>
+  </>;
 }
