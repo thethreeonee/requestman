@@ -131,6 +131,13 @@ export default function RequestmanPanel() {
     setPage({ type: 'list' });
   };
 
+  const currentRuleDirty = useMemo(() => {
+    if (!workingRule || !originalRule) return false;
+    const { enabled: _workingEnabled, ...workingRuleWithoutEnabled } = workingRule;
+    const { enabled: _originalEnabled, ...originalRuleWithoutEnabled } = originalRule;
+    return JSON.stringify(workingRuleWithoutEnabled) !== JSON.stringify(originalRuleWithoutEnabled);
+  }, [workingRule, originalRule]);
+
   const saveDetailRule = () => {
     if (!workingRule || page.type !== 'detail') return false;
     if (workingRule.type === 'redirect_request') {
@@ -290,8 +297,33 @@ export default function RequestmanPanel() {
     setRules((prev) => prev.filter((rule) => rule.id !== ruleId));
     setWorkingRule((prev) => (prev?.id === ruleId ? null : prev));
     setOriginalRule((prev) => (prev?.id === ruleId ? null : prev));
-    setPage({ type: 'list' });
+    if (page.type === 'detail' && page.ruleId === ruleId) {
+      setPage({ type: 'list' });
+    }
     notification.success(t(`规则「${targetName}」已删除`, `Rule "${targetName}" deleted.`));
+  };
+
+  const renameRule = (ruleId: string, name: string) => {
+    const nextName = name.trim();
+    if (!nextName) return;
+    const targetRule = workingRule?.id === ruleId ? workingRule : rules.find((rule) => rule.id === ruleId);
+    if (!targetRule || targetRule.name === nextName) return;
+    const targetName = targetRule.name || t('未命名规则', 'Untitled rule');
+    setRules((prev) => prev.map((rule) => (rule.id === ruleId ? { ...rule, name: nextName } : rule)));
+    setWorkingRule((prev) => (prev?.id === ruleId ? { ...prev, name: nextName } : prev));
+    setOriginalRule((prev) => (prev?.id === ruleId ? { ...prev, name: nextName } : prev));
+    notification.success(t(`规则「${targetName}」已重命名为「${nextName}」`, `Rule "${targetName}" renamed to "${nextName}".`));
+  };
+
+  const moveRuleToGroupById = (ruleId: string, groupId: string) => {
+    const targetGroup = groups.find((group) => group.id === groupId);
+    const targetRule = workingRule?.id === ruleId ? workingRule : rules.find((rule) => rule.id === ruleId);
+    if (!targetGroup || !targetRule || targetRule.groupId === groupId) return;
+    const targetName = targetRule.name || t('未命名规则', 'Untitled rule');
+    setRules((prev) => prev.map((rule) => (rule.id === ruleId ? { ...rule, groupId } : rule)));
+    setWorkingRule((prev) => (prev?.id === ruleId ? { ...prev, groupId } : prev));
+    setOriginalRule((prev) => (prev?.id === ruleId ? { ...prev, groupId } : prev));
+    notification.success(t(`规则「${targetName}」已移动到规则组「${targetGroup.name}」`, `Rule "${targetName}" moved to group "${targetGroup.name}".`));
   };
 
   const moveRuleToGroup = () => {
@@ -436,6 +468,8 @@ export default function RequestmanPanel() {
       toggleDetailRuleEnabled,
       duplicateDetailRule,
       deleteDetailRule,
+      renameRule,
+      moveRuleToGroupById,
       setPageToList: () => setPage({ type: 'list' }),
       notifyApi: notification,
     }
@@ -460,12 +494,19 @@ export default function RequestmanPanel() {
         groups={groups}
         rules={rules}
         activeRuleId={currentRule?.id}
+        activeRuleDirty={currentRuleDirty}
+        activeRuleIsNew={page.type === 'detail' ? page.isNew : false}
+        onSaveActiveRule={saveDetailRule}
         onSelectRule={openRuleDetail}
         onCreateGroup={() => {
           setGroupInput('');
           setGroupModal({ open: true, mode: 'create' });
         }}
         onCreateRule={createRule}
+        onRenameRule={renameRule}
+        onMoveRuleToGroup={moveRuleToGroupById}
+        onDuplicateRule={duplicateDetailRule}
+        onDeleteRule={deleteDetailRule}
       />
       <ConfigArea currentRule={currentRule} detailProps={detailProps} />
     </div>

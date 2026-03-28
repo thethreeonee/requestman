@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { AnimateIcon } from '@/components/animate-ui/icons/icon';
+import { EllipsisVertical } from '@/components/animate-ui/icons/ellipsis-vertical';
 import { Plus } from '@/components/animate-ui/icons/plus';
 import {
   DropdownMenu,
@@ -27,6 +28,7 @@ import {
 } from '@/components/animate-ui/primitives/radix/collapsible';
 import { ChevronRight } from 'lucide-react';
 import { Layers } from '@/components/animate-ui/icons/layers';
+import RuleActionsMenu from '../../components/RuleActionsMenu';
 import { Button } from '../../components';
 import { t } from '../../i18n';
 import {
@@ -43,6 +45,13 @@ type Props = {
   onSelectRule: (ruleId: string) => void;
   onCreateGroup: () => void;
   onCreateRule: (type: RedirectRule['type']) => void;
+  onRenameRule: (ruleId: string, name: string) => void;
+  onMoveRuleToGroup: (ruleId: string, groupId: string) => void;
+  onDuplicateRule: (ruleId: string) => void;
+  onDeleteRule: (ruleId: string) => void;
+  activeRuleDirty?: boolean;
+  activeRuleIsNew?: boolean;
+  onSaveActiveRule?: () => boolean | void;
 };
 
 export default function RuleTree({
@@ -52,7 +61,18 @@ export default function RuleTree({
   onSelectRule,
   onCreateGroup,
   onCreateRule,
+  onRenameRule,
+  onMoveRuleToGroup,
+  onDuplicateRule,
+  onDeleteRule,
+  activeRuleDirty = false,
+  activeRuleIsNew = false,
+  onSaveActiveRule,
 }: Props) {
+  const stopRuleSelection = (event: React.SyntheticEvent) => {
+    event.stopPropagation();
+  };
+
   const rulesByGroup = useMemo(() => {
     const next = new Map<string, RedirectRule[]>();
     for (const rule of rules) {
@@ -100,7 +120,7 @@ export default function RuleTree({
                           <SidebarMenuSub>
                             {groupRules.length > 0
                               ? groupRules.map((rule) => (
-                                <SidebarMenuSubItem key={rule.id}>
+                                <SidebarMenuSubItem key={rule.id} className="rule-tree-sidebar__rule-item">
                                   <AnimateIcon animateOnHover asChild>
                                     <SidebarMenuSubButton
                                       asChild
@@ -115,10 +135,43 @@ export default function RuleTree({
                                         <span className="rule-tree-sidebar__rule-icon" aria-hidden="true">
                                           {renderRuleTypeIcon(rule.type)}
                                         </span>
-                                        <span>{rule.name}</span>
+                                        <span className="rule-tree-sidebar__rule-label">{rule.name}</span>
                                       </button>
                                     </SidebarMenuSubButton>
                                   </AnimateIcon>
+                                  <RuleActionsMenu
+                                    rule={rule}
+                                    groups={groups}
+                                    dirty={activeRuleId === rule.id ? activeRuleDirty : false}
+                                    isNewRule={activeRuleId === rule.id ? activeRuleIsNew : false}
+                                    onSave={activeRuleId === rule.id ? onSaveActiveRule : undefined}
+                                    onRename={(name) => onRenameRule(rule.id, name)}
+                                    onGroupChange={(nextGroupId) => onMoveRuleToGroup(rule.id, nextGroupId)}
+                                    onDuplicate={() => onDuplicateRule(rule.id)}
+                                    onDelete={() => onDeleteRule(rule.id)}
+                                    contentProps={{
+                                      align: 'start',
+                                      side: 'right',
+                                      sideOffset: 8,
+                                    }}
+                                    trigger={(
+                                      <button
+                                        type="button"
+                                        className="rule-tree-sidebar__rule-action"
+                                        aria-label={t('规则操作', 'Rule actions')}
+                                        onClick={stopRuleSelection}
+                                        onMouseDown={stopRuleSelection}
+                                        onPointerDown={stopRuleSelection}
+                                        onKeyDown={stopRuleSelection}
+                                      >
+                                        <AnimateIcon animateOnHover asChild>
+                                          <span className="rule-tree-sidebar__rule-action-icon">
+                                            <EllipsisVertical size={14} animation="pulse" />
+                                          </span>
+                                        </AnimateIcon>
+                                      </button>
+                                    )}
+                                  />
                                 </SidebarMenuSubItem>
                               ))
                               : (

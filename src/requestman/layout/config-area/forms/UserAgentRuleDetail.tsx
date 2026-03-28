@@ -42,9 +42,15 @@ export default function UserAgentRuleDetail({
   groups,
   workingRule,
   originalRule,
+  isNewRule,
   setWorkingRule,
   setRules,
   saveDetailRule,
+  toggleDetailRuleEnabled,
+  duplicateDetailRule,
+  deleteDetailRule,
+  renameRule,
+  moveRuleToGroupById,
   setPageToList,
   notifyApi,
 }: Props) {
@@ -90,8 +96,13 @@ export default function UserAgentRuleDetail({
       groups={groups}
       workingRule={workingRule}
       originalRule={originalRule}
-      setWorkingRule={setWorkingRule}
+      isNewRule={isNewRule}
       saveDetailRule={saveDetailRule}
+      toggleDetailRuleEnabled={toggleDetailRuleEnabled}
+      duplicateDetailRule={duplicateDetailRule}
+      deleteDetailRule={deleteDetailRule}
+      renameRule={renameRule}
+      moveRuleToGroupById={moveRuleToGroupById}
       onTest={() => setTestDrawerOpen(true)}
     />
     <ConditionList
