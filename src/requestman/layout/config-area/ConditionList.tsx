@@ -22,6 +22,7 @@ import { Separator } from '@/components/ui/separator';
 import { t } from '../../i18n';
 import { PlusOutlined } from '../../icons';
 import type { RedirectCondition } from '../../types';
+import { getConditionSummary } from '../../rule-utils';
 
 type Props = {
   conditions: RedirectCondition[];
@@ -42,11 +43,11 @@ export default function ConditionList({ conditions, onAdd, onRemove, renderCondi
   return (
     <>
       <Accordion type="multiple" value={openConditions} onValueChange={setOpenConditions} className="condition-accordion">
-        {conditions.map((c) => (
+        {conditions.map((c, index) => (
           <AccordionItem key={c.id} value={c.id} className="mb-3 border rounded-lg">
             <AccordionTrigger className="px-4">
               <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>{t('请求条件配置', 'Request conditions')}</span>
+                <span>{t('条件', 'Condition')} {index + 1} · {getConditionSummary(c)}</span>
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <AnimateIcon animateOnHover asChild>

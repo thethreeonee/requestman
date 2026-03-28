@@ -1,4 +1,11 @@
-import { DEFAULT_GROUP_ID, DEFAULT_GROUP_NAME, DEFAULT_MODIFY_REQUEST_BODY_SCRIPT, DEFAULT_MODIFY_RESPONSE_BODY_SCRIPT } from './constants';
+import {
+  DEFAULT_GROUP_ID,
+  DEFAULT_GROUP_NAME,
+  DEFAULT_MODIFY_REQUEST_BODY_SCRIPT,
+  DEFAULT_MODIFY_RESPONSE_BODY_SCRIPT,
+  MATCH_MODE_OPTIONS,
+  MATCH_TARGET_OPTIONS,
+} from './constants';
 import type { MatchMode, RedirectCondition, RedirectGroup, RedirectRule } from './types';
 import { t } from './i18n';
 
@@ -63,6 +70,49 @@ export function getConditionRedirectTarget(condition: Pick<RedirectCondition, 'r
     return (condition.redirectFileTarget ?? '').trim() || condition.redirectTarget.trim();
   }
   return (condition.redirectUrlTarget ?? '').trim() || condition.redirectTarget.trim();
+}
+
+function truncateConditionExpression(expression: string, maxLength = 36) {
+  const trimmed = expression.trim();
+  if (!trimmed) return t('未填写匹配内容', 'No pattern');
+  if (trimmed.length <= maxLength) return trimmed;
+  return `${trimmed.slice(0, maxLength - 1)}...`;
+}
+
+function summarizeUrlLikeExpression(expression: string, maxLength = 28) {
+  const trimmed = expression.trim();
+  if (!trimmed) return t('未填写匹配内容', 'No pattern');
+
+  const normalized = trimmed
+    .replace(/^\^https?:\/\/(?:www\.)?/, '')
+    .replace(/^https?:\/\/(?:www\.)?/, '')
+    .replace(/\(\?:/g, '(')
+    .replace(/\\\//g, '/');
+
+  const match = normalized.match(/([a-z0-9-]+(?:\.[a-z0-9-]+)+)(\/[^\s]*)?/i);
+  if (!match) return truncateConditionExpression(trimmed, maxLength);
+
+  const host = match[1];
+  const path = match[2] ?? '';
+  const shortPath = path
+    ? path.length > 14
+      ? `${path.slice(0, 6)}...${path.slice(-5)}`
+      : path
+    : '';
+  const summary = shortPath ? `${host}${shortPath}` : host;
+
+  if (summary.length <= maxLength) return summary;
+  return `${summary.slice(0, maxLength - 1)}...`;
+}
+
+export function getConditionSummary(condition: Pick<RedirectCondition, 'matchTarget' | 'matchMode' | 'expression'>) {
+  const targetLabel = MATCH_TARGET_OPTIONS.find((option) => option.value === condition.matchTarget)?.label ?? condition.matchTarget;
+  const modeLabel = MATCH_MODE_OPTIONS.find((option) => option.value === condition.matchMode)?.label ?? condition.matchMode;
+  const expressionLabel = condition.matchTarget === 'url'
+    ? summarizeUrlLikeExpression(condition.expression)
+    : truncateConditionExpression(condition.expression);
+
+  return `${targetLabel} / ${modeLabel} / ${expressionLabel}`;
 }
 
 export function normalizeGroups(input: unknown): RedirectGroup[] {

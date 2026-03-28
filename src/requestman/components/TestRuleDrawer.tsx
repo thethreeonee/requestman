@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
 import { Input } from '@/components/ui/input';
-import type { SimulateRuleResult } from '../rule-utils';
+import { getConditionSummary, type SimulateRuleResult } from '../rule-utils';
 import { t } from '../i18n';
 import {
   Sheet,
@@ -70,6 +70,9 @@ export default function TestRuleDrawer({
   const matchedConditionIndex = testResult && testResult.ok
     ? testResult.matchedRule.conditions.findIndex((condition) => condition.id === testResult.matchedCondition.id)
     : -1;
+  const matchedConditionSummary = testResult && testResult.ok
+    ? getConditionSummary(testResult.matchedCondition)
+    : '';
 
   return (
     <Sheet open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
@@ -99,7 +102,7 @@ export default function TestRuleDrawer({
                 <div style={rowStyle}>
                   <strong>{t('命中条件配置', 'Matched condition')}</strong>
                   <span style={valueStyle}>
-                    {t('条件', 'Condition')} {matchedConditionIndex >= 0 ? matchedConditionIndex + 1 : '-'}（{testResult.matchedCondition.matchTarget}/{testResult.matchedCondition.matchMode}）
+                    {t('条件', 'Condition')} {matchedConditionIndex >= 0 ? matchedConditionIndex + 1 : '-'} · {matchedConditionSummary}
                   </span>
                 </div>
                 <div style={rowStyle}>
