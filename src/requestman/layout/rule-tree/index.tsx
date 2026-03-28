@@ -45,6 +45,9 @@ type Props = {
   onSelectRule: (ruleId: string) => void;
   onCreateGroup: () => void;
   onCreateRule: (type: RedirectRule['type']) => void;
+  onRenameGroup: (groupId: string) => void;
+  onDuplicateGroup: (groupId: string) => void;
+  onDeleteGroup: (groupId: string) => void;
   onRenameRule: (ruleId: string, name: string) => void;
   onMoveRuleToGroup: (ruleId: string, groupId: string) => void;
   onDuplicateRule: (ruleId: string) => void;
@@ -61,6 +64,9 @@ export default function RuleTree({
   onSelectRule,
   onCreateGroup,
   onCreateRule,
+  onRenameGroup,
+  onDuplicateGroup,
+  onDeleteGroup,
   onRenameRule,
   onMoveRuleToGroup,
   onDuplicateRule,
@@ -70,6 +76,16 @@ export default function RuleTree({
   onSaveActiveRule,
 }: Props) {
   const stopRuleSelection = (event: React.SyntheticEvent) => {
+    event.stopPropagation();
+  };
+
+  const stopGroupToggle = (event: React.SyntheticEvent) => {
+    event.stopPropagation();
+  };
+
+  const stopGroupMenuItemPropagation = (
+    event: Event | React.SyntheticEvent,
+  ) => {
     event.stopPropagation();
   };
 
@@ -99,6 +115,9 @@ export default function RuleTree({
               <SidebarMenu>
                 {groups.map((group) => {
                   const groupRules = rulesByGroup.get(group.id) ?? [];
+                  const enabledRuleCount = group.enabled
+                    ? groupRules.filter((rule) => rule.enabled).length
+                    : 0;
 
                   return (
                     <Collapsible
@@ -109,9 +128,71 @@ export default function RuleTree({
                       <SidebarMenuItem>
                         <CollapsibleTrigger asChild>
                           <AnimateIcon animateOnHover asChild>
-                            <SidebarMenuButton tooltip={group.name}>
+                            <SidebarMenuButton
+                              tooltip={group.name}
+                              className="rule-tree-sidebar__group-button"
+                            >
                               <Layers size={16} />
-                              <span>{group.name}</span>
+                              <span className="rule-tree-sidebar__group-label">{group.name}</span>
+                              <span className="rule-tree-sidebar__group-count">
+                                {t(
+                                  `( ${enabledRuleCount} / ${groupRules.length} )`,
+                                  `( ${enabledRuleCount} / ${groupRules.length} )`,
+                                )}
+                              </span>
+                              <span className="rule-tree-sidebar__group-spacer" />
+                              <DropdownMenu modal={false}>
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    type="button"
+                                    aria-label={t('规则组操作', 'Group actions')}
+                                    className="rule-tree-sidebar__group-action"
+                                    onClick={stopGroupToggle}
+                                    onMouseDown={stopGroupToggle}
+                                    onPointerDown={stopGroupToggle}
+                                    onKeyDown={stopGroupToggle}
+                                  >
+                                    <AnimateIcon animateOnHover asChild>
+                                      <span className="rule-tree-sidebar__group-action-icon">
+                                        <EllipsisVertical size={14} animation="pulse" />
+                                      </span>
+                                    </AnimateIcon>
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent
+                                  align="start"
+                                  side="right"
+                                  sideOffset={8}
+                                  onClick={stopGroupMenuItemPropagation}
+                                  onPointerDown={stopGroupMenuItemPropagation}
+                                >
+                                  <DropdownMenuItem
+                                    onSelect={(event) => {
+                                      stopGroupMenuItemPropagation(event);
+                                      onRenameGroup(group.id);
+                                    }}
+                                  >
+                                    <span>{t('重命名', 'Rename')}</span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onSelect={(event) => {
+                                      stopGroupMenuItemPropagation(event);
+                                      onDuplicateGroup(group.id);
+                                    }}
+                                  >
+                                    <span>{t('复制', 'Duplicate')}</span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    variant="destructive"
+                                    onSelect={(event) => {
+                                      stopGroupMenuItemPropagation(event);
+                                      onDeleteGroup(group.id);
+                                    }}
+                                  >
+                                    <span>{t('删除', 'Delete')}</span>
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                               <ChevronRight className="ml-auto transition-transform duration-300 group-data-[state=open]/collapsible:rotate-90" />
                             </SidebarMenuButton>
                           </AnimateIcon>
@@ -125,7 +206,7 @@ export default function RuleTree({
                                     <SidebarMenuSubButton
                                       asChild
                                       isActive={activeRuleId === rule.id}
-                                      className="rule-tree-sidebar__rule-sub-button"
+                                      className={`rule-tree-sidebar__rule-sub-button${!group.enabled || !rule.enabled ? ' rule-tree-sidebar__rule-sub-button--disabled' : ''}`}
                                     >
                                       <button
                                         type="button"

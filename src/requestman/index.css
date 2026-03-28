@@ -181,6 +181,77 @@ html.dark .theme-toggle-icons .theme-icon-moon {
   overflow: hidden;
 }
 
+.rule-tree-sidebar__group-button {
+  gap: 8px;
+}
+
+.rule-tree-sidebar__group-label {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-tree-sidebar__group-count {
+  flex-shrink: 0;
+  color: var(--rm-text-tertiary);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.rule-tree-sidebar__group-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+.rule-tree-sidebar__group-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--rm-text-secondary);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(4px) scale(0.96);
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.rule-tree-sidebar__group-action:hover {
+  background: color-mix(in oklab, var(--rm-accent-primary) 10%, transparent);
+  color: var(--rm-text-primary);
+}
+
+.rule-tree-sidebar__group-action:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+  outline: 2px solid color-mix(in oklab, var(--rm-accent-primary) 24%, transparent);
+  outline-offset: 2px;
+}
+
+.rule-tree-sidebar__group-button:hover .rule-tree-sidebar__group-action,
+.rule-tree-sidebar__group-action[data-state='open'] {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+.rule-tree-sidebar__group-action-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .rule-tree-sidebar__footer-actions {
   display: flex;
   gap: 8px;
@@ -211,6 +282,11 @@ html.dark .theme-toggle-icons .theme-icon-moon {
   box-shadow:
     inset 0 0 0 1px color-mix(in oklab, var(--rm-accent-primary) 24%, var(--rm-border)),
     inset 0 0 0 999px color-mix(in oklab, var(--rm-accent-primary) 10%, transparent);
+}
+
+.rule-tree-sidebar__rule-sub-button--disabled .rule-tree-sidebar__rule-icon,
+.rule-tree-sidebar__rule-sub-button--disabled .rule-tree-sidebar__rule-label {
+  opacity: 0.42;
 }
 
 .rule-tree-sidebar__rule-button {
@@ -279,7 +355,6 @@ html.dark .theme-toggle-icons .theme-icon-moon {
 }
 
 .rule-tree-sidebar__rule-item:hover .rule-tree-sidebar__rule-action,
-.rule-tree-sidebar__rule-item:focus-within .rule-tree-sidebar__rule-action,
 .rule-tree-sidebar__rule-action[data-state='open'] {
   opacity: 1;
   pointer-events: auto;

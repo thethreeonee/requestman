@@ -371,7 +371,19 @@ export default function RequestmanPanel() {
       return next;
     });
     setRules((prev) => {
-      const selected = prev.filter((r) => r.groupId === groupId).map((r) => ({ ...r, id: genId(), groupId: newGroupId, name: `${r.name} ${t('副本', 'Copy')}` }));
+      const selected = prev.filter((r) => r.groupId === groupId).map((r) => ({
+        ...r,
+        id: genId(),
+        groupId: newGroupId,
+        name: `${r.name} ${t('副本', 'Copy')}`,
+        conditions: r.conditions.map((condition) => ({
+          ...condition,
+          id: genId(),
+          queryParamModifications: condition.queryParamModifications.map((item) => ({ ...item, id: genId() })),
+          requestHeaderModifications: condition.requestHeaderModifications.map((item) => ({ ...item, id: genId() })),
+          responseHeaderModifications: condition.responseHeaderModifications.map((item) => ({ ...item, id: genId() })),
+        })),
+      }));
       return [...prev, ...selected];
     });
     notification.success(t(`规则组「${group.name}」已复制`, `Group "${group.name}" duplicated.`));
@@ -503,6 +515,14 @@ export default function RequestmanPanel() {
           setGroupModal({ open: true, mode: 'create' });
         }}
         onCreateRule={createRule}
+        onRenameGroup={(groupId) => {
+          const group = groups.find((item) => item.id === groupId);
+          if (!group) return;
+          setGroupInput(group.name);
+          setGroupModal({ open: true, mode: 'rename', groupId });
+        }}
+        onDuplicateGroup={duplicateGroup}
+        onDeleteGroup={deleteGroup}
         onRenameRule={renameRule}
         onMoveRuleToGroup={moveRuleToGroupById}
         onDuplicateRule={duplicateDetailRule}
@@ -588,8 +608,14 @@ export default function RequestmanPanel() {
               if (!deleteGroupId) return;
               const deletedGroup = groups.find((g) => g.id === deleteGroupId);
               const deletedRuleCount = rules.filter((r) => r.groupId === deleteGroupId).length;
+              const deletingActiveRule = page.type === 'detail' && workingRule?.groupId === deleteGroupId;
               setGroups((prev) => prev.filter((g) => g.id !== deleteGroupId));
               setRules((prev) => prev.filter((r) => r.groupId !== deleteGroupId));
+              if (deletingActiveRule) {
+                setWorkingRule(null);
+                setOriginalRule(null);
+                setPage({ type: 'list' });
+              }
               notification.success(t(`规则组「${deletedGroup?.name ?? ''}」已删除（含 ${deletedRuleCount} 条规则）`, `Group "${deletedGroup?.name ?? ''}" deleted (${deletedRuleCount} rules).`));
               setDeleteGroupId(null);
             }}
