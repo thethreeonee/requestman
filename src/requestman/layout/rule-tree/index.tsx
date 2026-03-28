@@ -309,7 +309,7 @@ export default function RuleTree({
                   onClick={onCreateGroup}
                 >
                   <Layers size={16} />
-                  <span>新建规则组</span>
+                  <span>{t('新建规则组', 'New group')}</span>
                 </Button>
               </AnimateIcon>
               <DropdownMenu>
@@ -322,7 +322,7 @@ export default function RuleTree({
                         className="rule-tree-sidebar__footer-button rule-tree-sidebar__footer-button--rule"
                       >
                         <Plus size={16} />
-                        <span>新建规则</span>
+                        <span>{t('新建规则', 'New rule')}</span>
                       </Button>
                     </AnimateIcon>
                   </span>

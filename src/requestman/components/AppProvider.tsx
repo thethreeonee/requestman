@@ -1,5 +1,6 @@
 import React from 'react';
 import { toast } from 'sonner';
+import { t } from '../i18n';
 
 type NotificationPayload = string | { content: string; duration?: number; title?: string };
 
@@ -10,9 +11,9 @@ export type NotificationApi = {
 };
 
 const DEFAULT_TITLES: Record<'success' | 'warning' | 'error', string> = {
-  success: 'Success',
-  warning: 'Warning',
-  error: 'Error',
+  success: t('成功', 'Success'),
+  warning: t('警告', 'Warning'),
+  error: t('错误', 'Error'),
 };
 
 function normalize(type: 'success' | 'warning' | 'error', payload: NotificationPayload) {

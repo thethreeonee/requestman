@@ -1,4 +1,75 @@
 (() => {
+  const HANT_LANGUAGE_PATTERNS = ['zh-hant', 'zh-tw', 'zh-hk', 'zh-mo'];
+  const HANT_PHRASE_MAP = {
+    关闭: '關閉',
+    当前页面没有命中规则: '當前頁面沒有命中規則',
+    以下规则已在当前页生效: '以下規則已在當前頁生效',
+    打开配置: '打開配置',
+    重定向请求: '重定向請求',
+    重写字符串: '重寫字串',
+    Query参数: 'Query 參數',
+    改写请求体: '改寫請求體',
+    改写响应体: '改寫回應體',
+    修改Headers: '修改 Headers',
+    取消请求: '取消請求',
+    网络请求延迟: '網路請求延遲',
+  };
+  const HANT_CHAR_MAP = {
+    关: '關',
+    写: '寫',
+    则: '則',
+    动: '動',
+    参: '參',
+    响: '響',
+    导: '導',
+    当: '當',
+    应: '應',
+    当前: '當前',
+    数: '數',
+    规: '規',
+    览: '覽',
+    请: '請',
+    设: '設',
+    语: '語',
+    请求: '請求',
+    页: '頁',
+    迟: '遲',
+    过: '過',
+    闭: '閉',
+    页: '頁',
+  };
+
+  function getLocale() {
+    const primaryLanguage = typeof navigator.language === 'string' && navigator.language.trim()
+      ? navigator.language.toLowerCase()
+      : (
+        Array.isArray(navigator.languages) && navigator.languages.length > 0 && typeof navigator.languages[0] === 'string'
+          ? navigator.languages[0].toLowerCase()
+          : 'en'
+      );
+    if (HANT_LANGUAGE_PATTERNS.some((pattern) => primaryLanguage.startsWith(pattern))) {
+      return 'zh-Hant';
+    }
+    if (primaryLanguage.startsWith('zh')) {
+      return 'zh-Hans';
+    }
+    return 'en';
+  }
+
+  function toTraditionalChinese(input) {
+    let output = String(input);
+    for (const [source, target] of Object.entries(HANT_PHRASE_MAP)) {
+      output = output.split(source).join(target);
+    }
+    return Array.from(output, (char) => HANT_CHAR_MAP[char] || char).join('');
+  }
+
+  const locale = getLocale();
+  const t = (zhHans, en) => {
+    if (locale === 'en') return en;
+    return locale === 'zh-Hant' ? toTraditionalChinese(zhHans) : zhHans;
+  };
+
   const MESSAGE_TYPE = '__REQUESTMAN_RUNTIME_RULES__';
   const HIT_MESSAGE_TYPE = '__REQUESTMAN_RULE_HIT__';
   const RULES_KEY = 'asap_redirect_rules_v1';
@@ -192,14 +263,14 @@
     close.style.display = 'inline-flex';
     close.style.alignItems = 'center';
     close.style.justifyContent = 'center';
-    close.setAttribute('aria-label', '关闭');
+    close.setAttribute('aria-label', t('关闭', 'Close'));
     close.addEventListener('click', () => hideHitToast());
 
     header.appendChild(headerLeft);
     header.appendChild(close);
 
     const hint = document.createElement('div');
-    hint.textContent = '以下规则已在当前页生效';
+    hint.textContent = t('以下规则已在当前页生效', 'The following rules are active on this page');
     hint.style.fontSize = '12px';
     hint.style.lineHeight = '16px';
     hint.style.marginTop = '16px';
@@ -268,6 +339,7 @@
   function renderHitRecord(record) {
     const { container, list } = ensureHitToast();
     const ruleType = typeof record.ruleType === 'string' && record.ruleType ? record.ruleType : 'redirect_request';
+    const ruleTypeLabel = toRuleTypeLabel(ruleType);
     const ruleName = typeof record.ruleName === 'string' ? record.ruleName.trim() : '';
     if (!ruleName) return;
     const ruleId = typeof record.ruleId === 'string' ? record.ruleId.trim() : '';
@@ -291,12 +363,25 @@
     item.style.alignItems = 'center';
     item.style.gap = '8px';
     const icon = createRuleTypeIcon(ruleType);
+    const content = document.createElement('div');
+    content.style.minWidth = '0';
+    content.style.display = 'flex';
+    content.style.flexDirection = 'column';
+    content.style.gap = '2px';
     const nameNode = document.createElement('span');
     nameNode.style.fontSize = '14px';
     nameNode.style.lineHeight = '16px';
+    nameNode.style.fontWeight = '500';
     nameNode.textContent = ruleName;
+    const typeNode = document.createElement('span');
+    typeNode.style.fontSize = '12px';
+    typeNode.style.lineHeight = '14px';
+    typeNode.style.opacity = '0.75';
+    typeNode.textContent = ruleTypeLabel;
+    content.appendChild(nameNode);
+    content.appendChild(typeNode);
     item.appendChild(icon);
-    item.appendChild(nameNode);
+    item.appendChild(content);
     list.appendChild(item);
     showHitToast(container);
 
@@ -313,19 +398,19 @@
   }
 
   const RULE_TYPE_LABEL_MAP = {
-    redirect_request: 'Redirect Request',
-    rewrite_string: 'Rewrite String',
-    query_params: 'Query Params',
-    modify_request_body: 'Modify Request Body',
-    modify_response_body: 'Modify Response Body',
-    modify_headers: 'Modify Headers',
-    user_agent: 'User Agent',
-    cancel_request: 'Cancel Request',
-    request_delay: 'Request Delay',
+    redirect_request: t('重定向请求', 'Redirect Request'),
+    rewrite_string: t('重写字符串', 'Rewrite String'),
+    query_params: t('Query参数', 'Query Params'),
+    modify_request_body: t('改写请求体', 'Modify Request Body'),
+    modify_response_body: t('改写响应体', 'Modify Response Body'),
+    modify_headers: t('修改Headers', 'Modify Headers'),
+    user_agent: t('User-Agent', 'User Agent'),
+    cancel_request: t('取消请求', 'Cancel Request'),
+    request_delay: t('网络请求延迟', 'Request Delay'),
   };
 
   function toRuleTypeLabel(ruleType) {
-    if (typeof ruleType !== 'string') return 'Redirect Request';
+    if (typeof ruleType !== 'string') return t('重定向请求', 'Redirect Request');
     return RULE_TYPE_LABEL_MAP[ruleType] || ruleType;
   }
 

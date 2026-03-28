@@ -224,7 +224,7 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
                 <AutoComplete
                   options={COMMON_HEADER_OPTIONS}
                   value={entry.key}
-                  placeholder="Header"
+                  placeholder={t('Header', 'Header')}
                   style={{ width: '30%' }}
                   onChange={(value) => updateHeaderFilter(idx, { key: value })}
                 />
@@ -275,7 +275,7 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>{t('取消', 'Cancel')}</Button>
-          <Button variant="default" onClick={onClose}>OK</Button>
+          <Button variant="default" onClick={onClose}>{t('确定', 'OK')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

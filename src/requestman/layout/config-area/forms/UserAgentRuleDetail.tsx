@@ -162,10 +162,10 @@ export default function UserAgentRuleDetail({
           </div>
           <span style={{ fontSize: 12, opacity: 0.7 }}>
             {(c.userAgentType ?? 'device') === 'custom'
-              ? (c.userAgentCustomValue?.trim() ? `将设置为：${c.userAgentCustomValue.trim()}` : t('请输入自定义 User-Agent', 'Enter custom User-Agent'))
+              ? (c.userAgentCustomValue?.trim() ? `${t('将设置为：', 'Will set to: ')}${c.userAgentCustomValue.trim()}` : t('请输入自定义 User-Agent', 'Enter custom User-Agent'))
               : (() => {
                 const value = getUserAgentByPresetKey(c.userAgentPresetKey ?? '');
-                return value ? `将设置为：${value}` : t('请选择 User-Agent', 'Select User-Agent');
+                return value ? `${t('将设置为：', 'Will set to: ')}${value}` : t('请选择 User-Agent', 'Select User-Agent');
               })()}
           </span>
         </>

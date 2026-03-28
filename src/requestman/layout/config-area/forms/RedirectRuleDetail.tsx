@@ -196,7 +196,7 @@ export default function RedirectRuleDetail({
                 onChange={(e) => onFilePicked(c, e)}
               />
             </>
-            : <Input value={getRedirectTarget(c)} onChange={(e) => updateRedirectTarget(c, e.target.value)} placeholder="重定向目标 URL" />}
+            : <Input value={getRedirectTarget(c)} onChange={(e) => updateRedirectTarget(c, e.target.value)} placeholder={t('重定向目标 URL', 'Redirect target URL')} />}
         </>
       )}
     />

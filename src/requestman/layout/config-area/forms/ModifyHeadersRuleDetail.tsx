@@ -189,7 +189,7 @@ export default function ModifyHeadersRuleDetail({
             options={HEADER_OPTIONS}
             filterOption={false}
             value={modification.key}
-            placeholder="Header"
+            placeholder={t('Header', 'Header')}
             title={modification.key || undefined}
             inputStyle={{
               textOverflow: 'ellipsis',

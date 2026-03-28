@@ -12,6 +12,7 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from '@/components/ui/input-group';
+import { t } from '../i18n';
 
 export function AutoComplete({
   options = [],
@@ -67,7 +68,7 @@ export function AutoComplete({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                aria-label="Select header"
+                aria-label={t('选择 Header', 'Select header')}
                 disabled={disabled}
                 data-slot="input-group-control"
                 className="inline-flex size-6 items-center justify-center rounded-[calc(var(--radius)-3px)] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
@@ -105,7 +106,7 @@ export function AutoComplete({
                   <DropdownMenuItem
                     disabled
                   >
-                    No matching headers
+                    {t('没有匹配的 Header', 'No matching headers')}
                   </DropdownMenuItem>
                 )}
               </div>

@@ -1,19 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Settings } from 'lucide-react';
+import { t } from '../requestman/i18n';
+import { RULE_TYPE_LABEL_MAP } from '../requestman/constants';
 
 type HitEntry = { ruleName: string; ruleType: string; url: string; ts: number };
-
-const RULE_TYPE_LABELS: Record<string, string> = {
-  redirect_request: 'Redirect',
-  rewrite_string: 'Rewrite',
-  query_params: 'Query Params',
-  modify_request_body: 'Request Body',
-  modify_response_body: 'Response Body',
-  modify_headers: 'Headers',
-  user_agent: 'User Agent',
-  cancel_request: 'Cancel',
-  request_delay: 'Delay',
-};
 
 function RuleTypeIcon({ ruleType }: { ruleType: string }) {
   const common = { width: 14, height: 14, fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
@@ -49,20 +39,20 @@ function EmptyState() {
         <circle cx="6" cy="19" r="3" />
         <circle cx="18" cy="5" r="3" />
       </svg>
-      <span className="text-xs">当前页面没有命中规则</span>
+      <span className="text-xs">{t('当前页面没有命中规则', 'No rules matched on this page')}</span>
     </div>
   );
 }
 
 function HitItem({ hit }: { hit: HitEntry }) {
-  const label = RULE_TYPE_LABELS[hit.ruleType] ?? hit.ruleType;
+  const label = RULE_TYPE_LABEL_MAP[hit.ruleType as keyof typeof RULE_TYPE_LABEL_MAP] ?? hit.ruleType;
   return (
     <li className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-accent/50 text-sm">
       <span className="flex-shrink-0 text-muted-foreground">
         <RuleTypeIcon ruleType={hit.ruleType} />
       </span>
       <div className="flex-1 min-w-0">
-        <div className="font-medium text-foreground truncate leading-tight">{hit.ruleName || '(unnamed)'}</div>
+        <div className="font-medium text-foreground truncate leading-tight">{hit.ruleName || t('（未命名）', '(unnamed)')}</div>
         <div className="text-[11px] text-muted-foreground mt-0.5">{label}</div>
       </div>
     </li>
@@ -121,7 +111,7 @@ export default function PopupApp() {
         <button
           onClick={openPanel}
           className="flex items-center justify-center w-7 h-7 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-          title="打开配置"
+          title={t('打开配置', 'Open settings')}
         >
           <Settings size={15} />
         </button>

@@ -552,7 +552,7 @@ export default function RequestmanPanel() {
         <DialogHeader>
           <DialogTitle>
             {groupModal.mode === 'create'
-              ? t('新建规则组', 'Create group')
+              ? t('新建规则组', 'New group')
               : groupModal.mode === 'rename'
                 ? t('重命名规则组', 'Rename group')
                 : t('移动到规则组', 'Move to group')}

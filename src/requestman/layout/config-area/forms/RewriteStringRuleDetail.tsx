@@ -100,7 +100,7 @@ export default function RewriteStringRuleDetail({
             <InputGroupInput
               value={c.rewriteFrom}
               onChange={(e) => updateCondition(c.id, { rewriteFrom: e.target.value })}
-              placeholder="from"
+              placeholder={t('原文本', 'From')}
             />
           </InputGroup>
           <InputGroup style={{ flex: 1, minWidth: 0 }}>
@@ -116,7 +116,7 @@ export default function RewriteStringRuleDetail({
             <InputGroupInput
               value={c.rewriteTo}
               onChange={(e) => updateCondition(c.id, { rewriteTo: e.target.value })}
-              placeholder="to"
+              placeholder={t('新文本', 'To')}
             />
           </InputGroup>
         </div>
