@@ -75,7 +75,8 @@
   const RULES_KEY = 'asap_redirect_rules_v1';
   const GROUPS_KEY = 'asap_redirect_groups_v1';
   const ENABLED_KEY = 'asap_redirect_enabled_v1';
-  const TOAST_VISIBLE_MS = 2000;
+  const HIT_TOAST_ENABLED_KEY = 'asap_redirect_hit_toast_enabled_v1';
+  const TOAST_VISIBLE_MS = 1200;
   const TOAST_ENTER_MS = 180;
   const TOAST_EXIT_MS = 160;
   const RULE_TYPE_ICON_DEFS = {
@@ -162,6 +163,7 @@
   let hitListNode = null;
   let hideToastTimer = null;
   let hideAnimationTimer = null;
+  let hitToastEnabled = true;
   const renderedRuleKeys = new Set();
 
   function createRuleTypeIcon(ruleType) {
@@ -194,9 +196,11 @@
     const container = document.createElement('div');
     container.id = '__requestman-hit-toast';
     container.style.position = 'fixed';
-    container.style.top = '20px';
-    container.style.left = '50%';
-    container.style.transform = 'translateX(-50%)';
+    container.style.top = 'auto';
+    container.style.left = 'auto';
+    container.style.right = '20px';
+    container.style.bottom = '20px';
+    container.style.transform = 'translateY(0)';
     container.style.zIndex = '2147483647';
     container.style.minWidth = '375px';
     container.style.maxWidth = '560px';
@@ -304,16 +308,16 @@
     if (container.style.display !== 'block') {
       container.style.display = 'block';
       container.style.opacity = '0';
-      container.style.transform = 'translateX(-50%) translateY(-8px)';
+      container.style.transform = 'translateY(8px)';
       requestAnimationFrame(() => {
         container.style.opacity = '1';
-        container.style.transform = 'translateX(-50%) translateY(0)';
+        container.style.transform = 'translateY(0)';
       });
       return;
     }
 
     container.style.opacity = '1';
-    container.style.transform = 'translateX(-50%) translateY(0)';
+    container.style.transform = 'translateY(0)';
   }
 
   function hideHitToast() {
@@ -324,7 +328,7 @@
     if (!hitToast) return;
 
     hitToast.style.opacity = '0';
-    hitToast.style.transform = 'translateX(-50%) translateY(-8px)';
+    hitToast.style.transform = 'translateY(8px)';
 
     if (hideAnimationTimer) clearTimeout(hideAnimationTimer);
     hideAnimationTimer = setTimeout(() => {
@@ -337,6 +341,7 @@
   }
 
   function renderHitRecord(record) {
+    if (!hitToastEnabled) return;
     const { container, list } = ensureHitToast();
     const ruleType = typeof record.ruleType === 'string' && record.ruleType ? record.ruleType : 'redirect_request';
     const ruleTypeLabel = toRuleTypeLabel(ruleType);
@@ -569,8 +574,24 @@
     });
   }
 
+  function updateHitToastEnabled(value) {
+    hitToastEnabled = value !== false;
+    if (!hitToastEnabled) {
+      hideHitToast();
+    }
+  }
+
+  function hydrateHitToastEnabled() {
+    chrome.storage.local.get([HIT_TOAST_ENABLED_KEY], (payload) => {
+      updateHitToastEnabled(payload?.[HIT_TOAST_ENABLED_KEY]);
+    });
+  }
+
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return;
+    if (HIT_TOAST_ENABLED_KEY in changes) {
+      updateHitToastEnabled(changes[HIT_TOAST_ENABLED_KEY]?.newValue);
+    }
     if (!(RULES_KEY in changes) && !(GROUPS_KEY in changes) && !(ENABLED_KEY in changes)) return;
     broadcastRules();
   });
@@ -600,6 +621,7 @@
   });
 
   broadcastRules();
+  hydrateHitToastEnabled();
   ensureHitToast();
   notifyContentReady();
   window.addEventListener('pageshow', () => {

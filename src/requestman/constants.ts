@@ -3,6 +3,7 @@ export { RULE_TYPE_LABEL_MAP } from './rule-type-meta';
 export const REDIRECT_RULES_KEY = 'asap_redirect_rules_v1';
 export const REDIRECT_ENABLED_KEY = 'asap_redirect_enabled_v1';
 export const REDIRECT_GROUPS_KEY = 'asap_redirect_groups_v1';
+export const HIT_TOAST_ENABLED_KEY = 'asap_redirect_hit_toast_enabled_v1';
 
 export const DEFAULT_GROUP_ID = '__default__';
 export const DEFAULT_GROUP_NAME = t('默认分组', 'Default group');

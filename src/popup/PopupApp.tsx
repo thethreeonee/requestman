@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Settings } from 'lucide-react';
 import { t } from '../requestman/i18n';
-import { RULE_TYPE_LABEL_MAP } from '../requestman/constants';
+import { HIT_TOAST_ENABLED_KEY, RULE_TYPE_LABEL_MAP } from '../requestman/constants';
+import { Switch } from '@/components/animate-ui/components/radix/switch';
 
 type HitEntry = { ruleName: string; ruleType: string; url: string; ts: number };
 
@@ -72,11 +73,17 @@ function dedupeHits(hits: HitEntry[]): HitEntry[] {
 export default function PopupApp() {
   const [hits, setHits] = useState<HitEntry[]>([]);
   const [tabId, setTabId] = useState<number | null>(null);
+  const [hitToastEnabled, setHitToastEnabled] = useState(true);
 
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const id = tabs[0]?.id;
       if (id != null) setTabId(id);
+    });
+
+    chrome.storage.local.get([HIT_TOAST_ENABLED_KEY], (res) => {
+      if (chrome.runtime.lastError) return;
+      setHitToastEnabled(res?.[HIT_TOAST_ENABLED_KEY] !== false);
     });
   }, []);
 
@@ -98,7 +105,17 @@ export default function PopupApp() {
     window.close();
   }
 
+  function onHitToastEnabledChange(checked: boolean) {
+    setHitToastEnabled(checked);
+    chrome.storage.local.set({ [HIT_TOAST_ENABLED_KEY]: checked }, () => {
+      void chrome.runtime.lastError;
+    });
+  }
+
   const displayedHits = dedupeHits(hits);
+  const listHint = displayedHits.length > 0
+    ? t(`当前页面命中规则（${displayedHits.length}）`, `Matched rules on this page (${displayedHits.length})`)
+    : t('当前页面命中规则', 'Matched rules on this page');
 
   return (
     <div className="w-[360px] flex flex-col bg-background text-foreground">
@@ -108,17 +125,32 @@ export default function PopupApp() {
           <img src="/assets/icon-source.png" alt="Requestman" className="w-5 h-5" />
           <span className="text-[11px] font-bold tracking-widest select-none">REQUESTMAN</span>
         </div>
-        <button
-          onClick={openPanel}
-          className="flex items-center justify-center w-7 h-7 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-          title={t('打开配置', 'Open settings')}
-        >
-          <Settings size={15} />
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground select-none">
+            <span>{t('页面浮层', 'On-page Toast')}</span>
+            <Switch
+              checked={hitToastEnabled}
+              onCheckedChange={onHitToastEnabledChange}
+              className="scale-[0.82] origin-center"
+              title={t('页面命中浮层开关', 'Page hit toast toggle')}
+              aria-label={t('页面命中浮层开关', 'Page hit toast toggle')}
+            />
+          </div>
+          <button
+            onClick={openPanel}
+            className="flex items-center justify-center w-7 h-7 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            title={t('打开配置', 'Open settings')}
+          >
+            <Settings size={15} />
+          </button>
+        </div>
       </div>
 
       {/* Content */}
       <div className="overflow-y-auto max-h-[400px]">
+        <div className="px-3 pt-2.5 pb-1 text-[11px] text-muted-foreground">
+          {listHint}
+        </div>
         {displayedHits.length === 0 ? (
           <EmptyState />
         ) : (
