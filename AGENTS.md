@@ -81,6 +81,7 @@ Release packaging may also create versioned zip files such as:
 - When adding a new rule type, expect updates across UI components, shared types/constants, and background application logic.
 - Keep package version and manifest versions in sync for releases.
 - After modifying any source code, run `npm run build:chrome` to verify the build succeeds before considering the change complete.
+- Treat style-only changes, CSS changes, and other seemingly non-functional UI edits as code changes: after any repository edit, run `npm run build:chrome` before considering the change complete.
 - Validate with `npm run build` before finalizing release-related changes.
 
 ## Release Process

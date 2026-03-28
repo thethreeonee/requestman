@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { AnimateIcon } from '@/components/animate-ui/icons/icon';
 import { EllipsisVertical } from '@/components/animate-ui/icons/ellipsis-vertical';
 import { Plus } from '@/components/animate-ui/icons/plus';
+import { Switch } from '@/components/animate-ui/components/radix/switch';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,8 +47,10 @@ type Props = {
   onCreateGroup: () => void;
   onCreateRule: (type: RedirectRule['type']) => void;
   onRenameGroup: (groupId: string) => void;
+  onToggleGroupEnabled: (groupId: string, enabled: boolean) => void;
   onDuplicateGroup: (groupId: string) => void;
   onDeleteGroup: (groupId: string) => void;
+  onToggleRuleEnabled: (ruleId: string, enabled: boolean) => void;
   onRenameRule: (ruleId: string, name: string) => void;
   onMoveRuleToGroup: (ruleId: string, groupId: string) => void;
   onDuplicateRule: (ruleId: string) => void;
@@ -65,8 +68,10 @@ export default function RuleTree({
   onCreateGroup,
   onCreateRule,
   onRenameGroup,
+  onToggleGroupEnabled,
   onDuplicateGroup,
   onDeleteGroup,
+  onToggleRuleEnabled,
   onRenameRule,
   onMoveRuleToGroup,
   onDuplicateRule,
@@ -141,6 +146,16 @@ export default function RuleTree({
                                 )}
                               </span>
                               <span className="rule-tree-sidebar__group-spacer" />
+                              <Switch
+                                checked={group.enabled}
+                                onCheckedChange={(enabled) => onToggleGroupEnabled(group.id, enabled)}
+                                aria-label={group.enabled ? t('禁用规则组', 'Disable group') : t('启用规则组', 'Enable group')}
+                                className="rule-tree-sidebar__group-switch"
+                                onClick={stopGroupToggle}
+                                onMouseDown={stopGroupToggle}
+                                onPointerDown={stopGroupToggle}
+                                onKeyDown={stopGroupToggle}
+                              />
                               <DropdownMenu modal={false}>
                                 <DropdownMenuTrigger asChild>
                                   <button
@@ -220,6 +235,16 @@ export default function RuleTree({
                                       </button>
                                     </SidebarMenuSubButton>
                                   </AnimateIcon>
+                                  <Switch
+                                    checked={rule.enabled}
+                                    onCheckedChange={(enabled) => onToggleRuleEnabled(rule.id, enabled)}
+                                    aria-label={rule.enabled ? t('禁用规则', 'Disable rule') : t('启用规则', 'Enable rule')}
+                                    className="rule-tree-sidebar__rule-switch"
+                                    onClick={stopRuleSelection}
+                                    onMouseDown={stopRuleSelection}
+                                    onPointerDown={stopRuleSelection}
+                                    onKeyDown={stopRuleSelection}
+                                  />
                                   <RuleActionsMenu
                                     rule={rule}
                                     groups={groups}

@@ -262,6 +262,15 @@ export default function RequestmanPanel() {
     notification.warning({ content: t('规则已停用', 'Rule disabled'), duration: 0.8 });
   };
 
+  const toggleGroupEnabled = (groupId: string, enabled: boolean) => {
+    setGroups((prev) => prev.map((group) => (group.id === groupId ? { ...group, enabled } : group)));
+    if (enabled) {
+      notification.success({ content: t('规则组已启用', 'Group enabled'), duration: 0.8 });
+      return;
+    }
+    notification.warning({ content: t('规则组已停用', 'Group disabled'), duration: 0.8 });
+  };
+
   const duplicateDetailRule = (ruleId: string) => {
     const sourceRule = workingRule?.id === ruleId ? workingRule : rules.find((rule) => rule.id === ruleId);
     if (!sourceRule) return;
@@ -521,8 +530,10 @@ export default function RequestmanPanel() {
           setGroupInput(group.name);
           setGroupModal({ open: true, mode: 'rename', groupId });
         }}
+        onToggleGroupEnabled={toggleGroupEnabled}
         onDuplicateGroup={duplicateGroup}
         onDeleteGroup={deleteGroup}
+        onToggleRuleEnabled={toggleDetailRuleEnabled}
         onRenameRule={renameRule}
         onMoveRuleToGroup={moveRuleToGroupById}
         onDuplicateRule={duplicateDetailRule}

@@ -216,14 +216,40 @@ html.dark .theme-toggle-icons .theme-icon-moon {
   border-radius: 8px;
   background: transparent;
   color: var(--rm-text-secondary);
+  visibility: hidden;
   opacity: 0;
+  filter: blur(2px);
   pointer-events: none;
-  transform: translateX(4px) scale(0.96);
+  transform: translateX(6px) scale(0.88);
   transition:
+    visibility 0s linear 0.18s,
     opacity 0.18s ease,
+    filter 0.18s ease,
     transform 0.18s ease,
     background-color 0.18s ease,
     color 0.18s ease;
+}
+
+.rule-tree-sidebar__group-switch {
+  flex-shrink: 0;
+  width: 24px;
+  height: 16px;
+  padding-inline: 1px;
+  visibility: hidden;
+  opacity: 0;
+  filter: blur(2px);
+  pointer-events: none;
+  transform: translateX(6px) scale(0.88);
+  transition:
+    visibility 0s linear 0.18s,
+    opacity 0.18s ease,
+    filter 0.18s ease,
+    transform 0.18s ease;
+}
+
+.rule-tree-sidebar__group-switch [data-slot='switch-thumb'] {
+  width: 12px;
+  height: 12px;
 }
 
 .rule-tree-sidebar__group-action:hover {
@@ -231,19 +257,35 @@ html.dark .theme-toggle-icons .theme-icon-moon {
   color: var(--rm-text-primary);
 }
 
+.rule-tree-sidebar__group-switch:focus-visible,
 .rule-tree-sidebar__group-action:focus-visible {
+  visibility: visible;
   opacity: 1;
+  filter: none;
   pointer-events: auto;
   transform: none;
+  transition-delay: 0s;
   outline: 2px solid color-mix(in oklab, var(--rm-accent-primary) 24%, transparent);
   outline-offset: 2px;
 }
 
-.rule-tree-sidebar__group-button:hover .rule-tree-sidebar__group-action,
-.rule-tree-sidebar__group-action[data-state='open'] {
+.rule-tree-sidebar__group-button:hover .rule-tree-sidebar__group-switch,
+.rule-tree-sidebar__group-button:hover .rule-tree-sidebar__group-action {
+  visibility: visible;
   opacity: 1;
+  filter: none;
   pointer-events: auto;
   transform: none;
+  transition-delay: 30ms;
+}
+
+.rule-tree-sidebar__group-action[data-state='open'] {
+  visibility: visible;
+  opacity: 1;
+  filter: none;
+  pointer-events: auto;
+  transform: none;
+  transition-delay: 0s;
 }
 
 .rule-tree-sidebar__group-action-icon {
@@ -296,7 +338,7 @@ html.dark .theme-toggle-icons .theme-icon-moon {
   width: 100%;
   border: 0;
   background: transparent;
-  padding: 0 28px 0 8px;
+  padding: 0 56px 0 8px;
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -331,14 +373,43 @@ html.dark .theme-toggle-icons .theme-icon-moon {
   border-radius: 8px;
   background: transparent;
   color: var(--rm-text-secondary);
+  visibility: hidden;
   opacity: 0;
+  filter: blur(2px);
   pointer-events: none;
-  transform: translateY(-50%) translateX(4px) scale(0.96);
+  transform: translateY(-50%) translateX(6px) scale(0.88);
   transition:
+    visibility 0s linear 0.18s,
     opacity 0.18s ease,
+    filter 0.18s ease,
     transform 0.18s ease,
     background-color 0.18s ease,
     color 0.18s ease;
+}
+
+.rule-tree-sidebar__rule-switch {
+  position: absolute;
+  top: 50%;
+  right: 32px;
+  z-index: 3;
+  width: 24px;
+  height: 16px;
+  padding-inline: 1px;
+  visibility: hidden;
+  opacity: 0;
+  filter: blur(2px);
+  pointer-events: none;
+  transform: translateY(-50%) translateX(6px) scale(0.88);
+  transition:
+    visibility 0s linear 0.18s,
+    opacity 0.18s ease,
+    filter 0.18s ease,
+    transform 0.18s ease;
+}
+
+.rule-tree-sidebar__rule-switch [data-slot='switch-thumb'] {
+  width: 12px;
+  height: 12px;
 }
 
 .rule-tree-sidebar__rule-action:hover {
@@ -346,19 +417,35 @@ html.dark .theme-toggle-icons .theme-icon-moon {
   color: var(--rm-text-primary);
 }
 
+.rule-tree-sidebar__rule-switch:focus-visible,
 .rule-tree-sidebar__rule-action:focus-visible {
+  visibility: visible;
   opacity: 1;
+  filter: none;
   pointer-events: auto;
   transform: translateY(-50%);
+  transition-delay: 0s;
   outline: 2px solid color-mix(in oklab, var(--rm-accent-primary) 24%, transparent);
   outline-offset: 2px;
 }
 
-.rule-tree-sidebar__rule-item:hover .rule-tree-sidebar__rule-action,
-.rule-tree-sidebar__rule-action[data-state='open'] {
+.rule-tree-sidebar__rule-item:hover .rule-tree-sidebar__rule-switch,
+.rule-tree-sidebar__rule-item:hover .rule-tree-sidebar__rule-action {
+  visibility: visible;
   opacity: 1;
+  filter: none;
   pointer-events: auto;
   transform: translateY(-50%);
+  transition-delay: 30ms;
+}
+
+.rule-tree-sidebar__rule-action[data-state='open'] {
+  visibility: visible;
+  opacity: 1;
+  filter: none;
+  pointer-events: auto;
+  transform: translateY(-50%);
+  transition-delay: 0s;
 }
 
 .rule-tree-sidebar__rule-action-icon {
