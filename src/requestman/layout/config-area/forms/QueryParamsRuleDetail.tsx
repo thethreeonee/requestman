@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
+import { Trash2 } from '@/components/animate-ui/icons/trash-2';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -10,7 +11,6 @@ import {
 } from '@/components/ui/select';
 import { t } from '../../../i18n';
 import {
-  DeleteOutlined,
   PlusOutlined,
 } from '../../../icons';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
@@ -151,8 +151,8 @@ export default function QueryParamsRuleDetail({
                 disabled={modification.action === 'delete'}
                 onChange={(e) => updateModification(c.id, modification.id, { value: e.target.value })}
               />
-              <Button variant="destructive" size="icon" onClick={() => removeModification(c.id, modification.id)}>
-                <DeleteOutlined />
+              <Button variant="outline" size="icon-sm" onClick={() => removeModification(c.id, modification.id)}>
+                <Trash2 size={14} animateOnHover style={{ color: '#ff4d4f' }} />
               </Button>
             </div>
           ))}

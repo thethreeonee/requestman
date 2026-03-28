@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/animate-ui/components/buttons/button';
+import { AnimateIcon } from '@/components/animate-ui/icons/icon';
+import { Trash2 } from '@/components/animate-ui/icons/trash-2';
 import {
   Tooltip,
   TooltipContent,
@@ -17,7 +19,6 @@ import { AutoComplete } from '../../../components/AutoComplete';
 import { Tabs, TabsList, TabsTrigger, TabsContents, TabsContent } from '@/components/animate-ui/components/animate/tabs';
 import { t } from '../../../i18n';
 import {
-  DeleteOutlined,
   PlusOutlined,
 } from '../../../icons';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
@@ -107,6 +108,7 @@ export default function ModifyHeadersRuleDetail({
   const [testUrl, setTestUrl] = useState('');
   const [testResult, setTestResult] = useState<SimulateRuleResult | null>(null);
   const [filterModal, setFilterModal] = useState<{ open: boolean; conditionId?: string }>({ open: false });
+  const [activeHeaderTabs, setActiveHeaderTabs] = useState<Record<string, 'requestHeaderModifications' | 'responseHeaderModifications'>>({});
   const currentGroupEnabled = useMemo(() => new Map(groups.map((g) => [g.id, g.enabled])), [groups]);
 
   const updateCondition = (conditionId: string, patch: Partial<RedirectCondition>) => {
@@ -200,8 +202,12 @@ export default function ModifyHeadersRuleDetail({
             disabled={modification.action === 'delete'}
             onChange={(e) => updateHeaderModification(condition.id, tabKey, modification.id, { value: e.target.value })}
           />
-          <Button variant="destructive" size="icon" onClick={() => removeHeaderModification(condition.id, tabKey, modification.id)}>
-            <DeleteOutlined />
+          <Button variant="outline" size="icon-sm" onClick={() => removeHeaderModification(condition.id, tabKey, modification.id)}>
+            <AnimateIcon animateOnHover asChild>
+              <span className="inline-flex items-center justify-center" style={{ color: '#ff4d4f' }}>
+                <Trash2 size={14} />
+              </span>
+            </AnimateIcon>
           </Button>
         </div>
       ))}
@@ -240,14 +246,24 @@ export default function ModifyHeadersRuleDetail({
         />
       )}
       renderExecutionContent={(c) => (
-        <Tabs defaultValue="requestHeaderModifications">
+        <Tabs
+          value={activeHeaderTabs[c.id] ?? 'requestHeaderModifications'}
+          onValueChange={(value) => setActiveHeaderTabs((prev) => ({
+            ...prev,
+            [c.id]: value as 'requestHeaderModifications' | 'responseHeaderModifications',
+          }))}
+        >
           <TabsList>
-            <TabsTrigger value="requestHeaderModifications">{t('请求 Headers', 'Request headers')}</TabsTrigger>
-            <TabsTrigger value="responseHeaderModifications">{t('响应 Headers', 'Response headers')}</TabsTrigger>
+            <TabsTrigger value="requestHeaderModifications">
+              {t('请求 Headers', 'Request headers')}
+            </TabsTrigger>
+            <TabsTrigger value="responseHeaderModifications">
+              {t('响应 Headers', 'Response headers')}
+            </TabsTrigger>
           </TabsList>
-          <TabsContents>
-            <TabsContent value="requestHeaderModifications">{renderHeaderTabContent(c, 'requestHeaderModifications')}</TabsContent>
-            <TabsContent value="responseHeaderModifications">{renderHeaderTabContent(c, 'responseHeaderModifications')}</TabsContent>
+          <TabsContents style={{ overflow: 'visible' }}>
+            <TabsContent value="requestHeaderModifications" style={{ overflow: 'visible', paddingTop: 4 }}>{renderHeaderTabContent(c, 'requestHeaderModifications')}</TabsContent>
+            <TabsContent value="responseHeaderModifications" style={{ overflow: 'visible', paddingTop: 4 }}>{renderHeaderTabContent(c, 'responseHeaderModifications')}</TabsContent>
           </TabsContents>
         </Tabs>
       )}

@@ -1,5 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Input } from '@/components/ui/input';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from '@/components/ui/input-group';
 import { t } from '../../../i18n';
 import { createDefaultCondition, genId, simulateRuleEffect, type SimulateRuleResult } from '../../../rule-utils';
 import type { RedirectCondition } from '../../../types';
@@ -82,17 +86,22 @@ export default function RequestDelayRuleDetail({
       )}
       renderExecutionContent={(c) => (
         <>
-          <label style={{ display: 'block', marginBottom: 0 }}>
-            <div>{t('延迟（ms）', 'Delay (ms)')}</div>
-            <Input
+          <InputGroup>
+            <InputGroupAddon
+              align="inline-start"
+              className="flex h-full items-center self-stretch whitespace-nowrap"
+            >
+              <span className="leading-none">{t('延迟（ms）', 'Delay (ms)')}</span>
+            </InputGroupAddon>
+            <InputGroupInput
               type="number"
-              style={{ width: '100%' }}
+              className="placeholder:opacity-60"
               min={0}
               value={c.delayMs ?? ''}
               onChange={(e) => updateCondition(c.id, { delayMs: Number(e.target.value) || 0 })}
               placeholder={t('输入请求延迟时间', 'Enter request delay')}
             />
-          </label>
+          </InputGroup>
           <span style={{ opacity: 0.7 }}>{t('命中该 URL 条件后，请求将延迟指定毫秒数再继续。', 'When this URL condition matches, the request will continue after the specified delay.')}</span>
         </>
       )}

@@ -92,10 +92,10 @@ export default function RewriteStringRuleDetail({
               align="inline-start"
               className="flex h-full items-center gap-1.5 self-stretch whitespace-nowrap"
             >
-              <span className="inline-flex size-4 items-center justify-center">
+              <span className="inline-flex size-4 items-center justify-center opacity-60">
                 <CaseLower size={16} className="translate-y-px" />
               </span>
-              <span className="leading-none">{t('目标', 'Target')}</span>
+              <span className="leading-none opacity-60">{t('目标', 'Target')}</span>
             </InputGroupAddon>
             <InputGroupInput
               value={c.rewriteFrom}
@@ -108,10 +108,10 @@ export default function RewriteStringRuleDetail({
               align="inline-start"
               className="flex h-full items-center gap-1.5 self-stretch whitespace-nowrap"
             >
-              <span className="inline-flex size-4 items-center justify-center">
+              <span className="inline-flex size-4 items-center justify-center opacity-60">
                 <CaseUpper size={16} className="translate-y-px" />
               </span>
-              <span className="leading-none">{t('替换为', 'Replace with')}</span>
+              <span className="leading-none opacity-60">{t('替换为', 'Replace with')}</span>
             </InputGroupAddon>
             <InputGroupInput
               value={c.rewriteTo}
