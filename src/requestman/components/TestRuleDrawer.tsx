@@ -30,7 +30,7 @@ const bodyStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 12,
-  padding: '0 16px 16px',
+  padding: '4px 16px 16px',
   overflow: 'auto',
 };
 
@@ -38,6 +38,18 @@ const valueStyle: React.CSSProperties = {
   marginLeft: 8,
   wordBreak: 'break-all',
   overflowWrap: 'anywhere',
+};
+
+const testActionRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  width: '100%',
+};
+
+const testInputWrapStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
 };
 
 export default function TestRuleDrawer({
@@ -67,14 +79,16 @@ export default function TestRuleDrawer({
         </SheetHeader>
 
         <div style={bodyStyle}>
-          <div className="aui-compact" style={{ width: '100%' }}>
-            <Input
-              value={testUrl}
-              onChange={(e) => onTestUrlChange(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') onTest(); }}
-              placeholder={t('输入测试URL', 'Enter URL to test')}
-            />
-            <Button variant="outline" onClick={onTest}>{t('测试', 'Test')}</Button>
+          <div style={testActionRowStyle}>
+            <div style={testInputWrapStyle}>
+              <Input
+                value={testUrl}
+                onChange={(e) => onTestUrlChange(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') onTest(); }}
+                placeholder={t('输入测试URL', 'Enter URL to test')}
+              />
+            </div>
+            <Button variant="outline" size="sm" onClick={onTest}>{t('测试', 'Test')}</Button>
           </div>
 
           <div style={resultBlockStyle}>
