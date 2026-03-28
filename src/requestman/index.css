@@ -23,12 +23,14 @@
   --rm-on-accent: #ffffff;
   --rm-icon-accent-alt: #1a1a1a;
 
-  min-height: 100vh;
+  display: grid;
+  grid-template-rows: 56px minmax(0, 1fr);
+  height: 100vh;
   min-width: 900px;
   background: var(--rm-page-bg);
   color: var(--rm-text-primary);
   box-sizing: border-box;
-  overflow-x: auto;
+  overflow: hidden;
 }
 
 html.dark .requestman-shell {
@@ -134,7 +136,9 @@ html.dark .theme-toggle-icons .theme-icon-moon {
 .main-body-layout {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
-  min-height: calc(100vh - 57px);
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .main-sidebar,
@@ -148,6 +152,7 @@ html.dark .theme-toggle-icons .theme-icon-moon {
 }
 
 .main-editor {
+  padding-top: 8px;
   overflow: auto;
 }
 
@@ -164,7 +169,11 @@ html.dark .theme-toggle-icons .theme-icon-moon {
 }
 
 .rule-tree-sidebar__content {
-  padding: 12px 0;
+  padding: 8px 0 12px;
+}
+
+.rule-tree-sidebar__group {
+  padding-top: 2px;
 }
 
 .rule-tree-sidebar__footer {

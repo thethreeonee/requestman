@@ -116,7 +116,7 @@ export default function RuleTree({
           containerClassName="rule-tree-sidebar__container"
         >
           <SidebarContent className="rule-tree-sidebar__content">
-            <SidebarGroup>
+            <SidebarGroup className="rule-tree-sidebar__group">
               <SidebarMenu>
                 {groups.map((group) => {
                   const groupRules = rulesByGroup.get(group.id) ?? [];
