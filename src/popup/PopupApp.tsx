@@ -1,6 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Settings } from 'lucide-react';
-import { motion } from 'motion/react';
 import { t } from '../requestman/i18n';
 import { HIT_TOAST_ENABLED_KEY, REDIRECT_ENABLED_KEY, RULE_TYPE_LABEL_MAP } from '../requestman/constants';
 import { Switch } from '@/components/animate-ui/components/radix/switch';
@@ -12,8 +10,9 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuCheckboxItem,
 } from '@/components/animate-ui/components/radix/dropdown-menu';
+import { MessageSquareOff } from '@/components/animate-ui/icons/message-square-off';
+import { Settings } from '@/components/animate-ui/icons/settings';
 
 type HitEntry = { ruleName: string; ruleType: string; url: string; ts: number };
 
@@ -167,27 +166,25 @@ export default function PopupApp() {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuCheckboxItem
-                checked={hitToastEnabled}
-                onCheckedChange={onHitToastEnabledChange}
-              >
-                <AnimateIcon animateOnHover asChild>
-                  <span className="inline-flex text-muted-foreground">
-                    <MessageSquareShare size={14} animation="arrow-up" />
+              <AnimateIcon animateOnHover asChild>
+                <DropdownMenuItem onSelect={() => onHitToastEnabledChange(!hitToastEnabled)}>
+                  <span className={hitToastEnabled ? 'inline-flex text-muted-foreground' : 'inline-flex text-muted-foreground/40'}>
+                    {hitToastEnabled
+                      ? <MessageSquareShare size={14} animation="arrow-up" />
+                      : <MessageSquareOff size={14} animation="default" />
+                    }
                   </span>
-                </AnimateIcon>
-                {t('页面浮层', 'On-page Toast')}
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuItem onSelect={openPanel}>
-                <motion.span
-                  className="inline-flex text-muted-foreground"
-                  whileHover={{ rotate: 90 }}
-                  transition={{ type: 'spring', stiffness: 200, damping: 15 }}
-                >
-                  <Settings size={14} />
-                </motion.span>
-                {t('打开配置', 'Open settings')}
-              </DropdownMenuItem>
+                  {t('页面浮层', 'On-page Toast')}
+                </DropdownMenuItem>
+              </AnimateIcon>
+              <AnimateIcon animateOnHover asChild>
+                <DropdownMenuItem onSelect={openPanel}>
+                  <span className="inline-flex text-muted-foreground">
+                    <Settings size={14} animation="default" />
+                  </span>
+                  {t('打开配置', 'Open settings')}
+                </DropdownMenuItem>
+              </AnimateIcon>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
