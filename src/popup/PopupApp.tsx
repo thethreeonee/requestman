@@ -1,8 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { Settings } from 'lucide-react';
+import { motion } from 'motion/react';
 import { t } from '../requestman/i18n';
-import { HIT_TOAST_ENABLED_KEY, RULE_TYPE_LABEL_MAP } from '../requestman/constants';
+import { HIT_TOAST_ENABLED_KEY, REDIRECT_ENABLED_KEY, RULE_TYPE_LABEL_MAP } from '../requestman/constants';
 import { Switch } from '@/components/animate-ui/components/radix/switch';
+import { AnimateIcon } from '@/components/animate-ui/icons/icon';
+import { EllipsisVertical } from '@/components/animate-ui/icons/ellipsis-vertical';
+import { MessageSquareShare } from '@/components/animate-ui/icons/message-square-share';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuCheckboxItem,
+} from '@/components/animate-ui/components/radix/dropdown-menu';
 
 type HitEntry = { ruleName: string; ruleType: string; url: string; ts: number };
 
@@ -73,6 +84,7 @@ function dedupeHits(hits: HitEntry[]): HitEntry[] {
 export default function PopupApp() {
   const [hits, setHits] = useState<HitEntry[]>([]);
   const [tabId, setTabId] = useState<number | null>(null);
+  const [redirectEnabled, setRedirectEnabled] = useState(true);
   const [hitToastEnabled, setHitToastEnabled] = useState(true);
 
   useEffect(() => {
@@ -81,8 +93,9 @@ export default function PopupApp() {
       if (id != null) setTabId(id);
     });
 
-    chrome.storage.local.get([HIT_TOAST_ENABLED_KEY], (res) => {
+    chrome.storage.local.get([REDIRECT_ENABLED_KEY, HIT_TOAST_ENABLED_KEY], (res) => {
       if (chrome.runtime.lastError) return;
+      setRedirectEnabled(res?.[REDIRECT_ENABLED_KEY] !== false);
       setHitToastEnabled(res?.[HIT_TOAST_ENABLED_KEY] !== false);
     });
   }, []);
@@ -103,6 +116,13 @@ export default function PopupApp() {
   function openPanel() {
     chrome.tabs.create({ url: chrome.runtime.getURL('requestman/index.html') });
     window.close();
+  }
+
+  function onRedirectEnabledChange(checked: boolean) {
+    setRedirectEnabled(checked);
+    chrome.storage.local.set({ [REDIRECT_ENABLED_KEY]: checked }, () => {
+      void chrome.runtime.lastError;
+    });
   }
 
   function onHitToastEnabledChange(checked: boolean) {
@@ -126,23 +146,50 @@ export default function PopupApp() {
           <span className="text-[11px] font-bold tracking-widest select-none">REQUESTMAN</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground select-none">
-            <span>{t('页面浮层', 'On-page Toast')}</span>
-            <Switch
-              checked={hitToastEnabled}
-              onCheckedChange={onHitToastEnabledChange}
-              className="scale-[0.82] origin-center"
-              title={t('页面命中浮层开关', 'Page hit toast toggle')}
-              aria-label={t('页面命中浮层开关', 'Page hit toast toggle')}
-            />
-          </div>
-          <button
-            onClick={openPanel}
-            className="flex items-center justify-center w-7 h-7 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            title={t('打开配置', 'Open settings')}
-          >
-            <Settings size={15} />
-          </button>
+          <Switch
+            checked={redirectEnabled}
+            onCheckedChange={onRedirectEnabledChange}
+            className="scale-[0.82] origin-center"
+            title={t('插件开关', 'Extension enabled')}
+            aria-label={t('插件开关', 'Extension enabled')}
+          />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="flex items-center justify-center w-7 h-7 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                title={t('更多选项', 'More options')}
+              >
+                <AnimateIcon animateOnHover asChild>
+                  <span className="inline-flex">
+                    <EllipsisVertical size={15} animation="pulse" />
+                  </span>
+                </AnimateIcon>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuCheckboxItem
+                checked={hitToastEnabled}
+                onCheckedChange={onHitToastEnabledChange}
+              >
+                <AnimateIcon animateOnHover asChild>
+                  <span className="inline-flex text-muted-foreground">
+                    <MessageSquareShare size={14} animation="arrow-up" />
+                  </span>
+                </AnimateIcon>
+                {t('页面浮层', 'On-page Toast')}
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuItem onSelect={openPanel}>
+                <motion.span
+                  className="inline-flex text-muted-foreground"
+                  whileHover={{ rotate: 90 }}
+                  transition={{ type: 'spring', stiffness: 200, damping: 15 }}
+                >
+                  <Settings size={14} />
+                </motion.span>
+                {t('打开配置', 'Open settings')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
