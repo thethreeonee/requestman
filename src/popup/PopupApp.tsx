@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Settings } from 'lucide-react';
 import { t } from '../requestman/i18n';
 import { HIT_TOAST_ENABLED_KEY, REDIRECT_ENABLED_KEY, RULE_TYPE_LABEL_MAP } from '../requestman/constants';
 import { Switch } from '@/components/animate-ui/components/radix/switch';
@@ -13,6 +12,7 @@ import {
   DropdownMenuItem,
 } from '@/components/animate-ui/components/radix/dropdown-menu';
 import { MessageSquareOff } from '@/components/animate-ui/icons/message-square-off';
+import { Settings } from '@/components/animate-ui/icons/settings';
 
 type HitEntry = { ruleName: string; ruleType: string; url: string; ts: number };
 
@@ -177,12 +177,14 @@ export default function PopupApp() {
                   {t('页面浮层', 'On-page Toast')}
                 </DropdownMenuItem>
               </AnimateIcon>
-              <DropdownMenuItem onSelect={openPanel} className="group">
-                <span className="inline-flex text-muted-foreground transition-transform duration-300 group-data-[highlighted]:rotate-90">
-                  <Settings size={14} />
-                </span>
-                {t('打开配置', 'Open settings')}
-              </DropdownMenuItem>
+              <AnimateIcon animateOnHover asChild>
+                <DropdownMenuItem onSelect={openPanel}>
+                  <span className="inline-flex text-muted-foreground">
+                    <Settings size={14} animation="default" />
+                  </span>
+                  {t('打开配置', 'Open settings')}
+                </DropdownMenuItem>
+              </AnimateIcon>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
