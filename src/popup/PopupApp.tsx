@@ -142,9 +142,6 @@ export default function PopupApp() {
       <div className="flex items-center justify-between px-3 h-11 border-b border-border flex-shrink-0">
         <div className="flex items-center gap-2">
           <img src="/assets/icon-source.png" alt="Requestman" className="w-5 h-5" />
-          <span className="text-[11px] font-bold tracking-widest select-none">REQUESTMAN</span>
-        </div>
-        <div className="flex items-center gap-2">
           <Switch
             checked={redirectEnabled}
             onCheckedChange={onRedirectEnabledChange}
@@ -152,6 +149,11 @@ export default function PopupApp() {
             title={t('插件开关', 'Extension enabled')}
             aria-label={t('插件开关', 'Extension enabled')}
           />
+          <span className={`text-[11px] font-medium select-none ${redirectEnabled ? 'text-foreground' : 'text-muted-foreground'}`}>
+            {redirectEnabled ? t('已启用', 'Enabled') : t('已停用', 'Disabled')}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
