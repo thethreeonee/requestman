@@ -173,7 +173,7 @@ export default function PopupApp() {
               >
                 <AnimateIcon animateOnHover asChild>
                   <span className="inline-flex text-muted-foreground">
-                    <MessageSquareShare size={14} animation="default" />
+                    <MessageSquareShare size={14} animation="arrow-up" />
                   </span>
                 </AnimateIcon>
                 {t('页面浮层', 'On-page Toast')}
