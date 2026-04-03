@@ -12,8 +12,8 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuCheckboxItem,
 } from '@/components/animate-ui/components/radix/dropdown-menu';
+import { MessageSquareOff } from '@/components/animate-ui/icons/message-square-off';
 
 type HitEntry = { ruleName: string; ruleType: string; url: string; ts: number };
 
@@ -167,17 +167,17 @@ export default function PopupApp() {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuCheckboxItem
-                checked={hitToastEnabled}
-                onCheckedChange={onHitToastEnabledChange}
-              >
+              <DropdownMenuItem onSelect={() => onHitToastEnabledChange(!hitToastEnabled)}>
                 <AnimateIcon animateOnHover asChild>
-                  <span className="inline-flex text-muted-foreground">
-                    <MessageSquareShare size={14} animation="arrow-up" />
+                  <span className={hitToastEnabled ? 'inline-flex text-muted-foreground' : 'inline-flex text-muted-foreground/40'}>
+                    {hitToastEnabled
+                      ? <MessageSquareShare size={14} animation="arrow-up" />
+                      : <MessageSquareOff size={14} animation="default" />
+                    }
                   </span>
                 </AnimateIcon>
                 {t('页面浮层', 'On-page Toast')}
-              </DropdownMenuCheckboxItem>
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={openPanel}>
                 <motion.span
                   className="inline-flex text-muted-foreground"
