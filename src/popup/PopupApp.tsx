@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { Settings } from 'lucide-react';
-import { motion } from 'motion/react';
 import { t } from '../requestman/i18n';
 import { HIT_TOAST_ENABLED_KEY, REDIRECT_ENABLED_KEY, RULE_TYPE_LABEL_MAP } from '../requestman/constants';
 import { Switch } from '@/components/animate-ui/components/radix/switch';
@@ -167,25 +166,21 @@ export default function PopupApp() {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => onHitToastEnabledChange(!hitToastEnabled)}>
-                <AnimateIcon animateOnHover asChild>
+              <AnimateIcon animateOnHover asChild>
+                <DropdownMenuItem onSelect={() => onHitToastEnabledChange(!hitToastEnabled)}>
                   <span className={hitToastEnabled ? 'inline-flex text-muted-foreground' : 'inline-flex text-muted-foreground/40'}>
                     {hitToastEnabled
                       ? <MessageSquareShare size={14} animation="arrow-up" />
                       : <MessageSquareOff size={14} animation="default" />
                     }
                   </span>
-                </AnimateIcon>
-                {t('页面浮层', 'On-page Toast')}
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={openPanel}>
-                <motion.span
-                  className="inline-flex text-muted-foreground"
-                  whileHover={{ rotate: 90 }}
-                  transition={{ type: 'spring', stiffness: 200, damping: 15 }}
-                >
+                  {t('页面浮层', 'On-page Toast')}
+                </DropdownMenuItem>
+              </AnimateIcon>
+              <DropdownMenuItem onSelect={openPanel} className="group">
+                <span className="inline-flex text-muted-foreground transition-transform duration-300 group-data-[highlighted]:rotate-90">
                   <Settings size={14} />
-                </motion.span>
+                </span>
                 {t('打开配置', 'Open settings')}
               </DropdownMenuItem>
             </DropdownMenuContent>
