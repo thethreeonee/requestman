@@ -549,6 +549,11 @@ async function ensureRuleCachesReady() {
 
 chrome.runtime.onStartup.addListener(() => { void ensureRuleCachesReady(); });
 chrome.runtime.onInstalled.addListener(() => { void ensureRuleCachesReady(); });
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local') return;
+  if (!(REDIRECT_ENABLED_KEY in changes) && !(REDIRECT_RULES_KEY in changes) && !(REDIRECT_GROUPS_KEY in changes)) return;
+  void restoreRulesFromStorage();
+});
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'requestman:content-ready') {
     const tabId = normalizeNumericId(sender?.tab?.id);

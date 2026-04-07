@@ -205,8 +205,8 @@
     container.style.minWidth = '375px';
     container.style.maxWidth = '560px';
     container.style.background = 'rgba(20, 20, 24, 0.82)';
-    container.style.backdropFilter = 'blur(12px)';
-    container.style.webkitBackdropFilter = 'blur(12px)';
+    container.style.backdropFilter = 'blur(12px) contrast(80%) brightness(130%) saturate(80%)';
+    container.style.webkitBackdropFilter = 'blur(12px) contrast(80%) brightness(130%) saturate(80%)';
     container.style.color = '#f1f5f9';
     container.style.border = '1px solid rgba(148, 163, 184, 0.35)';
     container.style.borderRadius = '12px';
