@@ -407,8 +407,8 @@ function toQueryParamsRule(condition: RedirectCondition, index: number): chrome.
 
   const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
   const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
-  const regexFilter = matchTarget === 'host' ? buildHostRegex(matchMode, expression) : buildUrlRegex(matchMode, expression);
-  try { new RegExp(regexFilter); } catch { return null; }
+  const matchConditionParts = buildMatchConditionParts(matchTarget, matchMode, expression);
+  if (!matchConditionParts) return null;
 
   const modifications = Array.isArray(condition.queryParamModifications) ? condition.queryParamModifications : [];
   const addOrReplaceParams = modifications
@@ -435,7 +435,7 @@ function toQueryParamsRule(condition: RedirectCondition, index: number): chrome.
     },
   };
 
-  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { ...matchConditionParts, resourceTypes: ALL_RESOURCE_TYPES };
   applyConditionFilters(conditionRule, condition.filter);
 
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
@@ -451,8 +451,8 @@ function toUserAgentRule(condition: RedirectCondition, index: number): chrome.de
 
   const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
   const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
-  const regexFilter = matchTarget === 'host' ? buildHostRegex(matchMode, expression) : buildUrlRegex(matchMode, expression);
-  try { new RegExp(regexFilter); } catch { return null; }
+  const matchConditionParts = buildMatchConditionParts(matchTarget, matchMode, expression);
+  if (!matchConditionParts) return null;
 
   const uaType = condition.userAgentType === 'browser' || condition.userAgentType === 'custom' ? condition.userAgentType : 'device';
   const userAgentValue = uaType === 'custom'
@@ -469,7 +469,10 @@ function toUserAgentRule(condition: RedirectCondition, index: number): chrome.de
     }],
   };
 
-  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other'] };
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = {
+    ...matchConditionParts,
+    resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other'],
+  };
   applyConditionFilters(conditionRule, condition.filter);
 
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
@@ -483,8 +486,8 @@ function toModifyHeadersRule(condition: RedirectCondition, index: number): chrom
 
   const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
   const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
-  const regexFilter = matchTarget === 'host' ? buildHostRegex(matchMode, expression) : buildUrlRegex(matchMode, expression);
-  try { new RegExp(regexFilter); } catch { return null; }
+  const matchConditionParts = buildMatchConditionParts(matchTarget, matchMode, expression);
+  if (!matchConditionParts) return null;
 
   const mapHeaders = (
     modifications: RedirectCondition['requestHeaderModifications'],
@@ -513,7 +516,7 @@ function toModifyHeadersRule(condition: RedirectCondition, index: number): chrom
     ...(responseHeaders.length ? { responseHeaders } : {}),
   };
 
-  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { ...matchConditionParts, resourceTypes: ALL_RESOURCE_TYPES };
   applyConditionFilters(conditionRule, condition.filter);
 
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
@@ -528,14 +531,14 @@ function toCancelRequestRule(condition: RedirectCondition, index: number): chrom
 
   const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
   const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
-  const regexFilter = matchTarget === 'host' ? buildHostRegex(matchMode, expression) : buildUrlRegex(matchMode, expression);
-  try { new RegExp(regexFilter); } catch { return null; }
+  const matchConditionParts = buildMatchConditionParts(matchTarget, matchMode, expression);
+  if (!matchConditionParts) return null;
 
   const action: chrome.declarativeNetRequest.RuleAction = {
     type: 'block',
   };
 
-  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { ...matchConditionParts, resourceTypes: ALL_RESOURCE_TYPES };
   applyConditionFilters(conditionRule, condition.filter);
 
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
