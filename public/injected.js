@@ -13,6 +13,7 @@
   let modifyResponseBodyRules = [];
   let pendingHitFlushTimer = null;
   const pendingHitReports = new Map();
+  const reportedHitKeys = new Set();
   const HIT_BATCH_MS = 120;
 
   const nativeFetch = window.fetch;
@@ -164,7 +165,10 @@
       ruleType: typeof rule?.ruleType === 'string' ? rule.ruleType : 'redirect_request',
       url: typeof url === 'string' ? url : '',
     };
-    pendingHitReports.set(getHitKey(hit), hit);
+    const hitKey = getHitKey(hit);
+    if (reportedHitKeys.has(hitKey)) return;
+    reportedHitKeys.add(hitKey);
+    pendingHitReports.set(hitKey, hit);
     if (pendingHitFlushTimer) return;
     pendingHitFlushTimer = setTimeout(() => {
       flushReportedHits();
