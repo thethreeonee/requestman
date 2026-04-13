@@ -11,6 +11,9 @@
   let delayRules = [];
   let modifyRequestBodyRules = [];
   let modifyResponseBodyRules = [];
+  let pendingHitFlushTimer = null;
+  const pendingHitReports = new Map();
+  const HIT_BATCH_MS = 120;
 
   const nativeFetch = window.fetch;
   const nativeXhrOpen = window.XMLHttpRequest && window.XMLHttpRequest.prototype.open;
@@ -136,25 +139,43 @@
     return true;
   }
 
-  function reportRuleHit(rule) {
-    const ruleName = typeof rule?.ruleName === 'string' ? rule.ruleName.trim() : '';
-    if (!ruleName) return;
+  function getHitKey(hit) {
+    return `${hit.ruleType}::${hit.ruleId || hit.ruleName}`;
+  }
+
+  function flushReportedHits() {
+    pendingHitFlushTimer = null;
+    if (!pendingHitReports.size) return;
+    const hits = Array.from(pendingHitReports.values());
+    pendingHitReports.clear();
     window.postMessage({
       source: SOURCE,
       type: HIT_MESSAGE_TYPE,
-      payload: {
-        ruleId: typeof rule?.ruleId === 'string' ? rule.ruleId : '',
-        ruleName: typeof rule?.ruleName === 'string' ? rule.ruleName : '',
-        ruleType: typeof rule?.ruleType === 'string' ? rule.ruleType : 'redirect_request',
-      },
+      hits,
     }, '*');
+  }
+
+  function reportRuleHit(rule, url) {
+    const ruleName = typeof rule?.ruleName === 'string' ? rule.ruleName.trim() : '';
+    if (!ruleName) return;
+    const hit = {
+      ruleId: typeof rule?.ruleId === 'string' ? rule.ruleId : '',
+      ruleName,
+      ruleType: typeof rule?.ruleType === 'string' ? rule.ruleType : 'redirect_request',
+      url: typeof url === 'string' ? url : '',
+    };
+    pendingHitReports.set(getHitKey(hit), hit);
+    if (pendingHitFlushTimer) return;
+    pendingHitFlushTimer = setTimeout(() => {
+      flushReportedHits();
+    }, HIT_BATCH_MS);
   }
 
   function getDelayMs(url, method, resourceType, headers) {
     let maxDelayMs = 0;
     for (const rule of delayRules) {
       if (!shouldApplyRule(url, method, resourceType, headers, rule)) continue;
-      reportRuleHit(rule);
+      reportRuleHit(rule, url);
       const delayMs = Number.isFinite(rule.delayMs) ? Math.max(0, Math.floor(rule.delayMs)) : 0;
       if (delayMs > maxDelayMs) maxDelayMs = delayMs;
     }
@@ -207,7 +228,7 @@
 
     for (const rule of modifyRequestBodyRules) {
       if (!shouldApplyRule(url, method, resourceType, headers, rule)) continue;
-      reportRuleHit(rule);
+      reportRuleHit(rule, url);
 
       if (rule.requestBodyMode === 'dynamic') {
         nextBody = runDynamicBodyScript(rule.requestBodyValue, {
@@ -227,7 +248,7 @@
   function hasMatchedResponseRule(url, method, resourceType, headers) {
     for (const rule of modifyResponseBodyRules) {
       if (!shouldApplyRule(url, method, resourceType, headers, rule)) continue;
-      reportRuleHit(rule);
+      reportRuleHit(rule, url);
       return true;
     }
     return false;

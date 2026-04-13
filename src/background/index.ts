@@ -74,14 +74,19 @@ export const REDIRECT_GROUPS_KEY = 'asap_redirect_groups_v1';
 export const REDIRECT_RULE_ID_BASE = 10000;
 export const REDIRECT_RULE_ID_MAX = 19999;
 const managedRuleMeta = new Map<number, { ruleName: string; ruleType: string }>();
-const pendingHitRuleIdsByTab = new Map<number, Set<number>>();
 let ruleCachesReady = false;
 let ruleCachesPromise: Promise<void> | null = null;
 const REQUESTMAN_PANEL_URL = chrome.runtime.getURL('requestman/index.html');
 
 type TabHitEntry = { ruleName: string; ruleType: string; url: string; ts: number };
+type TabUiHitEntry = { ruleId: string; ruleName: string; ruleType: string; url: string };
 const tabHitsMap = new Map<number, TabHitEntry[]>();
+const pendingUiHitsByTab = new Map<number, Map<string, TabUiHitEntry>>();
+const uiHitFlushTimersByTab = new Map<number, ReturnType<typeof setTimeout>>();
+const contentReadyTabs = new Set<number>();
 const MAX_TAB_HITS = 50;
+const UI_HIT_BATCH_MS = 120;
+const MAX_PENDING_UI_HITS = 24;
 
 function recordTabHit(tabId: number, ruleName: string, ruleType: string, url: string) {
   if (!ruleName.trim()) return;
@@ -92,12 +97,26 @@ function recordTabHit(tabId: number, ruleName: string, ruleType: string, url: st
 }
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === 'loading') tabHitsMap.delete(tabId);
+  if (changeInfo.status !== 'loading') return;
+  tabHitsMap.delete(tabId);
+  pendingUiHitsByTab.delete(tabId);
+  contentReadyTabs.delete(tabId);
+  const flushTimer = uiHitFlushTimersByTab.get(tabId);
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    uiHitFlushTimersByTab.delete(tabId);
+  }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabHitsMap.delete(tabId);
-  pendingHitRuleIdsByTab.delete(tabId);
+  pendingUiHitsByTab.delete(tabId);
+  contentReadyTabs.delete(tabId);
+  const flushTimer = uiHitFlushTimersByTab.get(tabId);
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    uiHitFlushTimersByTab.delete(tabId);
+  }
 });
 
 function escapeRegex(value: string) { return value.replace(/[|\\{}()[\]^$+?.]/g, '\\$&'); }
@@ -440,40 +459,66 @@ const normalizeNumericId = (value: unknown) => {
   return null;
 };
 
-function queuePendingHit(tabId: number, ruleId: number) {
-  let set = pendingHitRuleIdsByTab.get(tabId);
-  if (!set) {
-    set = new Set<number>();
-    pendingHitRuleIdsByTab.set(tabId, set);
-  }
-  set.add(ruleId);
+function getUiHitKey(hit: TabUiHitEntry) {
+  return `${hit.ruleType}::${hit.ruleId || hit.ruleName}`;
 }
 
-function notifyMatchedRule(tabId: number, ruleId: number, url?: string, allowQueue = true): Promise<boolean> {
-  const meta = managedRuleMeta.get(ruleId);
-  if (!meta || !meta.ruleName.trim()) return Promise.resolve(false);
-  recordTabHit(tabId, meta.ruleName, meta.ruleType, typeof url === 'string' ? url : '');
-  return new Promise<boolean>((resolve) => {
-    chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: { ...meta, url: typeof url === 'string' ? url : '' } }, () => {
-      if (chrome.runtime.lastError) {
-        if (allowQueue) queuePendingHit(tabId, ruleId);
-        resolve(false);
-        return;
-      }
-      resolve(true);
-    });
+function scheduleUiHitsFlush(tabId: number, delay = UI_HIT_BATCH_MS) {
+  if (!contentReadyTabs.has(tabId) || uiHitFlushTimersByTab.has(tabId)) return;
+  const timer = setTimeout(() => {
+    uiHitFlushTimersByTab.delete(tabId);
+    flushUiHitsForTab(tabId);
+  }, delay);
+  uiHitFlushTimersByTab.set(tabId, timer);
+}
+
+function queueUiHit(tabId: number, hit: TabUiHitEntry) {
+  let pending = pendingUiHitsByTab.get(tabId);
+  if (!pending) {
+    pending = new Map<string, TabUiHitEntry>();
+    pendingUiHitsByTab.set(tabId, pending);
+  }
+  pending.set(getUiHitKey(hit), hit);
+  if (pending.size > MAX_PENDING_UI_HITS) {
+    const oldestKey = pending.keys().next().value;
+    if (oldestKey) pending.delete(oldestKey);
+  }
+  scheduleUiHitsFlush(tabId);
+}
+
+function flushUiHitsForTab(tabId: number) {
+  if (!contentReadyTabs.has(tabId)) return;
+  const pending = pendingUiHitsByTab.get(tabId);
+  if (!pending || !pending.size) return;
+  const entries = Array.from(pending.entries());
+  const hits = entries.map(([, hit]) => hit);
+  chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit-batch', payload: { hits } }, () => {
+    if (chrome.runtime.lastError) {
+      contentReadyTabs.delete(tabId);
+      return;
+    }
+    const currentPending = pendingUiHitsByTab.get(tabId);
+    if (!currentPending) return;
+    for (const [key] of entries) currentPending.delete(key);
+    if (!currentPending.size) {
+      pendingUiHitsByTab.delete(tabId);
+      return;
+    }
+    scheduleUiHitsFlush(tabId);
   });
 }
 
-async function flushPendingHitsForTab(tabId: number) {
-  const pending = pendingHitRuleIdsByTab.get(tabId);
-  if (!pending || !pending.size) return;
-  const list = Array.from(pending);
-  for (const ruleId of list) {
-    const delivered = await notifyMatchedRule(tabId, ruleId, undefined, false);
-    if (delivered) pending.delete(ruleId);
-  }
-  if (!pending.size) pendingHitRuleIdsByTab.delete(tabId);
+function notifyMatchedRule(tabId: number, ruleId: number, url?: string) {
+  const meta = managedRuleMeta.get(ruleId);
+  if (!meta || !meta.ruleName.trim()) return;
+  const matchedUrl = typeof url === 'string' ? url : '';
+  recordTabHit(tabId, meta.ruleName, meta.ruleType, matchedUrl);
+  queueUiHit(tabId, {
+    ruleId: String(ruleId),
+    ruleName: meta.ruleName,
+    ruleType: meta.ruleType,
+    url: matchedUrl,
+  });
 }
 
 async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: RedirectRule[]; enabled?: boolean; }) {
@@ -557,7 +602,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'requestman:content-ready') {
     const tabId = normalizeNumericId(sender?.tab?.id);
-    if (tabId !== null && tabId >= 0) void flushPendingHitsForTab(tabId);
+    if (tabId !== null && tabId >= 0) {
+      contentReadyTabs.add(tabId);
+      flushUiHitsForTab(tabId);
+    }
     sendResponse({ ok: true });
     return;
   }
@@ -566,11 +614,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ hits: tabId !== null ? (tabHitsMap.get(tabId) ?? []) : [] });
     return;
   }
-  if (message?.type === 'requestman:add-injected-hit') {
+  if (message?.type === 'requestman:add-injected-hit' || message?.type === 'requestman:add-injected-hits') {
     const tabId = normalizeNumericId(sender?.tab?.id);
     if (tabId !== null && tabId >= 0) {
-      const p = message.payload || {};
-      recordTabHit(tabId, typeof p.ruleName === 'string' ? p.ruleName : '', typeof p.ruleType === 'string' ? p.ruleType : 'redirect_request', typeof p.url === 'string' ? p.url : '');
+      const payloadHits = Array.isArray(message?.payload?.hits)
+        ? message.payload.hits
+        : [message.payload || {}];
+      for (const hit of payloadHits) {
+        recordTabHit(
+          tabId,
+          typeof hit?.ruleName === 'string' ? hit.ruleName : '',
+          typeof hit?.ruleType === 'string' ? hit.ruleType : 'redirect_request',
+          typeof hit?.url === 'string' ? hit.url : '',
+        );
+      }
     }
     sendResponse({ ok: true });
     return;
