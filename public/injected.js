@@ -319,7 +319,7 @@
     return false;
   }
 
-  function resolveResponseBody(url, method, resourceType, headers, responseMeta, body) {
+  function resolveResponseBody(url, method, resourceType, headers, requestMeta, responseMeta, body) {
     if (typeof body !== 'string') return body;
     let nextBody = body;
 
@@ -330,6 +330,10 @@
         nextBody = runDynamicBodyScript(rule.responseBodyValue, {
           method: String(method || 'GET').toUpperCase(),
           url,
+          resourceType,
+          requestHeaders: requestMeta.headers,
+          requestBody: requestMeta.body,
+          requestBodyAsJson: parseBodyAsJson(requestMeta.body),
           status: responseMeta.status,
           statusText: responseMeta.statusText,
           headers: responseMeta.headers,
@@ -405,6 +409,9 @@
       try {
         const originalBody = await response.clone().text();
         const nextBody = toBodyValue(resolveResponseBody(url, method, 'xmlhttprequest', requestHeaders, {
+          headers: requestHeaders,
+          body,
+        }, {
           status: response.status,
           statusText: response.statusText,
           headers: Object.fromEntries(response.headers.entries()),
@@ -464,6 +471,9 @@
               ? JSON.stringify(this.response)
               : this.responseText;
             const nextBody = toBodyValue(resolveResponseBody(url, method, 'xmlhttprequest', requestHeaders, {
+              headers: requestHeaders,
+              body: typeof requestBody === 'string' ? requestBody : '',
+            }, {
               status: this.status,
               statusText: this.statusText,
               headers: {},
