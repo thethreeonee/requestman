@@ -74,17 +74,32 @@ export const REDIRECT_GROUPS_KEY = 'asap_redirect_groups_v1';
 export const REDIRECT_RULE_ID_BASE = 10000;
 export const REDIRECT_RULE_ID_MAX = 19999;
 const managedRuleMeta = new Map<number, { ruleName: string; ruleType: string }>();
-const pendingHitRuleIdsByTab = new Map<number, Set<number>>();
 let ruleCachesReady = false;
 let ruleCachesPromise: Promise<void> | null = null;
 const REQUESTMAN_PANEL_URL = chrome.runtime.getURL('requestman/index.html');
 
 type TabHitEntry = { ruleName: string; ruleType: string; url: string; ts: number };
+type TabUiHitEntry = { ruleId: string; ruleName: string; ruleType: string; url: string };
 const tabHitsMap = new Map<number, TabHitEntry[]>();
+const seenHitKeysByTab = new Map<number, Set<string>>();
+const pendingUiHitsByTab = new Map<number, Map<string, TabUiHitEntry>>();
+const uiHitFlushTimersByTab = new Map<number, ReturnType<typeof setTimeout>>();
+const contentReadyTabs = new Set<number>();
 const MAX_TAB_HITS = 50;
+const UI_HIT_BATCH_MS = 120;
+const MAX_PENDING_UI_HITS = 24;
 
-function recordTabHit(tabId: number, ruleName: string, ruleType: string, url: string) {
+function recordTabHit(tabId: number, ruleName: string, ruleType: string, url: string, dedupeKey?: string) {
   if (!ruleName.trim()) return;
+  if (dedupeKey) {
+    let seen = seenHitKeysByTab.get(tabId);
+    if (!seen) {
+      seen = new Set<string>();
+      seenHitKeysByTab.set(tabId, seen);
+    }
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+  }
   let hits = tabHitsMap.get(tabId);
   if (!hits) { hits = []; tabHitsMap.set(tabId, hits); }
   hits.unshift({ ruleName, ruleType, url, ts: Date.now() });
@@ -92,17 +107,38 @@ function recordTabHit(tabId: number, ruleName: string, ruleType: string, url: st
 }
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === 'loading') tabHitsMap.delete(tabId);
+  if (changeInfo.status !== 'loading') return;
+  tabHitsMap.delete(tabId);
+  seenHitKeysByTab.delete(tabId);
+  pendingUiHitsByTab.delete(tabId);
+  contentReadyTabs.delete(tabId);
+  const flushTimer = uiHitFlushTimersByTab.get(tabId);
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    uiHitFlushTimersByTab.delete(tabId);
+  }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabHitsMap.delete(tabId);
-  pendingHitRuleIdsByTab.delete(tabId);
+  seenHitKeysByTab.delete(tabId);
+  pendingUiHitsByTab.delete(tabId);
+  contentReadyTabs.delete(tabId);
+  const flushTimer = uiHitFlushTimersByTab.get(tabId);
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    uiHitFlushTimersByTab.delete(tabId);
+  }
 });
 
 function escapeRegex(value: string) { return value.replace(/[|\\{}()[\]^$+?.]/g, '\\$&'); }
 function wildcardToRegexBody(pattern: string) { return escapeRegex(pattern).replace(/\*/g, '.*'); }
 function escapeHeaderPattern(value: string) { return value.replace(/[?*\\]/g, '\\$&'); }
+function isAsciiOnly(value: string) { return /^[\x00-\x7F]*$/.test(value); }
+function hasUnsafeUrlFilterChars(value: string, allowWildcard = false) {
+  const unsafePattern = allowWildcard ? /[|^]/ : /[*|^]/;
+  return unsafePattern.test(value);
+}
 function buildHostRegex(mode: MatchMode, expression: string) {
   if (mode === 'contains') return `^https?://[^/]*${escapeRegex(expression)}[^/]*(?:/|$)`;
   if (mode === 'regex') return `^https?://(?:${expression})(?:/|$)`;
@@ -114,6 +150,22 @@ function buildUrlRegex(mode: MatchMode, expression: string) {
   if (mode === 'wildcard') return `^${wildcardToRegexBody(expression)}$`;
   if (mode === 'regex') return expression;
   return `^${escapeRegex(expression)}$`;
+}
+function buildUrlFilter(mode: MatchMode, expression: string) {
+  if (!expression || !isAsciiOnly(expression)) return '';
+  if (mode === 'equals') {
+    if (hasUnsafeUrlFilterChars(expression)) return '';
+    return `|${expression}|`;
+  }
+  if (mode === 'contains') {
+    if (hasUnsafeUrlFilterChars(expression)) return '';
+    return expression;
+  }
+  if (mode === 'wildcard') {
+    if (hasUnsafeUrlFilterChars(expression, true)) return '';
+    return `|${expression}|`;
+  }
+  return '';
 }
 function normalizeRegexSubstitution(value: string) { return value.replace(/\$(\d+)/g, '\\$1'); }
 function escapeRegexReplacement(value: string) { return value.replace(/\\/g, '\\\\').replace(/\$/g, '$$$$'); }
@@ -131,6 +183,57 @@ function normalizeDomainFilter(value: string): string {
   } catch {
     return raw.replace(/^https?:\/\//i, '').split('/')[0].split(':')[0].trim();
   }
+}
+
+function extractRequestDomains(matchTarget: MatchTarget, matchMode: MatchMode, expression: string): string[] {
+  if (!expression || !isAsciiOnly(expression)) return [];
+
+  const addDomain = (rawValue: string, target: Set<string>) => {
+    const normalized = normalizeDomainFilter(rawValue).toLowerCase();
+    if (normalized && isAsciiOnly(normalized)) target.add(normalized);
+  };
+
+  const domains = new Set<string>();
+
+  if (matchTarget === 'host') {
+    if (matchMode === 'equals') addDomain(expression, domains);
+    else if (matchMode === 'wildcard' && expression.startsWith('*.') && expression.indexOf('*', 2) === -1) addDomain(expression.slice(2), domains);
+    return Array.from(domains);
+  }
+
+  const directUrlMatch = expression.match(/^https?:\/\/([^/*|^?#]+)(?:[/?#:]|$)/i);
+  if (directUrlMatch) {
+    addDomain(directUrlMatch[1], domains);
+    return Array.from(domains);
+  }
+
+  if (matchMode === 'wildcard') {
+    const wildcardUrlMatch = expression.match(/^https?:\/\/\*\.([^/*|^?#]+)(?:[/?#:]|$)/i);
+    if (wildcardUrlMatch) addDomain(wildcardUrlMatch[1], domains);
+  }
+
+  return Array.from(domains);
+}
+
+function buildMatchConditionParts(matchTarget: MatchTarget, matchMode: MatchMode, expression: string) {
+  const requestDomains = extractRequestDomains(matchTarget, matchMode, expression);
+  const urlFilter = matchTarget === 'url' && matchMode !== 'regex'
+    ? buildUrlFilter(matchMode, expression)
+    : '';
+
+  if (urlFilter) {
+    return {
+      urlFilter,
+      ...(requestDomains.length > 0 ? { requestDomains } : {}),
+    };
+  }
+
+  const regexFilter = matchTarget === 'host' ? buildHostRegex(matchMode, expression) : buildUrlRegex(matchMode, expression);
+  try { new RegExp(regexFilter); } catch { return null; }
+  return {
+    regexFilter,
+    ...(requestDomains.length > 0 ? { requestDomains } : {}),
+  };
 }
 
 function applyConditionFilters(conditionRule: chrome.declarativeNetRequest.RuleCondition, filter?: RedirectFilter) {
@@ -210,15 +313,15 @@ function toOneRule(condition: RedirectCondition, index: number): chrome.declarat
   if (id > REDIRECT_RULE_ID_MAX) return null;
   const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
   const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
-  const regexFilter = matchTarget === 'host' ? buildHostRegex(matchMode, expression) : buildUrlRegex(matchMode, expression);
-  try { new RegExp(regexFilter); } catch { return null; }
+  const matchConditionParts = buildMatchConditionParts(matchTarget, matchMode, expression);
+  if (!matchConditionParts) return null;
 
   const action: chrome.declarativeNetRequest.RuleAction = {
     type: 'redirect',
     redirect: matchMode === 'regex' ? { regexSubstitution: normalizeRegexSubstitution(redirectTarget) } : { url: redirectTarget },
   };
 
-  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { ...matchConditionParts, resourceTypes: ALL_RESOURCE_TYPES };
   applyConditionFilters(conditionRule, condition.filter);
 
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
@@ -275,6 +378,7 @@ function toRewriteRule(condition: RedirectCondition, index: number): chrome.decl
     ? buildRewriteHostRegex(matchMode, expression, rewriteFrom)
     : buildRewriteUrlRegex(matchMode, expression, rewriteFrom);
   try { new RegExp(regexFilter); } catch { return null; }
+  const requestDomains = extractRequestDomains(matchTarget, matchMode, expression);
 
   // In Chrome DNR regexSubstitution, only \ needs escaping; \N refers to capture groups.
   // rewrite_string regexFilter variants all capture before/after rewriteFrom in group 1/2.
@@ -285,7 +389,11 @@ function toRewriteRule(condition: RedirectCondition, index: number): chrome.decl
     redirect: { regexSubstitution },
   };
 
-  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = {
+    regexFilter,
+    resourceTypes: ALL_RESOURCE_TYPES,
+    ...(requestDomains.length > 0 ? { requestDomains } : {}),
+  };
   applyConditionFilters(conditionRule, condition.filter);
 
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
@@ -299,8 +407,8 @@ function toQueryParamsRule(condition: RedirectCondition, index: number): chrome.
 
   const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
   const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
-  const regexFilter = matchTarget === 'host' ? buildHostRegex(matchMode, expression) : buildUrlRegex(matchMode, expression);
-  try { new RegExp(regexFilter); } catch { return null; }
+  const matchConditionParts = buildMatchConditionParts(matchTarget, matchMode, expression);
+  if (!matchConditionParts) return null;
 
   const modifications = Array.isArray(condition.queryParamModifications) ? condition.queryParamModifications : [];
   const addOrReplaceParams = modifications
@@ -327,7 +435,7 @@ function toQueryParamsRule(condition: RedirectCondition, index: number): chrome.
     },
   };
 
-  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { ...matchConditionParts, resourceTypes: ALL_RESOURCE_TYPES };
   applyConditionFilters(conditionRule, condition.filter);
 
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
@@ -343,8 +451,8 @@ function toUserAgentRule(condition: RedirectCondition, index: number): chrome.de
 
   const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
   const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
-  const regexFilter = matchTarget === 'host' ? buildHostRegex(matchMode, expression) : buildUrlRegex(matchMode, expression);
-  try { new RegExp(regexFilter); } catch { return null; }
+  const matchConditionParts = buildMatchConditionParts(matchTarget, matchMode, expression);
+  if (!matchConditionParts) return null;
 
   const uaType = condition.userAgentType === 'browser' || condition.userAgentType === 'custom' ? condition.userAgentType : 'device';
   const userAgentValue = uaType === 'custom'
@@ -361,7 +469,10 @@ function toUserAgentRule(condition: RedirectCondition, index: number): chrome.de
     }],
   };
 
-  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other'] };
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = {
+    ...matchConditionParts,
+    resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other'],
+  };
   applyConditionFilters(conditionRule, condition.filter);
 
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
@@ -375,8 +486,8 @@ function toModifyHeadersRule(condition: RedirectCondition, index: number): chrom
 
   const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
   const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
-  const regexFilter = matchTarget === 'host' ? buildHostRegex(matchMode, expression) : buildUrlRegex(matchMode, expression);
-  try { new RegExp(regexFilter); } catch { return null; }
+  const matchConditionParts = buildMatchConditionParts(matchTarget, matchMode, expression);
+  if (!matchConditionParts) return null;
 
   const mapHeaders = (
     modifications: RedirectCondition['requestHeaderModifications'],
@@ -405,7 +516,7 @@ function toModifyHeadersRule(condition: RedirectCondition, index: number): chrom
     ...(responseHeaders.length ? { responseHeaders } : {}),
   };
 
-  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { ...matchConditionParts, resourceTypes: ALL_RESOURCE_TYPES };
   applyConditionFilters(conditionRule, condition.filter);
 
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
@@ -420,14 +531,14 @@ function toCancelRequestRule(condition: RedirectCondition, index: number): chrom
 
   const matchTarget: MatchTarget = condition.matchTarget === 'host' ? 'host' : 'url';
   const matchMode: MatchMode = ['equals', 'contains', 'regex', 'wildcard'].includes(condition.matchMode ?? '') ? (condition.matchMode as MatchMode) : 'regex';
-  const regexFilter = matchTarget === 'host' ? buildHostRegex(matchMode, expression) : buildUrlRegex(matchMode, expression);
-  try { new RegExp(regexFilter); } catch { return null; }
+  const matchConditionParts = buildMatchConditionParts(matchTarget, matchMode, expression);
+  if (!matchConditionParts) return null;
 
   const action: chrome.declarativeNetRequest.RuleAction = {
     type: 'block',
   };
 
-  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { regexFilter, resourceTypes: ALL_RESOURCE_TYPES };
+  const conditionRule: chrome.declarativeNetRequest.RuleCondition = { ...matchConditionParts, resourceTypes: ALL_RESOURCE_TYPES };
   applyConditionFilters(conditionRule, condition.filter);
 
   return { id, priority: REDIRECT_RULE_ID_MAX - index, action, condition: conditionRule };
@@ -440,40 +551,66 @@ const normalizeNumericId = (value: unknown) => {
   return null;
 };
 
-function queuePendingHit(tabId: number, ruleId: number) {
-  let set = pendingHitRuleIdsByTab.get(tabId);
-  if (!set) {
-    set = new Set<number>();
-    pendingHitRuleIdsByTab.set(tabId, set);
-  }
-  set.add(ruleId);
+function getUiHitKey(hit: TabUiHitEntry) {
+  return `${hit.ruleType}::${hit.ruleId || hit.ruleName}`;
 }
 
-function notifyMatchedRule(tabId: number, ruleId: number, url?: string, allowQueue = true): Promise<boolean> {
-  const meta = managedRuleMeta.get(ruleId);
-  if (!meta || !meta.ruleName.trim()) return Promise.resolve(false);
-  recordTabHit(tabId, meta.ruleName, meta.ruleType, typeof url === 'string' ? url : '');
-  return new Promise<boolean>((resolve) => {
-    chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit', payload: { ...meta, url: typeof url === 'string' ? url : '' } }, () => {
-      if (chrome.runtime.lastError) {
-        if (allowQueue) queuePendingHit(tabId, ruleId);
-        resolve(false);
-        return;
-      }
-      resolve(true);
-    });
+function scheduleUiHitsFlush(tabId: number, delay = UI_HIT_BATCH_MS) {
+  if (!contentReadyTabs.has(tabId) || uiHitFlushTimersByTab.has(tabId)) return;
+  const timer = setTimeout(() => {
+    uiHitFlushTimersByTab.delete(tabId);
+    flushUiHitsForTab(tabId);
+  }, delay);
+  uiHitFlushTimersByTab.set(tabId, timer);
+}
+
+function queueUiHit(tabId: number, hit: TabUiHitEntry) {
+  let pending = pendingUiHitsByTab.get(tabId);
+  if (!pending) {
+    pending = new Map<string, TabUiHitEntry>();
+    pendingUiHitsByTab.set(tabId, pending);
+  }
+  pending.set(getUiHitKey(hit), hit);
+  if (pending.size > MAX_PENDING_UI_HITS) {
+    const oldestKey = pending.keys().next().value;
+    if (oldestKey) pending.delete(oldestKey);
+  }
+  scheduleUiHitsFlush(tabId);
+}
+
+function flushUiHitsForTab(tabId: number) {
+  if (!contentReadyTabs.has(tabId)) return;
+  const pending = pendingUiHitsByTab.get(tabId);
+  if (!pending || !pending.size) return;
+  const entries = Array.from(pending.entries());
+  const hits = entries.map(([, hit]) => hit);
+  chrome.tabs.sendMessage(tabId, { type: 'requestman:rule-hit-batch', payload: { hits } }, () => {
+    if (chrome.runtime.lastError) {
+      contentReadyTabs.delete(tabId);
+      return;
+    }
+    const currentPending = pendingUiHitsByTab.get(tabId);
+    if (!currentPending) return;
+    for (const [key] of entries) currentPending.delete(key);
+    if (!currentPending.size) {
+      pendingUiHitsByTab.delete(tabId);
+      return;
+    }
+    scheduleUiHitsFlush(tabId);
   });
 }
 
-async function flushPendingHitsForTab(tabId: number) {
-  const pending = pendingHitRuleIdsByTab.get(tabId);
-  if (!pending || !pending.size) return;
-  const list = Array.from(pending);
-  for (const ruleId of list) {
-    const delivered = await notifyMatchedRule(tabId, ruleId, undefined, false);
-    if (delivered) pending.delete(ruleId);
-  }
-  if (!pending.size) pendingHitRuleIdsByTab.delete(tabId);
+function notifyMatchedRule(tabId: number, ruleId: number, url?: string) {
+  const meta = managedRuleMeta.get(ruleId);
+  if (!meta || !meta.ruleName.trim()) return;
+  const matchedUrl = typeof url === 'string' ? url : '';
+  recordTabHit(tabId, meta.ruleName, meta.ruleType, matchedUrl, `dnr::${ruleId}`);
+  queueUiHit(tabId, {
+    ruleId: String(ruleId),
+    ruleName: meta.ruleName,
+    ruleType: meta.ruleType,
+    url: matchedUrl,
+  });
 }
 
 async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: RedirectRule[]; enabled?: boolean; }) {
@@ -557,7 +694,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'requestman:content-ready') {
     const tabId = normalizeNumericId(sender?.tab?.id);
-    if (tabId !== null && tabId >= 0) void flushPendingHitsForTab(tabId);
+    if (tabId !== null && tabId >= 0) {
+      contentReadyTabs.add(tabId);
+      flushUiHitsForTab(tabId);
+    }
     sendResponse({ ok: true });
     return;
   }
@@ -566,11 +706,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ hits: tabId !== null ? (tabHitsMap.get(tabId) ?? []) : [] });
     return;
   }
-  if (message?.type === 'requestman:add-injected-hit') {
+  if (message?.type === 'requestman:add-injected-hit' || message?.type === 'requestman:add-injected-hits') {
     const tabId = normalizeNumericId(sender?.tab?.id);
     if (tabId !== null && tabId >= 0) {
-      const p = message.payload || {};
-      recordTabHit(tabId, typeof p.ruleName === 'string' ? p.ruleName : '', typeof p.ruleType === 'string' ? p.ruleType : 'redirect_request', typeof p.url === 'string' ? p.url : '');
+      const payloadHits = Array.isArray(message?.payload?.hits)
+        ? message.payload.hits
+        : [message.payload || {}];
+      for (const hit of payloadHits) {
+        recordTabHit(
+          tabId,
+          typeof hit?.ruleName === 'string' ? hit.ruleName : '',
+          typeof hit?.ruleType === 'string' ? hit.ruleType : 'redirect_request',
+          typeof hit?.url === 'string' ? hit.url : '',
+          `injected::${typeof hit?.ruleId === 'string' && hit.ruleId ? hit.ruleId : typeof hit?.ruleName === 'string' ? hit.ruleName : ''}`,
+        );
+      }
     }
     sendResponse({ ok: true });
     return;

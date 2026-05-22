@@ -163,8 +163,13 @@
   let hitListNode = null;
   let hideToastTimer = null;
   let hideAnimationTimer = null;
+  let pendingRenderTimer = null;
+  let pendingForwardTimer = null;
   let hitToastEnabled = true;
   const renderedRuleKeys = new Set();
+  const pendingRenderHits = new Map();
+  const pendingForwardHits = new Map();
+  const HIT_BATCH_MS = 120;
 
   function createRuleTypeIcon(ruleType) {
     const iconDef = RULE_TYPE_ICON_DEFS[ruleType] || RULE_TYPE_ICON_DEFS.redirect_request;
@@ -396,6 +401,67 @@
     }, TOAST_VISIBLE_MS);
   }
 
+  function normalizeHitRecord(record) {
+    const ruleName = typeof record?.ruleName === 'string' ? record.ruleName.trim() : '';
+    if (!ruleName) return null;
+    return {
+      ruleId: typeof record?.ruleId === 'string' ? record.ruleId.trim() : '',
+      ruleName,
+      ruleType: typeof record?.ruleType === 'string' && record.ruleType ? record.ruleType : 'redirect_request',
+      url: typeof record?.url === 'string' ? record.url : '',
+    };
+  }
+
+  function getHitRecordKey(record) {
+    return `${record.ruleType}::${record.ruleId || record.ruleName}`;
+  }
+
+  function flushRenderedHits() {
+    pendingRenderTimer = null;
+    if (!pendingRenderHits.size) return;
+    const records = Array.from(pendingRenderHits.values());
+    pendingRenderHits.clear();
+    for (const record of records) renderHitRecord(record);
+  }
+
+  function queueRenderedHits(records) {
+    if (!hitToastEnabled) return;
+    for (const record of records) {
+      const normalized = normalizeHitRecord(record);
+      if (!normalized) continue;
+      pendingRenderHits.set(getHitRecordKey(normalized), normalized);
+    }
+    if (!pendingRenderHits.size || pendingRenderTimer) return;
+    pendingRenderTimer = setTimeout(() => {
+      flushRenderedHits();
+    }, HIT_BATCH_MS);
+  }
+
+  function flushForwardedHits() {
+    pendingForwardTimer = null;
+    if (!pendingForwardHits.size) return;
+    const hits = Array.from(pendingForwardHits.values());
+    pendingForwardHits.clear();
+    chrome.runtime.sendMessage({
+      type: 'requestman:add-injected-hits',
+      payload: { hits },
+    }, () => {
+      void chrome.runtime.lastError;
+    });
+  }
+
+  function queueForwardedHits(records) {
+    for (const record of records) {
+      const normalized = normalizeHitRecord(record);
+      if (!normalized) continue;
+      pendingForwardHits.set(getHitRecordKey(normalized), normalized);
+    }
+    if (!pendingForwardHits.size || pendingForwardTimer) return;
+    pendingForwardTimer = setTimeout(() => {
+      flushForwardedHits();
+    }, HIT_BATCH_MS);
+  }
+
   function notifyContentReady() {
     chrome.runtime.sendMessage({ type: 'requestman:content-ready' }, () => {
       void chrome.runtime.lastError;
@@ -417,22 +483,6 @@
   function toRuleTypeLabel(ruleType) {
     if (typeof ruleType !== 'string') return t('重定向请求', 'Redirect Request');
     return RULE_TYPE_LABEL_MAP[ruleType] || ruleType;
-  }
-
-  function logRuleHit(record) {
-    const ruleType = typeof record?.ruleType === 'string' ? record.ruleType : 'redirect_request';
-    const ruleTypeLabel = toRuleTypeLabel(ruleType);
-    const ruleName = typeof record?.ruleName === 'string' ? record.ruleName.trim() : '';
-    const matchedUrl = typeof record?.url === 'string' ? record.url : '';
-    if (!ruleName) return;
-    const title = `[🔀 REQUESTMAN] 🧭 Rule HIT >> ${ruleTypeLabel} / ${ruleName} <<`;
-    if (typeof console.groupCollapsed === 'function' && typeof console.groupEnd === 'function') {
-      console.groupCollapsed(title);
-      console.log({ rule: ruleTypeLabel, ruleName, matchedUrl });
-      console.groupEnd();
-      return;
-    }
-    console.log(title, { rule: ruleTypeLabel, ruleName, matchedUrl });
   }
 
   function isGroupEnabled(groupEnabled, groupId) {
@@ -577,6 +627,11 @@
   function updateHitToastEnabled(value) {
     hitToastEnabled = value !== false;
     if (!hitToastEnabled) {
+      pendingRenderHits.clear();
+      if (pendingRenderTimer) {
+        clearTimeout(pendingRenderTimer);
+        pendingRenderTimer = null;
+      }
       hideHitToast();
     }
   }
@@ -596,33 +651,30 @@
     broadcastRules();
   });
 
-  function forwardInjectedHit(record) {
-    const ruleName = typeof record.ruleName === 'string' ? record.ruleName.trim() : '';
-    if (!ruleName) return;
-    chrome.runtime.sendMessage({
-      type: 'requestman:add-injected-hit',
-      payload: { ruleName, ruleType: typeof record.ruleType === 'string' ? record.ruleType : 'redirect_request', url: typeof record.url === 'string' ? record.url : '' },
-    }, () => { void chrome.runtime.lastError; });
-  }
-
   window.addEventListener('message', (event) => {
     const data = event.data;
     if (!data || data.source !== 'requestman-extension' || data.type !== HIT_MESSAGE_TYPE) return;
-    const payload = data.payload || {};
-    logRuleHit(payload);
-    renderHitRecord(payload);
-    forwardInjectedHit(payload);
+    const hits = Array.isArray(data.hits)
+      ? data.hits
+      : data.payload
+        ? [data.payload]
+        : [];
+    queueRenderedHits(hits);
+    queueForwardedHits(hits);
   });
 
   chrome.runtime.onMessage.addListener((message) => {
-    if (!message || message.type !== 'requestman:rule-hit') return;
-    logRuleHit(message.payload || {});
-    renderHitRecord(message.payload || {});
+    if (!message || (message.type !== 'requestman:rule-hit' && message.type !== 'requestman:rule-hit-batch')) return;
+    const hits = Array.isArray(message?.payload?.hits)
+      ? message.payload.hits
+      : message.payload
+        ? [message.payload]
+        : [];
+    queueRenderedHits(hits);
   });
 
   broadcastRules();
   hydrateHitToastEnabled();
-  ensureHitToast();
   notifyContentReady();
   window.addEventListener('pageshow', () => {
     notifyContentReady();

@@ -11,6 +11,13 @@
   let delayRules = [];
   let modifyRequestBodyRules = [];
   let modifyResponseBodyRules = [];
+  let pendingHitFlushTimer = null;
+  const pendingHitReports = new Map();
+  const reportedHitKeys = new Set();
+  const HIT_BATCH_MS = 120;
+  const VALID_MATCH_MODES = new Set(['equals', 'contains', 'regex', 'wildcard']);
+  const VALID_RESOURCE_TYPES = new Set(['main_frame', 'sub_frame', 'xmlhttprequest', 'script', 'image', 'font', 'media', 'stylesheet', 'object', 'ping', 'other', 'websocket', 'webtransport', 'csp_report']);
+  const VALID_REQUEST_METHODS = new Set(['connect', 'delete', 'get', 'head', 'options', 'patch', 'post', 'put']);
 
   const nativeFetch = window.fetch;
   const nativeXhrOpen = window.XMLHttpRequest && window.XMLHttpRequest.prototype.open;
@@ -29,45 +36,87 @@
     }
   }
 
+  function normalizeDomainFilter(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    try {
+      return new URL(withProtocol).hostname.toLowerCase();
+    } catch {
+      return raw.replace(/^https?:\/\//i, '').split('/')[0].split(':')[0].trim().toLowerCase();
+    }
+  }
+
+  function normalizeMatchTarget(rule) {
+    return rule?.matchTarget === 'host' ? 'host' : 'url';
+  }
+
+  function normalizeMatchMode(rule) {
+    return VALID_MATCH_MODES.has(rule?.matchMode) ? rule.matchMode : 'regex';
+  }
+
+  function getRuleTargetValue(normalizedUrl, matchTarget) {
+    if (matchTarget !== 'host') return normalizedUrl;
+    try {
+      return new URL(normalizedUrl).hostname;
+    } catch {
+      return '';
+    }
+  }
+
   function matchesRule(url, rule) {
-    const expression = typeof rule.expression === 'string' ? rule.expression : '';
+    const expression = typeof rule.expression === 'string' ? rule.expression.trim() : '';
     if (!expression) return false;
 
     const normalizedUrl = toAbsoluteUrl(url);
-
-    const targetValue = rule.matchTarget === 'host'
-      ? (() => {
-          try {
-            return new URL(normalizedUrl).host;
-          } catch {
-            return '';
-          }
-        })()
-      : normalizedUrl;
+    const matchTarget = normalizeMatchTarget(rule);
+    const matchMode = normalizeMatchMode(rule);
+    const targetValue = getRuleTargetValue(normalizedUrl, matchTarget);
 
     if (!targetValue) return false;
 
     try {
-      if (rule.matchMode === 'equals') return targetValue === expression;
-      if (rule.matchMode === 'contains') return targetValue.includes(expression);
-      if (rule.matchMode === 'wildcard') return new RegExp(`^${wildcardToRegExpBody(expression)}$`).test(targetValue);
+      if (matchMode === 'equals') return targetValue === expression;
+      if (matchMode === 'contains') return targetValue.includes(expression);
+      if (matchMode === 'wildcard') return new RegExp(`^${wildcardToRegExpBody(expression)}$`).test(targetValue);
       return new RegExp(expression).test(targetValue);
     } catch {
       return false;
     }
   }
 
+  function collectFilterValues(values, validator) {
+    const normalized = [];
+    if (Array.isArray(values) && values.length > 0) {
+      for (const value of values) {
+        const nextValue = typeof value === 'string' ? value.trim().toLowerCase() : '';
+        if (nextValue && nextValue !== 'all' && validator.has(nextValue)) normalized.push(nextValue);
+      }
+    }
+    return normalized;
+  }
+
   function matchFilter(method, resourceType, filter) {
     const normalizedMethod = String(method || 'GET').toLowerCase();
     const normalizedResourceType = String(resourceType || 'xmlhttprequest').toLowerCase();
-    const pageDomain = typeof filter?.pageDomain === 'string' ? filter.pageDomain.trim().toLowerCase() : '';
+    const pageDomain = typeof filter?.pageDomain === 'string' ? normalizeDomainFilter(filter.pageDomain) : '';
     if (pageDomain && pageDomain !== window.location.hostname.toLowerCase()) return false;
 
-    const filterMethod = typeof filter?.requestMethod === 'string' ? filter.requestMethod.trim().toLowerCase() : '';
-    if (filterMethod && filterMethod !== 'all' && filterMethod !== normalizedMethod) return false;
+    const requestMethods = collectFilterValues(filter?.requestMethods, VALID_REQUEST_METHODS);
+    if (requestMethods.length === 0) {
+      const legacyMethod = typeof filter?.requestMethod === 'string' ? filter.requestMethod.trim().toLowerCase() : '';
+      if (legacyMethod && legacyMethod !== 'all' && VALID_REQUEST_METHODS.has(legacyMethod) && legacyMethod !== normalizedMethod) return false;
+    } else if (!requestMethods.includes(normalizedMethod)) {
+      return false;
+    }
 
-    const filterResourceType = typeof filter?.resourceType === 'string' ? filter.resourceType.trim().toLowerCase() : '';
-    if (filterResourceType && filterResourceType !== 'all' && filterResourceType !== normalizedResourceType) return false;
+    const resourceTypes = collectFilterValues(filter?.resourceTypes, VALID_RESOURCE_TYPES);
+    if (resourceTypes.length === 0) {
+      const legacyResourceType = typeof filter?.resourceType === 'string' ? filter.resourceType.trim().toLowerCase() : '';
+      if (legacyResourceType && legacyResourceType !== 'all' && VALID_RESOURCE_TYPES.has(legacyResourceType) && legacyResourceType !== normalizedResourceType) return false;
+    } else if (!resourceTypes.includes(normalizedResourceType)) {
+      return false;
+    }
 
     return true;
   }
@@ -116,17 +165,33 @@
   }
 
   function matchHeaderFilter(filter, headersLike) {
-    const requestHeaderKey = typeof filter?.requestHeaderKey === 'string' ? filter.requestHeaderKey.trim().toLowerCase() : '';
-    const requestHeaderValue = typeof filter?.requestHeaderValue === 'string' ? filter.requestHeaderValue : '';
-    if (!requestHeaderKey || !requestHeaderValue) return true;
+    const headerEntries = Array.isArray(filter?.requestHeaderFilters) && filter.requestHeaderFilters.length > 0
+      ? filter.requestHeaderFilters
+        .map((entry) => ({
+          key: typeof entry?.key === 'string' ? entry.key.trim().toLowerCase() : '',
+          operator: entry?.operator === 'contains' || entry?.operator === 'not_equals' ? entry.operator : 'equals',
+          value: typeof entry?.value === 'string' ? entry.value.trim() : '',
+        }))
+        .filter((entry) => entry.key && entry.value)
+      : (() => {
+          const key = typeof filter?.requestHeaderKey === 'string' ? filter.requestHeaderKey.trim().toLowerCase() : '';
+          const value = typeof filter?.requestHeaderValue === 'string' ? filter.requestHeaderValue.trim() : '';
+          if (!key || !value) return [];
+          return [{
+            key,
+            operator: filter?.requestHeaderOperator === 'contains' || filter?.requestHeaderOperator === 'not_equals' ? filter.requestHeaderOperator : 'equals',
+            value,
+          }];
+        })();
+    if (!headerEntries.length) return true;
 
-    const requestHeaderOperator = filter?.requestHeaderOperator;
     const headers = normalizeHeaderMap(headersLike);
-    const actualValue = headers.get(requestHeaderKey) || '';
-
-    if (requestHeaderOperator === 'contains') return actualValue.includes(requestHeaderValue);
-    if (requestHeaderOperator === 'not_equals') return actualValue !== requestHeaderValue;
-    return actualValue === requestHeaderValue;
+    return headerEntries.every(({ key, operator, value }) => {
+      const actualValue = headers.get(key) || '';
+      if (operator === 'contains') return actualValue.includes(value);
+      if (operator === 'not_equals') return actualValue !== value;
+      return actualValue === value;
+    });
   }
 
   function shouldApplyRule(url, method, resourceType, headers, rule) {
@@ -136,25 +201,46 @@
     return true;
   }
 
-  function reportRuleHit(rule) {
-    const ruleName = typeof rule?.ruleName === 'string' ? rule.ruleName.trim() : '';
-    if (!ruleName) return;
+  function getHitKey(hit) {
+    return `${hit.ruleType}::${hit.ruleId || hit.ruleName}`;
+  }
+
+  function flushReportedHits() {
+    pendingHitFlushTimer = null;
+    if (!pendingHitReports.size) return;
+    const hits = Array.from(pendingHitReports.values());
+    pendingHitReports.clear();
     window.postMessage({
       source: SOURCE,
       type: HIT_MESSAGE_TYPE,
-      payload: {
-        ruleId: typeof rule?.ruleId === 'string' ? rule.ruleId : '',
-        ruleName: typeof rule?.ruleName === 'string' ? rule.ruleName : '',
-        ruleType: typeof rule?.ruleType === 'string' ? rule.ruleType : 'redirect_request',
-      },
+      hits,
     }, '*');
+  }
+
+  function reportRuleHit(rule, url) {
+    const ruleName = typeof rule?.ruleName === 'string' ? rule.ruleName.trim() : '';
+    if (!ruleName) return;
+    const hit = {
+      ruleId: typeof rule?.ruleId === 'string' ? rule.ruleId : '',
+      ruleName,
+      ruleType: typeof rule?.ruleType === 'string' ? rule.ruleType : 'redirect_request',
+      url: typeof url === 'string' ? url : '',
+    };
+    const hitKey = getHitKey(hit);
+    if (reportedHitKeys.has(hitKey)) return;
+    reportedHitKeys.add(hitKey);
+    pendingHitReports.set(hitKey, hit);
+    if (pendingHitFlushTimer) return;
+    pendingHitFlushTimer = setTimeout(() => {
+      flushReportedHits();
+    }, HIT_BATCH_MS);
   }
 
   function getDelayMs(url, method, resourceType, headers) {
     let maxDelayMs = 0;
     for (const rule of delayRules) {
       if (!shouldApplyRule(url, method, resourceType, headers, rule)) continue;
-      reportRuleHit(rule);
+      reportRuleHit(rule, url);
       const delayMs = Number.isFinite(rule.delayMs) ? Math.max(0, Math.floor(rule.delayMs)) : 0;
       if (delayMs > maxDelayMs) maxDelayMs = delayMs;
     }
@@ -207,7 +293,7 @@
 
     for (const rule of modifyRequestBodyRules) {
       if (!shouldApplyRule(url, method, resourceType, headers, rule)) continue;
-      reportRuleHit(rule);
+      reportRuleHit(rule, url);
 
       if (rule.requestBodyMode === 'dynamic') {
         nextBody = runDynamicBodyScript(rule.requestBodyValue, {
@@ -227,7 +313,7 @@
   function hasMatchedResponseRule(url, method, resourceType, headers) {
     for (const rule of modifyResponseBodyRules) {
       if (!shouldApplyRule(url, method, resourceType, headers, rule)) continue;
-      reportRuleHit(rule);
+      reportRuleHit(rule, url);
       return true;
     }
     return false;
