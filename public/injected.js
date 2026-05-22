@@ -256,6 +256,34 @@
     }
   }
 
+  async function readBodyAsText(bodyLike) {
+    if (bodyLike == null) return '';
+    if (typeof bodyLike === 'string') return bodyLike;
+    if (typeof URLSearchParams !== 'undefined' && bodyLike instanceof URLSearchParams) return bodyLike.toString();
+    if (typeof Blob !== 'undefined' && bodyLike instanceof Blob) {
+      try {
+        return await bodyLike.text();
+      } catch {
+        return '';
+      }
+    }
+    if (typeof ArrayBuffer !== 'undefined' && bodyLike instanceof ArrayBuffer) {
+      try {
+        return new TextDecoder().decode(new Uint8Array(bodyLike));
+      } catch {
+        return '';
+      }
+    }
+    if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(bodyLike)) {
+      try {
+        return new TextDecoder().decode(new Uint8Array(bodyLike.buffer, bodyLike.byteOffset, bodyLike.byteLength));
+      } catch {
+        return '';
+      }
+    }
+    return '';
+  }
+
   function normalizeBodyResult(result, fallbackBody) {
     if (result === undefined) return fallbackBody;
     if (result === null) return '';
@@ -386,21 +414,21 @@
       const delayMs = getDelayMs(url, method, 'xmlhttprequest', requestHeaders);
       if (delayMs > 0) await wait(delayMs);
 
-      let body = null;
-      if (typeof init?.body === 'string') {
-        body = init.body;
-      } else if (typeof Request !== 'undefined' && input instanceof Request && !init?.body) {
+      let body = await readBodyAsText(init?.body);
+      if (!body && typeof Request !== 'undefined' && input instanceof Request && !init?.body) {
         body = await input.clone().text();
       }
 
       let nextInput = input;
       let nextInit = init;
-      if (typeof body === 'string') {
+      let sentBody = body;
+      if (typeof body === 'string' && body) {
         const nextBody = resolveRequestBody(url, method, 'xmlhttprequest', requestHeaders, body);
         const nextBodyValue = toBodyValue(nextBody);
         if (nextBodyValue !== body) {
           nextInit = { ...(init || {}), body: nextBodyValue, method };
         }
+        sentBody = nextBodyValue;
       }
 
       const response = await nativeFetch.call(this, nextInput, nextInit);
@@ -410,7 +438,7 @@
         const originalBody = await response.clone().text();
         const nextBody = toBodyValue(resolveResponseBody(url, method, 'xmlhttprequest', requestHeaders, {
           headers: requestHeaders,
-          body,
+          body: sentBody,
         }, {
           status: response.status,
           statusText: response.statusText,
