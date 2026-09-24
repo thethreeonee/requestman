@@ -57,7 +57,9 @@ export default function RequestmanPanel() {
   const [page, setPage] = useState<PageState>({ type: 'list' });
   const [workingRule, setWorkingRule] = useState<RedirectRule | null>(null);
   const [originalRule, setOriginalRule] = useState<RedirectRule | null>(null);
-  const hasInitializedStorageSync = useRef(false);
+  const persistedConfig = useRef<Record<string, string>>({});
+  const originalRuleRef = useRef(originalRule);
+  originalRuleRef.current = originalRule;
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [themeMode, setThemeMode] = useState<'light' | 'dark'>('light');
   const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>('light');
@@ -66,24 +68,85 @@ export default function RequestmanPanel() {
   const [deleteGroupId, setDeleteGroupId] = useState<string | null>(null);
 
   useEffect(() => {
-    chrome.storage.local.get([REDIRECT_RULES_KEY, REDIRECT_ENABLED_KEY, REDIRECT_GROUPS_KEY], (res) => {
-      const normalizedGroups = normalizeGroups(res?.[REDIRECT_GROUPS_KEY]);
-      const groupIds = new Set(normalizedGroups.map((g) => g.id));
+    const keys = [REDIRECT_RULES_KEY, REDIRECT_ENABLED_KEY, REDIRECT_GROUPS_KEY];
+    let hydrated = false;
+    let hydrationRevision = 0;
+    let disposed = false;
+    const applyStored = (res: Record<string, unknown>) => {
+      const normalizedGroups = normalizeGroups(res[REDIRECT_GROUPS_KEY]);
+      const normalizedRules = normalizeRules(res[REDIRECT_RULES_KEY], new Set(normalizedGroups.map((g) => g.id)), normalizedGroups[0]?.id ?? DEFAULT_GROUP_ID);
+      const enabled = res[REDIRECT_ENABLED_KEY] !== false;
+      persistedConfig.current = {
+        [REDIRECT_GROUPS_KEY]: JSON.stringify(normalizedGroups),
+        [REDIRECT_RULES_KEY]: JSON.stringify(normalizedRules),
+        [REDIRECT_ENABLED_KEY]: JSON.stringify(enabled),
+      };
       setGroups(normalizedGroups);
-      setRules(normalizeRules(res?.[REDIRECT_RULES_KEY], groupIds, normalizedGroups[0]?.id ?? DEFAULT_GROUP_ID));
-      setRedirectEnabled(res?.[REDIRECT_ENABLED_KEY] !== false);
+      setRules(normalizedRules);
+      setRedirectEnabled(enabled);
       setRulesLoaded(true);
-    });
+    };
+    const hydrate = () => {
+      const revision = ++hydrationRevision;
+      chrome.storage.local.get(keys, (res) => {
+        if (disposed || revision !== hydrationRevision) return;
+        applyStored(res);
+        hydrated = true;
+      });
+    };
+    const onChanged = (changes: Record<string, { newValue?: unknown }>, area: string) => {
+      if (area !== 'local' || !keys.some((key) => key in changes)) return;
+      if (!hydrated) { hydrate(); return; }
+      if (REDIRECT_ENABLED_KEY in changes) {
+        const enabled = changes[REDIRECT_ENABLED_KEY].newValue !== false;
+        persistedConfig.current[REDIRECT_ENABLED_KEY] = JSON.stringify(enabled);
+        setRedirectEnabled(enabled);
+      }
+      if (REDIRECT_GROUPS_KEY in changes) {
+        const nextGroups = normalizeGroups(changes[REDIRECT_GROUPS_KEY].newValue);
+        persistedConfig.current[REDIRECT_GROUPS_KEY] = JSON.stringify(nextGroups);
+        setGroups(nextGroups);
+      }
+      if (REDIRECT_RULES_KEY in changes) {
+        const storedGroups = JSON.parse(persistedConfig.current[REDIRECT_GROUPS_KEY] ?? '[]') as RedirectGroup[];
+        const nextRules = normalizeRules(changes[REDIRECT_RULES_KEY].newValue, new Set(storedGroups.map((g) => g.id)), storedGroups[0]?.id ?? DEFAULT_GROUP_ID);
+        persistedConfig.current[REDIRECT_RULES_KEY] = JSON.stringify(nextRules);
+        setRules(nextRules);
+        const baseline = originalRuleRef.current;
+        setWorkingRule((prev) => {
+          const next = nextRules.find((rule) => rule.id === prev?.id);
+          if (!prev || !next) return prev;
+          return JSON.stringify(prev) === JSON.stringify(baseline) ? next : { ...prev, enabled: next.enabled };
+        });
+        setOriginalRule((prev) => nextRules.find((rule) => rule.id === prev?.id) ?? prev);
+      }
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    hydrate();
+    return () => { disposed = true; chrome.storage.onChanged.removeListener(onChanged); };
   }, []);
 
   useEffect(() => {
     if (!rulesLoaded) return;
-    if (!hasInitializedStorageSync.current) {
-      hasInitializedStorageSync.current = true;
-      return;
+    const config = { [REDIRECT_GROUPS_KEY]: groups, [REDIRECT_RULES_KEY]: rules, [REDIRECT_ENABLED_KEY]: redirectEnabled };
+    const patch: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(config)) {
+      const serialized = JSON.stringify(value);
+      if (persistedConfig.current[key] === serialized) continue;
+      persistedConfig.current[key] = serialized;
+      patch[key] = value;
     }
-    chrome.storage.local.set({ [REDIRECT_GROUPS_KEY]: groups, [REDIRECT_RULES_KEY]: rules, [REDIRECT_ENABLED_KEY]: redirectEnabled });
-    chrome.runtime.sendMessage({ type: 'redirectRules/apply', groups, rules, enabled: redirectEnabled });
+    if (!Object.keys(patch).length) return;
+    chrome.storage.local.set(patch, () => {
+      if (chrome.runtime.lastError) {
+        notification.error(chrome.runtime.lastError.message || t('保存配置失败', 'Failed to save configuration.'));
+        return;
+      }
+      chrome.runtime.sendMessage({ type: 'redirectRules/apply' }, (result) => {
+        const error = chrome.runtime.lastError?.message || (result?.ok === false ? result.error : '');
+        if (error) notification.error(t('规则应用失败：', 'Failed to apply rules: ') + error);
+      });
+    });
   }, [groups, rules, redirectEnabled, rulesLoaded]);
 
   useEffect(() => {

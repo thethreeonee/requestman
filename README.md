@@ -214,7 +214,11 @@ Every rule supports fine-grained conditions so it only fires when you want it to
 | **Page domain** | Only apply the rule when requests come from a specific page |
 | **Resource type** | Limit to XHR, script, image, stylesheet, etc. |
 | **HTTP method** | GET, POST, PUT, DELETE, etc. |
-| **Request header** | Match on a header value (`equals` / `not_equals` / `contains`) |
+| **Request header** | Match on a header value (`equals` / `not_equals` / `contains`); all configured headers must match |
+
+Request-header filters run on page `fetch`/XHR requests using headers supplied by the page (including `Request.headers`). Header names are case-insensitive; values are case-sensitive. Missing headers are treated as empty values. The browser's DNR API cannot filter request headers, so header-filtered redirect, rewrite, query, cancel, and header-modification conditions use the injected engine. They do not apply to navigation, static assets, workers, or browser-added headers such as cookies. Browser restrictions on setting headers still apply. User-Agent rules cannot combine with request-header filters; applying that combination reports an error and does not install a broader rule.
+
+Switch and filter changes are synchronized across the panel and popup. Failed native-rule updates remove the previous rules and report an error in the panel. After updating/reloading the extension, refresh existing webpages so they load the current injected script.
 
 ---
 
@@ -253,6 +257,9 @@ npm run build
 # Build separately
 npm run build:chrome
 npm run build:firefox
+
+# Run request interception regression tests
+npm test
 
 # Check internal references
 npm run check:references

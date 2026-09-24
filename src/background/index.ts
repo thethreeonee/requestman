@@ -133,7 +133,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 function escapeRegex(value: string) { return value.replace(/[|\\{}()[\]^$+?.]/g, '\\$&'); }
 function wildcardToRegexBody(pattern: string) { return escapeRegex(pattern).replace(/\*/g, '.*'); }
-function escapeHeaderPattern(value: string) { return value.replace(/[?*\\]/g, '\\$&'); }
 function isAsciiOnly(value: string) { return /^[\x00-\x7F]*$/.test(value); }
 function hasUnsafeUrlFilterChars(value: string, allowWildcard = false) {
   const unsafePattern = allowWildcard ? /[|^]/ : /[*|^]/;
@@ -267,31 +266,22 @@ function applyConditionFilters(conditionRule: chrome.declarativeNetRequest.RuleC
     if (m && m !== 'all' && VALID_REQUEST_METHODS.has(m)) requestMethods.push(m as chrome.declarativeNetRequest.RequestMethod);
   }
   if (requestMethods.length > 0) conditionRule.requestMethods = requestMethods;
-
-  // requestHeaderFilters (new) with legacy fallback
-  const headerEntries: Array<{ key: string; operator: 'equals' | 'not_equals' | 'contains'; value: string }> = [];
-  if (Array.isArray(filter?.requestHeaderFilters) && filter.requestHeaderFilters.length > 0) {
-    for (const entry of filter.requestHeaderFilters) {
-      const key = typeof entry.key === 'string' ? entry.key.trim().toLowerCase() : '';
-      const value = typeof entry.value === 'string' ? entry.value.trim() : '';
-      if (key && value) headerEntries.push({ key, operator: entry.operator ?? 'equals', value });
-    }
-  } else {
-    const key = typeof filter?.requestHeaderKey === 'string' ? filter.requestHeaderKey.trim().toLowerCase() : '';
-    const value = typeof filter?.requestHeaderValue === 'string' ? filter.requestHeaderValue.trim() : '';
-    if (key && value) headerEntries.push({ key, operator: filter?.requestHeaderOperator ?? 'equals', value });
-  }
-  if (headerEntries.length > 0) {
-    conditionRule.requestHeaders = headerEntries.map(({ key, operator, value }) => ({
-      header: key,
-      ...(operator === 'contains'
-        ? { values: [`*${escapeHeaderPattern(value)}*`] }
-        : operator === 'not_equals'
-          ? { excludedValues: [escapeHeaderPattern(value)] }
-          : { values: [escapeHeaderPattern(value)] }),
-    }));
-  }
 }
+
+function hasRequestHeaderFilter(filter?: RedirectFilter) {
+  const entries = Array.isArray(filter?.requestHeaderFilters) && filter.requestHeaderFilters.length
+    ? filter.requestHeaderFilters
+    : [{ key: filter?.requestHeaderKey, value: filter?.requestHeaderValue }];
+  return entries.some((entry) => typeof entry?.key === 'string' && entry.key.trim() && typeof entry.value === 'string' && entry.value.trim());
+}
+
+// DNR has no request-header condition. These conditions run on page fetch/XHR
+// instead of installing a broader URL-only native rule.
+type NetworkRule = RedirectCondition & {
+  ruleId: string; ruleName: string; ruleType: string;
+  action: chrome.declarativeNetRequest.RuleAction; regexFilter?: string;
+};
+let activeNetworkRules: NetworkRule[] = [];
 
 function toOneRule(condition: RedirectCondition, index: number): chrome.declarativeNetRequest.Rule | null {
   const expression = typeof condition.expression === 'string' ? condition.expression.trim() : '';
@@ -621,7 +611,9 @@ async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: R
   for (const group of groups) if (typeof group?.id === 'string' && group.id) groupEnabled.set(group.id, group.enabled !== false);
 
   const nextRules: chrome.declarativeNetRequest.Rule[] = [];
-  managedRuleMeta.clear();
+  const nextNetworkRules: NetworkRule[] = [];
+  const errors: string[] = [];
+  const nextRuleMeta = new Map<number, { ruleName: string; ruleType: string }>();
   if (enabled) {
     let index = 0;
     for (const rule of rules) {
@@ -642,13 +634,25 @@ async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: R
                 ? toUserAgentRule(c, index)
                 : rule.type === 'cancel_request'
                   ? toCancelRequestRule(c, index)
-                  : rule.type === 'request_delay'
+                  : rule.type === 'request_delay' || rule.type === 'modify_request_body' || rule.type === 'modify_response_body'
                     ? null
                     : toOneRule(c, index);
         index += 1;
         if (dnr) {
+          if (hasRequestHeaderFilter(c.filter)) {
+            if (rule.type === 'user_agent') {
+              errors.push('User-Agent rules cannot filter by request headers.');
+              continue;
+            }
+            nextNetworkRules.push({
+              ...c,
+              ruleId: rule.id ?? '', ruleName: rule.name ?? '', ruleType: rule.type ?? 'redirect_request',
+              action: dnr.action, regexFilter: dnr.condition.regexFilter,
+            });
+            continue;
+          }
           nextRules.push(dnr);
-          managedRuleMeta.set(dnr.id, {
+          nextRuleMeta.set(dnr.id, {
             ruleName: typeof rule.name === 'string' ? rule.name : '',
             ruleType: typeof rule.type === 'string' ? rule.type : 'redirect_request',
           });
@@ -657,14 +661,34 @@ async function applyRedirectRules(payload: { groups?: RedirectGroup[]; rules?: R
     }
   }
 
-  await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: getManagedRuleIds(), addRules: nextRules });
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: getManagedRuleIds(), addRules: nextRules });
+  } catch (error) {
+    // A rejected atomic update leaves the previous rules installed. Remove them
+    // so a disabled rule or an outdated, broader condition cannot keep running.
+    await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: getManagedRuleIds() });
+    managedRuleMeta.clear();
+    activeNetworkRules = [];
+    ruleCachesReady = false;
+    throw error;
+  }
+  managedRuleMeta.clear();
+  for (const [id, meta] of nextRuleMeta) managedRuleMeta.set(id, meta);
+  activeNetworkRules = nextNetworkRules;
   ruleCachesReady = true;
-  return { ok: true, activeCount: nextRules.length };
+  return { ok: errors.length === 0, activeCount: nextRules.length + nextNetworkRules.length, ...(errors.length ? { error: errors.join(' ') } : {}) };
 }
 
-async function restoreRulesFromStorage() {
-  const stored = await chrome.storage.local.get([REDIRECT_GROUPS_KEY, REDIRECT_RULES_KEY, REDIRECT_ENABLED_KEY]);
-  await applyRedirectRules({ groups: stored?.[REDIRECT_GROUPS_KEY], rules: stored?.[REDIRECT_RULES_KEY], enabled: stored?.[REDIRECT_ENABLED_KEY] !== false });
+// Read storage inside the queue, never apply a stale panel message or an
+// out-of-order storage snapshot after a newer switch/filter change.
+let rulesUpdateQueue: Promise<unknown> = Promise.resolve();
+function restoreRulesFromStorage() {
+  const update = rulesUpdateQueue.then(async () => {
+    const stored = await chrome.storage.local.get([REDIRECT_GROUPS_KEY, REDIRECT_RULES_KEY, REDIRECT_ENABLED_KEY]);
+    return applyRedirectRules({ groups: stored?.[REDIRECT_GROUPS_KEY], rules: stored?.[REDIRECT_RULES_KEY], enabled: stored?.[REDIRECT_ENABLED_KEY] !== false });
+  });
+  rulesUpdateQueue = update.catch(() => {});
+  return update;
 }
 
 async function ensureRuleCachesReady() {
@@ -689,7 +713,7 @@ chrome.runtime.onInstalled.addListener(() => { void ensureRuleCachesReady(); });
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local') return;
   if (!(REDIRECT_ENABLED_KEY in changes) && !(REDIRECT_RULES_KEY in changes) && !(REDIRECT_GROUPS_KEY in changes)) return;
-  void restoreRulesFromStorage();
+  void restoreRulesFromStorage().catch((error) => console.error('Requestman: failed to apply rules', error));
 });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'requestman:content-ready') {
@@ -725,8 +749,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: true });
     return;
   }
+  if (message?.type === 'requestman:get-network-rules') {
+    restoreRulesFromStorage().then(() => sendResponse({ rules: activeNetworkRules })).catch(() => sendResponse({ rules: [] }));
+    return true;
+  }
   if (message?.type !== 'redirectRules/apply') return;
-  applyRedirectRules(message).then((result) => sendResponse(result)).catch((err: unknown) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+  restoreRulesFromStorage().then((result) => sendResponse(result)).catch((err: unknown) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }));
   return true;
 });
 

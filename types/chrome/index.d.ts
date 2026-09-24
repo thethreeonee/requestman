@@ -11,6 +11,11 @@ declare namespace chrome {
   }
 
   namespace storage {
+    type StorageChange = { oldValue?: any; newValue?: any };
+    const onChanged: {
+      addListener(callback: (changes: Record<string, StorageChange>, areaName: string) => void): void;
+      removeListener(callback: (changes: Record<string, StorageChange>, areaName: string) => void): void;
+    };
     namespace local {
       function get(keys: string[] | string): Promise<Record<string, any>>;
       function get(keys: string[] | string, callback: (items: Record<string, any>) => void): void;
@@ -20,6 +25,7 @@ declare namespace chrome {
   }
 
   namespace runtime {
+    const lastError: { message?: string } | undefined;
     const onStartup: { addListener(callback: () => void): void };
     const onInstalled: { addListener(callback: () => void): void };
     const onMessage: { addListener(callback: (message: any, sender: any, sendResponse: (response?: any) => void) => void): void };

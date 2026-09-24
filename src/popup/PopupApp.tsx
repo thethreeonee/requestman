@@ -100,6 +100,16 @@ export default function PopupApp() {
   }, []);
 
   useEffect(() => {
+    const onChanged = (changes: Record<string, { newValue?: unknown }>, area: string) => {
+      if (area !== 'local') return;
+      if (REDIRECT_ENABLED_KEY in changes) setRedirectEnabled(changes[REDIRECT_ENABLED_KEY].newValue !== false);
+      if (HIT_TOAST_ENABLED_KEY in changes) setHitToastEnabled(changes[HIT_TOAST_ENABLED_KEY].newValue !== false);
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
+  }, []);
+
+  useEffect(() => {
     if (tabId == null) return;
     function fetchHits() {
       chrome.runtime.sendMessage({ type: 'requestman:get-tab-hits', tabId }, (response) => {
