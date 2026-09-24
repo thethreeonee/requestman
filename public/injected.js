@@ -8,6 +8,7 @@
   const MESSAGE_TYPE = '__REQUESTMAN_RUNTIME_RULES__';
   const HIT_MESSAGE_TYPE = '__REQUESTMAN_RULE_HIT__';
   const SOURCE = 'requestman-extension';
+  let networkRules = [];
   let delayRules = [];
   let modifyRequestBodyRules = [];
   let modifyResponseBodyRules = [];
@@ -201,6 +202,64 @@
     return true;
   }
 
+  function applyHeaderActions(headers, modifications) {
+    for (const mod of modifications || []) {
+      if (mod.operation === 'remove') headers.delete(mod.header);
+      else if (mod.operation === 'append') headers.append(mod.header, mod.value ?? '');
+      else headers.set(mod.header, mod.value ?? '');
+    }
+  }
+
+  function resolveNetworkRequest(url, method, requestHeaders) {
+    const headers = new Headers(requestHeaders);
+    const responseRules = [];
+    let nextUrl = url;
+    let redirected = false;
+    let headersChanged = false;
+    for (const rule of networkRules) {
+      if (!shouldApplyRule(url, method, 'xmlhttprequest', requestHeaders, rule)) continue;
+      const action = rule.action;
+      if (action?.type === 'block' && !redirected) {
+        reportRuleHit(rule, url);
+        return { blocked: true };
+      }
+      if (action?.type === 'redirect' && !redirected) {
+        const redirect = action.redirect;
+        if (redirect?.url) nextUrl = redirect.url;
+        else if (redirect?.regexSubstitution && rule.regexFilter) {
+          const match = new RegExp(rule.regexFilter).exec(url);
+          if (!match) continue;
+          nextUrl = redirect.regexSubstitution.replace(/\\(\\|[0-9])/g, (_, group) => group === '\\' ? '\\' : (match[Number(group)] ?? ''));
+        } else if (redirect?.transform?.queryTransform) {
+          const transformed = new URL(url);
+          const query = redirect.transform.queryTransform;
+          for (const key of query.removeParams || []) transformed.searchParams.delete(key);
+          for (const param of query.addOrReplaceParams || []) {
+            if (!param.replaceOnly || transformed.searchParams.has(param.key)) transformed.searchParams.set(param.key, param.value);
+          }
+          nextUrl = transformed.href;
+        } else continue;
+        redirected = true;
+        reportRuleHit(rule, url);
+      }
+      if (action?.type === 'modifyHeaders') {
+        applyHeaderActions(headers, action.requestHeaders);
+        headersChanged ||= !!action.requestHeaders?.length;
+        if (action.responseHeaders?.length) responseRules.push(rule);
+        reportRuleHit(rule, url);
+      }
+    }
+    return { blocked: false, url: nextUrl, headers, headersChanged, responseRules };
+  }
+
+  function resolveNetworkResponseHeaders(headers, rules) {
+    const result = new Headers(headers);
+    for (const rule of rules) {
+      if (networkRules.includes(rule)) applyHeaderActions(result, rule.action.responseHeaders);
+    }
+    return result;
+  }
+
   function getHitKey(hit) {
     return `${hit.ruleType}::${hit.ruleId || hit.ruleName}`;
   }
@@ -385,6 +444,7 @@
   window.addEventListener('message', (event) => {
     const data = event.data;
     if (!data || data.source !== SOURCE || data.type !== MESSAGE_TYPE) return;
+    networkRules = Array.isArray(data.networkRules) ? data.networkRules : [];
     delayRules = Array.isArray(data.delayRules) ? data.delayRules : [];
     modifyRequestBodyRules = Array.isArray(data.modifyRequestBodyRules) ? data.modifyRequestBodyRules : [];
     modifyResponseBodyRules = Array.isArray(data.modifyResponseBodyRules) ? data.modifyResponseBodyRules : [];
@@ -397,6 +457,8 @@
 
       if (typeof input === 'string') {
         url = input;
+      } else if (input instanceof URL) {
+        url = input.href;
       } else if (input && typeof input === 'object') {
         if ('url' in input && typeof input.url === 'string') {
           url = input.url;
@@ -411,6 +473,8 @@
       const requestHeaders = init?.headers
         || (typeof Request !== 'undefined' && input instanceof Request ? input.headers : undefined);
 
+      const network = resolveNetworkRequest(url, method, requestHeaders);
+      if (network.blocked) throw new TypeError('Failed to fetch');
       const delayMs = getDelayMs(url, method, 'xmlhttprequest', requestHeaders);
       if (delayMs > 0) await wait(delayMs);
 
@@ -431,7 +495,23 @@
         sentBody = nextBodyValue;
       }
 
-      const response = await nativeFetch.call(this, nextInput, nextInit);
+      if (network.url !== url) {
+        nextInput = typeof Request !== 'undefined' && input instanceof Request
+          ? new Request(network.url, input)
+          : network.url;
+      }
+      if (network.headersChanged) nextInit = { ...(nextInit || {}), headers: network.headers };
+      let response = await nativeFetch.call(this, nextInput, nextInit);
+      if (network.responseRules.length && response.status !== 0) {
+        const headers = resolveNetworkResponseHeaders(response.headers, network.responseRules);
+        const patchHeaders = (original) => {
+          const clone = original.clone.bind(original);
+          Object.defineProperty(original, 'headers', { configurable: true, value: new Headers(headers) });
+          original.clone = () => patchHeaders(clone());
+          return original;
+        };
+        response = patchHeaders(response);
+      }
       if (!hasMatchedResponseRule(url, method, 'xmlhttprequest', requestHeaders)) return response;
 
       try {
@@ -461,6 +541,12 @@
     const nativeXhrSetRequestHeader = window.XMLHttpRequest.prototype.setRequestHeader;
 
     window.XMLHttpRequest.prototype.open = function requestmanDelayedXhrOpen(method, url) {
+      // open() resets headers; retain its optional async/user/password arguments
+      // so a header-filtered redirect can reopen the same request before send().
+      this.__requestmanOpenArgs = Array.from(arguments);
+      delete this.getResponseHeader;
+      delete this.getAllResponseHeaders;
+      delete this.readyState;
       this.__requestmanMethod = method;
       this.__requestmanUrl = url;
       this.__requestmanHeaders = {};
@@ -484,6 +570,41 @@
       const method = this.__requestmanMethod;
       const url = toAbsoluteUrl(this.__requestmanUrl);
       const requestHeaders = this.__requestmanHeaders || {};
+      const network = resolveNetworkRequest(url, method, requestHeaders);
+      if (network.blocked) {
+        const fail = () => {
+          Object.defineProperty(this, 'readyState', { configurable: true, value: 4 });
+          this.dispatchEvent(new Event('readystatechange'));
+          this.dispatchEvent(new ProgressEvent('error'));
+          this.dispatchEvent(new ProgressEvent('loadend'));
+        };
+        if (this.__requestmanOpenArgs?.[2] === false) fail();
+        else setTimeout(fail, 0);
+        return;
+      }
+      if (network.url !== url || network.headersChanged) {
+        const args = [...this.__requestmanOpenArgs];
+        args[1] = network.url;
+        const { responseType, withCredentials, timeout } = this;
+        nativeXhrOpen.apply(this, args);
+        this.responseType = responseType;
+        this.withCredentials = withCredentials;
+        this.timeout = timeout;
+        network.headers.forEach((value, key) => nativeXhrSetRequestHeader.call(this, key, value));
+      }
+      if (network.responseRules.length) {
+        const getAll = this.getAllResponseHeaders.bind(this);
+        const responseHeaders = () => {
+          const headers = new Headers();
+          for (const line of getAll().split(/\r?\n/)) {
+            const colon = line.indexOf(':');
+            if (colon > 0) headers.append(line.slice(0, colon), line.slice(colon + 1).trim());
+          }
+          return resolveNetworkResponseHeaders(headers, network.responseRules);
+        };
+        this.getResponseHeader = (name) => this.readyState < 2 ? null : responseHeaders().get(name);
+        this.getAllResponseHeaders = () => this.readyState < 2 ? '' : Array.from(responseHeaders(), ([key, value]) => `${key}: ${value}\r\n`).join('');
+      }
       const delayMs = getDelayMs(url, method, 'xmlhttprequest', requestHeaders);
       const requestBody = typeof body === 'string'
         ? toBodyValue(resolveRequestBody(url, method, 'xmlhttprequest', requestHeaders, body))

@@ -219,6 +219,9 @@ export default function ConditionFilterModal({ open, condition, onClose, onCondi
             <div style={sectionHeaderStyle}>
               <div style={labelStyle}>{t('请求 Header 过滤', 'Request header filter')}</div>
             </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              {t('仅匹配页面 fetch/XHR 主动设置的 Header；导航、静态资源和 User-Agent 规则不支持此筛选。', 'Matches headers supplied by page fetch/XHR only. Navigation, static assets, and User-Agent rules do not support this filter.')}
+            </p>
             {filter.requestHeaderFilters.map((entry, idx) => (
               <div key={idx} className="aui-compact" style={{ marginBottom: 6 }}>
                 <AutoComplete

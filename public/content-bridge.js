@@ -607,20 +607,32 @@
     return conditions;
   }
 
+  let broadcastRevision = 0;
   function broadcastRules() {
+    const revision = ++broadcastRevision;
     chrome.storage.local.get([RULES_KEY, GROUPS_KEY, ENABLED_KEY], (payload) => {
+      if (revision !== broadcastRevision || chrome.runtime.lastError) return;
       const redirectEnabled = payload?.[ENABLED_KEY] !== false;
       const groups = Array.isArray(payload?.[GROUPS_KEY]) ? payload[GROUPS_KEY] : [];
       const rules = Array.isArray(payload?.[RULES_KEY]) ? payload[RULES_KEY] : [];
       const groupEnabled = getGroupEnabledMap(groups);
 
-      window.postMessage({
+      const runtimeRules = {
         source: 'requestman-extension',
         type: MESSAGE_TYPE,
         delayRules: redirectEnabled ? getActiveDelayConditions(rules, groupEnabled) : [],
         modifyRequestBodyRules: redirectEnabled ? getActiveModifyRequestBodyConditions(rules, groupEnabled) : [],
         modifyResponseBodyRules: redirectEnabled ? getActiveModifyResponseBodyConditions(rules, groupEnabled) : [],
-      }, '*');
+        networkRules: [],
+      };
+      // Clear old network rules immediately while the background applies the
+      // latest snapshot. A late reply must not undo a newer disable/filter edit.
+      window.postMessage(runtimeRules, '*');
+      if (!redirectEnabled) return;
+      chrome.runtime.sendMessage({ type: 'requestman:get-network-rules' }, (result) => {
+        if (revision !== broadcastRevision || chrome.runtime.lastError) return;
+        window.postMessage({ ...runtimeRules, networkRules: Array.isArray(result?.rules) ? result.rules : [] }, '*');
+      });
     });
   }
 

@@ -11,6 +11,7 @@
     "build:firefox:xpi": "npm run build:firefox && node scripts/package-firefox.mjs",
     "build:all": "npm run clean && npm run build:chrome && npm run build:firefox && npm run build:firefox:xpi",
     "build": "npm run build:all",
+    "test": "node --test scripts/test-runtime-rules.mjs",
     "check:references": "node scripts/check-references.mjs"
   },
   "dependencies": {
