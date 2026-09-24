@@ -8,8 +8,9 @@
 ## Repository layout
 
 - [apps/browser-extension](apps/browser-extension): the existing Chrome / Firefox extension with its functionality preserved. The installation and usage instructions below describe this client.
+- [apps/macos](apps/macos/README.md): a native macOS scaffold with an Xcode project, application selection, and connection settings. Traffic capture, rewriting, and Mock are not implemented yet.
 
-Run `npm install`, `npm test`, and `npm run build` from the repository root. Extension artifacts remain in root `dist/`. Its release version lives in `apps/browser-extension/package.json` and that directory's three manifests.
+Run `npm install`, `npm test`, and `npm run build` from the repository root. Extension artifacts remain in root `dist/`. Its release version lives in `apps/browser-extension/package.json` and that directory's three manifests. The macOS project and version are maintained independently.
 
 ---
 

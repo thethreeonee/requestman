@@ -2,8 +2,9 @@
 
 ## Project Overview
 
-`requestman` contains a Chrome/Firefox DevTools extension for intercepting and modifying network requests. Browser code lives in `apps/browser-extension`.
+`requestman` contains the existing Chrome/Firefox DevTools extension and an independent native macOS app scaffold. Browser code lives in `apps/browser-extension`; native code lives in `apps/macos`.
 
+Read [macOS instructions](apps/macos/AGENTS.md) and [macOS architecture](apps/macos/Docs/Architecture.md) before native work. The macOS scaffold does not yet capture traffic or modify system networking. Browser and macOS versions are independent.
 
 The browser extension uses:
 
@@ -55,6 +56,7 @@ Release packaging may also create versioned zip files such as:
 
 Run these commands at the repository root. The root `package.json` forwards commands to the npm workspace in `apps/browser-extension`; it has no release version. Browser artifacts remain under root `dist/`, so CI packaging paths are unchanged.
 
+For the macOS core, run `swift test --package-path apps/macos/Packages/RequestmanCore`. The native Xcode entrypoint is `apps/macos/Requestman.xcodeproj`. Do not compile and deploy an App to a physical device through Xcode or `xcodebuild`, including by splitting those actions into separate commands.
 
 - `npm install`: install dependencies
 - `npm run dev`: watch build

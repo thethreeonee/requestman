@@ -8,8 +8,9 @@
 ## 仓库结构
 
 - [apps/browser-extension](apps/browser-extension)：现有 Chrome / Firefox 扩展，保留全部功能。下文的安装与使用说明针对浏览器扩展。
+- [apps/macos](apps/macos/README.md)：原生 macOS 应用骨架，包含 Xcode 工程、应用选择与连接配置；真实捕获、修改和 Mock 尚未接入。
 
-根目录统一执行 `npm install`、`npm test` 和 `npm run build`；构建产物仍在根目录 `dist/`。扩展版本维护在 `apps/browser-extension/package.json` 与该目录下的三个 manifest 中。
+根目录统一执行 `npm install`、`npm test` 和 `npm run build`；构建产物仍在根目录 `dist/`。扩展版本维护在 `apps/browser-extension/package.json` 与该目录下的三个 manifest 中。macOS 工程和版本独立维护，详见其 README。
 
 ---
 
