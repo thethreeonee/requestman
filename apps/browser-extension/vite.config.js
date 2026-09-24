@@ -1,4 +1,3 @@
-// vite.config.ts
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -19,8 +18,8 @@ export default defineConfig({
   publicDir: false,
 
   build: {
-    // ✅ outDir 相对于 root=src，所以要写到 ../dist
-    outDir: resolve(__dirname, `dist/${buildTarget}`),
+    // Keep repository-level artifacts compatible with release packaging.
+    outDir: resolve(__dirname, `../../dist/${buildTarget}`),
     emptyOutDir: true,
     cssCodeSplit: true,
     chunkSizeWarningLimit: 1000,

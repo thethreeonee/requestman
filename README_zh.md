@@ -4,6 +4,13 @@
 
 **requestman** 在浏览器 DevTools（Chrome & Firefox）中新增一个 **Redirect Rules** 面板。不需要配置代理，不需要改动代码，就能实时对网络请求进行重定向、改写、拦截和延迟。
 
+
+## 仓库结构
+
+- [apps/browser-extension](apps/browser-extension)：现有 Chrome / Firefox 扩展，保留全部功能。下文的安装与使用说明针对浏览器扩展。
+
+根目录统一执行 `npm install`、`npm test` 和 `npm run build`；构建产物仍在根目录 `dist/`。扩展版本维护在 `apps/browser-extension/package.json` 与该目录下的三个 manifest 中。
+
 ---
 
 ## 🚀 安装
@@ -258,10 +265,10 @@ npm run build:firefox
 npm run check:references
 
 # 打包 Firefox .xpi
-npm run package:firefox
+npm run build:firefox:xpi
 ```
 
 **构建产物：**
 - `dist/chrome/`
 - `dist/firefox/`
-- `dist/requestman-firefox.xpi`（执行 `package:firefox` 后生成）
+- `dist/requestman-firefox.xpi`（执行 `build:firefox:xpi` 后生成）

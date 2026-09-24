@@ -6,7 +6,7 @@ if (!['chrome', 'firefox'].includes(target)) {
   throw new Error('Usage: node scripts/copy-static.mjs <chrome|firefox>');
 }
 
-const outDir = resolve('dist', target);
+const outDir = resolve('../../dist', target);
 const publicDir = resolve('public');
 
 await mkdir(outDir, { recursive: true });

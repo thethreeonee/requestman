@@ -4,6 +4,13 @@
 
 **requestman** adds a **Redirect Rules** panel to your browser's DevTools (Chrome & Firefox). Without writing any proxy config or changing your code, you can redirect, rewrite, block, and delay network requests on the fly.
 
+
+## Repository layout
+
+- [apps/browser-extension](apps/browser-extension): the existing Chrome / Firefox extension with its functionality preserved. The installation and usage instructions below describe this client.
+
+Run `npm install`, `npm test`, and `npm run build` from the repository root. Extension artifacts remain in root `dist/`. Its release version lives in `apps/browser-extension/package.json` and that directory's three manifests.
+
 ---
 
 ## 🚀 Installation
@@ -265,10 +272,10 @@ npm test
 npm run check:references
 
 # Package Firefox .xpi
-npm run package:firefox
+npm run build:firefox:xpi
 ```
 
 **Build output:**
 - `dist/chrome/`
 - `dist/firefox/`
-- `dist/requestman-firefox.xpi` (after running `package:firefox`)
+- `dist/requestman-firefox.xpi` (after running `build:firefox:xpi`)

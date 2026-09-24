@@ -3,8 +3,8 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 
-const firefoxDistDir = resolve('dist/firefox');
-const xpiPath = resolve('dist/requestman-firefox.xpi');
+const firefoxDistDir = resolve('../../dist/firefox');
+const xpiPath = resolve('../../dist/requestman-firefox.xpi');
 
 if (!existsSync(firefoxDistDir)) {
   throw new Error('dist/firefox does not exist. Run `npm run build:firefox` first.');
