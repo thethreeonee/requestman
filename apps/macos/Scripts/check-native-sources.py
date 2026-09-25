@@ -19,7 +19,8 @@ assert set(references.values()) == sources, "Swift source files and project refe
 compiled_refs = {objects[file]["fileRef"] for value in objects.values() if value.get("isa") == "PBXSourcesBuildPhase" for file in value["files"]}
 assert compiled_refs == set(references), "Source build phase is missing files or includes stale files"
 products = {value.get("productName") for value in objects.values() if value.get("isa") == "XCSwiftPackageProductDependency"}
-assert {"RequestmanCore", "RequestmanProxy"} <= products, "Missing local package products"
+required_products = {"RequestmanCore", "RequestmanProxy", "RequestmanCertificates"}
+assert required_products <= products, "Missing local package products"
 project_object = next(value for value in objects.values() if value.get("isa") == "PBXProject")
 project_configs = {
     objects[key]["name"]: objects[key]["buildSettings"]
@@ -44,11 +45,10 @@ print(f"Project references OK: {len(sources)} Swift sources, local packages, sha
 
 if args.typecheck:
     build = root / "Packages/RequestmanCore/.build"
-    product_dir = build / "out/Products/Debug"
-    if not (product_dir / "RequestmanCore.swiftmodule").exists():
-        candidates = list(build.glob("*/debug/Modules"))
-        assert candidates, "Run swift test --package-path apps/macos/Packages/RequestmanCore first"
-        product_dir = candidates[0]
+    candidates = list(build.glob("*/debug/Modules")) + [build / "out/Products/Debug"]
+    product_dir = next((path for path in candidates
+                        if all((path / f"{name}.swiftmodule").exists() for name in required_products)), None)
+    assert product_dir, "Run swift test --package-path apps/macos/Packages/RequestmanCore first"
     command = ["swiftc", "-typecheck", "-parse-as-library", "-swift-version", "6", "-target", "arm64-apple-macosx14.0",
                "-module-cache-path", str(build / "host-typecheck-cache"), "-I", str(product_dir), "-I", str(product_dir / "include")]
     maps = list((build / "out/Intermediates.noindex/GeneratedModuleMaps").glob("*.modulemap"))

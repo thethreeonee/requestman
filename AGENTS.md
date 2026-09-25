@@ -4,7 +4,7 @@
 
 `requestman` contains the existing Chrome/Firefox DevTools extension and an independent native macOS app. Browser code lives in `apps/browser-extension`; native code lives in `apps/macos`.
 
-Read [macOS instructions](apps/macos/AGENTS.md) and [macOS architecture](apps/macos/Docs/Architecture.md) before native work. The macOS app has a loopback HTTP proxy and CONNECT passthrough. Starting capture sets system HTTP/HTTPS proxies; stopping or quitting restores the prior settings. It does not decrypt HTTPS. Browser and macOS versions are independent.
+Read [macOS instructions](apps/macos/AGENTS.md) and [macOS architecture](apps/macos/Docs/Architecture.md) before native work. The macOS app has a loopback HTTP/HTTPS proxy. With its local CA configured, new CONNECT connections decrypt HTTP/1.1 over TLS; otherwise they pass through. The toolbar starts either system-proxy capture or a browser with explicit proxy arguments, according to General settings. Only system-proxy mode changes system HTTP/HTTPS proxies and restores them on stop/quit; browser mode leaves system settings unchanged. Browser and macOS versions are independent.
 
 The browser extension uses:
 

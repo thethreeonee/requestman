@@ -12,6 +12,8 @@ struct RequestmanApp: App {
         .defaultSize(width: 1440, height: 900)
         .windowToolbarStyle(.unified(showsTitle: false))
         Settings { WorkspaceSettingsView(model: model) }
+            .windowToolbarStyle(.unified(showsTitle: false))
+            .windowResizability(.contentSize)
     }
 }
 

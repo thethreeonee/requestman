@@ -1,24 +1,29 @@
 import AppKit
 import SwiftUI
 
-/// AppKit owns selection and sizing; the toolbar supplies the glass backing.
-struct WorkspaceSectionControl: NSViewRepresentable {
-    @Binding var selection: WorkspaceSection
+/// AppKit owns the control's appearance, selection and sizing.
+struct ToolbarSectionControl: NSViewRepresentable {
+    var labels: [String]
+    var accessibilityLabel: String
+    @Binding var selection: Int
 
     func makeNSView(context: Context) -> NSSegmentedControl {
         let control = NSSegmentedControl(
-            labels: WorkspaceSection.allCases.map(\.title),
+            labels: labels,
             trackingMode: .selectOne,
             target: context.coordinator,
             action: #selector(Coordinator.selectSection(_:))
         )
         control.segmentStyle = .automatic
         control.segmentDistribution = .fit
-        control.controlSize = .regular
+        control.controlSize = .large
         if #available(macOS 26.0, *) {
             control.borderShape = .capsule
         }
-        control.setAccessibilityLabel("工作区")
+        if #available(macOS 27.0, *) {
+            control.role = .tabs
+        }
+        control.setAccessibilityLabel(accessibilityLabel)
         control.setContentHuggingPriority(.required, for: .horizontal)
         control.setContentCompressionResistancePriority(.required, for: .horizontal)
         return control
@@ -26,7 +31,7 @@ struct WorkspaceSectionControl: NSViewRepresentable {
 
     func updateNSView(_ control: NSSegmentedControl, context: Context) {
         context.coordinator.selection = $selection
-        control.selectedSegment = WorkspaceSection.allCases.firstIndex(of: selection) ?? 0
+        control.selectedSegment = selection
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSegmentedControl, context: Context) -> CGSize? {
@@ -37,13 +42,13 @@ struct WorkspaceSectionControl: NSViewRepresentable {
 
     @MainActor
     final class Coordinator: NSObject {
-        var selection: Binding<WorkspaceSection>
+        var selection: Binding<Int>
 
-        init(selection: Binding<WorkspaceSection>) { self.selection = selection }
+        init(selection: Binding<Int>) { self.selection = selection }
 
         @objc func selectSection(_ sender: NSSegmentedControl) {
-            guard WorkspaceSection.allCases.indices.contains(sender.selectedSegment) else { return }
-            selection.wrappedValue = WorkspaceSection.allCases[sender.selectedSegment]
+            guard (0..<sender.segmentCount).contains(sender.selectedSegment) else { return }
+            selection.wrappedValue = sender.selectedSegment
         }
     }
 }

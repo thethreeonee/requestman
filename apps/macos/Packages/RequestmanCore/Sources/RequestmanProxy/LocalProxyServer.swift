@@ -2,6 +2,8 @@ import Foundation
 import NIOCore
 import NIOPosix
 import NIOHTTP1
+import NIOSSL
+import RequestmanCertificates
 import RequestmanCore
 import os
 
@@ -9,14 +11,28 @@ import os
 public actor LocalProxyServer {
     private var group: MultiThreadedEventLoopGroup?
     private var listener: Channel?
-    private let shared = ProxySharedState()
+    private let shared: ProxySharedState
     public nonisolated let records = CaptureRecordBuffer()
-    public init() {}
+    public init(certificateProvider: (any TLSCertificateProviding)? = nil) {
+        shared = ProxySharedState(certificateProvider: certificateProvider)
+    }
+    // In-memory test anchors only. Production always evaluates the macOS trust store.
+    init(certificateProvider: any TLSCertificateProviding, upstreamTrustRoots: [NIOSSLCertificate]) {
+        shared = ProxySharedState(certificateProvider: certificateProvider, upstreamTrustRoots: upstreamTrustRoots)
+    }
     public func update(_ document: WorkspaceDocument) { shared.document.withLock { $0 = document } }
+    public func updateConfiguration(_ configuration: ExplicitProxyConfiguration) throws {
+        try configuration.validate()
+        guard listener?.localAddress?.port == configuration.port else {
+            throw WorkflowError.invalid("监听端口变更需要切换监听")
+        }
+        shared.configuration.withLock { $0 = configuration }
+    }
     public func start(configuration: ExplicitProxyConfiguration, document: WorkspaceDocument) async throws -> Int {
         guard listener == nil, group == nil else { throw WorkflowError.invalid("代理已启动") }
         try configuration.validate()
         update(document)
+        shared.configuration.withLock { $0 = configuration }
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         self.group = group
         let shared = shared, records = records
@@ -43,7 +59,7 @@ public actor LocalProxyServer {
                         try channel.pipeline.syncOperations.addHandlers([
                             HTTPResponseEncoder(configuration: encoder),
                             ByteToMessageHandler(HTTPRequestDecoder(leftOverBytesStrategy: .forwardBytes, limitConfiguration: proxyDecoderLimits())),
-                            ProxyConnection(configuration: configuration, shared: shared, records: records)
+                            ProxyConnection(configuration: shared.configuration.withLock { $0 }, shared: shared, records: records)
                         ])
                     }
                 }.bind(host: "127.0.0.1", port: configuration.port).get()
@@ -59,13 +75,20 @@ public actor LocalProxyServer {
         try? await listener?.close().get()
         listener = nil
         // Close downstream channels first; their handlers cancel pending connects and close upstream peers.
-        for channel in shared.channels.withLock({ Array($0.values) }) { try? await channel.close().get() }
+        for channel in shared.channels.withLock({ Array($0.values) }) { try? await closeProxyChannel(channel).get() }
         try? await group?.shutdownGracefully()
         group = nil
     }
 }
 
 final class ProxySharedState: Sendable {
+    let certificateProvider: (any TLSCertificateProviding)?
+    let upstreamTrustRoots: [NIOSSLCertificate]?
+    init(certificateProvider: (any TLSCertificateProviding)? = nil, upstreamTrustRoots: [NIOSSLCertificate]? = nil) {
+        self.certificateProvider = certificateProvider
+        self.upstreamTrustRoots = upstreamTrustRoots
+    }
+    let configuration = OSAllocatedUnfairLock(initialState: ExplicitProxyConfiguration())
     let document = OSAllocatedUnfairLock(initialState: WorkspaceDocument())
     let generatedBodyBytes = OSAllocatedUnfairLock(initialState: 0)
     func reserveBody(_ body: String) throws -> GeneratedBodyReservation {
@@ -93,9 +116,11 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     private let configuration: ExplicitProxyConfiguration
     private let shared: ProxySharedState
     private let records: CaptureRecordBuffer
+    private let tlsAuthority: String?
     private var client: Channel?
     private var upstream: Channel?
     private var timer: Scheduled<Void>?
+    private var certificateTask: Task<Void, Never>?
     private var record: CaptureRecord?
     private var started = ContinuousClock.now
     private var match: WorkflowMatch?
@@ -112,19 +137,35 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     private var requestEnded = false
     private var responseStarted = false
     private var finished = false
+    private var failureMessage: String?
+    private var isProcessing: Bool { !finished && failureMessage == nil }
     private var tunnel = false
     private var originalMethod = "GET"
+    private var requestBodyCollector: CaptureBodyCollector?
+    private var sentBodyCollector: CaptureBodyCollector?
+    private var receivedBodyCollector: CaptureBodyCollector?
+    private var responseBodyCollector: CaptureBodyCollector?
+    private var requestWriteFailed = false
+    private var responseWriteFailed = false
+    private var requestWriteComplete = false
+    private var responseWriteComplete = false
 
-    init(configuration: ExplicitProxyConfiguration, shared: ProxySharedState, records: CaptureRecordBuffer) {
+    init(configuration: ExplicitProxyConfiguration, shared: ProxySharedState, records: CaptureRecordBuffer, tlsAuthority: String? = nil) {
         self.configuration = configuration; self.shared = shared; self.records = records
+        self.tlsAuthority = tlsAuthority
     }
-    func channelActive(context: ChannelHandlerContext) {
+    func handlerAdded(context: ChannelHandlerContext) {
+        if context.channel.isActive { activate(context) }
+    }
+    func channelActive(context: ChannelHandlerContext) { activate(context) }
+    private func activate(_ context: ChannelHandlerContext) {
+        guard client == nil else { return }
         client = context.channel
         timer = context.eventLoop.scheduleTask(in: .seconds(30)) { [self] in fail("请求超时", status: 504) }
         context.read()
     }
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        guard !finished else { return }
+        guard isProcessing else { return }
         let part = unwrapInboundIn(data)
         switch part {
         case .head(let head):
@@ -132,6 +173,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             begin(head)
         case .body(let buffer):
             record?.requestBytes += buffer.readableBytes
+            requestBodyCollector?.append(buffer.readableBytesView)
             if !connected { enqueue(part, bytes: buffer.readableBytes) } else { forward(part) }
         case .end:
             requestEnded = true
@@ -139,31 +181,67 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         }
     }
     func channelReadComplete(context: ChannelHandlerContext) {
-        guard connected, !finished, !tunnel else { return }
+        guard connected, isProcessing, !tunnel else { return }
         flushRequest()
     }
-    func errorCaught(context: ChannelHandlerContext, error: Error) { fail(error.localizedDescription, status: 400) }
+    func errorCaught(context: ChannelHandlerContext, error: Error) {
+        if record == nil, let tlsAuthority {
+            record = CaptureRecord(method: "CONNECT", url: "https://" + tlsAuthority)
+            finish(error: "TLS 握手失败：" + error.localizedDescription)
+            context.close(promise: nil)
+        } else { fail(error.localizedDescription, status: 400) }
+    }
     func channelInactive(context: ChannelHandlerContext) {
-        timer?.cancel()
+        timer?.cancel(); certificateTask?.cancel()
         if !finished { finish(error: "客户端连接已关闭") }
-        upstream?.close(promise: nil)
+        if let upstream { closeProxyChannel(upstream) }
     }
     private func enqueue(_ part: HTTPServerRequestPart, bytes: Int) {
         pendingBytes += bytes
         guard pendingBytes <= 65_536, pending.count < 128 else { return fail("连接预读缓冲已满", status: 503) }
         pending.append(part)
     }
-    private func begin(_ head: HTTPRequestHead) {
+    private func begin(_ input: HTTPRequestHead) {
         guard let client else { return }
+        var head = input
+        if let tlsAuthority {
+            let expected = URLComponents(string: "https://" + tlsAuthority)
+            let hostHeader = head.headers["host"]
+            let supplied = hostHeader.count == 1 ? URLComponents(string: "https://" + hostHeader[0]) : nil
+            let originAuthority = (expected?.percentEncodedHost ?? "")
+                + (expected?.port.flatMap { $0 == 443 ? nil : ":\($0)" } ?? "")
+            let fullURL = head.uri.hasPrefix("/") ? "https://" + originAuthority + head.uri : head.uri
+            let target = URLComponents(string: fullURL)
+            guard head.method != .CONNECT, target?.scheme == "https",
+                  target?.host?.lowercased() == expected?.host?.lowercased(),
+                  (target?.port ?? 443) == (expected?.port ?? 443),
+                  supplied?.host?.lowercased() == expected?.host?.lowercased(),
+                  (supplied?.port ?? 443) == (expected?.port ?? 443),
+                  supplied?.user == nil, supplied?.path.isEmpty == true,
+                  supplied?.query == nil, supplied?.fragment == nil else {
+                record = CaptureRecord(method: head.method.rawValue, url: fullURL)
+                return fail("HTTPS 请求与 CONNECT 目标不一致", status: 400)
+            }
+            head.uri = fullURL
+        }
         originalMethod = head.method.rawValue
         record = CaptureRecord(method: originalMethod, url: head.uri)
         record?.requestHeaders = fields(head.headers)
         record?.environment = shared.document.withLock { $0.environment?.name ?? "无环境" }
         started = .now
-        if head.method == .CONNECT { return beginTunnel(head) }
+        if head.method == .CONNECT {
+            record?.requestBody = .unavailable("加密隧道不采集 HTTP 内容")
+            record?.sentBody = .unavailable("加密隧道不采集 HTTP 内容")
+            record?.receivedBody = .unavailable("加密隧道不采集 HTTP 内容")
+            record?.responseBody = .unavailable("加密隧道不采集 HTTP 内容")
+            return beginTunnel(head)
+        }
+        requestBodyCollector = CaptureBodyCollector(headers: fields(head.headers))
+        record?.sentBody = .unavailable("请求未发送至上游")
+        record?.receivedBody = .unavailable("尚未收到上游响应")
         guard head.method != .TRACE, head.headers["upgrade"].isEmpty else { return fail("当前不支持协议升级或 TRACE", status: 501) }
-        guard let url = URL(string: head.uri), url.scheme == "http", url.host != nil,
-              url.user == nil, url.fragment == nil else { return fail("需要 http:// 绝对请求地址", status: 400) }
+        guard let url = URL(string: head.uri), ["http", "https"].contains(url.scheme ?? ""), url.host != nil,
+              url.user == nil, url.fragment == nil else { return fail("需要 HTTP 或 HTTPS 绝对请求地址", status: 400) }
         do {
             let document = shared.document.withLock { $0 }
             match = WorkflowEngine.match(document, method: originalMethod, url: head.uri)
@@ -171,6 +249,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             var draft = HTTPMessageDraft(method: originalMethod, url: head.uri, headers: fields(head.headers))
             if let match, let record {
                 self.record?.project = match.project; self.record?.workflow = match.workflow.name
+                self.record?.matchedWorkflowID = match.workflow.id
                 self.record?.steps = try WorkflowEngine.apply(match.workflow.requestSteps, response: false, to: &draft,
                     environment: match.environment?.values ?? [:], id: record.id, date: record.startedAt)
             }
@@ -179,6 +258,8 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             request = draft
             if draft.isMock {
                 record?.outcome = .mocked
+                record?.sentBody = .unavailable("本地响应，请求未发送至上游")
+                record?.receivedBody = .unavailable("本地响应，没有上游响应")
                 var reply = draft
                 if let match, let record {
                     self.record?.steps += try WorkflowEngine.apply(match.workflow.responseSteps, response: true, to: &reply,
@@ -188,7 +269,8 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                 return sendStatic(reply)
             }
             guard let target = URLComponents(string: draft.url), let host = target.host else { throw WorkflowError.invalid("目标地址无效") }
-            let port = target.port ?? 80
+            let secure = target.scheme == "https"
+            let port = target.port ?? (secure ? 443 : 80)
             guard !isLoop(host, port: port) else { throw WorkflowError.invalid("请求目标会形成代理循环") }
             var headers = cleanHeaders(draft.headers)
             headers.replaceOrAdd(name: "Host", value: target.percentEncodedHost.map { $0 + (target.port.map { ":\($0)" } ?? "") } ?? host)
@@ -201,26 +283,28 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             }
             let uri: String
             let endpoint: ProxyEndpoint
-            if case .httpProxy(let proxy) = configuration.upstream { endpoint = proxy; uri = draft.url }
-            else { endpoint = ProxyEndpoint(host: host, port: port); uri = (target.percentEncodedPath.isEmpty ? "/" : target.percentEncodedPath) + (target.percentEncodedQuery.map { "?\($0)" } ?? "") }
+            if case .httpProxy(let proxy) = configuration.upstream { endpoint = proxy }
+            else { endpoint = ProxyEndpoint(host: host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")), port: port) }
+            if case .httpProxy = configuration.upstream, !secure { uri = draft.url }
+            else { uri = (target.percentEncodedPath.isEmpty ? "/" : target.percentEncodedPath) + (target.percentEncodedQuery.map { "?\($0)" } ?? "") }
             record?.sentHeaders = fields(headers)
             let forwarded = HTTPRequestHead(version: .http1_1, method: HTTPMethod(rawValue: draft.method), uri: uri, headers: headers)
             if head.headers["expect"].contains(where: { $0.lowercased() == "100-continue" }) {
                 client.writeAndFlush(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .continue)), promise: nil)
             }
-            bootstrap(on: client.eventLoop).channelInitializer { channel in
-                channel.pipeline.addHTTPClientHandlers(decoderLimitConfiguration: proxyDecoderLimits()).flatMap {
-                    channel.pipeline.addHandler(ProxyResponseHandler(owner: self))
-                }
-            }.connect(host: endpoint.host, port: endpoint.port).whenComplete { [self] result in
+            connectHTTP(endpoint: endpoint, targetHost: host, targetPort: port, secure: secure, on: client.eventLoop).whenComplete { [self] result in
                 switch result {
                 case .failure(let error): fail(error.localizedDescription, status: 502)
                 case .success(let channel):
-                    guard !finished else { channel.close(promise: nil); return }
-                    guard !isLoopChannel(channel) else { channel.close(promise: nil); fail("目标解析后指向代理自身", status: 502); return }
+                    guard isProcessing else { closeProxyChannel(channel); return }
+                    guard !isLoopChannel(channel) else { closeProxyChannel(channel); fail("目标解析后指向代理自身", status: 502); return }
                     upstream = channel; connected = true
-                    lastRequestWrite = channel.write(HTTPClientRequestPart.head(forwarded))
-                    if let body = request?.replacementBody { lastRequestWrite = channel.write(HTTPClientRequestPart.body(.byteBuffer(channel.allocator.buffer(string: body)))) }
+                    sentBodyCollector = CaptureBodyCollector(headers: record?.sentHeaders ?? [])
+                    trackRequestWrite(channel.write(HTTPClientRequestPart.head(forwarded)))
+                    if let body = request?.replacementBody {
+                        sentBodyCollector?.append(body.utf8)
+                        trackRequestWrite(channel.write(HTTPClientRequestPart.body(.byteBuffer(channel.allocator.buffer(string: body)))))
+                    }
                     for part in pending { forward(part) }
                     pending.removeAll(); pendingBytes = 0
                     flushRequest()
@@ -229,13 +313,70 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             }
         } catch { fail(error.localizedDescription, status: 400) }
     }
+    private func connectHTTP(endpoint: ProxyEndpoint, targetHost: String, targetPort: Int, secure: Bool, on loop: EventLoop) -> EventLoopFuture<Channel> {
+        bootstrap(on: loop).connect(host: endpoint.host, port: endpoint.port).flatMap { [self] channel in
+            guard isProcessing, !isLoopChannel(channel) else {
+                closeProxyChannel(channel)
+                return loop.makeFailedFuture(WorkflowError.invalid("连接已取消或指向代理自身"))
+            }
+            upstream = channel
+            let ready: EventLoopFuture<Void>
+            if secure, case .httpProxy = configuration.upstream {
+                let handshake = loop.makePromise(of: Void.self)
+                let authority = targetHost + ":" + String(targetPort)
+                ready = channel.pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes, decoderLimitConfiguration: proxyDecoderLimits()).flatMap {
+                    channel.pipeline.addHandler(TunnelHandshake(ready: handshake))
+                }.flatMap {
+                    channel.write(HTTPClientRequestPart.head(HTTPRequestHead(version: .http1_1, method: .CONNECT, uri: authority, headers: HTTPHeaders([("Host", authority)]))), promise: nil)
+                    channel.writeAndFlush(HTTPClientRequestPart.end(nil), promise: nil)
+                    channel.read()
+                    return handshake.futureResult
+                }
+            } else { ready = loop.makeSucceededFuture(()) }
+            return ready.flatMap { [self] in
+                loop.makeCompletedFuture {
+                    guard self.isProcessing else { throw WorkflowError.invalid("连接已取消") }
+                    if secure {
+                        try channel.pipeline.syncOperations.addHandler(ProxyTLS.client(host: targetHost, testTrustRoots: self.shared.upstreamTrustRoots))
+                    }
+                }
+            }.flatMap {
+                channel.pipeline.addHTTPClientHandlers(decoderLimitConfiguration: proxyDecoderLimits())
+            }.flatMap {
+                channel.pipeline.addHandler(ProxyResponseHandler(owner: self))
+            }.map { channel }
+        }
+    }
+
     private func forward(_ part: HTTPServerRequestPart) {
         guard let upstream, !tunnel else { return }
         switch part {
         case .body(let bytes):
-            if request?.replacementBody == nil { lastRequestWrite = upstream.write(HTTPClientRequestPart.body(.byteBuffer(bytes))) }
-        case .end: lastRequestWrite = upstream.write(HTTPClientRequestPart.end(nil))
+            if request?.replacementBody == nil {
+                sentBodyCollector?.append(bytes.readableBytesView)
+                trackRequestWrite(upstream.write(HTTPClientRequestPart.body(.byteBuffer(bytes))))
+            }
+        case .end:
+            let written = upstream.write(HTTPClientRequestPart.end(nil))
+            trackRequestWrite(written)
+            written.whenSuccess { [self] in requestWriteComplete = !requestWriteFailed }
         case .head: break
+        }
+    }
+    private func trackRequestWrite(_ future: EventLoopFuture<Void>) {
+        lastRequestWrite = future
+        future.whenFailure { [self] error in
+            requestWriteFailed = true
+            requestWriteComplete = false
+            fail(error.localizedDescription, status: 502)
+        }
+    }
+    private func trackResponseWrite(_ future: EventLoopFuture<Void>) {
+        lastResponseWrite = future
+        future.whenFailure { [self] error in
+            responseWriteFailed = true
+            responseWriteComplete = false
+            fail(error.localizedDescription, status: 502)
         }
     }
     private func flushRequest() {
@@ -244,11 +385,11 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         let flushed = lastRequestWrite ?? upstream.eventLoop.makeSucceededFuture(())
         flushed.whenComplete { [self] result in
             if case .failure(let error) = result { fail(error.localizedDescription, status: 502) }
-            else if !requestEnded && !finished { client?.read() }
+            else if !requestEnded && isProcessing { client?.read() }
         }
     }
     func receive(_ part: HTTPClientResponsePart, channel: Channel) {
-        guard !finished else { return }
+        guard isProcessing else { return }
         do {
             switch part {
             case .head(let head):
@@ -261,6 +402,8 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                 guard !responseStarted else { return fail("重复响应头", status: 502) }
                 var draft = HTTPMessageDraft(method: originalMethod, url: request?.url ?? "", status: Int(head.status.code), headers: fields(head.headers))
                 record?.receivedHeaders = draft.headers
+                record?.originalStatus = draft.status
+                receivedBodyCollector = CaptureBodyCollector(headers: draft.headers)
                 if let match, let record {
                     self.record?.steps += try WorkflowEngine.apply(match.workflow.responseSteps, response: true, to: &draft,
                         environment: match.environment?.values ?? [:], id: record.id, date: record.startedAt)
@@ -270,15 +413,21 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                 var headers = responseHeaders(draft)
                 headers.replaceOrAdd(name: "Connection", value: "close")
                 record?.responseHeaders = fields(headers); record?.status = draft.status
+                responseBodyCollector = CaptureBodyCollector(headers: fields(headers))
                 responseStarted = true
-                lastResponseWrite = client?.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .init(statusCode: draft.status), headers: headers)))
+                if let client {
+                    trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .init(statusCode: draft.status), headers: headers))))
+                }
                 if let body = draft.replacementBody, allowsBody(draft.status), let client {
-                    lastResponseWrite = client.write(HTTPServerResponsePart.body(.byteBuffer(client.allocator.buffer(string: body))))
+                    responseBodyCollector?.append(body.utf8)
+                    trackResponseWrite(client.write(HTTPServerResponsePart.body(.byteBuffer(client.allocator.buffer(string: body)))))
                 }
             case .body(let buffer):
                 record?.responseBytes += buffer.readableBytes
+                receivedBodyCollector?.append(buffer.readableBytesView)
                 if let response, response.replacementBody == nil, allowsBody(response.status) {
-                    lastResponseWrite = client?.write(HTTPServerResponsePart.body(.byteBuffer(buffer)))
+                    responseBodyCollector?.append(buffer.readableBytesView)
+                    if let client { trackResponseWrite(client.write(HTTPServerResponsePart.body(.byteBuffer(buffer)))) }
                 }
             case .end:
                 if informationalResponse { informationalResponse = false; return }
@@ -286,23 +435,23 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                 responseEnded = true
                 client.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { [self] result in
                     if case .failure(let error) = result { finish(error: error.localizedDescription) }
-                    else { finish() }
-                    client.close(promise: nil); channel.close(promise: nil)
+                    else { responseWriteComplete = !responseWriteFailed; finish() }
+                    closeProxyChannel(client); closeProxyChannel(channel)
                 }
             }
         } catch { fail(error.localizedDescription, status: 502) }
     }
     func responseReadComplete(_ channel: Channel) {
-        guard let client, !finished else { return }
+        guard let client, isProcessing else { return }
         client.flush()
         guard !responseEnded else { return }
         let flushed = lastResponseWrite ?? channel.eventLoop.makeSucceededFuture(())
         flushed.whenComplete { [self] result in
             if case .failure(let error) = result { fail(error.localizedDescription, status: 502) }
-            else if !finished { channel.read() }
+            else if isProcessing { channel.read() }
         }
     }
-    func upstreamClosed() { if !finished && !responseEnded { fail("上游连接提前关闭", status: 502) } }
+    func upstreamClosed() { if isProcessing && !responseEnded { fail("上游连接提前关闭", status: 502) } }
     func upstreamError(_ error: Error) { fail(error.localizedDescription, status: 502) }
 
     private func reserveBody(_ body: String?) throws {
@@ -313,14 +462,17 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         responseStarted = true
         let headers = responseHeaders(draft)
         record?.status = draft.status; record?.responseHeaders = fields(headers)
-        client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .init(statusCode: draft.status), headers: headers)), promise: nil)
+        responseBodyCollector = CaptureBodyCollector(headers: fields(headers))
+        trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .init(statusCode: draft.status), headers: headers))))
         if allowsBody(draft.status), let body = draft.replacementBody {
             record?.responseBytes = body.utf8.count
-            lastResponseWrite = client.write(HTTPServerResponsePart.body(.byteBuffer(client.allocator.buffer(string: body))))
+            responseBodyCollector?.append(body.utf8)
+            trackResponseWrite(client.write(HTTPServerResponsePart.body(.byteBuffer(client.allocator.buffer(string: body)))))
         }
         client.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { [self] result in
-            if case .failure(let error) = result { finish(error: error.localizedDescription) } else { finish() }
-            client.close(promise: nil)
+            if case .failure(let error) = result { finish(error: error.localizedDescription) }
+            else { responseWriteComplete = !responseWriteFailed; finish() }
+            closeProxyChannel(client)
         }
     }
     private func responseHeaders(_ draft: HTTPMessageDraft) -> HTTPHeaders {
@@ -334,28 +486,42 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     }
     private func allowsBody(_ status: Int) -> Bool { originalMethod != "HEAD" && status != 204 && status != 205 && status != 304 }
     private func fail(_ message: String, status: Int) {
-        guard !finished else { return }
-        let alreadyResponding = responseStarted
-        if !alreadyResponding { record?.status = status }
-        finish(error: message)
-        upstream?.close(promise: nil)
-        guard let client else { return }
-        if alreadyResponding || tunnel { client.close(promise: nil); return }
+        guard isProcessing else { return }
+        failureMessage = message
+        timer?.cancel(); certificateTask?.cancel()
+        if let upstream { closeProxyChannel(upstream) }
+        guard let client else { finish(error: message); return }
+        if responseStarted || tunnel { finish(error: message); closeProxyChannel(client); return }
+        record?.status = status
+        responseStarted = true
         let body = "Requestman: \(message)"
         let headers = HTTPHeaders([("Connection", "close"), ("Content-Type", "text/plain; charset=utf-8"), ("Content-Length", String(body.utf8.count))])
-        client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .init(statusCode: status), headers: headers)), promise: nil)
-        lastResponseWrite = client.write(HTTPServerResponsePart.body(.byteBuffer(client.allocator.buffer(string: body))))
-        client.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { _ in client.close(promise: nil) }
+        record?.responseHeaders = fields(headers)
+        responseBodyCollector = CaptureBodyCollector(headers: fields(headers))
+        trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .init(statusCode: status), headers: headers))))
+        if originalMethod != "HEAD" {
+            responseBodyCollector?.append(body.utf8)
+            trackResponseWrite(client.write(HTTPServerResponsePart.body(.byteBuffer(client.allocator.buffer(string: body)))))
+        }
+        client.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { [self] result in
+            if case .success = result { responseWriteComplete = !responseWriteFailed }
+            finish(error: message)
+            closeProxyChannel(client)
+        }
     }
     private func finish(error: String? = nil) {
         guard !finished else { return }
-        finished = true; timer?.cancel()
+        finished = true; timer?.cancel(); certificateTask?.cancel()
         pending.removeAll()
         guard var record else { return }
         let elapsed = started.duration(to: .now).components
         record.duration = Double(elapsed.attoseconds) / 1e18 + Double(elapsed.seconds)
-        record.error = error
-        if error != nil { record.outcome = .failed }
+        record.error = failureMessage ?? error
+        if let requestBodyCollector { record.requestBody = requestBodyCollector.snapshot(isComplete: requestEnded) }
+        if let sentBodyCollector { record.sentBody = sentBodyCollector.snapshot(isComplete: requestWriteComplete) }
+        if let receivedBodyCollector { record.receivedBody = receivedBodyCollector.snapshot(isComplete: responseEnded) }
+        if let responseBodyCollector { record.responseBody = responseBodyCollector.snapshot(isComplete: responseWriteComplete) }
+        if record.error != nil { record.outcome = .failed }
         else if record.outcome == .forwarded && !record.steps.isEmpty { record.outcome = .modified }
         records.append(record)
     }
@@ -386,14 +552,69 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         }
         guard head.headers["transfer-encoding"].isEmpty,
               head.headers["content-length"].allSatisfy({ $0 == "0" }) else { return fail("CONNECT 不接受 HTTP Body", status: 400) }
+        if let provider = shared.certificateProvider {
+            let identity = client.eventLoop.makePromise(of: TLSCertificateIdentity?.self)
+            certificateTask = Task {
+                do { identity.succeed(try await provider.serverIdentity(for: host)) }
+                catch { identity.fail(error) }
+            }
+            identity.futureResult.whenComplete { [self] result in
+                certificateTask = nil
+                guard isProcessing else { return }
+                switch result {
+                case .failure(let error): fail("HTTPS 证书不可用：" + error.localizedDescription, status: 502)
+                case .success(let identity):
+                    if let identity { beginDecryption(identity, authority: head.uri) }
+                    else { beginPassthrough(head, host: host, port: port) }
+                }
+            }
+        } else { beginPassthrough(head, host: host, port: port) }
+    }
+
+    private func beginDecryption(_ identity: TLSCertificateIdentity, authority: String) {
+        guard let client else { return }
+        do {
+            let tlsContext = try ProxyTLS.serverContext(identity)
+            responseStarted = true
+            client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .ok)), promise: nil)
+            client.writeAndFlush(HTTPServerResponsePart.end(nil)).flatMap { [self] in
+                client.pipeline.removeHandler(self)
+            }.flatMap {
+                client.pipeline.removeHTTPHandler(HTTPResponseEncoder.self)
+            }.flatMap { [self] in
+                client.eventLoop.makeCompletedFuture {
+                    var encoder = HTTPResponseEncoder.Configuration()
+                    encoder.automaticallySetFramingHeaders = false
+                    try client.pipeline.syncOperations.addHandlers([
+                        NIOSSLServerHandler(context: tlsContext), HTTPResponseEncoder(configuration: encoder),
+                        ByteToMessageHandler(HTTPRequestDecoder(limitConfiguration: proxyDecoderLimits())),
+                        ProxyConnection(configuration: self.configuration, shared: self.shared, records: self.records, tlsAuthority: authority)
+                    ])
+                }
+            }.flatMap {
+                // Install TLS before forwarding any ClientHello bytes buffered with CONNECT.
+                client.pipeline.removeHTTPHandler(ByteToMessageHandler<HTTPRequestDecoder>.self)
+            }.whenComplete { [self] result in
+                switch result {
+                case .failure(let error): fail(error.localizedDescription, status: 502)
+                case .success:
+                    finished = true; timer?.cancel(); pending.removeAll()
+                    client.read()
+                }
+            }
+        } catch { fail(error.localizedDescription, status: 502) }
+    }
+
+    private func beginPassthrough(_ head: HTTPRequestHead, host: String, port: Int) {
+        guard let client else { return }
         record?.outcome = .tunnel; record?.workflow = "HTTPS 透传（未解密）"
         let endpoint: ProxyEndpoint
         if case .httpProxy(let proxy) = configuration.upstream { endpoint = proxy }
         else { endpoint = ProxyEndpoint(host: host, port: port) }
         let bootstrap = bootstrap(on: client.eventLoop)
         bootstrap.connect(host: endpoint.host, port: endpoint.port).flatMap { [self] peer -> EventLoopFuture<Channel> in
-            guard !finished, !isLoopChannel(peer) else {
-                peer.close(promise: nil)
+            guard isProcessing, !isLoopChannel(peer) else {
+                closeProxyChannel(peer)
                 return peer.eventLoop.makeFailedFuture(WorkflowError.invalid("连接已取消或指向代理自身"))
             }
             upstream = peer
@@ -412,7 +633,8 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             switch result {
             case .failure(let error): fail(error.localizedDescription, status: 502)
             case .success(let peer):
-                guard !finished else { peer.close(promise: nil); return }
+                guard isProcessing else { closeProxyChannel(peer); return }
+                responseStarted = true
                 client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .ok)), promise: nil)
                 client.writeAndFlush(HTTPServerResponsePart.end(nil)).flatMap { [self] in
                     // Install raw relay before releasing bytes held by the CONNECT decoder.
@@ -421,7 +643,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                     client.eventLoop.makeCompletedFuture { () throws -> Void in
                         try client.pipeline.syncOperations.addHandlers([
                             IdleStateHandler(readTimeout: .seconds(120)),
-                            TunnelRelay(peer: peer, onClose: { [self] in finish(); peer.close(promise: nil) })
+                            TunnelRelay(peer: peer, onClose: { [self] in finish(); closeProxyChannel(peer) })
                         ])
                     }
                 }.flatMap {
@@ -432,7 +654,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                     peer.eventLoop.makeCompletedFuture { () throws -> Void in
                         try peer.pipeline.syncOperations.addHandlers([
                             IdleStateHandler(readTimeout: .seconds(120)),
-                            TunnelRelay(peer: client, onClose: { [self] in finish(); client.close(promise: nil) })
+                            TunnelRelay(peer: client, onClose: { [self] in finish(); closeProxyChannel(client) })
                         ])
                     }
                 }.whenComplete { [self] upgrade in
@@ -467,7 +689,7 @@ final class TunnelRelay: ChannelInboundHandler, @unchecked Sendable {
     func channelReadComplete(context: ChannelHandlerContext) {
         let channel = context.channel
         peer.writeAndFlush(ByteBuffer()).whenComplete { result in
-            if case .success = result { channel.read() } else { channel.close(promise: nil) }
+            if case .success = result { channel.read() } else { closeProxyChannel(channel) }
         }
     }
     func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
@@ -524,4 +746,10 @@ private func proxyDecoderLimits() -> NIOHTTPDecoderLimitConfiguration {
     limits.maxHeaderListSize = 32_768
     limits.maxHeaderFieldCount = 128
     return limits
+}
+
+/// TLS close_notify needs reads even after the HTTP transaction has completed.
+@discardableResult
+private func closeProxyChannel(_ channel: Channel) -> EventLoopFuture<Void> {
+    channel.setOption(ChannelOptions.autoRead, value: true).flatMap { channel.close() }
 }

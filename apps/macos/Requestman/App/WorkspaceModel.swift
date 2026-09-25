@@ -2,38 +2,98 @@ import AppKit
 import Foundation
 import Observation
 import RequestmanCore
+import RequestmanCertificates
 
 @MainActor @Observable
 final class WorkspaceModel {
     var selection: WorkspaceSection = .rules
-    var settingsSection: WorkspaceSettingsSection = .connection
-    var document = WorkspaceDocument() { didSet { if loaded { scheduleSave() } } }
+    var settingsSection: WorkspaceSettingsSection = .general
+    var captureMode = CaptureMode(rawValue: UserDefaults.standard.string(forKey: "captureMode") ?? "") ?? .systemProxy {
+        didSet { UserDefaults.standard.set(captureMode.rawValue, forKey: "captureMode") }
+    }
+    var document = WorkspaceDocument() {
+        didSet {
+            if loaded {
+                scheduleSave()
+                if document.proxy != oldValue.proxy { scheduleProxyConfiguration() }
+            }
+        }
+    }
     var selectedWorkflowID: UUID?
     var selectedStepID: UUID?
     var editingResponse = false
     var selectedEnvironmentID: UUID?
     var isCapturing = false
-    var isTransitioning = false
-    var isLaunchingChrome = false
+    var isTransitioning = false {
+        didSet {
+            if oldValue, !isTransitioning, proxyConfigurationPending { scheduleProxyConfiguration() }
+        }
+    }
+    var isLaunchingBrowser = false
     var isCheckingUpstream = false
     var isPreparingToQuit = false
-    var chromeLaunchError: String?
+    var installedBrowsers: [ChromiumBrowser] = []
+    var isDiscoveringBrowsers = false
+    var selectedBrowserID = UserDefaults.standard.string(forKey: "selectedBrowserID") ?? "" {
+        didSet {
+            UserDefaults.standard.set(selectedBrowserID, forKey: "selectedBrowserID")
+        }
+    }
+    var selectedBrowser: ChromiumBrowser? { installedBrowsers.first { $0.id == selectedBrowserID } }
+    var captureButtonTitle: String {
+        if isCapturing { return captureService.activeMode == .systemProxy ? "停止全局接管" : "停止浏览器捕获" }
+        if isCheckingUpstream { return "正在检查上游代理…" }
+        if isLaunchingBrowser { return "正在启动浏览器…" }
+        return captureMode == .systemProxy ? "开始全局接管" : "启动 \(selectedBrowser?.name ?? "浏览器")"
+    }
+    var captureButtonHelp: String {
+        if isCapturing { return captureService.activeMode == .systemProxy ? "恢复系统代理并停止捕获" : "停止浏览器捕获" }
+        return captureMode == .systemProxy ? "修改系统 HTTP/HTTPS 代理并开始捕获" : "通过代理参数启动 \(selectedBrowser?.name ?? "所选浏览器")"
+    }
+
+    func browserDisplayName(_ browser: ChromiumBrowser) -> String {
+        installedBrowsers.filter { $0.name == browser.name }.count > 1
+            ? "\(browser.name)（\(browser.applicationURL.deletingLastPathComponent().path)）" : browser.name
+    }
+
+    func refreshBrowsers() async {
+        guard !isDiscoveringBrowsers, !isTransitioning else { return }
+        await reloadBrowsers()
+    }
+    private func reloadBrowsers() async {
+        isDiscoveringBrowsers = true
+        defer { isDiscoveringBrowsers = false }
+        let browsers = await ChromiumBrowserCatalog.installedBrowsers()
+        guard !Task.isCancelled else { return }
+        installedBrowsers = browsers
+        if selectedBrowser == nil { selectedBrowserID = browsers.first?.id ?? "" }
+    }
+    var proxyConfigurationError: String?
     var listenPort: Int?
     var errorMessage: String?
     var saveState = "正在载入"
     var loaded = false
     let history = ExecutionHistoryModel()
+    let certificateSetup: CertificateSetupModel
     @ObservationIgnored private let captureService: any CaptureService
     @ObservationIgnored private let documentStore: WorkspaceDocumentStore
-    @ObservationIgnored private let chromeLauncher = ChromeLauncher()
+    @ObservationIgnored private let browserLauncher = BrowserLauncher()
+    @ObservationIgnored private var activeBrowser: ChromiumBrowser?
+    @ObservationIgnored private var needsSystemProxyRecovery = false
     @ObservationIgnored private var saveTask: Task<Void, Never>?
+    @ObservationIgnored private var proxyConfigurationTask: Task<Void, Never>?
+    @ObservationIgnored private var proxyConfigurationPending = false
     @ObservationIgnored private var revision = 0
 
-    init(captureService: any CaptureService = LocalCaptureService()) {
-        self.captureService = captureService
+    init(captureService: (any CaptureService)? = nil) {
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Requestman", isDirectory: true)
         documentStore = WorkspaceDocumentStore(url: directory.appendingPathComponent("workspace.json"))
+        let certificates = LocalCertificateService(
+            directoryURL: directory.appendingPathComponent("Certificates", isDirectory: true)
+        )
+        certificateSetup = CertificateSetupModel(service: certificates)
+        self.captureService = captureService ?? LocalCaptureService(certificateProvider: certificates)
     }
     func load() async {
         guard !loaded, !isTransitioning else { return }
@@ -46,7 +106,11 @@ final class WorkspaceModel {
             loaded = true; saveState = "已保存"
         } catch { errorMessage = "工作区读取失败：\(error.localizedDescription)"; saveState = "读取失败" }
         do { try await captureService.recoverSystemProxy() }
-        catch { errorMessage = "恢复上次的系统代理设置失败：\(error.localizedDescription)" }
+        catch {
+            needsSystemProxyRecovery = true
+            errorMessage = "恢复上次的系统代理设置失败：\(error.localizedDescription)"
+        }
+        await reloadBrowsers()
     }
     func collectRecords() async {
         while !Task.isCancelled {
@@ -55,20 +119,55 @@ final class WorkspaceModel {
         }
     }
     func toggleCapture() async {
-        guard loaded, !isTransitioning else { return }
+        guard loaded, !isTransitioning, isCapturing || captureMode == .systemProxy || !isDiscoveringBrowsers else { return }
         isTransitioning = true
-        defer { isTransitioning = false }
+        defer { isTransitioning = false; isLaunchingBrowser = false }
         do {
-            if isCapturing { try await captureService.stop(); isCapturing = false; listenPort = nil }
-            else { _ = try await startCaptureIfNeeded() }
+            if isCapturing {
+                try await captureService.stop()
+                synchronizeCaptureState()
+                return
+            }
+            if needsSystemProxyRecovery {
+                // Finish recovery of an earlier global session before starting either mode.
+                try await captureService.recoverSystemProxy()
+                needsSystemProxyRecovery = false
+            }
+            let mode = captureMode
+            var browser: ChromiumBrowser?
+            if mode == .browser {
+                isLaunchingBrowser = true
+                let requestedBrowserID = selectedBrowserID
+                await reloadBrowsers()
+                guard let selectedBrowser else {
+                    throw WorkflowError.invalid("未找到可用的浏览器，请在通用设置中选择浏览器。")
+                }
+                guard requestedBrowserID.isEmpty || selectedBrowser.id == requestedBrowserID else {
+                    throw WorkflowError.invalid("所选浏览器已不可用，请在通用设置中重新选择。")
+                }
+                try browserLauncher.validate(selectedBrowser)
+                browser = selectedBrowser
+            }
+            guard let port = try await startCapture(mode: mode) else { return }
+            if let browser {
+                do {
+                    try await browserLauncher.launch(browser: browser, proxyPort: port)
+                    activeBrowser = browser
+                } catch {
+                    let launchError = error
+                    do { try await captureService.stop() }
+                    catch {
+                        throw WorkflowError.invalid("无法启动 \(browser.name)：\(launchError.localizedDescription)\n停止监听失败：\(error.localizedDescription)")
+                    }
+                    throw WorkflowError.invalid("无法启动 \(browser.name)：\(launchError.localizedDescription)")
+                }
+            }
         } catch {
-            listenPort = captureService.activePort
-            isCapturing = listenPort != nil
+            synchronizeCaptureState()
             errorMessage = error.localizedDescription
         }
     }
-    private func startCaptureIfNeeded() async throws -> Int? {
-        if isCapturing, let listenPort { return listenPort }
+    private func startCapture(mode: CaptureMode) async throws -> Int? {
         let window = NSApp.keyWindow
         let configuration: ExplicitProxyConfiguration
         do {
@@ -84,38 +183,15 @@ final class WorkspaceModel {
             return nil
         }
         if document.proxy != configuration { document.proxy = configuration }
-        let port = try await captureService.start(configuration: configuration, document: document)
+        let port = try await captureService.start(configuration: configuration, document: document, mode: mode)
         listenPort = port
         isCapturing = true
         return port
     }
-    func launchChromeAndCapture() async {
-        guard loaded, !isTransitioning else { return }
-        isTransitioning = true
-        isLaunchingChrome = true
-        chromeLaunchError = nil
-        let wasCapturing = isCapturing
-        defer { isTransitioning = false; isLaunchingChrome = false }
-        do {
-            let applicationURL = try chromeLauncher.applicationURL()
-            guard let port = try await startCaptureIfNeeded() else { return }
-            await captureService.update(document: document)
-            try await chromeLauncher.launch(applicationURL: applicationURL, proxyPort: port)
-        } catch {
-            chromeLaunchError = "无法启动 Chrome：\(error.localizedDescription)"
-            listenPort = captureService.activePort
-            isCapturing = listenPort != nil
-            // Roll back only the listener started by this action. Existing capture keeps running.
-            if !wasCapturing && isCapturing {
-                do {
-                    try await captureService.stop()
-                    isCapturing = false
-                    listenPort = nil
-                } catch {
-                    chromeLaunchError = "\(chromeLaunchError ?? "启动失败")\n停止监听失败：\(error.localizedDescription)"
-                }
-            }
-        }
+    private func synchronizeCaptureState() {
+        listenPort = captureService.activePort
+        isCapturing = listenPort != nil
+        if !isCapturing { activeBrowser = nil }
     }
     func prepareToQuit() async -> Bool {
         guard !isTransitioning, !isPreparingToQuit else { return false }
@@ -125,8 +201,7 @@ final class WorkspaceModel {
         guard await flushSave() else { return false }
         do {
             try await captureService.stop()
-            isCapturing = false
-            listenPort = nil
+            synchronizeCaptureState()
             return true
         } catch {
             errorMessage = "系统代理恢复失败，暂未退出，请重试停止捕获：\(error.localizedDescription)"
@@ -137,6 +212,39 @@ final class WorkspaceModel {
         history.paused = paused; captureService.recordBuffer?.setPaused(paused)
     }
     func clearHistory() { captureService.recordBuffer?.clear(); history.clear() }
+    private func scheduleProxyConfiguration() {
+        proxyConfigurationPending = true
+        proxyConfigurationError = nil
+        proxyConfigurationTask?.cancel()
+        proxyConfigurationTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+            guard let self, !Task.isCancelled else { return }
+            // Only debounce tasks are cancellable; a started system-proxy transaction must finish.
+            proxyConfigurationTask = nil
+            guard !isTransitioning else { return }
+            proxyConfigurationPending = false
+            guard isCapturing else { return }
+            isTransitioning = true
+            defer { isTransitioning = false }
+            do {
+                let previousPort = listenPort
+                listenPort = try await captureService.reconfigure(configuration: document.proxy, document: document)
+                if captureService.activeMode == .browser, listenPort != previousPort,
+                   let port = listenPort, let browser = activeBrowser {
+                    // The current session keeps its browser even if next-start preferences changed.
+                    do { try await browserLauncher.launch(browser: browser, proxyPort: port) }
+                    catch {
+                        proxyConfigurationError = "代理端口已更新，但无法启动 \(browser.name)：\(error.localizedDescription)"
+                        return
+                    }
+                }
+                proxyConfigurationError = nil
+            } catch {
+                synchronizeCaptureState()
+                proxyConfigurationError = "代理配置未生效：\(error.localizedDescription)"
+            }
+        }
+    }
     private func scheduleSave() {
         revision += 1
         let currentRevision = revision

@@ -86,8 +86,8 @@ public enum WorkflowEngine {
                 draft.setHeader(step.name, step.kind == .removeHeader ? nil : value)
             case .replaceBody: draft.replacementBody = value; clearBodyEncoding(&draft)
             case .rewriteURL:
-                guard let url = URL(string: value), url.scheme == "http", url.host != nil, url.user == nil, url.fragment == nil else {
-                    throw WorkflowError.invalid("当前目标改写只支持完整的 http:// 地址")
+                guard let url = URL(string: value), ["http", "https"].contains(url.scheme ?? ""), url.host != nil, url.user == nil, url.fragment == nil else {
+                    throw WorkflowError.invalid("当前目标改写只支持完整的 http:// 或 https:// 地址")
                 }
                 draft.url = value
             case .setMethod:

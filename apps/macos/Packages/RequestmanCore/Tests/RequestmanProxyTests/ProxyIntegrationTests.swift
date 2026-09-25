@@ -1,5 +1,6 @@
 import Foundation
 import NIOCore
+import NIOEmbedded
 import NIOPosix
 import NIOHTTP1
 import Testing
@@ -9,6 +10,30 @@ import RequestmanCore
 
 @Suite(.serialized)
 struct ProxyIntegrationTests {
+    @Test func upstreamChangesApplyWithoutRestartingListener() async throws {
+        try await withHarness { h in
+            try await h.start()
+            var configuration = ExplicitProxyConfiguration()
+            configuration.port = h.proxyPort
+            configuration.upstream = .httpProxy(ProxyEndpoint(host: "127.0.0.1", port: h.originPort))
+            try await h.proxy.updateConfiguration(configuration)
+            let proxied = try await h.exchange("GET http://unresolved.test/live HTTP/1.1\r\nHost: unresolved.test\r\n\r\n")
+            #expect(proxied.contains("origin-body"))
+            #expect(h.observation.withLock { $0.uri } == "http://unresolved.test/live")
+
+            configuration.upstream = .system
+            try await h.proxy.updateConfiguration(configuration)
+            let direct = try await h.exchange("GET \(h.originURL)direct HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            #expect(direct.contains("origin-body"))
+            #expect(h.observation.withLock { $0.uri } == "/direct")
+
+            configuration.upstream = .httpProxy(ProxyEndpoint(host: "127.0.0.1", port: h.proxyPort))
+            await #expect(throws: WorkflowError.self) { try await h.proxy.updateConfiguration(configuration) }
+            let afterFailure = try await h.exchange("GET \(h.originURL)still-direct HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            #expect(afterFailure.contains("origin-body"))
+            #expect(h.observation.withLock { $0.uri } == "/still-direct")
+        }
+    }
     @Test func modifiesRealRequestAndResponseWithoutBufferingBody() async throws {
         try await withHarness { h in
             var env = WorkspaceEnvironment(name: "dev"); env.variables = [NamedValue(name: "key", value: "test-key")]
@@ -27,6 +52,16 @@ struct ProxyIntegrationTests {
             let records = h.proxy.records.drain().records
             #expect(records.count == 1); #expect(records.first?.outcome == .modified)
             #expect(records.first?.requestBytes == body.utf8.count)
+            let record = try #require(records.first)
+            #expect(record.requestBody.state == .complete && record.requestBody.isTruncated)
+            #expect(record.requestBody.data.count == CaptureBodySnapshot.maximumBytes)
+            #expect(record.requestBody.observedByteCount == body.utf8.count)
+            #expect(record.sentBody.data == record.requestBody.data)
+            #expect(record.sentBody.state == .complete && record.sentBody.isTruncated)
+            #expect(record.receivedBody.data == Data("origin-body".utf8))
+            #expect(record.responseBody.data == record.receivedBody.data)
+            #expect(record.originalStatus == 200 && record.status == 202)
+            #expect(record.matchedWorkflowID == workflow.id)
         }
     }
     @Test func mockSkipsOriginAndResponseLaneStillRuns() async throws {
@@ -39,7 +74,10 @@ struct ProxyIntegrationTests {
             let reply = try await h.exchange("GET \(h.originURL)mock HTTP/1.1\r\nHost: localhost\r\n\r\n")
             #expect(reply.contains("201 Created")); #expect(reply.contains("local-static")); #expect(reply.contains("X-Response-Flow: yes"))
             #expect(h.observation.withLock { $0.requests } == 0)
-            #expect(h.proxy.records.drain().records.first?.outcome == .mocked)
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(record.outcome == .mocked)
+            #expect(record.sentBody.state == .unavailable && record.receivedBody.state == .unavailable)
+            #expect(record.responseBody.isComplete && record.responseBody.data == Data("local-static".utf8))
         }
     }
     @Test func responseReplacementRepairsEncodingAndHeadHasNoBody() async throws {
@@ -51,8 +89,17 @@ struct ProxyIntegrationTests {
             let reply = try await h.exchange("GET \(h.originURL) HTTP/1.1\r\nHost: localhost\r\n\r\n")
             #expect(reply.contains("Content-Length: 11")); #expect(reply.hasSuffix("replacement"))
             #expect(!reply.lowercased().contains("content-encoding"))
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(record.requestBody.isComplete && record.requestBody.data.isEmpty)
+            #expect(record.sentBody.isComplete && record.sentBody.data.isEmpty)
+            #expect(record.receivedBody.data == Data("origin-body".utf8))
+            #expect(record.responseBody.data == Data("replacement".utf8))
+            #expect(record.responseBody.isComplete)
             let head = try await h.exchange("HEAD \(h.originURL) HTTP/1.1\r\nHost: localhost\r\n\r\n")
             #expect(head.hasSuffix("\r\n\r\n")); #expect(!head.hasSuffix("replacement"))
+            let headRecord = try #require(h.proxy.records.drain().records.first)
+            #expect(headRecord.receivedBody.isComplete && headRecord.receivedBody.data.isEmpty)
+            #expect(headRecord.responseBody.isComplete && headRecord.responseBody.data.isEmpty)
         }
     }
     @Test func invalidDynamicValueFailsBeforeOriginAndStopReleasesPort() async throws {
@@ -63,7 +110,12 @@ struct ProxyIntegrationTests {
             try await h.start(workflow: workflow)
             let reply = try await h.exchange("GET \(h.originURL) HTTP/1.1\r\nHost: localhost\r\n\r\n")
             #expect(reply.contains("400 Bad Request")); #expect(h.observation.withLock { $0.requests } == 0)
-            #expect(h.proxy.records.drain().records.first?.outcome == .failed)
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(record.outcome == .failed)
+            #expect(record.responseBody.isComplete)
+            #expect(String(data: record.responseBody.data, encoding: .utf8)?.contains("未找到变量") == true)
+            #expect(record.responseHeaders.contains { $0.name.lowercased() == "content-type" && $0.value == "text/plain; charset=utf-8" })
+            #expect(record.sentBody.state == .unavailable)
             await h.proxy.stop()
             let rebound = try await ServerBootstrap(group: h.group).serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1).bind(host: "127.0.0.1", port: h.proxyPort).get()
             try await rebound.close().get()
@@ -93,6 +145,9 @@ struct ProxyIntegrationTests {
             try await h.start(workflow: workflow)
             let reply = try await h.exchange("POST \(h.originURL) HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n3\r\ndef\r\n0\r\n\r\n")
             #expect(reply.contains("200 OK")); #expect(h.observation.withLock { $0.bodyBytes } == 7)
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(record.requestBody.isComplete && record.requestBody.data == Data("abcdef".utf8))
+            #expect(record.sentBody.isComplete && record.sentBody.data == Data("changed".utf8))
             let doc = WorkspaceDocument()
             await h.proxy.update(doc)
             let unchanged = try await h.exchange("POST \(h.originURL) HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n")
@@ -147,6 +202,51 @@ struct ProxyIntegrationTests {
             #expect(h.observation.withLock { $0.requests } == 1)
         }
     }
+    @Test func encodedAndInterruptedBodiesAreNeverReportedAsCompleteJSON() async throws {
+        try await withHarness { h in
+            try await h.start()
+            let encoded = try await h.exchange("GET \(h.originURL)encoded HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            #expect(encoded.lowercased().contains("content-encoding: gzip"))
+            let compressed = try #require(h.proxy.records.drain().records.first)
+            #expect(compressed.receivedBody.isComplete && compressed.receivedBody.isEncoded)
+            #expect(compressed.receivedBody.contentType == "application/json")
+            #expect(compressed.receivedBody.contentEncoding == "gzip")
+            #expect(compressed.receivedBody.data == Data(gzipJSONFixture))
+            #expect(compressed.responseBody.data == compressed.receivedBody.data)
+            #expect(compressed.responseBody.isEncoded)
+
+            _ = try await h.exchange("GET \(h.originURL)interrupted HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            let partial = try #require(h.proxy.records.drain().records.first)
+            #expect(partial.outcome == .failed && partial.error != nil)
+            #expect(partial.originalStatus == 200 && partial.status == 200)
+            #expect(partial.responseHeaders.contains { $0.name.lowercased() == "transfer-encoding" && $0.value == "chunked" })
+            #expect(partial.responseBody.data == Data("origin-body".utf8))
+            #expect(partial.receivedBody.state == .incomplete && !partial.receivedBody.isComplete)
+            #expect(partial.receivedBody.data == Data("origin-body".utf8))
+            #expect(partial.responseBody.state == .incomplete && !partial.responseBody.isComplete)
+        }
+    }
+    @Test func bodyWriteFailureCannotBecomeACompleteSnapshotWhenEndSucceeds() throws {
+        let records = CaptureRecordBuffer()
+        let shared = ProxySharedState()
+        var workflow = RequestWorkflow(); workflow.urlPrefix = "http://example.test/"
+        var mock = ModificationStep(kind: .mock); mock.status = 201; mock.value = "not-written"
+        workflow.requestSteps = [mock]
+        var project = WorkflowProject(); project.workflows = [workflow]
+        var document = WorkspaceDocument(); document.projects = [project]
+        let documentSnapshot = document
+        shared.document.withLock { $0 = documentSnapshot }
+        let channel = EmbeddedChannel()
+        try channel.pipeline.addHandlers([RejectResponseBodyWrite(), ProxyConnection(configuration: .init(), shared: shared, records: records)]).wait()
+        defer { _ = try? channel.finish(acceptAlreadyClosed: true) }
+        try channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 12345)).wait()
+        try channel.writeInbound(HTTPServerRequestPart.head(HTTPRequestHead(version: .http1_1, method: .GET, uri: "http://example.test/", headers: HTTPHeaders([("Host", "example.test")]))))
+        let record = try #require(records.drain().records.first)
+        #expect(record.outcome == .failed && record.status == 201)
+        #expect(record.responseBody.state == .incomplete && !record.responseBody.isComplete)
+        #expect(record.responseBody.data == Data("not-written".utf8))
+    }
+
     @Test func explicitUpstreamReceivesAbsoluteURL() async throws {
         try await withHarness { h in
             var upstream = ExplicitProxyConfiguration(); upstream.upstream = .httpProxy(ProxyEndpoint(host: "127.0.0.1", port: h.originPort))
@@ -223,9 +323,17 @@ private final class OriginHandler: ChannelInboundHandler, @unchecked Sendable {
         case .end:
             let channel = context.channel
             let body = uri.hasSuffix("/large") ? String(repeating: "z", count: 1_048_576) : "origin-body"
-            channel.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .ok, headers: HTTPHeaders([("Content-Length", String(body.utf8.count)), ("Connection", "close")]))), promise: nil)
-            if method != .HEAD { channel.write(HTTPServerResponsePart.body(.byteBuffer(channel.allocator.buffer(string: body))), promise: nil) }
-            channel.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { _ in channel.close(promise: nil) }
+            let bytes = uri.hasSuffix("/encoded") ? gzipJSONFixture : Array(body.utf8)
+            let interrupted = uri.hasSuffix("/interrupted")
+            var headers = HTTPHeaders([("Content-Length", String(bytes.count + (interrupted ? 32 : 0))), ("Connection", "close")])
+            if uri.hasSuffix("/encoded") {
+                headers.add(name: "Content-Encoding", value: "gzip")
+                headers.add(name: "Content-Type", value: "application/json")
+            }
+            channel.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .ok, headers: headers)), promise: nil)
+            if method != .HEAD { channel.write(HTTPServerResponsePart.body(.byteBuffer(channel.allocator.buffer(bytes: bytes))), promise: nil) }
+            if interrupted { channel.writeAndFlush(HTTPServerResponsePart.body(.byteBuffer(ByteBuffer()))).whenComplete { _ in channel.close(promise: nil) } }
+            else { channel.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { _ in channel.close(promise: nil) } }
         }
     }
 }
@@ -248,4 +356,15 @@ private final class RawCollector: ChannelInboundHandler, @unchecked Sendable {
 private final class EchoHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = ByteBuffer
     func channelRead(context: ChannelHandlerContext, data: NIOAny) { context.channel.writeAndFlush(unwrapInboundIn(data), promise: nil) }
+}
+
+private let gzipJSONFixture: [UInt8] = [31, 139, 8, 0, 0, 0, 0, 0, 2, 255, 171, 86, 202, 207, 86, 178, 42, 41, 42, 77, 173, 5, 0, 144, 95, 212, 167, 11, 0, 0, 0]
+
+private enum InjectedBodyWriteError: Error { case rejected }
+private final class RejectResponseBodyWrite: ChannelOutboundHandler, Sendable {
+    typealias OutboundIn = HTTPServerResponsePart
+    func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
+        if case .body = unwrapOutboundIn(data) { promise?.fail(InjectedBodyWriteError.rejected) }
+        else { context.write(data, promise: promise) }
+    }
 }

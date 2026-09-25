@@ -1,11 +1,12 @@
 # macOS 开发约定
 
-- 先读 [README.md](README.md) 与 [Docs/Architecture.md](Docs/Architecture.md)。当前已有 HTTP/1.1 显式代理和 CONNECT 透传；不能将静态 UI 检查或回环测试表述为 Chrome 实测、HTTPS 解密或性能验收通过。
+- 先读 [README.md](README.md) 与 [Docs/Architecture.md](Docs/Architecture.md)。当前已有 HTTP/1.1 显式代理、HTTPS 解密与未配置证书时的 CONNECT 透传；不能将静态 UI 检查或回环测试表述为 Chrome 实测或性能验收通过。
 - 原生 UI 使用 SwiftUI，必要的系统集成使用 AppKit。采用 Swift 6 并发检查；UI 状态保持 `@MainActor`，按功能拆分视图。
 - 与 UI 无关的配置和服务契约放在 `Packages/RequestmanCore`。宿主状态通过 `CaptureService` 访问捕获实现，不在视图中直接操作 Network Extension、代理或证书。
 - `Extensions/TransparentProxy` 目前只有实现边界说明。引入真实 target 时同步补齐 provider、签名、entitlements、嵌入、安装/卸载与 IPC，不创建看似可用但吞掉流量的占位 provider。
 - 与 Surge 共存时区分系统代理、增强模式、MITM；保留来源信息、域名和避免循环的要求见架构文档。不得把系统路由称为保证绕过 Surge 的直连。
-- 开始捕获或启动调试 Chrome 是接管系统 HTTP/HTTPS 代理的明确操作；先监听再接管、先恢复再停止。恢复失败保留监听并阻止退出，异常退出记录在下次启动时恢复。不得自动修改 Surge 配置或证书信任。
+- 导航栏启动按钮按通用设置选择启动方式。全局接管模式修改系统 HTTP/HTTPS 代理，先监听再接管、先恢复再停止；仅启动浏览器模式只监听回环端口并带代理参数启动所选浏览器，不修改系统代理。当前会话固定启动时的模式，偏好修改用于下次启动。全局恢复失败保留监听并阻止退出，异常退出记录在下次启动时独立恢复。不得自动修改 Surge 配置；捕获启停不修改证书信任。
+- 只有用户点击“设置证书…”才执行本机 CA 生成、安装和当前用户 SSL 信任流程，授权由系统 Security UI 完成。CA 私钥仅保存在本机钥匙串，不导出到文件或日志；短期站点私钥只在内存中使用。复用并校验现有证书，取消后可继续；信任成功须验证系统实际 SSL 信任链，不能靠自定义锚点或本地布尔值。证书就绪后对新 CONNECT 连接解密，已有透传连接需重建；对服务器继续校验系统 SSL 信任与主机名，不通过关闭校验处理握手失败。自动测试不得安装或信任真实本机证书。
 - 核心逻辑变更运行相关 Swift package 测试；工程调整检查源文件引用、共享 scheme 和配置。构建、静态检查与真实网络行为分别报告。
 - 遵守上级规则：禁止通过 Xcode / `xcodebuild` 编译 App 并部署真机运行测试，不通过拆分命令绕过。
 
