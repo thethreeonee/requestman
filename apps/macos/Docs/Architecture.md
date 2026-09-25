@@ -46,6 +46,8 @@ HTTP/1.1 顺序请求复用下游连接，每条下游最多保留一个同目�
 
 `check-workspace-sidebar.py` 编译实际工作区原生壳与模型、内容替身，在不显示的 `NSWindow` 中回归分栏布局、工具栏和状态同步，包括捕获按钮在浏览器名称、启动/停止及禁用状态变化后的宽度、图标布局与动作。它与完整 App 的外观、鼠标交互和真实数据验收分别报告，不能以隐藏窗口回归代替视觉验收。
 
+`check-inspector-performance.py` 进一步使用真实请求表格和详情组件、75 条替身记录，在隐藏窗口反复选择、展开、缩放和收起详情，检查空闲 CPU 与相同快照下工具栏图像的稳定性。内容宿主保留关闭自动尺寸推导的边界，工具栏快照相同则跳过控件赋值，避免重复布局更新；隐藏窗口测试仍不能替代实际 App 的性能验收。
+
 详情内容复用 `ToolbarSectionControl`，直接使用 `NSSegmentedControl` 展示请求头、请求体、响应头、响应体四项；macOS 26+ 用控件自身的 `borderShape = .capsule` 配置胶囊形状，macOS 27+ 设 `.tabs` 语义，继续使用 `.automatic` 分段样式；主工作区和设置分段控件采用相同配置。形状与绘制均由 AppKit 提供，不添加 `NSGlassEffectView` 包装。版本继续使用独立菜单；请求体、响应体的 JSON 显示方式改由原生 `Button` 切换，树形时显示“原始数据”，源码时显示“树形视图”，不改变当前版本。`RequestInspectorView` 固定摘要、独立查询参数入口与条件规则入口，查询参数来自原始/最终 URL，不混入 Body；`RequestPayloadView` 保留各 Tab 浏览状态，`RequestDataOutline` 通过 `NSOutlineView` 提供 Header 和 JSON 字段树。原始数据使用只读 `NSTextView`，保留文本缩进、换行和字段顺序，不重新格式化；非 JSON 直接显示文本或十六进制，不提供无效切换。Payload、Outline 和 Source 不再设置独立白背景，由系统 Inspector 背景贯穿；字段仍仅用系统色的低透明度背景表达变更。原生按钮在行悬停时以 0.15 秒淡入淡出并复制值或完整子树，遵循减少动态效果设置；提供右键与键盘替代。`RequestInspectionData` 在后台构造差异和节点，隐藏/不完整数据不产生推测性差异。系统侧栏建议宽度 520 pt，可在 400–760 pt 调整。外观与鼠标交互仍待 App 运行验收。
 
 `CaptureBodyCollector` 随流量记录原始请求、发出请求、服务器响应和最终响应的有界前缀，`CaptureBodySnapshot` 持有全局 32 MiB 预算租约直到最后一个快照释放；单快照 64 KiB。记录包括完整、未完成、未采集和不可用状态，Mock 无上游原始响应。写入失败不会被后续结束标记成功掩盖。`RequestBodyDecoding` 只对完整快照在详情后台任务中使用系统 zlib 解码 gzip / deflate，每层输出限 256 KiB；JSON 树另限 64 层与每侧 4,096 节点。Body 预览不落盘，详见 [性能边界](Performance.md) 与 [请求详情设计](Design/request-inspector.md)。

@@ -31,7 +31,7 @@ struct ToolbarSectionControl: NSViewRepresentable {
 
     func updateNSView(_ control: NSSegmentedControl, context: Context) {
         context.coordinator.selection = $selection
-        control.selectedSegment = selection
+        if control.selectedSegment != selection { control.selectedSegment = selection }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSegmentedControl, context: Context) -> CGSize? {

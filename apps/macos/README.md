@@ -85,6 +85,7 @@ swift test --package-path apps/macos/Packages/RequestmanCore
 python3 apps/macos/Scripts/check-native-sources.py --typecheck
 python3 apps/macos/Scripts/check-request-inspection.py
 python3 apps/macos/Scripts/check-workspace-sidebar.py
+python3 apps/macos/Scripts/check-inspector-performance.py
 python3 apps/macos/Scripts/check-browser-discovery.py
 ```
 

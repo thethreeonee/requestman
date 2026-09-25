@@ -21,7 +21,7 @@ struct WorkspaceSplitView: NSViewControllerRepresentable {
 }
 
 @MainActor
-struct WorkspaceToolbarSnapshot {
+struct WorkspaceToolbarSnapshot: Equatable {
     let section: WorkspaceSection
     let selectedRequestID: UUID?
     let hasSelectedRequest: Bool
@@ -175,11 +175,14 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
 
     func update(snapshot next: WorkspaceToolbarSnapshot, openSettings: @escaping () -> Void) {
         guard !isTearingDown else { return }
+        self.openSettings = openSettings
+        // Parent layout/observation can deliver the same snapshot repeatedly.
+        // Avoid reassigning native control images, titles and selection each time.
+        guard state != next else { installToolbarIfNeeded(); return }
         let sectionChanged = state.section != next.section
         let requestChanged = state.selectedRequestID != next.selectedRequestID
         if sectionChanged, state.section == .rules { rulesSidebarCollapsed = sidebarItem.isCollapsed }
         state = next
-        self.openSettings = openSettings
         if sectionChanged {
             environmentPopover?.close()
             if next.section != .requests { searchField.window?.endEditing(for: searchField) }
