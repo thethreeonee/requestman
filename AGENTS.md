@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-`requestman` contains the existing Chrome/Firefox DevTools extension and an independent native macOS app scaffold. Browser code lives in `apps/browser-extension`; native code lives in `apps/macos`.
+`requestman` contains the existing Chrome/Firefox DevTools extension and an independent native macOS app. Browser code lives in `apps/browser-extension`; native code lives in `apps/macos`.
 
-Read [macOS instructions](apps/macos/AGENTS.md) and [macOS architecture](apps/macos/Docs/Architecture.md) before native work. The macOS scaffold does not yet capture traffic or modify system networking. Browser and macOS versions are independent.
+Read [macOS instructions](apps/macos/AGENTS.md) and [macOS architecture](apps/macos/Docs/Architecture.md) before native work. The macOS app has a loopback HTTP proxy and CONNECT passthrough. Starting capture sets system HTTP/HTTPS proxies; stopping or quitting restores the prior settings. It does not decrypt HTTPS. Browser and macOS versions are independent.
 
 The browser extension uses:
 

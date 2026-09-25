@@ -5,6 +5,75 @@
 	};
 	"objectVersion" = "60";
 	"objects" = {
+		"AC61F3DB56E446B0BA7CD9C1" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Requestman/Features/Connection/UpstreamProxyPrompt.swift";
+			"sourceTree" = "<group>";
+		};
+		"69AC519681D4411F90021182" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "AC61F3DB56E446B0BA7CD9C1";
+		};
+		"66C777AADFDD9EF77AB46C95" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Requestman/Features/Workspace/WorkspaceSectionControl.swift";
+			"sourceTree" = "<group>";
+		};
+		"AA723CB28A14D53FFE8683CC" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "66C777AADFDD9EF77AB46C95";
+		};
+		"20862586DEEC23D066F47C31" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Requestman/Features/Settings/WorkspaceSettingsView.swift";
+			"sourceTree" = "<group>";
+		};
+		"A2D34AF5EAF3073EA4E6CBE8" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "20862586DEEC23D066F47C31";
+		};
+		"F034173E7D712F9B663EF189" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Requestman/Infrastructure/Browser/ChromeLauncher.swift";
+			"sourceTree" = "<group>";
+		};
+		"E9751C5AF06CE56B082322E9" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "F034173E7D712F9B663EF189";
+		};
+		"3378E8C5B9087F2189A82B77" = {
+			"isa" = "PBXBuildFile";
+			"productRef" = "769C1826843E971C2F135B82";
+		};
+		"769C1826843E971C2F135B82" = {
+			"isa" = "XCSwiftPackageProductDependency";
+			"package" = "582681C2EAE02B3F3D399C0C";
+			"productName" = "RequestmanProxy";
+		};
+		"7C2BDDBDD012B872A8E7AAC1" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "FD72A5DC99C066FA074DEE61";
+		};
+		"FD72A5DC99C066FA074DEE61" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Requestman/Infrastructure/Capture/LocalCaptureService.swift";
+			"sourceTree" = "<group>";
+		};
+		"E8F774C24B7384DC1464C81F" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "15F71FB09981C1A1D4BBDA4B";
+		};
+		"15F71FB09981C1A1D4BBDA4B" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Requestman/Features/Environments/EnvironmentsView.swift";
+			"sourceTree" = "<group>";
+		};
 		"67AA01506D96DA364042FF26" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -24,26 +93,6 @@
 		"CCBE6A86B4438F5217413328" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "A9F286AE72ED88A25448163E";
-		};
-		"D66BF7F359767EEAFDA01641" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Applications/ApplicationsView.swift";
-			"sourceTree" = "<group>";
-		};
-		"12CCC7EC5285B89FF344763E" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "D66BF7F359767EEAFDA01641";
-		};
-		"BAF624D98C46FB69DD7C4E29" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Applications/RunningApplication.swift";
-			"sourceTree" = "<group>";
-		};
-		"460EF6353043D0E595ABF4F4" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "BAF624D98C46FB69DD7C4E29";
 		};
 		"A03C17A225475B347E26729E" = {
 			"isa" = "PBXFileReference";
@@ -95,16 +144,6 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "7C28A29B34E8034AC7DD0C18";
 		};
-		"D8C446834658C85AE0156071" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Infrastructure/Applications/ApplicationCatalog.swift";
-			"sourceTree" = "<group>";
-		};
-		"7C882872F4B9EF4580AD0843" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "D8C446834658C85AE0156071";
-		};
 		"B0EAAA525C3106E1DE8CB93D" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -139,16 +178,19 @@
 		"BCE16DD0260827ECF338C787" = {
 			"isa" = "PBXGroup";
 			"children" = (
+				"66C777AADFDD9EF77AB46C95",
+				"20862586DEEC23D066F47C31",
+				"F034173E7D712F9B663EF189",
+				"FD72A5DC99C066FA074DEE61",
+				"15F71FB09981C1A1D4BBDA4B",
 				"67AA01506D96DA364042FF26",
 				"A9F286AE72ED88A25448163E",
-				"D66BF7F359767EEAFDA01641",
-				"BAF624D98C46FB69DD7C4E29",
 				"A03C17A225475B347E26729E",
+				"AC61F3DB56E446B0BA7CD9C1",
 				"CF619E3F4441CF542CEC6273",
 				"A8CE98D3D53D32C769A516B8",
 				"E993CA47D7D0AC8845B4A238",
 				"7C28A29B34E8034AC7DD0C18",
-				"D8C446834658C85AE0156071",
 				"B0EAAA525C3106E1DE8CB93D",
 			);
 			"name" = "Requestman";
@@ -180,16 +222,19 @@
 			"isa" = "PBXSourcesBuildPhase";
 			"buildActionMask" = "2147483647";
 			"files" = (
+				"AA723CB28A14D53FFE8683CC",
+				"A2D34AF5EAF3073EA4E6CBE8",
+				"E9751C5AF06CE56B082322E9",
+				"7C2BDDBDD012B872A8E7AAC1",
+				"E8F774C24B7384DC1464C81F",
 				"B1314B8A4F25E11367CF1680",
 				"CCBE6A86B4438F5217413328",
-				"12CCC7EC5285B89FF344763E",
-				"460EF6353043D0E595ABF4F4",
 				"99927C93F99D4F00D97CC57F",
+				"69AC519681D4411F90021182",
 				"65D2437F451A7E298F01615A",
 				"977963FF90440603C012F5DC",
 				"BFC10EFC1AB3448A59D900DC",
 				"3F3F99DF960C01BEA0551DBB",
-				"7C882872F4B9EF4580AD0843",
 				"32B96703F25DC6C7865528FB",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
@@ -198,6 +243,7 @@
 			"isa" = "PBXFrameworksBuildPhase";
 			"buildActionMask" = "2147483647";
 			"files" = (
+				"3378E8C5B9087F2189A82B77",
 				"D9F82689E8F760ECED47CA3E",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
@@ -263,6 +309,7 @@
 			);
 			"name" = "Requestman";
 			"packageProductDependencies" = (
+				"769C1826843E971C2F135B82",
 				"94A0426E8D3203DA5468CCF0",
 			);
 			"productName" = "Requestman";
@@ -273,6 +320,7 @@
 			"isa" = "XCBuildConfiguration";
 			"name" = "Debug";
 			"buildSettings" = {
+				"ONLY_ACTIVE_ARCH" = "YES";
 				"SDKROOT" = "macosx";
 				"SUPPORTED_PLATFORMS" = "macosx";
 				"CLANG_ENABLE_MODULES" = "YES";
@@ -282,6 +330,7 @@
 			"isa" = "XCBuildConfiguration";
 			"name" = "Release";
 			"buildSettings" = {
+				"ONLY_ACTIVE_ARCH" = "NO";
 				"SDKROOT" = "macosx";
 				"SUPPORTED_PLATFORMS" = "macosx";
 				"CLANG_ENABLE_MODULES" = "YES";
