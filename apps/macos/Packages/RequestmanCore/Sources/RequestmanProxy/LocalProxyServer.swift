@@ -38,7 +38,7 @@ public actor LocalProxyServer {
         let shared = shared, records = records
         do {
             let channel = try await ServerBootstrap(group: group)
-                .serverChannelOption(ChannelOptions.backlog, value: 64)
+                .serverChannelOption(ChannelOptions.backlog, value: Int32(ProxySharedState.maximumConnections))
                 .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
                 .childChannelOption(ChannelOptions.autoRead, value: false)
                 .childChannelOption(ChannelOptions.maxMessagesPerRead, value: 1)
@@ -48,7 +48,7 @@ public actor LocalProxyServer {
                     guard shared.register(channel) else {
                         var record = CaptureRecord(method: "—", url: "连接未受理")
                         record.outcome = .failed; record.workflow = "连接容量上限"
-                        record.error = "当前已有 64 个连接"
+                        record.error = "当前已有 \(ProxySharedState.maximumConnections) 个连接"
                         records.append(record)
                         return channel.close()
                     }
@@ -82,6 +82,7 @@ public actor LocalProxyServer {
 }
 
 final class ProxySharedState: Sendable {
+    static let maximumConnections = 256
     let tlsContexts = ProxyTLSContexts()
     let certificateProvider: (any TLSCertificateProviding)?
     let upstreamTrustRoots: [NIOSSLCertificate]?
@@ -103,7 +104,7 @@ final class ProxySharedState: Sendable {
     let channels = OSAllocatedUnfairLock(initialState: [ObjectIdentifier: Channel]())
     func register(_ channel: Channel) -> Bool {
         channels.withLock { channels in
-            guard channels.count < 64 else { return false }
+            guard channels.count < Self.maximumConnections else { return false }
             channels[ObjectIdentifier(channel)] = channel
             return true
         }

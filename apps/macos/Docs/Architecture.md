@@ -32,7 +32,7 @@
 
 CA 材料和实际信任结果使用最多 5 秒的固定期限缓存，命中不会续期；状态刷新、生成、安装、信任操作先失效旧缓存，应用重新激活也刷新状态。刷新失败不能沿用旧的可信结果。站点 TLS 服务端 context 按叶证书 DER 缓存最多 128 个，复用前仍须经过证书提供方的信任检查；出站共用 TLS context，但每次新连接的目标与信任验证独立执行。
 
-HTTP/1.1 顺序请求复用下游连接，每条下游最多保留一个同目标、同出口的上游连接，HTTPS 同时复用 TLS 会话。上游主动关闭后，下次请求重新建连；不重试已发送请求。每个事务完成后清空规则匹配、Body 采集器和内存租约，保留独立记录；闲置 30 秒关闭且不生成虚假失败记录，停止监听关闭在用和闲置连接。仍限制最多 64 个下游连接，不支持流水线和跨客户端连接池。
+HTTP/1.1 顺序请求复用下游连接，每条下游最多保留一个同目标、同出口的上游连接，HTTPS 同时复用 TLS 会话。上游主动关闭后，下次请求重新建连；不重试已发送请求。每个事务完成后清空规则匹配、Body 采集器和内存租约，保留独立记录；闲置 30 秒关闭且不生成虚假失败记录，停止监听关闭在用和闲置连接。仍限制最多 256 个下游连接，不支持流水线和跨客户端连接池。
 
 主窗口由 `WorkspaceSplitView` 桥接一个 AppKit `NSSplitViewController`，持久保留项目侧栏、主内容、请求详情三个 `NSHostingController`。两侧分别使用 `NSSplitViewItem(sidebarWithViewController:)` 与 `NSSplitViewItem(inspectorWithViewController:)`，启用 `allowsFullHeightLayout`，窗口采用 `.fullSizeContentView`，由系统提供贯穿窗口高度的侧栏材质。主内容最小宽度为 420 pt；右栏范围 400–760 pt，首次展开建议宽度为 520 pt，完成布局后由分栏保存用户调整的宽度。`WorkspaceView` 保留场景生命周期、错误提示和设置入口，在 `body` 中读取模型生成 `WorkspaceToolbarSnapshot`，使 Observation 变化进入桥接更新。三个内容宿主关闭场景桥接，避免 SwiftUI 再安装窗口工具栏；原生控制器拆卸时释放观察者并恢复其接管的窗口配置。
 
