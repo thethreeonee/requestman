@@ -51,6 +51,9 @@ struct ConnectionSettingsView: View {
                         }
                     }
                 }
+                if let error = model.certificateSetup.errorMessage {
+                    Text(error).font(.footnote).foregroundStyle(.secondary)
+                }
             } header: {
                 Text("协议支持")
             } footer: {

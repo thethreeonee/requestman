@@ -2,7 +2,8 @@ import Foundation
 import X509
 
 protocol CertificateKeyStore: Sendable {
-    func existingKey() throws -> Certificate.PrivateKey?
+    func existingKey(certificate: Certificate?) throws -> Certificate.PrivateKey?
+    func authorizeSigning() throws
     func createKey() throws -> Certificate.PrivateKey
 }
 
@@ -42,21 +43,23 @@ public actor LocalCertificateService: CertificateService, TLSCertificateProvidin
     private var authorityLease: AuthorityLease?
 
     public func serverIdentity(for host: String) throws -> TLSCertificateIdentity? {
-        try Task.checkCancellation()
-        guard let root = try trustedIdentity() else { return nil }
-        let name = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        let fingerprint = CertificateMaterial.fingerprint(root.data)
-        if let cached = leaves[name], cached.rootFingerprint == fingerprint, cached.expiresAt > now() {
-            return cached.identity
+        return try CertificateKeychainInteraction.perform(allowingUI: false) {
+            try Task.checkCancellation()
+            guard let root = try trustedIdentity() else { return nil }
+            let name = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+            let fingerprint = CertificateMaterial.fingerprint(root.data)
+            if let cached = leaves[name], cached.rootFingerprint == fingerprint, cached.expiresAt > now() {
+                return cached.identity
+            }
+            let expiresAt = min(now().addingTimeInterval(7 * 24 * 60 * 60), root.certificate.notValidAfter)
+            let leaf = try CertificateMaterial.serverIdentity(
+                host: name, root: root.certificate, privateKey: root.privateKey, now: now(), expiresAt: expiresAt
+            )
+            leaves = leaves.filter { $0.value.expiresAt > now() && $0.value.rootFingerprint == fingerprint }
+            if leaves.count >= 128, let key = leaves.keys.sorted().first { leaves.removeValue(forKey: key) }
+            leaves[name] = CachedLeaf(identity: leaf, rootFingerprint: fingerprint, expiresAt: expiresAt)
+            return leaf
         }
-        let expiresAt = min(now().addingTimeInterval(7 * 24 * 60 * 60), root.certificate.notValidAfter)
-        let leaf = try CertificateMaterial.serverIdentity(
-            host: name, root: root.certificate, privateKey: root.privateKey, now: now(), expiresAt: expiresAt
-        )
-        leaves = leaves.filter { $0.value.expiresAt > now() && $0.value.rootFingerprint == fingerprint }
-        if leaves.count >= 128, let key = leaves.keys.sorted().first { leaves.removeValue(forKey: key) }
-        leaves[name] = CachedLeaf(identity: leaf, rootFingerprint: fingerprint, expiresAt: expiresAt)
-        return leaf
     }
 
     public init(directoryURL: URL) {
@@ -77,53 +80,65 @@ public actor LocalCertificateService: CertificateService, TLSCertificateProvidin
     }
 
     public func status() throws -> CertificateStatus {
-        authorityLease = nil
-        guard let identity = try loadIdentity() else { return .missing }
-        let result = try status(identity)
-        cacheAuthority(result.trusted ? identity : nil)
-        return result
+        return try CertificateKeychainInteraction.perform(allowingUI: false) {
+            authorityLease = nil
+            guard let identity = try loadIdentity() else { return .missing }
+            let result = try status(identity)
+            cacheAuthority(result.trusted ? identity : nil)
+            return result
+        }
     }
 
     public func generate() throws -> CertificateStatus {
-        authorityLease = nil
-        try Task.checkCancellation()
-        if let identity = try loadIdentity() {
-            try requireValidDate(identity.certificate)
-            // Recover a missing public DER file from the matching installed certificate.
-            if try documentStore.read() == nil { try documentStore.write(identity.data) }
-            return try status(identity)
+        return try CertificateKeychainInteraction.perform(allowingUI: true) {
+            authorityLease = nil
+            try Task.checkCancellation()
+            if let data = try documentStore.read() ?? trustStore.installedCertificateData() {
+                try requireValidDate(CertificateMaterial.decodeRoot(data))
+            }
+            try keyStore.authorizeSigning()
+            if let identity = try loadIdentity() {
+                try requireValidDate(identity.certificate)
+                // Recover a missing public DER file from the matching installed certificate.
+                if try documentStore.read() == nil { try documentStore.write(identity.data) }
+                return try status(identity)
+            }
+            // Reuse a key left by an interrupted first attempt; never silently replace a key or CA.
+            let privateKey = try keyStore.existingKey(certificate: nil) ?? keyStore.createKey()
+            let certificate = try CertificateMaterial.root(privateKey: privateKey, now: now())
+            let data = try CertificateMaterial.data(certificate)
+            try documentStore.write(data)
+            return try status(Identity(certificate: certificate, privateKey: privateKey, data: data))
         }
-        // Reuse a key left by an interrupted first attempt; never silently replace a key or CA.
-        let privateKey = try keyStore.existingKey() ?? keyStore.createKey()
-        let certificate = try CertificateMaterial.root(privateKey: privateKey, now: now())
-        let data = try CertificateMaterial.data(certificate)
-        try documentStore.write(data)
-        return try status(Identity(certificate: certificate, privateKey: privateKey, data: data))
     }
 
     public func install() throws -> CertificateStatus {
-        authorityLease = nil
-        try Task.checkCancellation()
-        let identity = try requireIdentity()
-        try requireValidDate(identity.certificate)
-        if try !trustStore.isInstalled(identity.data) { try trustStore.install(identity.data) }
-        let result = try status(identity)
-        guard result.installed else { throw LocalCertificateError.certificateNotInstalled }
-        return result
+        return try CertificateKeychainInteraction.perform(allowingUI: true) {
+            authorityLease = nil
+            try Task.checkCancellation()
+            let identity = try requireIdentity()
+            try requireValidDate(identity.certificate)
+            if try !trustStore.isInstalled(identity.data) { try trustStore.install(identity.data) }
+            let result = try status(identity)
+            guard result.installed else { throw LocalCertificateError.certificateNotInstalled }
+            return result
+        }
     }
 
     public func trust() throws -> CertificateStatus {
-        authorityLease = nil
-        try Task.checkCancellation()
-        let identity = try requireIdentity()
-        try requireValidDate(identity.certificate)
-        let current = try status(identity)
-        guard current.installed else { throw LocalCertificateError.certificateNotInstalled }
-        if current.trusted { return current }
-        try trustStore.trust(identity.data)
-        let result = try status(identity)
-        guard result.trusted else { throw LocalCertificateError.trustNotEffective }
-        return result
+        return try CertificateKeychainInteraction.perform(allowingUI: true) {
+            authorityLease = nil
+            try Task.checkCancellation()
+            let identity = try requireIdentity()
+            try requireValidDate(identity.certificate)
+            let current = try status(identity)
+            guard current.installed else { throw LocalCertificateError.certificateNotInstalled }
+            if current.trusted { return current }
+            try trustStore.trust(identity.data)
+            let result = try status(identity)
+            guard result.trusted else { throw LocalCertificateError.trustNotEffective }
+            return result
+        }
     }
 
     private struct Identity {
@@ -155,7 +170,8 @@ public actor LocalCertificateService: CertificateService, TLSCertificateProvidin
 
     private func loadIdentity() throws -> Identity? {
         guard let data = try documentStore.read() ?? trustStore.installedCertificateData() else { return nil }
-        guard let privateKey = try keyStore.existingKey() else { throw LocalCertificateError.missingPrivateKey }
+        let publicCertificate = try CertificateMaterial.decodeRoot(data)
+        guard let privateKey = try keyStore.existingKey(certificate: publicCertificate) else { throw LocalCertificateError.missingPrivateKey }
         let certificate = try CertificateMaterial.decodeRoot(data, privateKey: privateKey)
         return Identity(certificate: certificate, privateKey: privateKey, data: data)
     }

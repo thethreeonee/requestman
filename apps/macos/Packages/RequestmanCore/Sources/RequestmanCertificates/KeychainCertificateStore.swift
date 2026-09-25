@@ -8,7 +8,7 @@ import X509
 struct KeychainCertificateStore: CertificateKeyStore, CertificateTrustStore {
     private static let keyTag = Data("com.requestman.local-ca.p256.v1".utf8)
 
-    func existingKey() throws -> Certificate.PrivateKey? {
+    private func existingSecKey() throws -> SecKey? {
         var result: CFTypeRef?
         let query: [String: Any] = [
             kSecClass as String: kSecClassKey,
@@ -26,7 +26,46 @@ struct KeychainCertificateStore: CertificateKeyStore, CertificateTrustStore {
         guard let keys = result as? [SecKey], keys.count == 1, let key = keys.first else {
             throw LocalCertificateError.multipleCertificates
         }
+        return key
+    }
+
+    func existingKey(certificate: Certificate?) throws -> Certificate.PrivateKey? {
+        guard let key = try existingSecKey() else { return nil }
+        if let certificate {
+            return Certificate.PrivateKey(KeychainSigningKey(key: key, publicKey: certificate.publicKey))
+        }
+        // Only setup can reach this recovery path (a key exists but the CA was not saved).
         return try Certificate.PrivateKey(key)
+    }
+
+    func authorizeSigning() throws {
+        guard let key = try existingSecKey() else { return }
+        // SecKey and SecKeychainItem share the legacy keychain item implementation.
+        let item = unsafeBitCast(key, to: SecKeychainItem.self)
+        var access: SecAccess?
+        try check(SecKeychainItemCopyAccess(item, &access), operation: "读取 HTTPS 证书授权")
+        guard let access else { throw LocalCertificateError.authorizationRequired }
+        var application: SecTrustedApplication?
+        try check(SecTrustedApplicationCreateFromPath(nil, &application), operation: "识别 Requestman")
+        guard let application else { throw LocalCertificateError.authorizationRequired }
+        var acl: SecACL?
+        // Grant only signing to this application, preserving every existing ACL entry.
+        try check(SecACLCreateWithSimpleContents(access, [application] as CFArray,
+            Self.accessName as CFString, [], &acl), operation: "配置 HTTPS 签名权限")
+        guard let acl else { throw LocalCertificateError.authorizationRequired }
+        try check(SecACLUpdateAuthorizations(acl, [kSecACLAuthorizationSign] as CFArray),
+                  operation: "配置 HTTPS 签名权限")
+        try check(SecKeychainItemSetAccess(item, access), operation: "保存 HTTPS 证书授权")
+    }
+
+    private static let accessName = "Requestman HTTPS 调试 CA"
+
+    private func newAccess() throws -> SecAccess {
+        var access: SecAccess?
+        // nil means only the creating application, NOT all applications.
+        try check(SecAccessCreate(Self.accessName as CFString, nil, &access), operation: "配置 HTTPS 证书授权")
+        guard let access else { throw LocalCertificateError.authorizationRequired }
+        return access
     }
 
     func createKey() throws -> Certificate.PrivateKey {
@@ -35,6 +74,8 @@ struct KeychainCertificateStore: CertificateKeyStore, CertificateTrustStore {
             kSecAttrKeySizeInBits as String: 256,
             kSecUseKeychain as String: try defaultKeychain(),
             kSecUseDataProtectionKeychain as String: false,
+            kSecAttrAccess as String: try newAccess(),
+            kSecPublicKeyAttrs as String: [kSecAttrLabel as String: Self.accessName],
             kSecPrivateKeyAttrs as String: [
                 kSecAttrIsPermanent as String: true,
                 kSecAttrIsExtractable as String: false,
@@ -150,6 +191,9 @@ struct KeychainCertificateStore: CertificateKeyStore, CertificateTrustStore {
     }
 
     private func check(_ status: OSStatus, operation: String) throws {
+        if status == errSecInteractionNotAllowed || status == errSecAuthFailed {
+            throw LocalCertificateError.authorizationRequired
+        }
         if status == errSecUserCanceled || status == errAuthorizationCanceled { throw CancellationError() }
         guard status == errSecSuccess else {
             throw LocalCertificateError.security(operation: operation, status: status)

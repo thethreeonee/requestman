@@ -27,7 +27,7 @@ enum CertificateMaterial {
         )
     }
 
-    static func decodeRoot(_ data: Data, privateKey: Certificate.PrivateKey) throws -> Certificate {
+    static func decodeRoot(_ data: Data) throws -> Certificate {
         let certificate: Certificate
         do { certificate = try Certificate(derEncoded: Array(data)) }
         catch { throw LocalCertificateError.invalidCertificate }
@@ -39,7 +39,16 @@ enum CertificateMaterial {
               certificate.extensions[oid: .X509ExtensionID.basicConstraints]?.critical == true,
               certificate.extensions[oid: .X509ExtensionID.keyUsage]?.critical == true
         else { throw LocalCertificateError.invalidCertificate }
+        return certificate
+    }
+
+    static func decodeRoot(_ data: Data, privateKey: Certificate.PrivateKey) throws -> Certificate {
+        let certificate = try decodeRoot(data)
         guard certificate.publicKey == privateKey.publicKey else {
+            throw LocalCertificateError.privateKeyMismatch
+        }
+        let proof = try Certificate(derEncoded: Array(probe(root: certificate, privateKey: privateKey, now: Date())))
+        guard certificate.publicKey.isValidSignature(proof.signature, for: proof) else {
             throw LocalCertificateError.privateKeyMismatch
         }
         return certificate

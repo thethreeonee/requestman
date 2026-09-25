@@ -12,12 +12,14 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.103.0"),
         .package(url: "https://github.com/apple/swift-certificates.git", from: "1.21.0"),
+        .package(url: "https://github.com/apple/swift-asn1.git", from: "1.7.3"),
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.37.5")
     ],
     targets: [
         .target(name: "RequestmanCore"),
         .target(name: "RequestmanCertificates", dependencies: [
-            .product(name: "X509", package: "swift-certificates")
+            .product(name: "X509", package: "swift-certificates"),
+            .product(name: "SwiftASN1", package: "swift-asn1")
         ]),
         .target(name: "RequestmanProxy", dependencies: [
             "RequestmanCore", "RequestmanCertificates", .product(name: "NIOSSL", package: "swift-nio-ssl"),

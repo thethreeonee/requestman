@@ -34,6 +34,8 @@ public protocol CertificateService: Sendable {
 }
 
 public enum LocalCertificateError: LocalizedError, Equatable {
+    case authorizationRequired
+    case privateKeyExportForbidden
     case security(operation: String, status: Int32)
     case invalidCertificate
     case missingPrivateKey
@@ -46,6 +48,8 @@ public enum LocalCertificateError: LocalizedError, Equatable {
 
     public var errorDescription: String? {
         switch self {
+        case .authorizationRequired: "HTTPS 证书需要重新授权。请在设置中点击“设置证书…”完成配置。"
+        case .privateKeyExportForbidden: "不允许导出 HTTPS 调试 CA 私钥。"
         case let .security(operation, status): "\(operation)失败（\(status)）。请确认登录钥匙串已解锁后重试。"
         case .invalidCertificate: "本地证书已损坏或格式不符，未覆盖现有证书。请在钥匙串访问中检查 Requestman Local CA。"
         case .missingPrivateKey: "找不到此证书的私钥，未替换现有证书。请检查登录钥匙串中的 Requestman Local CA。"

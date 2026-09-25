@@ -39,6 +39,92 @@ struct LocalCertificateServiceTests {
         #expect(try probe.extensions.subjectAlternativeNames == SubjectAlternativeNames([.dnsName("requestman.invalid")]))
     }
 
+    @Test func customSignerUsesCertificatePublicKeyAndCannotExportPrivateKey() throws {
+        let raw = try #require(SecKeyCreateRandomKey([
+            kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom,
+            kSecAttrKeySizeInBits: 256, kSecAttrIsPermanent: false
+        ] as CFDictionary, nil))
+        let publicKey = try Certificate.PrivateKey(raw).publicKey
+        let key = Certificate.PrivateKey(KeychainSigningKey(key: raw, publicKey: publicKey))
+        let root = try CertificateMaterial.root(privateKey: key, now: testDate)
+        #expect(root.publicKey.isValidSignature(root.signature, for: root))
+        let leaf = try CertificateMaterial.serverIdentity(host: "example.com", root: root,
+            privateKey: key, now: testDate, expiresAt: testDate + 3600)
+        let certificate = try Certificate(derEncoded: Array(leaf.certificateDER))
+        #expect(root.publicKey.isValidSignature(certificate.signature, for: certificate))
+        #expect(throws: LocalCertificateError.privateKeyExportForbidden) { try key.serializeAsPEM() }
+
+        // A caller-supplied public key must not mask a mismatched actual signing key.
+        let wrongPublicKey = Certificate.PrivateKey(P256.Signing.PrivateKey()).publicKey
+        let wrong = Certificate.PrivateKey(KeychainSigningKey(key: raw, publicKey: wrongPublicKey))
+        let wrongRoot = try CertificateMaterial.root(privateKey: .init(P256.Signing.PrivateKey()), now: testDate)
+        #expect(throws: LocalCertificateError.privateKeyMismatch) {
+            try CertificateMaterial.decodeRoot(CertificateMaterial.data(wrongRoot), privateKey: wrong)
+        }
+        let other = Certificate.PrivateKey(P256.Signing.PrivateKey())
+        let otherRoot = try CertificateMaterial.root(privateKey: other, now: testDate)
+        let disguised = Certificate.PrivateKey(KeychainSigningKey(key: raw, publicKey: other.publicKey))
+        #expect(throws: LocalCertificateError.privateKeyMismatch) {
+            try CertificateMaterial.decodeRoot(CertificateMaterial.data(otherRoot), privateKey: disguised)
+        }
+    }
+
+    @Test func runtimeCannotPromptAndSetupPersistsAuthorizationAcrossServiceRestart() async throws {
+        let fixture = MemoryCertificates()
+        let service = fixture.service()
+        _ = try await service.generate()
+        _ = try await service.install()
+        _ = try await service.trust()
+        fixture.requireAuthorization()
+        await #expect(throws: LocalCertificateError.authorizationRequired) { try await service.status() }
+        await #expect(throws: LocalCertificateError.authorizationRequired) {
+            try await service.serverIdentity(for: "example.com")
+        }
+        #expect(fixture.snapshot().interactiveKeyReads == 0)
+        let original = fixture.snapshot().document
+        _ = try await service.generate() // Explicit setup repairs authorization, reuses CA.
+        let restarted = fixture.service()
+        #expect(try await restarted.status().trusted)
+        #expect(try await restarted.serverIdentity(for: "example.com") != nil)
+        #expect(fixture.snapshot().document == original)
+        #expect(fixture.snapshot().keyCreates == 1)
+        #expect(fixture.snapshot().authorizationRepairs == 1)
+    }
+
+    @Test func cancelledSetupDoesNotEnableBackgroundAuthorization() async throws {
+        let fixture = MemoryCertificates()
+        let service = fixture.service()
+        _ = try await service.generate()
+        _ = try await service.install()
+        _ = try await service.trust()
+        fixture.requireAuthorization(cancelRepair: true)
+        await #expect(throws: CancellationError.self) { try await service.generate() }
+        await #expect(throws: LocalCertificateError.authorizationRequired) { try await service.status() }
+        await #expect(throws: LocalCertificateError.authorizationRequired) {
+            try await service.serverIdentity(for: "example.com")
+        }
+        #expect(fixture.snapshot().interactiveKeyReads == 0)
+    }
+
+    @Test func interactionScopeRestoresPolicyAfterNestedFailure() throws {
+        try CertificateKeychainInteraction.perform(allowingUI: true) {
+            #expect(Self.interactionAllowed())
+            #expect(throws: LocalCertificateError.authorizationRequired) {
+                try CertificateKeychainInteraction.perform(allowingUI: false) {
+                    #expect(!Self.interactionAllowed())
+                    throw LocalCertificateError.authorizationRequired
+                }
+            }
+            #expect(Self.interactionAllowed())
+        }
+    }
+
+    private static func interactionAllowed() -> Bool {
+        var allowed = DarwinBoolean(false)
+        #expect(SecKeychainGetUserInteractionAllowed(&allowed) == errSecSuccess)
+        return allowed.boolValue
+    }
+
     @Test func lifecycleIsIdempotentAndUsesActualTrustResult() async throws {
         let fixture = MemoryCertificates()
         let service = fixture.service()
@@ -243,6 +329,10 @@ private final class MemoryCertificates: CertificateKeyStore, CertificateDocument
         var document: Data?
         var installed: Data?
         var trusted = false
+        var needsAuthorization = false
+        var cancelRepair = false
+        var authorizationRepairs = 0
+        var interactiveKeyReads = 0
         var keyCreates = 0
         var installs = 0
         var trusts = 0
@@ -270,7 +360,31 @@ private final class MemoryCertificates: CertificateKeyStore, CertificateDocument
     func revokeTrust() { lock.withLock { state.trusted = false } }
     func advanceTime(_ seconds: TimeInterval) { lock.withLock { state.date += seconds } }
     func corruptDocument() { lock.withLock { state.document = Data([0, 1, 2]) } }
-    func existingKey() -> Certificate.PrivateKey? { lock.withLock { state.key } }
+    func requireAuthorization(cancelRepair: Bool = false) {
+        lock.withLock { state.needsAuthorization = true; state.cancelRepair = cancelRepair }
+    }
+    func authorizeSigning() throws {
+        try lock.withLock {
+            guard state.needsAuthorization else { return }
+            var allowed = DarwinBoolean(false)
+            #expect(SecKeychainGetUserInteractionAllowed(&allowed) == errSecSuccess)
+            #expect(allowed.boolValue)
+            if state.cancelRepair { throw CancellationError() }
+            state.needsAuthorization = false
+            state.authorizationRepairs += 1
+        }
+    }
+    func existingKey(certificate: Certificate?) throws -> Certificate.PrivateKey? {
+        try lock.withLock {
+            if state.needsAuthorization {
+                var allowed = DarwinBoolean(false)
+                #expect(SecKeychainGetUserInteractionAllowed(&allowed) == errSecSuccess)
+                if allowed.boolValue { state.interactiveKeyReads += 1 }
+                throw LocalCertificateError.authorizationRequired
+            }
+            return state.key
+        }
+    }
     func createKey() -> Certificate.PrivateKey {
         lock.withLock {
             let key = Certificate.PrivateKey(P256.Signing.PrivateKey())

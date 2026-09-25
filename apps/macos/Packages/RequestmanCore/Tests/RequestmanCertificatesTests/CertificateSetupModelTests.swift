@@ -87,6 +87,29 @@ struct CertificateSetupModelTests {
         #expect(model.errorMessage != nil)
     }
 
+    @Test func missingAuthorizationIsRepairedOnlyDuringExplicitSetup() async {
+        let service = SetupServiceFixture(status: .init(generated: true, installed: true, trusted: true),
+                                          requiresAuthorization: true)
+        let model = CertificateSetupModel(service: service)
+        await model.refreshStatus()
+        #expect(!model.isConfigured)
+        #expect(model.errorMessage == LocalCertificateError.authorizationRequired.localizedDescription)
+        #expect(await service.events == ["status"])
+        await model.run()
+        #expect(model.phase == .complete)
+        #expect(await service.events == ["status", "status", "generate", "status"])
+    }
+
+    @Test func setupCannotCompleteIfSilentAuthorizationStillFails() async {
+        let service = SetupServiceFixture(status: .init(generated: true, installed: true, trusted: true),
+                                          requiresAuthorization: true, repairTakesEffect: false)
+        let model = CertificateSetupModel(service: service)
+        await model.run()
+        #expect(model.phase == .failed)
+        #expect(!model.isConfigured)
+        #expect(model.errorMessage == LocalCertificateError.authorizationRequired.localizedDescription)
+    }
+
     @Test func expiredCertificateIsNotAutomaticallyReplaced() async {
         let service = SetupServiceFixture(status: .init(generated: true, installed: true, isExpired: true))
         let model = CertificateSetupModel(service: service)
@@ -132,20 +155,26 @@ private actor SetupServiceFixture: CertificateService {
     private let blockTrust: Bool
     private var statusReadCount = 0
     private var statusUnavailable = false
+    private var requiresAuthorization: Bool
+    private let repairTakesEffect: Bool
     private var trustContinuation: CheckedContinuation<Void, Never>?
     private var trustObserver: CheckedContinuation<Void, Never>?
 
     init(status: CertificateStatus = .missing, cancelTrustOnce: Bool = false,
-         failInstall: Bool = false, failVerification: Bool = false, blockTrust: Bool = false) {
+         failInstall: Bool = false, failVerification: Bool = false, blockTrust: Bool = false,
+         requiresAuthorization: Bool = false, repairTakesEffect: Bool = true) {
         current = status
         self.cancelTrustOnce = cancelTrustOnce
         self.failInstall = failInstall
         self.failVerification = failVerification
         self.blockTrust = blockTrust
+        self.requiresAuthorization = requiresAuthorization
+        self.repairTakesEffect = repairTakesEffect
     }
 
     func status() async throws -> CertificateStatus {
         events.append("status")
+        if requiresAuthorization { throw LocalCertificateError.authorizationRequired }
         if statusUnavailable { throw LocalCertificateError.missingPrivateKey }
         statusReadCount += 1
         if failVerification, statusReadCount > 1 { current.trusted = false }
@@ -156,6 +185,7 @@ private actor SetupServiceFixture: CertificateService {
 
     func generate() async throws -> CertificateStatus {
         events.append("generate")
+        if repairTakesEffect { requiresAuthorization = false }
         current.generated = true
         return current
     }

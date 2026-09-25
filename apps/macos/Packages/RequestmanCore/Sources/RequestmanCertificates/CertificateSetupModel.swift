@@ -38,6 +38,7 @@ public final class CertificateSetupModel {
             phase = isConfigured ? .complete : .idle
         } catch {
             status = nil
+            errorMessage = error.localizedDescription
             phase = .idle
         }
     }
@@ -48,7 +49,13 @@ public final class CertificateSetupModel {
         errorMessage = nil
         phase = .checking
         do {
-            status = try await service.status()
+            do {
+                status = try await service.status()
+            } catch LocalCertificateError.authorizationRequired {
+                // Only this user-initiated path may repair the key's persistent signing ACL.
+                phase = .generating
+                status = try await service.generate()
+            }
             try validateValidity()
             try Task.checkCancellation()
             if status?.generated != true {
@@ -69,6 +76,7 @@ public final class CertificateSetupModel {
                 status = try await service.trust()
             }
             phase = .verifying
+            status = nil // A failed silent verification must not retain setup's trusted snapshot.
             status = try await service.status()
             try validateValidity()
             guard status?.generated == true, status?.installed == true, status?.trusted == true else {
