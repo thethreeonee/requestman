@@ -45,13 +45,13 @@
 
 CA 私钥仅保存在本机文件型钥匙串，禁止导出，由钥匙串锁与访问控制保护，不写入应用配置、临时文件或日志。信任限制为当前用户的 SSL 用途，使用 [Security 原生授权接口](https://developer.apple.com/documentation/security/sectrustsettingssettrustsettings(_:_:_:))，不使用提权脚本。信任完成后通过内存测试证书与系统 SSL 策略验证，不注入自定义信任锚点；[Chromium 会读取默认钥匙串和系统钥匙串中的 SSL 信任](https://chromium.googlesource.com/chromium/src/+/main/net/data/ssl/chrome_root_store/faq.md)。系统授权界面与实际浏览器信任仍需人工运行验收。
 
-TLS 传输使用 Apple `swift-nio-ssl`。按目标域名/IP 签发短期站点证书，SAN 包含 DNS 或 IP，最多缓存 128 个站点且不晚于 CA 到期；站点私钥只保留在内存中。每次取用前重新确认 CA 的实际信任。上游证书交给 macOS Security 校验信任链、有效期及主机名，不关闭校验，也不因失败回退到明文或其他出口。系统验证禁用网络补取，避免经系统代理递归；站点应发送完整中间证书链。
+TLS 传输使用 Apple `swift-nio-ssl`。按目标域名/IP 签发短期站点证书，SAN 包含 DNS 或 IP，最多缓存 128 个站点且不晚于 CA 到期；站点私钥只保留在内存中。CA 材料与实际信任检查结果最多复用 5 秒，避免并发 CONNECT 重复读钥匙串和签名验证；状态刷新、证书设置操作与应用重新激活会触发重新检查，外部信任修改最迟在缓存到期后的新 CONNECT 生效。上游证书交给 macOS Security 校验信任链、有效期及主机名，不关闭校验，也不因失败回退到明文或其他出口。系统验证禁用网络补取，避免经系统代理递归；站点应发送完整中间证书链。
 
 ## 行为与资源边界
 
 - Body 未被替换时以二进制块流式透传，同时旁路保留有界预览；网络线程不解压或解析 JSON。静态 Body 替换不等待完整原 Body；转发期间仍会消费原流以完成 HTTP 消息。
 - `Content-Length`、传输分块、Host 与逐跳头由代理维护；不能通过 Header 步骤注入矛盾的报文边界。替换 Body 清除原编码与内容校验字段。重定向返回 3xx，内部 URL 改写不向客户端返回 3xx。
-- 每条连接处理一个 HTTP 事务，返回 `Connection: close`；尚无连接池。请求有 30 秒总时限，CONNECT 建立后空闲读超时 120 秒。长 SSE / 长下载目前不作为支持目标。
+- HTTP/1.1 支持同一客户端连接上的顺序请求；目标和出口相同时复用上游 TCP/TLS 连接。客户端要求关闭、错误、Mock 或重定向响应会关闭连接；不支持流水线请求或跨客户端连接池。每个请求时限 30 秒，HTTP keep-alive 空闲 30 秒关闭，透传 CONNECT 空闲读超时 120 秒。长 SSE / 长下载目前不作为支持目标。
 - 活跃连接、预读、Header、步骤、生成内容及记录都有上限；UI 和磁盘保存不阻塞转发。详见 [性能边界](Docs/Performance.md)。
 - 记录保留最近 500 条；原始/最终请求和响应各保留最多 64 KiB 的 Body 前缀，所有在途、待显示与历史快照共享 32 MiB 载荷预算。快照不落盘，关闭应用即丢失；预算不足只截断预览，不改变网络内容。常见凭据 Header 被隐藏；URL、Body 与自定义 Header 是本机调试数据。暂停记录不会停止流程或网络。
 - 工作区位于 `~/Library/Application Support/Requestman/workspace.json`，目录权限 0700、文件权限 0600。环境值目前存于这个本地文件，尚未迁移到 Keychain。加载失败时禁用编辑，避免覆盖原文件。

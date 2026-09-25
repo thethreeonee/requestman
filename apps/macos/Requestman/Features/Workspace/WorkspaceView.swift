@@ -17,7 +17,8 @@ struct WorkspaceView: View {
             } message: { Text(model.errorMessage ?? "") }
             .task { await model.load(); await model.collectRecords() }
             .onChange(of: scenePhase) { _, phase in
-                if phase != .active { Task { await model.flushSave() } }
+                if phase == .active { Task { await model.certificateSetup.refreshStatus() } }
+                else { Task { await model.flushSave() } }
             }
     }
 }

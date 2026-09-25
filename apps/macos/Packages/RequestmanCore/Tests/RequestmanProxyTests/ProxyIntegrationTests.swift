@@ -292,6 +292,9 @@ private final class Harness: @unchecked Sendable {
         }
     }
     func exchange(_ request: String, until: String? = nil) async throws -> String {
+        // This raw fixture collects until EOF; explicitly opt out of persistence.
+        let request = request.hasPrefix("CONNECT ") ? request : request.replacingOccurrences(
+            of: "HTTP/1.1\r\n", with: "HTTP/1.1\r\nConnection: close\r\n")
         let promise = group.next().makePromise(of: String.self)
         let channel = try await ClientBootstrap(group: group).channelInitializer { channel in
             channel.pipeline.addHandler(RawCollector(result: promise, until: until))

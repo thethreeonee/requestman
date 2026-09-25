@@ -14,6 +14,62 @@ import RequestmanCore
 /// Real TCP/TLS tests. All certificates and trust anchors live only in memory.
 @Suite(.serialized)
 struct HTTPSIntegrationTests {
+    @Test(arguments: [false, true])
+    func sequentialHTTPSRequestsReuseBothTLSConnections(useHTTPUpstream: Bool) async throws {
+        try await withHTTPSHarness { h in
+            try await h.start(useHTTPUpstream: useHTTPUpstream)
+            let replies = try await h.exchangeSequence(paths: ["/one", "/two", "/three"])
+            #expect(replies.map(\.status) == [200, 200, 200])
+            #expect(replies.allSatisfy { $0.body == "secure-origin-body" })
+            #expect(replies.allSatisfy { $0.headers.first(name: "connection") == "keep-alive" })
+            #expect(h.observation.withLock { $0.connections } == 1)
+            #expect(h.observation.withLock { $0.requests } == 3)
+            let records = h.proxy.records.drain().records
+            #expect(records.count == 3)
+            #expect(Set(records.map(\.id)).count == 3)
+            #expect(records.map(\.url) == ["one", "two", "three"].map { h.originURL + $0 })
+            #expect(records.allSatisfy { $0.requestBody.isComplete && $0.responseBody.isComplete && $0.error == nil })
+            #expect(records.allSatisfy { $0.responseBytes == "secure-origin-body".utf8.count })
+        }
+    }
+
+    @Test func originCloseStillAllowsNextRequestOnClientTLSConnection() async throws {
+        try await withHTTPSHarness { h in
+            try await h.start()
+            let replies = try await h.exchangeSequence(paths: ["/origin-close", "/two"])
+            #expect(replies.map(\.status) == [200, 200])
+            #expect(h.observation.withLock { $0.connections } == 2)
+        }
+    }
+
+    @Test func reusedConnectionResetsWorkflowAndBodyState() async throws {
+        try await withHTTPSHarness { h in
+            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL + "modify"
+            var header = ModificationStep(kind: .setHeader)
+            header.name = "X-Modified"; header.value = "yes"
+            var body = ModificationStep(kind: .replaceBody); body.value = "replacement"
+            workflow.responseSteps = [header, body]
+            try await h.start(workflow: workflow)
+            let replies = try await h.exchangeSequence(paths: ["/modify", "/plain"])
+            #expect(replies.map(\.body) == ["replacement", "secure-origin-body"])
+            #expect(replies[0].headers.first(name: "X-Modified") == "yes")
+            #expect(replies[1].headers.first(name: "X-Modified") == nil)
+            #expect(h.observation.withLock { $0.connections } == 1)
+            let records = h.proxy.records.drain().records
+            #expect(records.map(\.outcome) == [.modified, .forwarded])
+            #expect(records.map { $0.responseBody.data } == [Data("replacement".utf8), Data("secure-origin-body".utf8)])
+        }
+    }
+
+    @Test func stopClosesIdlePersistentConnectionWithoutExtraRecord() async throws {
+        try await withHTTPSHarness { h in
+            try await h.start()
+            let replies = try await h.exchangeSequence(paths: ["/one"], stopWhenIdle: true)
+            #expect(replies.count == 1)
+            let records = h.proxy.records.drain().records
+            #expect(records.count == 1 && records.first?.error == nil)
+        }
+    }
     @Test func decryptsHTTPSAndRecordsOriginalMethodURLAndHeaders() async throws {
         try await withHTTPSHarness { h in
             try await h.start()
@@ -325,6 +381,43 @@ private final class HTTPSHarness: @unchecked Sendable {
                                  method: method, headers: headers, body: body)
     }
 
+    func exchangeSequence(paths: [String], stopWhenIdle: Bool = false) async throws -> [HTTPSReply] {
+        var configuration = TLSConfiguration.makeClientConfiguration()
+        configuration.trustRoots = .certificates([try proxyAuthority.trustRoot()])
+        configuration.applicationProtocols = ["http/1.1"]
+        let context = try NIOSSLContext(configuration: configuration)
+        let loop = group.next()
+        let promises = paths.map { _ in loop.makePromise(of: HTTPSReply.self) }
+        let authority = authority, coalesced = coalescedClientHello
+        let channel = try await ClientBootstrap(group: loop).channelInitializer { channel in
+            channel.eventLoop.makeCompletedFuture {
+                try channel.pipeline.syncOperations.addHandler(HTTPSCONNECTGate(authority: authority, coalesce: false, coalesced: coalesced))
+                try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: context, serverHostname: "localhost"))
+                try channel.pipeline.syncOperations.addHTTPClientHandlers()
+                try channel.pipeline.syncOperations.addHandler(HTTPSSequenceCollector(results: promises))
+            }
+        }.connect(host: "127.0.0.1", port: proxyPort).get()
+        let timeout = loop.scheduleTask(in: .seconds(8)) { channel.close(promise: nil) }
+        do {
+            var replies: [HTTPSReply] = []
+            for (path, promise) in zip(paths, promises) {
+                let headers = HTTPHeaders([("Host", authority), ("Content-Length", "0"), ("Connection", "keep-alive")])
+                channel.write(HTTPClientRequestPart.head(HTTPRequestHead(version: .http1_1, method: .GET, uri: path, headers: headers)), promise: nil)
+                try await channel.writeAndFlush(HTTPClientRequestPart.end(nil)).get()
+                replies.append(try await promise.futureResult.get())
+            }
+            if stopWhenIdle {
+                await proxy.stop()
+                try await channel.closeFuture.get()
+                #expect(!channel.isActive)
+            } else { try await channel.close().get() }
+            timeout.cancel()
+            return replies
+        } catch {
+            timeout.cancel(); try? await channel.close().get(); throw error
+        }
+    }
+
     /// CONNECT preserves the proxy socket's remote address. Connecting to .1 while
     /// validating .2 reproduces that transport/target distinction without binding an alias.
     func exchangeDirectTLS(validatedHost: String) async throws -> HTTPSReply {
@@ -389,10 +482,12 @@ private func withHTTPSHarness(trustOrigin: Bool = true, originCertificateHost: S
 private final class HTTPSOriginHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = HTTPServerRequestPart
     let observation: OSAllocatedUnfairLock<HTTPSOriginObservation>
+    private var keepAlive = false
     init(observation: OSAllocatedUnfairLock<HTTPSOriginObservation>) { self.observation = observation }
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         switch unwrapInboundIn(data) {
         case .head(let head):
+            keepAlive = head.isKeepAlive && head.uri != "/origin-close"
             observation.withLock { $0.requests += 1; $0.uri = head.uri; $0.header = head.headers.first(name: "X-Key") ?? "" }
         case .body(let buffer):
             observation.withLock { $0.body += String(decoding: buffer.readableBytesView, as: UTF8.self) }
@@ -400,14 +495,39 @@ private final class HTTPSOriginHandler: ChannelInboundHandler, @unchecked Sendab
             let channel = context.channel
             let body = "secure-origin-body"
             let head = HTTPResponseHead(version: .http1_1, status: .ok, headers: HTTPHeaders([
-                ("Content-Length", String(body.utf8.count)), ("Connection", "close"), ("X-Origin", "secure")
+                ("Content-Length", String(body.utf8.count)), ("Connection", keepAlive ? "keep-alive" : "close"), ("X-Origin", "secure")
             ]))
             channel.write(HTTPServerResponsePart.head(head), promise: nil)
             channel.write(HTTPServerResponsePart.body(.byteBuffer(channel.allocator.buffer(string: body))), promise: nil)
-            channel.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { _ in channel.close(promise: nil) }
+            let keepAlive = keepAlive
+            channel.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { _ in
+                if !keepAlive { channel.close(promise: nil) }
+            }
         }
     }
     func errorCaught(context: ChannelHandlerContext, error: Error) { context.close(promise: nil) }
+}
+
+private final class HTTPSSequenceCollector: ChannelInboundHandler, @unchecked Sendable {
+    typealias InboundIn = HTTPClientResponsePart
+    let results: [EventLoopPromise<HTTPSReply>]
+    var index = 0
+    var reply = HTTPSReply()
+    init(results: [EventLoopPromise<HTTPSReply>]) { self.results = results }
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        guard index < results.count else { return }
+        switch unwrapInboundIn(data) {
+        case .head(let head): reply = HTTPSReply(); reply.status = head.status.code; reply.headers = head.headers
+        case .body(let buffer): reply.body += String(decoding: buffer.readableBytesView, as: UTF8.self)
+        case .end:
+            let promise = results[index]; index += 1; promise.succeed(reply)
+        }
+    }
+    func channelInactive(context: ChannelHandlerContext) { fail(HTTPSFixtureError.connectionClosed) }
+    func errorCaught(context: ChannelHandlerContext, error: Error) { fail(error); context.close(promise: nil) }
+    private func fail(_ error: Error) {
+        while index < results.count { let promise = results[index]; index += 1; promise.fail(error) }
+    }
 }
 
 private final class HTTPSResponseCollector: ChannelInboundHandler, @unchecked Sendable {

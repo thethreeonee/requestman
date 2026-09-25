@@ -82,6 +82,7 @@ public actor LocalProxyServer {
 }
 
 final class ProxySharedState: Sendable {
+    let tlsContexts = ProxyTLSContexts()
     let certificateProvider: (any TLSCertificateProviding)?
     let upstreamTrustRoots: [NIOSSLCertificate]?
     init(certificateProvider: (any TLSCertificateProviding)? = nil, upstreamTrustRoots: [NIOSSLCertificate]? = nil) {
@@ -149,6 +150,10 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     private var responseWriteFailed = false
     private var requestWriteComplete = false
     private var responseWriteComplete = false
+    private var clientKeepsAlive = false
+    private var responseKeepsAlive = false
+    private var originKeepsAlive = false
+    private var upstreamTarget: String?
 
     init(configuration: ExplicitProxyConfiguration, shared: ProxySharedState, records: CaptureRecordBuffer, tlsAuthority: String? = nil) {
         self.configuration = configuration; self.shared = shared; self.records = records
@@ -203,6 +208,9 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     }
     private func begin(_ input: HTTPRequestHead) {
         guard let client else { return }
+        timer?.cancel()
+        timer = client.eventLoop.scheduleTask(in: .seconds(30)) { [self] in fail("请求超时", status: 504) }
+        clientKeepsAlive = input.isKeepAlive
         var head = input
         if let tlsAuthority {
             let expected = URLComponents(string: "https://" + tlsAuthority)
@@ -230,6 +238,10 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         record?.environment = shared.document.withLock { $0.environment?.name ?? "无环境" }
         started = .now
         if head.method == .CONNECT {
+            if let previous = upstream {
+                upstream = nil; upstreamTarget = nil
+                closeProxyChannel(previous)
+            }
             record?.requestBody = .unavailable("加密隧道不采集 HTTP 内容")
             record?.sentBody = .unavailable("加密隧道不采集 HTTP 内容")
             record?.receivedBody = .unavailable("加密隧道不采集 HTTP 内容")
@@ -274,7 +286,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             guard !isLoop(host, port: port) else { throw WorkflowError.invalid("请求目标会形成代理循环") }
             var headers = cleanHeaders(draft.headers)
             headers.replaceOrAdd(name: "Host", value: target.percentEncodedHost.map { $0 + (target.port.map { ":\($0)" } ?? "") } ?? host)
-            headers.replaceOrAdd(name: "Connection", value: "close")
+            headers.replaceOrAdd(name: "Connection", value: clientKeepsAlive ? "keep-alive" : "close")
             headers.remove(name: "Expect")
             if let body = draft.replacementBody {
                 headers.remove(name: "Transfer-Encoding"); headers.replaceOrAdd(name: "Content-Length", value: String(body.utf8.count))
@@ -314,7 +326,18 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         } catch { fail(error.localizedDescription, status: 400) }
     }
     private func connectHTTP(endpoint: ProxyEndpoint, targetHost: String, targetPort: Int, secure: Bool, on loop: EventLoop) -> EventLoopFuture<Channel> {
-        bootstrap(on: loop).connect(host: endpoint.host, port: endpoint.port).flatMap { [self] channel in
+        // One reusable origin per downstream connection, including its TLS session.
+        // Never share a socket across targets, routes or concurrent transactions.
+        let key = "\(secure)-\(targetHost.lowercased()):\(targetPort)-\(endpoint.host):\(endpoint.port)"
+        if let upstream, upstream.isActive, upstreamTarget == key {
+            return loop.makeSucceededFuture(upstream)
+        }
+        if let previous = upstream {
+            upstream = nil
+            closeProxyChannel(previous)
+        }
+        upstreamTarget = key
+        return bootstrap(on: loop).connect(host: endpoint.host, port: endpoint.port).flatMap { [self] channel in
             guard isProcessing, !isLoopChannel(channel) else {
                 closeProxyChannel(channel)
                 return loop.makeFailedFuture(WorkflowError.invalid("连接已取消或指向代理自身"))
@@ -389,7 +412,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         }
     }
     func receive(_ part: HTTPClientResponsePart, channel: Channel) {
-        guard isProcessing else { return }
+        guard isProcessing, record != nil, channel === upstream else { return }
         do {
             switch part {
             case .head(let head):
@@ -399,6 +422,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                     return
                 }
                 informationalResponse = false
+                originKeepsAlive = head.isKeepAlive
                 guard !responseStarted else { return fail("重复响应头", status: 502) }
                 var draft = HTTPMessageDraft(method: originalMethod, url: request?.url ?? "", status: Int(head.status.code), headers: fields(head.headers))
                 record?.receivedHeaders = draft.headers
@@ -410,8 +434,8 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                 }
                 try reserveBody(draft.replacementBody)
                 response = draft
-                var headers = responseHeaders(draft)
-                headers.replaceOrAdd(name: "Connection", value: "close")
+                responseKeepsAlive = clientKeepsAlive && requestEnded && requestWriteComplete
+                let headers = responseHeaders(draft, keepAlive: responseKeepsAlive)
                 record?.responseHeaders = fields(headers); record?.status = draft.status
                 responseBodyCollector = CaptureBodyCollector(headers: fields(headers))
                 responseStarted = true
@@ -434,15 +458,21 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                 guard responseStarted, let client else { return fail("上游未返回完整响应", status: 502) }
                 responseEnded = true
                 client.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { [self] result in
-                    if case .failure(let error) = result { finish(error: error.localizedDescription) }
-                    else { responseWriteComplete = !responseWriteFailed; finish() }
-                    closeProxyChannel(client); closeProxyChannel(channel)
+                    if case .success = result, !responseWriteFailed, responseKeepsAlive, failureMessage == nil {
+                        responseWriteComplete = true
+                        finish()
+                        prepareNextRequest()
+                    } else {
+                        if case .failure(let error) = result { finish(error: error.localizedDescription) }
+                        else { responseWriteComplete = !responseWriteFailed; finish() }
+                        closeProxyChannel(client); closeProxyChannel(channel)
+                    }
                 }
             }
         } catch { fail(error.localizedDescription, status: 502) }
     }
     func responseReadComplete(_ channel: Channel) {
-        guard let client, isProcessing else { return }
+        guard let client, isProcessing, record != nil, channel === upstream else { return }
         client.flush()
         guard !responseEnded else { return }
         let flushed = lastResponseWrite ?? channel.eventLoop.makeSucceededFuture(())
@@ -451,8 +481,41 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             else if isProcessing { channel.read() }
         }
     }
-    func upstreamClosed() { if isProcessing && !responseEnded { fail("上游连接提前关闭", status: 502) } }
-    func upstreamError(_ error: Error) { fail(error.localizedDescription, status: 502) }
+    func upstreamClosed(_ channel: Channel) {
+        guard channel === upstream else { return }
+        upstream = nil; upstreamTarget = nil
+        if record != nil, isProcessing && !responseEnded { fail("上游连接提前关闭", status: 502) }
+    }
+    func upstreamError(_ error: Error, channel: Channel) {
+        guard channel === upstream else { return }
+        if record == nil { upstream = nil; upstreamTarget = nil; closeProxyChannel(channel) }
+        else { fail(error.localizedDescription, status: 502) }
+    }
+
+    private func prepareNextRequest() {
+        if !originKeepsAlive, let previous = upstream {
+            upstream = nil; upstreamTarget = nil
+            closeProxyChannel(previous)
+        }
+        record = nil; match = nil; request = nil; response = nil
+        pending.removeAll(keepingCapacity: true); pendingBytes = 0
+        lastRequestWrite = nil; lastResponseWrite = nil
+        bodyReservations.removeAll()
+        requestBodyCollector = nil; sentBodyCollector = nil
+        receivedBodyCollector = nil; responseBodyCollector = nil
+        connected = false; requestEnded = false; responseStarted = false; responseEnded = false
+        informationalResponse = false; finished = false; failureMessage = nil
+        requestWriteFailed = false; responseWriteFailed = false
+        requestWriteComplete = false; responseWriteComplete = false
+        clientKeepsAlive = false; responseKeepsAlive = false; originKeepsAlive = false
+        // Idle keep-alive sockets are bounded by the existing connection limit.
+        // Expiry closes quietly rather than creating a fictitious failed request.
+        if let client {
+            timer = client.eventLoop.scheduleTask(in: .seconds(30)) { closeProxyChannel(client) }
+            upstream?.read() // Observe an origin's idle FIN before considering reuse.
+            client.read()
+        }
+    }
 
     private func reserveBody(_ body: String?) throws {
         if let body { bodyReservations.append(try shared.reserveBody(body)) }
@@ -475,10 +538,10 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             closeProxyChannel(client)
         }
     }
-    private func responseHeaders(_ draft: HTTPMessageDraft) -> HTTPHeaders {
+    private func responseHeaders(_ draft: HTTPMessageDraft, keepAlive: Bool = false) -> HTTPHeaders {
         var headers = cleanHeaders(draft.headers)
         headers.remove(name: "Content-Length"); headers.remove(name: "Transfer-Encoding")
-        headers.replaceOrAdd(name: "Connection", value: "close")
+        headers.replaceOrAdd(name: "Connection", value: keepAlive ? "keep-alive" : "close")
         if let body = draft.replacementBody, draft.status != 204, draft.status != 205, draft.status != 304 {
             headers.replaceOrAdd(name: "Content-Length", value: String(body.utf8.count))
         } else if allowsBody(draft.status) { headers.replaceOrAdd(name: "Transfer-Encoding", value: "chunked") }
@@ -574,7 +637,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     private func beginDecryption(_ identity: TLSCertificateIdentity, authority: String) {
         guard let client else { return }
         do {
-            let tlsContext = try ProxyTLS.serverContext(identity)
+            let tlsContext = try shared.tlsContexts.server(identity)
             responseStarted = true
             client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .ok)), promise: nil)
             client.writeAndFlush(HTTPServerResponsePart.end(nil)).flatMap { [self] in
@@ -676,8 +739,8 @@ final class ProxyResponseHandler: ChannelInboundHandler, @unchecked Sendable {
     init(owner: ProxyConnection) { self.owner = owner }
     func channelRead(context: ChannelHandlerContext, data: NIOAny) { owner.receive(unwrapInboundIn(data), channel: context.channel) }
     func channelReadComplete(context: ChannelHandlerContext) { owner.responseReadComplete(context.channel) }
-    func errorCaught(context: ChannelHandlerContext, error: Error) { owner.upstreamError(error) }
-    func channelInactive(context: ChannelHandlerContext) { owner.upstreamClosed() }
+    func errorCaught(context: ChannelHandlerContext, error: Error) { owner.upstreamError(error, channel: context.channel) }
+    func channelInactive(context: ChannelHandlerContext) { owner.upstreamClosed(context.channel) }
 }
 
 final class TunnelRelay: ChannelInboundHandler, @unchecked Sendable {

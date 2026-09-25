@@ -26,9 +26,13 @@
 
 证书引导由 `WorkspaceModel.certificateSetup` 持有 `CertificateSetupModel`，经 `CertificateService` 访问独立的 `LocalCertificateService` actor；SwiftUI 不直接读写 Security。只在用户点击“设置证书…”后串行检查、生成、安装、授权和复核，已完成步骤可复用，取消不会自动重弹授权。私钥使用不可导出的文件型钥匙串键，由登录钥匙串锁和 ACL 保护；此选择兼容当前无专用 Keychain entitlement 的 macOS 宿主，公开 CA 安装到浏览器读取的默认钥匙串。证书编码和签名使用 [Apple swift-certificates](https://github.com/apple/swift-certificates)，不手写 X.509 或把私钥写到磁盘。当前用户信任只指定 SSL policy，授权由 `SecTrustSettingsSetTrustSettings` 系统面板执行；验证使用短期内存测试叶证书、主机名及系统 SSL 信任链，不设置自定义 anchors、不关闭证书校验。过期、损坏或密钥不匹配时报告错误并保留原材料，不静默轮换。证书与捕获服务共享同一个 actor。新 CONNECT 连接经 `TLSCertificateProviding` 获取短期站点证书；未完成信任时保持透传，已信任时升级到 NIOSSL 服务端并复用 HTTP 流程，按 CONNECT authority 校验内层 Host 与目标。CA 密钥不导出，P-256 站点密钥仅在内存中使用；SAN 支持 DNS/IPv4/IPv6，证书最多有效 7 天、不超过 CA 到期，缓存上限 128 个。已有透传连接需重建，历史记录不回填。
 
-`ProxyTLS` 使用 Apple NIOSSL 处理 TLS，出站验证异步交给 macOS `SecTrust`，同时检查真实目标的主机名和系统/用户信任；关闭网络证书补取避免系统代理递归，不关闭证书校验。仅 internal 测试构造器允许内存测试锚点。TLS 握手与请求共用 30 秒时限；升级时先安装 TLS 处理器，再释放 CONNECT decoder 缓冲的首包数据。解密记录包含 URL、方法和双向 Header 的有界快照，Body 旁路采集每方向最多 64 KiB 的预览；网络线程不等待完整内容、不解压。回环测试不安装或信任本机 CA。
+`ProxyTLS` 使用 Apple NIOSSL 处理 TLS，出站验证异步交给 macOS `SecTrust`，同时检查真实目标的主机名和系统/用户信任；关闭网络证书补取避免系统代理递归，不关闭证书校验。仅 internal 测试构造器允许内存测试锚点。CONNECT 建立、升级后等待内层请求、每个 HTTP 事务分别限时 30 秒，上游 TLS 握手计入该 HTTP 事务；升级时先安装 TLS 处理器，再释放 CONNECT decoder 缓冲的首包数据。解密记录包含 URL、方法和双向 Header 的有界快照，Body 旁路采集每方向最多 64 KiB 的预览；网络线程不等待完整内容、不解压。回环测试不安装或信任本机 CA。
 
 依赖方向：`Features → WorkspaceModel → CaptureService / RequestmanCore`。本轮本地代理库运行在宿主进程的独立 NIO 事件循环。未来系统扩展和代理核心需要明确的 IPC 协议，不直接跨进程共享 UI 状态。`CaptureConfiguration` 目前只是 Swift 模块间的数据契约，还不是稳定 IPC 协议。
+
+CA 材料和实际信任结果使用最多 5 秒的固定期限缓存，命中不会续期；状态刷新、生成、安装、信任操作先失效旧缓存，应用重新激活也刷新状态。刷新失败不能沿用旧的可信结果。站点 TLS 服务端 context 按叶证书 DER 缓存最多 128 个，复用前仍须经过证书提供方的信任检查；出站共用 TLS context，但每次新连接的目标与信任验证独立执行。
+
+HTTP/1.1 顺序请求复用下游连接，每条下游最多保留一个同目标、同出口的上游连接，HTTPS 同时复用 TLS 会话。上游主动关闭后，下次请求重新建连；不重试已发送请求。每个事务完成后清空规则匹配、Body 采集器和内存租约，保留独立记录；闲置 30 秒关闭且不生成虚假失败记录，停止监听关闭在用和闲置连接。仍限制最多 64 个下游连接，不支持流水线和跨客户端连接池。
 
 主窗口由 `WorkspaceSplitView` 桥接一个 AppKit `NSSplitViewController`，持久保留项目侧栏、主内容、请求详情三个 `NSHostingController`。两侧分别使用 `NSSplitViewItem(sidebarWithViewController:)` 与 `NSSplitViewItem(inspectorWithViewController:)`，启用 `allowsFullHeightLayout`，窗口采用 `.fullSizeContentView`，由系统提供贯穿窗口高度的侧栏材质。主内容最小宽度为 420 pt；右栏范围 400–760 pt，首次展开建议宽度为 520 pt，完成布局后由分栏保存用户调整的宽度。`WorkspaceView` 保留场景生命周期、错误提示和设置入口，在 `body` 中读取模型生成 `WorkspaceToolbarSnapshot`，使 Observation 变化进入桥接更新。三个内容宿主关闭场景桥接，避免 SwiftUI 再安装窗口工具栏；原生控制器拆卸时释放观察者并恢复其接管的窗口配置。
 

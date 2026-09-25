@@ -32,10 +32,18 @@ public actor LocalCertificateService: CertificateService, TLSCertificateProvidin
         let expiresAt: Date
     }
     private var leaves: [String: CachedLeaf] = [:]
+    // A burst of CONNECTs must not serialize repeated Keychain I/O and probe signing.
+    // Explicit status/setup operations invalidate this short lease; never extend on a hit.
+    private struct AuthorityLease {
+        let identity: Identity?
+        let checkedAt: Date
+        let expiresAt: Date
+    }
+    private var authorityLease: AuthorityLease?
 
     public func serverIdentity(for host: String) throws -> TLSCertificateIdentity? {
         try Task.checkCancellation()
-        guard let root = try loadIdentity(), try status(root).trusted else { return nil }
+        guard let root = try trustedIdentity() else { return nil }
         let name = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         let fingerprint = CertificateMaterial.fingerprint(root.data)
         if let cached = leaves[name], cached.rootFingerprint == fingerprint, cached.expiresAt > now() {
@@ -69,11 +77,15 @@ public actor LocalCertificateService: CertificateService, TLSCertificateProvidin
     }
 
     public func status() throws -> CertificateStatus {
+        authorityLease = nil
         guard let identity = try loadIdentity() else { return .missing }
-        return try status(identity)
+        let result = try status(identity)
+        cacheAuthority(result.trusted ? identity : nil)
+        return result
     }
 
     public func generate() throws -> CertificateStatus {
+        authorityLease = nil
         try Task.checkCancellation()
         if let identity = try loadIdentity() {
             try requireValidDate(identity.certificate)
@@ -90,6 +102,7 @@ public actor LocalCertificateService: CertificateService, TLSCertificateProvidin
     }
 
     public func install() throws -> CertificateStatus {
+        authorityLease = nil
         try Task.checkCancellation()
         let identity = try requireIdentity()
         try requireValidDate(identity.certificate)
@@ -100,6 +113,7 @@ public actor LocalCertificateService: CertificateService, TLSCertificateProvidin
     }
 
     public func trust() throws -> CertificateStatus {
+        authorityLease = nil
         try Task.checkCancellation()
         let identity = try requireIdentity()
         try requireValidDate(identity.certificate)
@@ -116,6 +130,27 @@ public actor LocalCertificateService: CertificateService, TLSCertificateProvidin
         let certificate: Certificate
         let privateKey: Certificate.PrivateKey
         let data: Data
+    }
+
+    private func trustedIdentity() throws -> Identity? {
+        let date = now()
+        if let lease = authorityLease, date >= lease.checkedAt, date < lease.expiresAt {
+            return lease.identity
+        }
+        authorityLease = nil // A failed refresh must not keep the previous trusted identity.
+        guard let identity = try loadIdentity(), try status(identity).trusted else {
+            cacheAuthority(nil)
+            return nil
+        }
+        cacheAuthority(identity)
+        return identity
+    }
+
+    private func cacheAuthority(_ identity: Identity?) {
+        let date = now()
+        authorityLease = AuthorityLease(identity: identity, checkedAt: date,
+            expiresAt: min(date.addingTimeInterval(5), identity?.certificate.notValidAfter ?? .distantFuture))
+        if identity == nil { leaves.removeAll() }
     }
 
     private func loadIdentity() throws -> Identity? {

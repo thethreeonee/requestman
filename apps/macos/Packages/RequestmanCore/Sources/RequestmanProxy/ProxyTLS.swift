@@ -3,9 +3,33 @@ import NIOCore
 import NIOSSL
 import RequestmanCertificates
 import Security
+import os
+
+/// Cache identities, not trust decisions. The provider authorizes every lease first.
+final class ProxyTLSContexts: Sendable {
+    private let servers = OSAllocatedUnfairLock(initialState: [Data: NIOSSLContext]())
+
+    func server(_ identity: TLSCertificateIdentity) throws -> NIOSSLContext {
+        try servers.withLock { contexts in
+            if let context = contexts[identity.certificateDER] { return context }
+            let context = try ProxyTLS.serverContext(identity)
+            if contexts.count >= 128, let key = contexts.keys.first { contexts.removeValue(forKey: key) }
+            contexts[identity.certificateDER] = context
+            return context
+        }
+    }
+}
 
 /// TLS transport only; the HTTP workflow remains in ProxyConnection.
 enum ProxyTLS {
+    private static let clientContext: Result<NIOSSLContext, Error> = Result {
+        var configuration = TLSConfiguration.makeClientConfiguration()
+        configuration.minimumTLSVersion = .tlsv12
+        configuration.applicationProtocols = ["http/1.1"]
+        configuration.certificateVerification = .noHostnameVerification
+        configuration.trustRoots = .certificates([])
+        return try NIOSSLContext(configuration: configuration)
+    }
     static func serverContext(_ identity: TLSCertificateIdentity) throws -> NIOSSLContext {
         let certificate = try NIOSSLCertificate(bytes: Array(identity.certificateDER), format: .der)
         let key = try NIOSSLPrivateKey(bytes: Array(identity.privateKeyPEM), format: .pem)
@@ -19,19 +43,14 @@ enum ProxyTLS {
 
     static func client(host: String, testTrustRoots: [NIOSSLCertificate]?) throws -> NIOSSLClientHandler {
         let name = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        var configuration = TLSConfiguration.makeClientConfiguration()
-        configuration.minimumTLSVersion = .tlsv12
-        configuration.applicationProtocols = ["http/1.1"]
         // Security validates the target hostname below. NIOSSL must not compare an IP
         // target to the HTTP upstream proxy's socket address a second time.
-        configuration.certificateVerification = .noHostnameVerification
         // macOS Security performs hostname, validity and system/user trust validation below.
         // These empty BoringSSL roots are not used by the custom verification callback.
-        configuration.trustRoots = .certificates([])
         let anchors = try testTrustRoots?.map { Data(try $0.toDERBytes()) }
         let sni = (try? SocketAddress(ipAddress: name, port: 443)) == nil ? name : nil
         return try NIOSSLClientHandler(
-            context: NIOSSLContext(configuration: configuration), serverHostname: sni,
+            context: clientContext.get(), serverHostname: sni,
             customVerificationCallback: { certificates, promise in
                 do {
                     let chain = try certificates.map { Data(try $0.toDERBytes()) }

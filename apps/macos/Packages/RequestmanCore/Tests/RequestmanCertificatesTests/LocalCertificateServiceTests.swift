@@ -154,7 +154,43 @@ struct LocalCertificateServiceTests {
         #expect(fixture.snapshot().installs == 1)
         #expect(fixture.snapshot().trusts == 1)
         fixture.revokeTrust()
+        #expect(try await !service.status().trusted) // Explicit refresh invalidates a live lease.
         #expect(try await service.serverIdentity(for: "example.com") == nil)
+    }
+
+    @Test func concurrentCONNECTBurstSharesTrustCheckAndExpiredLeaseDetectsRevocation() async throws {
+        let fixture = MemoryCertificates()
+        let service = fixture.service()
+        _ = try await service.generate()
+        _ = try await service.install()
+        _ = try await service.trust()
+        let checksBefore = fixture.snapshot().trustChecks
+        let readsBefore = fixture.snapshot().reads
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for _ in 0..<32 {
+                group.addTask {
+                    let identity = try await service.serverIdentity(for: "example.com")
+                    #expect(identity != nil)
+                }
+            }
+            try await group.waitForAll()
+        }
+        #expect(fixture.snapshot().trustChecks - checksBefore == 1)
+        #expect(fixture.snapshot().reads - readsBefore == 1)
+        fixture.revokeTrust()
+        fixture.advanceTime(6)
+        #expect(try await service.serverIdentity(for: "example.com") == nil)
+        #expect(fixture.snapshot().trustChecks - checksBefore == 2)
+    }
+
+    @Test func failedAuthorityRefreshNeverReusesPreviouslyTrustedLease() async throws {
+        let fixture = MemoryCertificates()
+        let service = fixture.service()
+        _ = try await service.generate(); _ = try await service.install(); _ = try await service.trust()
+        #expect(try await service.serverIdentity(for: "example.com") != nil)
+        fixture.corruptDocument()
+        await #expect(throws: LocalCertificateError.invalidCertificate) { try await service.status() }
+        await #expect(throws: LocalCertificateError.invalidCertificate) { try await service.serverIdentity(for: "example.com") }
     }
 
     @Test(arguments: ["example.com", "127.0.0.1", "::1"])
@@ -210,6 +246,9 @@ private final class MemoryCertificates: CertificateKeyStore, CertificateDocument
         var keyCreates = 0
         var installs = 0
         var trusts = 0
+        var trustChecks = 0
+        var reads = 0
+        var date = testDate
         var cancelTrustOnce: Bool
         var trustTakesEffect: Bool
         var failWriteOnce: Bool
@@ -224,11 +263,13 @@ private final class MemoryCertificates: CertificateKeyStore, CertificateDocument
     }
 
     func service() -> LocalCertificateService {
-        LocalCertificateService(keyStore: self, documentStore: self, trustStore: self, now: { testDate })
+        LocalCertificateService(keyStore: self, documentStore: self, trustStore: self, now: { self.lock.withLock { self.state.date } })
     }
 
     func snapshot() -> State { lock.withLock { state } }
     func revokeTrust() { lock.withLock { state.trusted = false } }
+    func advanceTime(_ seconds: TimeInterval) { lock.withLock { state.date += seconds } }
+    func corruptDocument() { lock.withLock { state.document = Data([0, 1, 2]) } }
     func existingKey() -> Certificate.PrivateKey? { lock.withLock { state.key } }
     func createKey() -> Certificate.PrivateKey {
         lock.withLock {
@@ -238,7 +279,7 @@ private final class MemoryCertificates: CertificateKeyStore, CertificateDocument
             return key
         }
     }
-    func read() -> Data? { lock.withLock { state.document } }
+    func read() -> Data? { lock.withLock { state.reads += 1; return state.document } }
     func write(_ data: Data) throws {
         try lock.withLock {
             if state.failWriteOnce {
@@ -251,7 +292,7 @@ private final class MemoryCertificates: CertificateKeyStore, CertificateDocument
     func installedCertificateData() -> Data? { lock.withLock { state.installed } }
     func isInstalled(_ data: Data) -> Bool { lock.withLock { state.installed == data } }
     func install(_ data: Data) { lock.withLock { state.installed = data; state.installs += 1 } }
-    func isTrusted(root: Data, probe: Data) -> Bool { lock.withLock { state.trusted } }
+    func isTrusted(root: Data, probe: Data) -> Bool { lock.withLock { state.trustChecks += 1; return state.trusted } }
     func trust(_ data: Data) throws {
         try lock.withLock {
             state.trusts += 1
