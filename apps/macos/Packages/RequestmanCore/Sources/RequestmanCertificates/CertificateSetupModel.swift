@@ -18,6 +18,7 @@ public final class CertificateSetupModel {
     public private(set) var status: CertificateStatus?
     public private(set) var phase: CertificateSetupPhase = .idle
     public private(set) var errorMessage: String?
+    public private(set) var canRegenerate = false
     public var isRunning: Bool { phase.isRunning }
     public var isConfigured: Bool {
         guard let status else { return false }
@@ -33,28 +34,45 @@ public final class CertificateSetupModel {
         guard !isRunning else { return }
         phase = .checking
         errorMessage = nil
+        canRegenerate = false
         do {
             status = try await service.status()
             phase = isConfigured ? .complete : .idle
         } catch {
             status = nil
             errorMessage = error.localizedDescription
+            canRegenerate = (error as? LocalCertificateError) == .missingPrivateKey
             phase = .idle
         }
     }
 
     public func run() async {
+        await run(regenerating: false)
+    }
+
+    public func regenerate() async {
+        guard canRegenerate else { return }
+        await run(regenerating: true)
+    }
+
+    private func run(regenerating: Bool) async {
         guard !isRunning else { return }
         status = nil
         errorMessage = nil
+        canRegenerate = false
         phase = .checking
         do {
-            do {
-                status = try await service.status()
-            } catch LocalCertificateError.authorizationRequired {
-                // Only this user-initiated path may repair the key's persistent signing ACL.
+            if regenerating {
                 phase = .generating
-                status = try await service.generate()
+                status = try await service.regenerate()
+            } else {
+                do {
+                    status = try await service.status()
+                } catch LocalCertificateError.authorizationRequired {
+                    // Only this user-initiated path may repair the key's persistent signing ACL.
+                    phase = .generating
+                    status = try await service.generate()
+                }
             }
             try validateValidity()
             try Task.checkCancellation()
@@ -84,9 +102,12 @@ public final class CertificateSetupModel {
             }
             phase = .complete
         } catch is CancellationError {
+            canRegenerate = regenerating && phase == .generating
             phase = .cancelled
             errorMessage = "设置已取消，已完成的步骤会保留。"
         } catch {
+            canRegenerate = (error as? LocalCertificateError) == .missingPrivateKey
+                || (regenerating && phase == .generating)
             phase = .failed
             errorMessage = error.localizedDescription
         }

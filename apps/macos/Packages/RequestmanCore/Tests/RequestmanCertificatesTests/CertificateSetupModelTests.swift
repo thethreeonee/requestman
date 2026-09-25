@@ -129,6 +129,48 @@ struct CertificateSetupModelTests {
         #expect(model.status == nil)
     }
 
+    @Test func missingKeyOffersRegenerationButNeverStartsItAutomatically() async {
+        let service = SetupServiceFixture()
+        await service.makeStatusUnavailable()
+        let model = CertificateSetupModel(service: service)
+        await model.refreshStatus()
+        #expect(model.canRegenerate)
+        await model.run()
+        #expect(model.phase == .failed)
+        #expect(model.canRegenerate)
+        #expect(await service.events == ["status", "status"])
+        await model.regenerate()
+        #expect(model.phase == .complete)
+        #expect(!model.canRegenerate)
+        #expect(await service.events == ["status", "status", "regenerate", "install", "trust", "status"])
+    }
+
+    @Test func regenerationCancellationCanBeRetried() async {
+        let service = SetupServiceFixture(cancelRegenerateOnce: true)
+        await service.makeStatusUnavailable()
+        let model = CertificateSetupModel(service: service)
+        await model.run()
+        await model.regenerate()
+        #expect(model.phase == .cancelled)
+        #expect(model.canRegenerate)
+        await model.regenerate()
+        #expect(model.phase == .complete)
+        #expect(await service.events.filter { $0 == "regenerate" }.count == 2)
+    }
+
+    @Test func healthyOrUnauthorizedCertificateDoesNotOfferRegeneration() async {
+        let service = SetupServiceFixture(status: .init(generated: true, installed: true, trusted: true))
+        let model = CertificateSetupModel(service: service)
+        await model.run()
+        #expect(!model.canRegenerate)
+        await model.regenerate()
+        #expect(await service.events == ["status", "status"])
+        let deniedService = SetupServiceFixture(requiresAuthorization: true, repairTakesEffect: false)
+        let denied = CertificateSetupModel(service: deniedService)
+        await denied.refreshStatus()
+        #expect(!denied.canRegenerate)
+    }
+
     @Test func repeatedClickCannotStartAnotherAuthorization() async {
         let service = SetupServiceFixture(blockTrust: true)
         let model = CertificateSetupModel(service: service)
@@ -150,6 +192,7 @@ private actor SetupServiceFixture: CertificateService {
     var events: [String] = []
     private var current: CertificateStatus
     private var cancelTrustOnce: Bool
+    private var cancelRegenerateOnce: Bool
     private let failInstall: Bool
     private let failVerification: Bool
     private let blockTrust: Bool
@@ -162,9 +205,10 @@ private actor SetupServiceFixture: CertificateService {
 
     init(status: CertificateStatus = .missing, cancelTrustOnce: Bool = false,
          failInstall: Bool = false, failVerification: Bool = false, blockTrust: Bool = false,
-         requiresAuthorization: Bool = false, repairTakesEffect: Bool = true) {
+         requiresAuthorization: Bool = false, repairTakesEffect: Bool = true, cancelRegenerateOnce: Bool = false) {
         current = status
         self.cancelTrustOnce = cancelTrustOnce
+        self.cancelRegenerateOnce = cancelRegenerateOnce
         self.failInstall = failInstall
         self.failVerification = failVerification
         self.blockTrust = blockTrust
@@ -187,6 +231,17 @@ private actor SetupServiceFixture: CertificateService {
         events.append("generate")
         if repairTakesEffect { requiresAuthorization = false }
         current.generated = true
+        return current
+    }
+
+    func regenerate() async throws -> CertificateStatus {
+        events.append("regenerate")
+        if cancelRegenerateOnce {
+            cancelRegenerateOnce = false
+            throw CancellationError()
+        }
+        statusUnavailable = false
+        current = .init(generated: true)
         return current
     }
 

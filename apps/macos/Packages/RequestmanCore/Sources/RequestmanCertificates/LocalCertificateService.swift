@@ -10,6 +10,7 @@ protocol CertificateKeyStore: Sendable {
 protocol CertificateDocumentStore: Sendable {
     func read() throws -> Data?
     func write(_ data: Data) throws
+    func remove() throws
 }
 
 protocol CertificateTrustStore: Sendable {
@@ -18,6 +19,7 @@ protocol CertificateTrustStore: Sendable {
     func install(_ data: Data) throws
     func isTrusted(root: Data, probe: Data) throws -> Bool
     func trust(_ data: Data) throws
+    func remove(_ data: Data) throws
 }
 
 /// All filesystem, cryptography, Keychain and blocking trust authorization work stays off MainActor.
@@ -109,6 +111,32 @@ public actor LocalCertificateService: CertificateService, TLSCertificateProvidin
             let data = try CertificateMaterial.data(certificate)
             try documentStore.write(data)
             return try status(Identity(certificate: certificate, privateKey: privateKey, data: data))
+        }
+    }
+
+    /// Explicit recovery after the user deleted the key. Never rotate a surviving key,
+    /// and never interpret a locked keychain or an authorization failure as a missing key.
+    public func regenerate() throws -> CertificateStatus {
+        try CertificateKeychainInteraction.perform(allowingUI: true) {
+            authorityLease = nil
+            leaves.removeAll()
+            try Task.checkCancellation()
+            guard let data = try documentStore.read() ?? trustStore.installedCertificateData() else {
+                return try generate()
+            }
+            let certificate = try CertificateMaterial.decodeRoot(data)
+            guard try keyStore.existingKey(certificate: certificate) == nil else {
+                return try generate() // State may have been repaired since the UI offered recovery.
+            }
+            if let installed = try trustStore.installedCertificateData(), installed != data {
+                throw LocalCertificateError.multipleCertificates
+            }
+            // Remove only the orphaned CA. Clear its public file before creating a key,
+            // so interruption/save failure resumes as the existing orphan-key recovery path.
+            try trustStore.remove(data)
+            try documentStore.remove()
+            try Task.checkCancellation()
+            return try generate()
         }
     }
 
@@ -222,5 +250,10 @@ struct FileCertificateDocumentStore: CertificateDocumentStore {
         )
         try data.write(to: certificateURL, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: certificateURL.path)
+    }
+
+    func remove() throws {
+        guard FileManager.default.fileExists(atPath: certificateURL.path) else { return }
+        try FileManager.default.trashItem(at: certificateURL, resultingItemURL: nil)
     }
 }

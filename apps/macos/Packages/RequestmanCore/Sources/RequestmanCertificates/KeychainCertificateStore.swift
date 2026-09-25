@@ -161,18 +161,37 @@ struct KeychainCertificateStore: CertificateKeyStore, CertificateTrustStore {
     }
 
     private func certificates() throws -> [Data] {
+        try certificateReferences().map { SecCertificateCopyData($0) as Data }
+    }
+
+    func remove(_ data: Data) throws {
+        // Query references in the default keychain, then match exact DER bytes. A label
+        // or subject alone is not sufficient authority to delete a certificate.
+        let matches = try certificateReferences().filter { SecCertificateCopyData($0) as Data == data }
+        let trustStatus = SecTrustSettingsRemoveTrustSettings(try certificate(data), .user)
+        if trustStatus != errSecItemNotFound { try check(trustStatus, operation: "移除旧证书信任") }
+        guard !matches.isEmpty else { return }
+        let status = SecItemDelete([
+            kSecClass as String: kSecClassCertificate,
+            kSecMatchItemList as String: matches,
+            kSecUseDataProtectionKeychain as String: false
+        ] as CFDictionary)
+        if status != errSecItemNotFound { try check(status, operation: "移除旧证书") }
+    }
+
+    private func certificateReferences() throws -> [SecCertificate] {
         var result: CFTypeRef?
         let query: [String: Any] = [
             kSecClass as String: kSecClassCertificate,
             kSecMatchSearchList as String: [try defaultKeychain()],
             kSecUseDataProtectionKeychain as String: false,
             kSecMatchLimit as String: kSecMatchLimitAll,
-            kSecReturnData as String: true
+            kSecReturnRef as String: true
         ]
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return [] }
         try check(status, operation: "读取已安装证书")
-        guard let certificates = result as? [Data] else { throw LocalCertificateError.invalidCertificate }
+        guard let certificates = result as? [SecCertificate] else { throw LocalCertificateError.invalidCertificate }
         return certificates
     }
 

@@ -34,6 +34,8 @@ CA 材料和实际信任结果使用最多 5 秒的固定期限缓存，命中�
 
 证书授权只允许发生在用户主动打开的配置流程。`CertificateKeychainInteraction` 在同步互斥作用域内管理文件型钥匙串的进程级交互开关，配置操作允许授权，状态检查及 CONNECT 签发禁止授权，退出时恢复原状态；作用域内不挂起、不执行网络 I/O。`KeychainSigningKey` 从公开 CA 证书取得公钥，直接调用 `SecKeyCreateSignature`，拒绝私钥序列化；加载时通过实际签名验证密钥匹配，避免旧 X509 SecKey 包装器在读取已有 CA 时导出公钥。配置阶段为当前应用添加仅签名的 ACL，保留既有权限和 CA；新建密钥的默认权限只信任创建应用。最终配置复核必须在禁止弹窗的条件下通过，才显示已配置；访问被拒绝时状态失效并引导用户回到“设置证书…”，运行期不自动授权。稳定的应用签名身份仍是跨版本复用授权的前提，真实系统授权与重启行为待验收。
 
+`CertificateSetupModel.canRegenerate` 仅在私钥缺失或显式恢复中断时提供“重新生成证书”。`LocalCertificateService.regenerate` 再次检查密钥；若已恢复则复用，访问错误不能当作缺失。确认缺失后按完整 DER 匹配移除旧证书及其当前用户信任，再将公开文件移入废纸篓，最后复用生成、安装、信任与静默复核流程。清理公开文件发生在新建私钥之前，因此生成后写入失败可通过已有的孤立私钥恢复路径重试，不重复生成密钥；多个证书或不匹配材料保持原状。
+
 HTTP/1.1 顺序请求复用下游连接，每条下游最多保留一个同目标、同出口的上游连接，HTTPS 同时复用 TLS 会话。上游主动关闭后，下次请求重新建连；不重试已发送请求。每个事务完成后清空规则匹配、Body 采集器和内存租约，保留独立记录；闲置 30 秒关闭且不生成虚假失败记录，停止监听关闭在用和闲置连接。仍限制最多 256 个下游连接，不支持流水线和跨客户端连接池。
 
 主窗口由 `WorkspaceSplitView` 桥接一个 AppKit `NSSplitViewController`，持久保留项目侧栏、主内容、请求详情三个 `NSHostingController`。两侧分别使用 `NSSplitViewItem(sidebarWithViewController:)` 与 `NSSplitViewItem(inspectorWithViewController:)`，启用 `allowsFullHeightLayout`，窗口采用 `.fullSizeContentView`，由系统提供贯穿窗口高度的侧栏材质。主内容最小宽度为 420 pt；右栏范围 400–760 pt，首次展开建议宽度为 520 pt，完成布局后由分栏保存用户调整的宽度。`WorkspaceView` 保留场景生命周期、错误提示和设置入口，在 `body` 中读取模型生成 `WorkspaceToolbarSnapshot`，使 Observation 变化进入桥接更新。三个内容宿主关闭场景桥接，避免 SwiftUI 再安装窗口工具栏；原生控制器拆卸时释放观察者并恢复其接管的窗口配置。

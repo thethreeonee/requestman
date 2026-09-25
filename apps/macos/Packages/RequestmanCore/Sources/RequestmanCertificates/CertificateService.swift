@@ -29,6 +29,7 @@ public struct CertificateStatus: Equatable, Sendable {
 public protocol CertificateService: Sendable {
     func status() async throws -> CertificateStatus
     func generate() async throws -> CertificateStatus
+    func regenerate() async throws -> CertificateStatus
     func install() async throws -> CertificateStatus
     func trust() async throws -> CertificateStatus
 }
@@ -52,7 +53,7 @@ public enum LocalCertificateError: LocalizedError, Equatable {
         case .privateKeyExportForbidden: "不允许导出 HTTPS 调试 CA 私钥。"
         case let .security(operation, status): "\(operation)失败（\(status)）。请确认登录钥匙串已解锁后重试。"
         case .invalidCertificate: "本地证书已损坏或格式不符，未覆盖现有证书。请在钥匙串访问中检查 Requestman Local CA。"
-        case .missingPrivateKey: "找不到此证书的私钥，未替换现有证书。请检查登录钥匙串中的 Requestman Local CA。"
+        case .missingPrivateKey: "找不到 HTTPS 证书的私钥，证书或私钥可能已被删除。请点击“重新生成证书”恢复配置。"
         case .privateKeyMismatch: "证书与钥匙串中的私钥不匹配，未替换现有证书。请检查 Requestman Local CA。"
         case .expiredCertificate: "本地证书已过期，未自动替换。请在钥匙串访问中移除旧证书和对应私钥，并移走本地 requestman-root-ca.der 文件后重试。"
         case .certificateNotGenerated: "请先生成本地证书。"

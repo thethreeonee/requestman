@@ -189,6 +189,88 @@ struct LocalCertificateServiceTests {
         #expect(mismatched.snapshot().keyCreates == 0)
     }
 
+    @Test(arguments: [false, true])
+    func explicitRegenerationRecoversDeletedPrivateKey(certificateStillInstalled: Bool) async throws {
+        let oldKey = Certificate.PrivateKey(P256.Signing.PrivateKey())
+        let oldData = try CertificateMaterial.data(CertificateMaterial.root(privateKey: oldKey, now: testDate))
+        let fixture = MemoryCertificates(document: oldData, installed: certificateStillInstalled ? oldData : nil)
+        let service = fixture.service()
+        await #expect(throws: LocalCertificateError.missingPrivateKey) { try await service.status() }
+        await #expect(throws: LocalCertificateError.missingPrivateKey) { try await service.generate() }
+        #expect(fixture.snapshot().keyCreates == 0)
+        #expect(fixture.snapshot().document == oldData)
+        let regenerated = try await service.regenerate()
+        #expect(regenerated.generated && !regenerated.installed && !regenerated.trusted)
+        #expect(regenerated.fingerprint != CertificateMaterial.fingerprint(oldData))
+        #expect(fixture.snapshot().removedCertificates == [oldData])
+        _ = try await service.install()
+        #expect(try await service.trust().trusted)
+        #expect(try await fixture.service().serverIdentity(for: "example.com") != nil)
+        #expect(fixture.snapshot().keyCreates == 1)
+    }
+
+    @Test func missingInstalledCertificateReusesSurvivingPrivateKey() async throws {
+        let key = Certificate.PrivateKey(P256.Signing.PrivateKey())
+        let data = try CertificateMaterial.data(CertificateMaterial.root(privateKey: key, now: testDate))
+        let fixture = MemoryCertificates(key: key, document: data)
+        let service = fixture.service()
+        #expect(try await !service.status().installed)
+        // Even a stale regenerate button must not replace a surviving identity.
+        #expect(try await service.regenerate().fingerprint == CertificateMaterial.fingerprint(data))
+        _ = try await service.install()
+        #expect(try await service.trust().trusted)
+        #expect(fixture.snapshot().keyCreates == 0)
+        #expect(fixture.snapshot().removedCertificates.isEmpty)
+    }
+
+    @Test func regenerationRetriesAfterSaveFailureWithoutCreatingAnotherKey() async throws {
+        let key = Certificate.PrivateKey(P256.Signing.PrivateKey())
+        let data = try CertificateMaterial.data(CertificateMaterial.root(privateKey: key, now: testDate))
+        let fixture = MemoryCertificates(document: data, installed: data, failWriteOnce: true)
+        let service = fixture.service()
+        await #expect(throws: CocoaError.self) { try await service.regenerate() }
+        #expect(fixture.snapshot().keyCreates == 1)
+        #expect(fixture.snapshot().document == nil)
+        #expect(fixture.snapshot().installed == nil)
+        #expect(try await service.regenerate().generated)
+        #expect(fixture.snapshot().keyCreates == 1)
+    }
+
+    @Test func cancelledRemovalKeepsRecoveryAvailableAndPreservesPublicFile() async throws {
+        let key = Certificate.PrivateKey(P256.Signing.PrivateKey())
+        let data = try CertificateMaterial.data(CertificateMaterial.root(privateKey: key, now: testDate))
+        let fixture = MemoryCertificates(document: data, installed: data, cancelRemovalOnce: true)
+        let service = fixture.service()
+        await #expect(throws: CancellationError.self) { try await service.regenerate() }
+        #expect(fixture.snapshot().document == data)
+        #expect(fixture.snapshot().installed == data)
+        #expect(fixture.snapshot().keyCreates == 0)
+        #expect(try await service.regenerate().generated)
+    }
+
+    @Test func regenerationNeverTreatsDeniedAccessAsDeletion() async throws {
+        let key = Certificate.PrivateKey(P256.Signing.PrivateKey())
+        let data = try CertificateMaterial.data(CertificateMaterial.root(privateKey: key, now: testDate))
+        let fixture = MemoryCertificates(key: key, document: data, installed: data)
+        fixture.requireAuthorization()
+        await #expect(throws: LocalCertificateError.authorizationRequired) { try await fixture.service().regenerate() }
+        #expect(fixture.snapshot().removedCertificates.isEmpty)
+        #expect(fixture.snapshot().document == data)
+        #expect(fixture.snapshot().keyCreates == 0)
+    }
+
+    @Test func regenerationDoesNotRemoveAnUnrelatedInstalledCertificate() async throws {
+        let key = Certificate.PrivateKey(P256.Signing.PrivateKey())
+        let data = try CertificateMaterial.data(CertificateMaterial.root(privateKey: key, now: testDate))
+        let other = try CertificateMaterial.data(CertificateMaterial.root(privateKey: key, now: testDate))
+        let fixture = MemoryCertificates(document: data, installed: other)
+        await #expect(throws: LocalCertificateError.multipleCertificates) { try await fixture.service().regenerate() }
+        #expect(fixture.snapshot().removedCertificates.isEmpty)
+        #expect(fixture.snapshot().document == data)
+        #expect(fixture.snapshot().installed == other)
+        #expect(fixture.snapshot().keyCreates == 0)
+    }
+
     @Test func missingPublicFileRecoversExistingInstalledCA() async throws {
         let key = Certificate.PrivateKey(P256.Signing.PrivateKey())
         let data = try CertificateMaterial.data(CertificateMaterial.root(privateKey: key, now: testDate))
@@ -333,6 +415,8 @@ private final class MemoryCertificates: CertificateKeyStore, CertificateDocument
         var cancelRepair = false
         var authorizationRepairs = 0
         var interactiveKeyReads = 0
+        var removedCertificates: [Data] = []
+        var cancelRemovalOnce: Bool
         var keyCreates = 0
         var installs = 0
         var trusts = 0
@@ -347,8 +431,8 @@ private final class MemoryCertificates: CertificateKeyStore, CertificateDocument
     private var state: State
 
     init(key: Certificate.PrivateKey? = nil, document: Data? = nil, installed: Data? = nil,
-         cancelTrustOnce: Bool = false, trustTakesEffect: Bool = true, failWriteOnce: Bool = false) {
-        state = State(key: key, document: document, installed: installed,
+         cancelTrustOnce: Bool = false, trustTakesEffect: Bool = true, failWriteOnce: Bool = false, cancelRemovalOnce: Bool = false) {
+        state = State(key: key, document: document, installed: installed, cancelRemovalOnce: cancelRemovalOnce,
                       cancelTrustOnce: cancelTrustOnce, trustTakesEffect: trustTakesEffect, failWriteOnce: failWriteOnce)
     }
 
@@ -401,6 +485,17 @@ private final class MemoryCertificates: CertificateKeyStore, CertificateDocument
                 throw CocoaError(.fileWriteUnknown)
             }
             state.document = data
+        }
+    }
+    func remove() { lock.withLock { state.document = nil } }
+    func remove(_ data: Data) throws {
+        try lock.withLock {
+            if state.cancelRemovalOnce {
+                state.cancelRemovalOnce = false
+                throw CancellationError()
+            }
+            state.removedCertificates.append(data)
+            if state.installed == data { state.installed = nil; state.trusted = false }
         }
     }
     func installedCertificateData() -> Data? { lock.withLock { state.installed } }

@@ -62,7 +62,10 @@ struct CertificateSetupView: View {
                 Button(model.phase == .complete ? "完成" : "关闭") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .disabled(model.isRunning)
-                if model.phase == .failed || model.phase == .cancelled {
+                if model.canRegenerate && !model.isRunning {
+                    Button("重新生成证书") { Task { await model.regenerate() } }
+                        .keyboardShortcut(.defaultAction)
+                } else if model.phase == .failed || model.phase == .cancelled {
                     Button("继续设置") { Task { await model.run() } }
                         .keyboardShortcut(.defaultAction)
                 }
