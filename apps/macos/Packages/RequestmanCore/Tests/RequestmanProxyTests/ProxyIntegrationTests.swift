@@ -68,6 +68,74 @@ struct ProxyIntegrationTests {
             #expect(record.matchedRules.allSatisfy { $0.name == workflow.name })
         }
     }
+    @Test func scriptStepsModifyRealRequestAndResponseBodies() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow(); workflow.matchTarget = .host
+            workflow.matchRule = .equals; workflow.matchPattern = "127.0.0.1"
+            var request = ModificationStep(kind: .script)
+            request.value = "request.body = request.body.toUpperCase(); request.headers.push({name:'X-Key',value:'script-key'}); return request;"
+            var response = ModificationStep(kind: .script)
+            response.value = "response.body = response.body + ':' + request.body; response.status = 201; return response;"
+            workflow.requestSteps = [request]; workflow.responseSteps = [response]
+            try await h.start(workflow: workflow)
+            let reply = try await h.exchange("POST \(h.originURL)script HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\nhello")
+            #expect(reply.contains("201 Created"))
+            #expect(reply.hasSuffix("origin-body:HELLO"))
+            #expect(h.observation.withLock { $0.header } == "script-key")
+            #expect(h.observation.withLock { $0.bodyBytes } == 5)
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(record.sentBody.data == Data("HELLO".utf8))
+            #expect(record.responseBody.data == Data("origin-body:HELLO".utf8))
+            #expect(record.matchedRules.map(\.kind) == [.script, .script])
+            #expect(record.requestBody.isComplete && record.receivedBody.isComplete && record.responseBody.isComplete)
+        }
+    }
+    @Test func scriptTimeoutFailsBeforeForwardingAndMockScriptsStillRun() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var script = ModificationStep(kind: .script); script.value = "while(true) {}"
+            var options = ScriptOptions(); options.timeoutMilliseconds = 150; script.scriptOptions = options
+            workflow.requestSteps = [script]
+            try await h.start(workflow: workflow)
+            let reply = try await h.exchange("GET \(h.originURL)timeout HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            #expect(reply.contains("400 Bad Request"))
+            #expect(h.observation.withLock { $0.requests } == 0)
+            let failed = try #require(h.proxy.records.drain().records.first)
+            #expect(failed.outcome == .failed && failed.matchedRules.isEmpty)
+            var mock = ModificationStep(kind: .mock); mock.value = "local"
+            script.value = "response.body += '-script'; return response;"; script.scriptOptions = nil
+            workflow.requestSteps = [mock]; workflow.responseSteps = [script]
+            var project = WorkflowProject(); project.workflows = [workflow]
+            var document = WorkspaceDocument(); document.projects = [project]
+            await h.proxy.update(document)
+            let mocked = try await h.exchange("GET \(h.originURL)mock-script HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            #expect(mocked.hasSuffix("local-script"))
+            #expect(h.observation.withLock { $0.requests } == 0)
+        }
+    }
+    @Test func scriptKeepsCompressedBytesAndBuffersChunkedInput() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var request = ModificationStep(kind: .script); request.value = "request.body += '-script'; return request;"
+            var response = ModificationStep(kind: .script); response.value = "response.headers.push({name:'X-Script', value:String(response.body)}); return response;"
+            workflow.requestSteps = [request]; workflow.responseSteps = [response]
+            try await h.start(workflow: workflow)
+            let reply = try await h.exchange("POST \(h.originURL)encoded HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n")
+            #expect(reply.lowercased().contains(#"x-script: {"ok":true}"#))
+            #expect(reply.lowercased().contains("content-encoding: gzip"))
+            #expect(h.observation.withLock { $0.bodyBytes } == 10)
+            let preserved = try #require(h.proxy.records.drain().records.first)
+            #expect(preserved.responseBody.data == Data(gzipJSONFixture))
+            response.value = "const body = JSON.parse(response.body); body.ok = false; response.body = JSON.stringify(body); return response;"
+            workflow.responseSteps = [response]
+            var project = WorkflowProject(); project.workflows = [workflow]
+            var document = WorkspaceDocument(); document.projects = [project]
+            await h.proxy.update(document)
+            let changed = try await h.exchange("GET \(h.originURL)encoded HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            #expect(changed.hasSuffix(#"{"ok":false}"#))
+            #expect(!changed.lowercased().contains("content-encoding"))
+        }
+    }
     @Test func mockSkipsOriginAndResponseLaneStillRuns() async throws {
         try await withHarness { h in
             var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL

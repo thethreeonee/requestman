@@ -1,6 +1,14 @@
 import SwiftUI
+import RequestmanCore
 
 @main
+struct RequestmanEntry {
+    @MainActor static func main() {
+        if WorkflowScript.runWorkerIfRequested() { return }
+        RequestmanApp.main()
+    }
+}
+
 struct RequestmanApp: App {
     @NSApplicationDelegateAdaptor(WorkspaceAppDelegate.self) private var appDelegate
     @State private var model = WorkspaceModel()

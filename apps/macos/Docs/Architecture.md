@@ -20,7 +20,7 @@
 | SystemProxyController | 系统 HTTP/HTTPS 代理接管、原配置保存与恢复 | SystemConfiguration + Authorization Services；设置策略与失败恢复已有替身测试，系统授权待人工验收 |
 | TransparentProxy 系统扩展 | 按来源筛选 TCP/UDP 流，转交代理引擎 | 待实现 |
 | RequestmanProxy | HTTP/CONNECT、双向修改、Mock、上游连接 | SwiftNIO + NIOSSL 实现 HTTP/1.1、HTTPS 解密与加密透传 |
-| WorkflowEngine | 有序双向动作、动态模板、环境快照 | 基础动作已接入；脚本、辅助请求、断点待实现 |
+| WorkflowEngine | 有序双向动作、动态模板、环境快照 | 基础动作与隔离同步脚本已接入；异步脚本、辅助请求、断点待实现 |
 | 存储 | 工作区持久化、全局记录 | JSON 配置保存及有界内存记录已实现；数据库待实现 |
 | RequestmanCertificates | 本机 CA、钥匙串安装、SSL 信任与校验 | 原生引导和可重试流程已实现；系统授权与浏览器实测待验收 |
 
@@ -142,3 +142,7 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 - [mitmproxy macOS 接管实现](https://www.mitmproxy.org/posts/local-capture/macos/)
 
 本轮代理选用 [SwiftNIO](https://github.com/apple/swift-nio)，使用其 HTTP/1 编解码和 socket/event-loop 实现，不自行解析 HTTP。依赖锁定见 Package.resolved；分发时需要包含 SwiftNIO 及其传递依赖的许可证。CONNECT 回环与上游串联已有集成测试；Chrome/Surge 共存矩阵仍待人工实测。
+
+## 请求修改配置与同步脚本（2026-09-26）
+
+匹配配置改为 URL / Host 与四类规则，旧前缀按转义正则迁移，工作区保存版本为 2。步骤详情接入同一个窗口级 Inspector，Header 使用插件候选列表的原生可编辑组合框。同步 JavaScript 通过可终止的独立进程执行，具有脚本的阶段在后台读取完整 Body、解码文本后执行；未带脚本的阶段保留 NIO 流式路径。取消与事务截止时间沿脚本流程传递；输入/输出没有新增载荷尺寸上限。完整 API、并发和时限、验收范围见[请求修改配置](Design/request-modification.md)。

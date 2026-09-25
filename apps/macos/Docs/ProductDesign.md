@@ -1,6 +1,6 @@
 # Requestman macOS 产品与技术设计草案
 
-> 实现进度（2026-09-25）：原生三栏工作区、环境、基础双向 HTTP 修改与全局内存记录已接入。HTTPS 当前仅 CONNECT 透传；脚本、辅助请求、断点等仍为后续目标。以 [macOS README](../README.md) 的能力表为准。
+> 实现进度（2026-09-26）：原生工作区、环境、双向 HTTP 修改、HTTPS 解密、全局记录及同步脚本已接入；当前脚本 API 见[请求修改配置](Design/request-modification.md)。本文中的异步脚本、辅助请求与断点仍为后续目标，以 [macOS README](../README.md) 的能力表为准。
 更新日期：2026-09-24。状态：第一版讨论稿；本文定义目标与建议，不代表功能已实现。
 
 当前实现状态见 [macOS README](../README.md)，网络接入、Surge 共存和系统扩展边界见 [Architecture.md](Architecture.md)。

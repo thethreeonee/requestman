@@ -144,6 +144,12 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     private var responseKeepsAlive = false
     private var originKeepsAlive = false
     private var upstreamTarget: String?
+    private var scriptLease: ScriptFlowLease?
+    private var scriptRequestHead: HTTPRequestHead?
+    private var scriptRequestDraft: HTTPMessageDraft?
+    private var scriptResponseDraft: HTTPMessageDraft?
+    private var scriptRequestBytes = Data()
+    private var scriptResponseBytes = Data()
 
     init(configuration: ExplicitProxyConfiguration, shared: ProxySharedState, records: CaptureRecordBuffer, tlsAuthority: String? = nil) {
         self.configuration = configuration; self.shared = shared; self.records = records
@@ -169,9 +175,22 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         case .body(let buffer):
             record?.requestBytes += buffer.readableBytes
             requestBodyCollector?.append(buffer.readableBytesView)
-            if !connected { enqueue(part) } else { forward(part) }
+            if scriptRequestHead != nil {
+                scriptRequestBytes.append(contentsOf: buffer.readableBytesView)
+            } else if !connected { enqueue(part) } else { forward(part) }
         case .end:
             requestEnded = true
+            if let head = scriptRequestHead, var draft = scriptRequestDraft {
+                scriptRequestHead = nil; scriptRequestDraft = nil
+                draft.bodyData = scriptRequestBytes
+                pending = [.body(context.channel.allocator.buffer(bytes: scriptRequestBytes)), .end(nil)]
+                scriptRequestBytes = Data()
+                executeScriptFlow(response: false, draft: draft) { [self] result in
+                    do { try continueRequest(head, draft: result) }
+                    catch { fail(error.localizedDescription, status: 400) }
+                }
+                return
+            }
             if !connected { enqueue(part) } else { forward(part) }
         }
     }
@@ -179,6 +198,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         guard isProcessing, !tunnel else { return }
         // A header can span multiple socket reads before the decoder emits its head.
         if record == nil { context.read(); return }
+        if scriptRequestHead != nil { context.read(); return }
         guard connected else { return }
         flushRequest()
     }
@@ -254,8 +274,22 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             if let match {
                 self.record?.project = match.project; self.record?.workflow = match.workflow.name
                 self.record?.matchedWorkflowID = match.workflow.id
+                if match.workflow.requestSteps.contains(where: { $0.enabled && $0.kind == .script }) {
+                    guard reserveScriptFlow() else { return }
+                    scriptRequestHead = head; scriptRequestDraft = draft
+                    if head.headers["expect"].contains(where: { $0.lowercased() == "100-continue" }) {
+                        client.writeAndFlush(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .continue)), promise: nil)
+                        scriptRequestHead?.headers.remove(name: "Expect")
+                    }
+                    return
+                }
                 try applyRecordedSteps(match.workflow.requestSteps, response: false, to: &draft)
             }
+            try continueRequest(head, draft: draft)
+        } catch { fail(error.localizedDescription, status: 400) }
+    }
+    private func continueRequest(_ head: HTTPRequestHead, draft: HTTPMessageDraft) throws {
+        guard let client, isProcessing else { return }
             record?.finalURL = draft.url; record?.sentMethod = draft.method
             request = draft
             if draft.isMock {
@@ -263,9 +297,11 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                 record?.sentBody = .unavailable("本地响应，请求未发送至上游")
                 record?.receivedBody = .unavailable("本地响应，没有上游响应")
                 var reply = draft
-                if let match {
-                    try applyRecordedSteps(match.workflow.responseSteps, response: true, to: &reply)
+                if match?.workflow.responseSteps.contains(where: { $0.enabled && $0.kind == .script }) == true {
+                    executeScriptFlow(response: true, draft: reply) { [self] in sendStatic($0) }
+                    return
                 }
+                if let match { try applyRecordedSteps(match.workflow.responseSteps, response: true, to: &reply) }
                 return sendStatic(reply)
             }
             guard let target = URLComponents(string: draft.url), let host = target.host else { throw WorkflowError.invalid("目标地址无效") }
@@ -312,7 +348,6 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                     channel.read()
                 }
             }
-        } catch { fail(error.localizedDescription, status: 400) }
     }
     private func connectHTTP(endpoint: ProxyEndpoint, targetHost: String, targetPort: Int, secure: Bool, on loop: EventLoop) -> EventLoopFuture<Channel> {
         // One reusable origin per downstream connection, including its TLS session.
@@ -417,9 +452,12 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                 record?.receivedHeaders = draft.headers
                 record?.originalStatus = draft.status
                 receivedBodyCollector = CaptureBodyCollector(headers: draft.headers)
-                if let match {
-                    try applyRecordedSteps(match.workflow.responseSteps, response: true, to: &draft)
+                if match?.workflow.responseSteps.contains(where: { $0.enabled && $0.kind == .script }) == true {
+                    guard reserveScriptFlow() else { return }
+                    scriptResponseDraft = draft
+                    return
                 }
+                if let match { try applyRecordedSteps(match.workflow.responseSteps, response: true, to: &draft) }
                 response = draft
                 responseKeepsAlive = clientKeepsAlive && requestEnded && requestWriteComplete
                 let headers = responseHeaders(draft, keepAlive: responseKeepsAlive)
@@ -436,12 +474,24 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             case .body(let buffer):
                 record?.responseBytes += buffer.readableBytes
                 receivedBodyCollector?.append(buffer.readableBytesView)
+                if scriptResponseDraft != nil {
+                    scriptResponseBytes.append(contentsOf: buffer.readableBytesView)
+                    return
+                }
                 if let response, response.replacementBody == nil, allowsBody(response.status) {
                     responseBodyCollector?.append(buffer.readableBytesView)
                     if let client { trackResponseWrite(client.write(HTTPServerResponsePart.body(.byteBuffer(buffer)))) }
                 }
             case .end:
                 if informationalResponse { informationalResponse = false; return }
+                if var draft = scriptResponseDraft {
+                    scriptResponseDraft = nil; responseEnded = true
+                    draft.bodyData = scriptResponseBytes
+                    executeScriptFlow(response: true, draft: draft) { [self] result in
+                        sendBufferedResponse(result)
+                    }
+                    return
+                }
                 guard responseStarted, let client else { return fail("上游未返回完整响应", status: 502) }
                 responseEnded = true
                 client.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { [self] result in
@@ -485,6 +535,9 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             closeProxyChannel(previous)
         }
         record = nil; match = nil; request = nil; response = nil
+        scriptLease?.control.cancel()
+        scriptLease = nil; scriptRequestHead = nil; scriptRequestDraft = nil; scriptResponseDraft = nil
+        scriptRequestBytes = Data(); scriptResponseBytes = Data()
         pending.removeAll(keepingCapacity: true)
         lastRequestWrite = nil; lastResponseWrite = nil
         requestBodyCollector = nil; sentBodyCollector = nil
@@ -534,6 +587,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     private func fail(_ message: String, status: Int) {
         guard isProcessing else { return }
         failureMessage = message
+        scriptLease?.control.cancel()
         timer?.cancel(); certificateTask?.cancel()
         if let upstream { closeProxyChannel(upstream) }
         guard let client else { finish(error: message); return }
@@ -559,7 +613,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                                     to draft: inout HTTPMessageDraft) throws {
         guard let match, let snapshot = record else { return }
         _ = try WorkflowEngine.apply(steps, response: response, to: &draft,
-            environment: match.environment?.values ?? [:], id: snapshot.id, date: snapshot.startedAt) { kind in
+            environment: match.environment?.values ?? [:], id: snapshot.id, date: snapshot.startedAt, request: request) { kind in
                 self.record?.steps.append(kind.title)
                 self.record?.matchedRules.append(CaptureMatchedRule(
                     kind: kind, name: match.workflow.name, response: response
@@ -567,9 +621,86 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             }
     }
 
+    private func reserveScriptFlow() -> Bool {
+        if scriptLease != nil { return true }
+        scriptLease = ScriptFlowLease.acquire()
+        if scriptLease == nil { fail("脚本流程执行已满", status: 503); return false }
+        return true
+    }
+
+    private func executeScriptFlow(response isResponse: Bool, draft: HTTPMessageDraft,
+                                   completion: @escaping @Sendable (HTTPMessageDraft) -> Void) {
+        guard reserveScriptFlow(), let lease = scriptLease, let client, let match, let snapshot = record else { return }
+        let steps = isResponse ? match.workflow.responseSteps : match.workflow.requestSteps
+        var requestSnapshot = request
+        if isResponse, requestSnapshot?.bodyText == nil, let requestBodyCollector, requestEnded {
+            let body = requestBodyCollector.snapshot(isComplete: true)
+            requestSnapshot?.bodyData = body.data
+        }
+        if snapshot.hasSentRequestHeaders { requestSnapshot?.headers = snapshot.sentHeaders }
+        let inputRequest = requestSnapshot
+        DispatchQueue.global(qos: .userInitiated).async { [self, lease] in
+            _ = lease // Keep the admission slot until the worker actually exits, even after a client cancellation.
+            var output = draft
+            var kinds: [ModificationKind] = []
+            let result: Result<HTTPMessageDraft, Error>
+            do {
+                try lease.control.check()
+                if let data = output.bodyData { output.bodyText = try ScriptBodyText.decode(data, headers: output.headers, control: lease.control) }
+                var preparedRequest = inputRequest
+                if let data = preparedRequest?.bodyData, preparedRequest?.replacementBody == nil {
+                    let headers = preparedRequest?.headers ?? []
+                    preparedRequest?.bodyText = try ScriptBodyText.decode(data, headers: headers, control: lease.control)
+                }
+                _ = try WorkflowEngine.apply(steps, response: isResponse, to: &output,
+                    environment: match.environment?.values ?? [:], id: snapshot.id, date: snapshot.startedAt,
+                    request: preparedRequest, control: lease.control, onApplied: { kinds.append($0) })
+                result = .success(output)
+            } catch { result = .failure(error) }
+            let appliedKinds = kinds
+            client.eventLoop.execute { [self] in
+                guard isProcessing, record?.id == snapshot.id else { return }
+                for kind in appliedKinds {
+                    record?.steps.append(kind.title)
+                    record?.matchedRules.append(CaptureMatchedRule(kind: kind, name: match.workflow.name, response: isResponse))
+                }
+                switch result {
+                case .success(let output): completion(output)
+                case .failure(let error): fail(error.localizedDescription, status: isResponse ? 502 : 400)
+                }
+            }
+        }
+    }
+
+    private func sendBufferedResponse(_ draft: HTTPMessageDraft) {
+        guard let client, isProcessing else { return }
+        response = draft; responseStarted = true
+        let bytes = draft.replacementBody.map { Data($0.utf8) } ?? scriptResponseBytes
+        scriptResponseBytes = Data()
+        var headers = responseHeaders(draft)
+        headers.remove(name: "Transfer-Encoding")
+        if allowsBody(draft.status) { headers.replaceOrAdd(name: "Content-Length", value: String(bytes.count)) }
+        record?.status = draft.status; record?.responseHeaders = fields(headers)
+        responseBodyCollector = CaptureBodyCollector(headers: fields(headers))
+        trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .init(statusCode: draft.status), headers: headers))))
+        if allowsBody(draft.status) {
+            responseBodyCollector?.append(bytes)
+            trackResponseWrite(client.write(HTTPServerResponsePart.body(.byteBuffer(client.allocator.buffer(bytes: bytes)))))
+        }
+        client.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { [self] result in
+            if case .failure(let error) = result { finish(error: error.localizedDescription) }
+            else { responseWriteComplete = !responseWriteFailed; finish() }
+            closeProxyChannel(client)
+            if let upstream { closeProxyChannel(upstream) }
+        }
+    }
+
     private func finish(error: String? = nil) {
         guard !finished else { return }
         finished = true; timer?.cancel(); certificateTask?.cancel()
+        scriptLease?.control.cancel()
+        scriptLease = nil; scriptRequestHead = nil; scriptRequestDraft = nil; scriptResponseDraft = nil
+        scriptRequestBytes = Data(); scriptResponseBytes = Data()
         pending.removeAll()
         guard var record else { return }
         let elapsed = started.duration(to: .now).components

@@ -18,10 +18,10 @@ public struct WorkspaceEnvironment: Codable, Equatable, Identifiable, Sendable {
 }
 
 public enum ModificationKind: String, Codable, CaseIterable, Sendable {
-    case setHeader, removeHeader, replaceBody, rewriteURL, setMethod, setStatus, mock, redirect
+    case setHeader, removeHeader, replaceBody, rewriteURL, setMethod, setStatus, mock, redirect, script
     public var title: String {
         switch self {
-        case .setHeader: "设置 Header"
+        case .setHeader: "添加或覆盖 Header"
         case .removeHeader: "移除 Header"
         case .replaceBody: "替换 Body"
         case .rewriteURL: "切换目标地址"
@@ -29,6 +29,7 @@ public enum ModificationKind: String, Codable, CaseIterable, Sendable {
         case .setStatus: "修改状态码"
         case .mock: "返回静态数据"
         case .redirect: "重定向"
+        case .script: "执行脚本"
         }
     }
     public func supports(response: Bool) -> Bool {
@@ -43,6 +44,7 @@ public struct ModificationStep: Codable, Equatable, Identifiable, Sendable {
     public var name = ""
     public var value = ""
     public var status = 200
+    public var scriptOptions: ScriptOptions?
     public init(kind: ModificationKind) {
         self.kind = kind
         if kind == .redirect { status = 302 }
@@ -55,13 +57,45 @@ public struct RequestWorkflow: Codable, Equatable, Identifiable, Sendable {
     public var name: String
     public var enabled = true
     public var method = "*"
-    /// Absolute URL prefix. An empty prefix never matches traffic.
-    public var urlPrefix = "http://localhost:3000/"
+    public var matchTarget: WorkflowMatchTarget = .url
+    public var matchRule: WorkflowMatchRule = .wildcard
+    public var matchPattern = "http://localhost:3000/*"
     public var requestSteps: [ModificationStep] = []
     public var responseSteps: [ModificationStep] = []
     public init(name: String = "新的请求修改") { self.name = name }
+
+    /// Compatibility for existing callers. Persisted v1 prefixes migrate without widening matches.
+    public var urlPrefix: String {
+        get { matchPattern }
+        set {
+            matchTarget = .url; matchRule = .regex
+            matchPattern = newValue.isEmpty ? "" : "\\A" + NSRegularExpression.escapedPattern(for: newValue)
+        }
+    }
     public func matches(method: String, url: String) -> Bool {
-        enabled && !urlPrefix.isEmpty && (self.method == "*" || self.method == method) && url.hasPrefix(urlPrefix)
+        enabled && (self.method == "*" || self.method.caseInsensitiveCompare(method) == .orderedSame)
+            && WorkflowMatcher.matches(target: matchTarget, rule: matchRule, pattern: matchPattern, url: url)
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, name, enabled, method, matchTarget, matchRule, matchPattern, requestSteps, responseSteps
+    }
+    private enum LegacyKeys: String, CodingKey { case urlPrefix }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        enabled = try values.decode(Bool.self, forKey: .enabled)
+        method = try values.decode(String.self, forKey: .method)
+        requestSteps = try values.decode([ModificationStep].self, forKey: .requestSteps)
+        responseSteps = try values.decode([ModificationStep].self, forKey: .responseSteps)
+        if values.contains(.matchPattern) {
+            matchTarget = try values.decode(WorkflowMatchTarget.self, forKey: .matchTarget)
+            matchRule = try values.decode(WorkflowMatchRule.self, forKey: .matchRule)
+            matchPattern = try values.decode(String.self, forKey: .matchPattern)
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+            urlPrefix = try legacy.decode(String.self, forKey: .urlPrefix)
+        }
     }
 }
 
@@ -88,7 +122,7 @@ public struct ExplicitProxyConfiguration: Codable, Equatable, Sendable {
 }
 
 public struct WorkspaceDocument: Codable, Equatable, Sendable {
-    public var version = 1
+    public var version = 2
     public var projects: [WorkflowProject] = []
     public var environments: [WorkspaceEnvironment] = []
     public var selectedEnvironmentID: UUID?
@@ -108,8 +142,9 @@ public actor WorkspaceDocumentStore {
     public init(url: URL) { self.url = url }
     public func load() throws -> WorkspaceDocument {
         guard FileManager.default.fileExists(atPath: url.path) else { return WorkspaceDocument() }
-        let document = try JSONDecoder().decode(WorkspaceDocument.self, from: Data(contentsOf: url))
-        guard document.version == 1 else { throw WorkflowError.invalid("不支持此工作区版本，未覆盖原文件") }
+        var document = try JSONDecoder().decode(WorkspaceDocument.self, from: Data(contentsOf: url))
+        guard [1, 2].contains(document.version) else { throw WorkflowError.invalid("不支持此工作区版本，未覆盖原文件") }
+        document.version = 2
         return document
     }
     public func save(_ document: WorkspaceDocument) throws {
