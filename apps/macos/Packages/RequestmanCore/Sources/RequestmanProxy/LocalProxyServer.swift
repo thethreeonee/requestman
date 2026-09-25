@@ -251,11 +251,10 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             match = WorkflowEngine.match(document, method: originalMethod, url: head.uri)
             record?.environment = document.environment?.name ?? "无环境"
             var draft = HTTPMessageDraft(method: originalMethod, url: head.uri, headers: fields(head.headers))
-            if let match, let record {
+            if let match {
                 self.record?.project = match.project; self.record?.workflow = match.workflow.name
                 self.record?.matchedWorkflowID = match.workflow.id
-                self.record?.steps = try WorkflowEngine.apply(match.workflow.requestSteps, response: false, to: &draft,
-                    environment: match.environment?.values ?? [:], id: record.id, date: record.startedAt)
+                try applyRecordedSteps(match.workflow.requestSteps, response: false, to: &draft)
             }
             record?.finalURL = draft.url; record?.sentMethod = draft.method
             request = draft
@@ -264,9 +263,8 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                 record?.sentBody = .unavailable("本地响应，请求未发送至上游")
                 record?.receivedBody = .unavailable("本地响应，没有上游响应")
                 var reply = draft
-                if let match, let record {
-                    self.record?.steps += try WorkflowEngine.apply(match.workflow.responseSteps, response: true, to: &reply,
-                        environment: match.environment?.values ?? [:], id: record.id, date: record.startedAt)
+                if let match {
+                    try applyRecordedSteps(match.workflow.responseSteps, response: true, to: &reply)
                 }
                 return sendStatic(reply)
             }
@@ -290,6 +288,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             if case .httpProxy = configuration.upstream, !secure { uri = draft.url }
             else { uri = (target.percentEncodedPath.isEmpty ? "/" : target.percentEncodedPath) + (target.percentEncodedQuery.map { "?\($0)" } ?? "") }
             record?.sentHeaders = fields(headers)
+            record?.hasSentRequestHeaders = true
             let forwarded = HTTPRequestHead(version: .http1_1, method: HTTPMethod(rawValue: draft.method), uri: uri, headers: headers)
             if head.headers["expect"].contains(where: { $0.lowercased() == "100-continue" }) {
                 client.writeAndFlush(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .continue)), promise: nil)
@@ -418,9 +417,8 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                 record?.receivedHeaders = draft.headers
                 record?.originalStatus = draft.status
                 receivedBodyCollector = CaptureBodyCollector(headers: draft.headers)
-                if let match, let record {
-                    self.record?.steps += try WorkflowEngine.apply(match.workflow.responseSteps, response: true, to: &draft,
-                        environment: match.environment?.values ?? [:], id: record.id, date: record.startedAt)
+                if let match {
+                    try applyRecordedSteps(match.workflow.responseSteps, response: true, to: &draft)
                 }
                 response = draft
                 responseKeepsAlive = clientKeepsAlive && requestEnded && requestWriteComplete
@@ -557,6 +555,18 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             closeProxyChannel(client)
         }
     }
+    private func applyRecordedSteps(_ steps: [ModificationStep], response: Bool,
+                                    to draft: inout HTTPMessageDraft) throws {
+        guard let match, let snapshot = record else { return }
+        _ = try WorkflowEngine.apply(steps, response: response, to: &draft,
+            environment: match.environment?.values ?? [:], id: snapshot.id, date: snapshot.startedAt) { kind in
+                self.record?.steps.append(kind.title)
+                self.record?.matchedRules.append(CaptureMatchedRule(
+                    kind: kind, name: match.workflow.name, response: response
+                ))
+            }
+    }
+
     private func finish(error: String? = nil) {
         guard !finished else { return }
         finished = true; timer?.cancel(); certificateTask?.cancel()

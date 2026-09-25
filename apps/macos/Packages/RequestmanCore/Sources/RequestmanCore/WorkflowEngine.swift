@@ -66,7 +66,8 @@ public enum WorkflowEngine {
     }
 
     public static func apply(_ steps: [ModificationStep], response: Bool, to draft: inout HTTPMessageDraft,
-                             environment: [String: String], id: UUID, date: Date) throws -> [String] {
+                             environment: [String: String], id: UUID, date: Date,
+                             onApplied: ((ModificationKind) -> Void)? = nil) throws -> [String] {
         guard steps.count <= 64 else { throw WorkflowError.invalid("每个方向最多执行 64 个步骤") }
         var trace: [String] = []
         for step in steps where step.enabled {
@@ -109,6 +110,7 @@ public enum WorkflowEngine {
                 clearBodyEncoding(&draft)
             }
             trace.append(step.kind.title)
+            onApplied?(step.kind)
             if !response && draft.isMock { break }
         }
         return trace

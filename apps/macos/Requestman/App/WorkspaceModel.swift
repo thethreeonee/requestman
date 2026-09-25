@@ -313,10 +313,7 @@ final class ExecutionHistoryModel {
     private(set) var dropped = 0
     var paused = false
     var selectedID: UUID?
-    var search = ""
-    var project = ""
-    var environment = ""
-    var outcome: CaptureRecord.Outcome?
+    var filter = CaptureRecordFilter()
     func append(_ batch: [CaptureRecord], dropped: Int) {
         guard !batch.isEmpty || dropped > 0 else { return }
         self.dropped += dropped
@@ -325,12 +322,6 @@ final class ExecutionHistoryModel {
         if let selectedID, !records.contains(where: { $0.id == selectedID }) { self.selectedID = nil }
     }
     func clear() { records.removeAll(); selectedID = nil; dropped = 0 }
-    var filtered: [CaptureRecord] {
-        records.filter {
-            (search.isEmpty || $0.url.localizedCaseInsensitiveContains(search) || $0.workflow.localizedCaseInsensitiveContains(search)) &&
-            (project.isEmpty || $0.project == project) && (environment.isEmpty || $0.environment == environment) &&
-            (outcome == nil || $0.outcome == outcome)
-        }
-    }
+    var filtered: [CaptureRecord] { records.filter { filter.matches($0) } }
     var selected: CaptureRecord? { records.first { $0.id == selectedID } }
 }

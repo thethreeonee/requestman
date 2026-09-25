@@ -62,6 +62,10 @@ struct ProxyIntegrationTests {
             #expect(record.responseBody.data == record.receivedBody.data)
             #expect(record.originalStatus == 200 && record.status == 202)
             #expect(record.matchedWorkflowID == workflow.id)
+            #expect(record.hasSentRequestHeaders)
+            #expect(record.matchedRules.map(\.kind) == [.setHeader, .setHeader, .setStatus])
+            #expect(record.matchedRules.map(\.response) == [false, true, true])
+            #expect(record.matchedRules.allSatisfy { $0.name == workflow.name })
         }
     }
     @Test func mockSkipsOriginAndResponseLaneStillRuns() async throws {
@@ -76,6 +80,8 @@ struct ProxyIntegrationTests {
             #expect(h.observation.withLock { $0.requests } == 0)
             let record = try #require(h.proxy.records.drain().records.first)
             #expect(record.outcome == .mocked)
+            #expect(!record.hasSentRequestHeaders)
+            #expect(record.matchedRules.map(\.kind) == [.mock, .setHeader])
             #expect(record.sentBody.state == .unavailable && record.receivedBody.state == .unavailable)
             #expect(record.responseBody.isComplete && record.responseBody.data == Data("local-static".utf8))
         }

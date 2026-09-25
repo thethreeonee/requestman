@@ -6,7 +6,12 @@ struct RequestRecordsTable: NSViewRepresentable {
     let records: [CaptureRecord]
     @Binding var selectedID: UUID?
 
-    func makeCoordinator() -> Coordinator { Coordinator(selection: $selectedID) }
+    var columnDefaults: UserDefaults = .standard
+    static let columnWidthsKey = "requestLog.columnWidths.v1"
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(selection: $selectedID, defaults: columnDefaults)
+    }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = RecordsScrollView()
@@ -17,26 +22,29 @@ struct RequestRecordsTable: NSViewRepresentable {
         scrollView.borderType = .noBorder
 
         let table = NSTableView()
-        table.rowHeight = 48
+        table.rowHeight = 56
         table.intercellSpacing = .zero
         table.usesAlternatingRowBackgroundColors = true
         table.allowsMultipleSelection = false
         table.allowsEmptySelection = true
         table.allowsColumnSelection = false
         table.allowsColumnReordering = false
-        table.allowsColumnResizing = false
+        table.allowsColumnResizing = true
         table.columnAutoresizingStyle = .noColumnAutoresizing
         table.style = .plain
         table.setAccessibilityLabel("请求日志")
         for column in RecordColumn.allCases {
-            let item = NSTableColumn(identifier: column.identifier)
+            let item = RecordsTableColumn(identifier: column.identifier)
             item.title = column.title
             item.minWidth = 0
             item.maxWidth = .greatestFiniteMagnitude
-            item.resizingMask = []
+            item.resizingMask = .userResizingMask
             item.isEditable = false
             item.headerCell.alignment = column == .duration ? .right : .left
             table.addTableColumn(item)
+            item.widthChanged = { [weak coordinator = context.coordinator] column in
+                coordinator?.resizeColumn(column)
+            }
         }
         table.dataSource = context.coordinator
         table.delegate = context.coordinator
@@ -60,6 +68,10 @@ struct RequestRecordsTable: NSViewRepresentable {
         weak var table: NSTableView?
         private var rows: [RecordRow] = []
         private var updating = false
+        private let defaults: UserDefaults
+        private var preferredWidths: [CGFloat]?
+        private var availableWidth: CGFloat = 0
+        private var applyingWidths = false
         private let timeFormatter: DateFormatter = {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -68,7 +80,18 @@ struct RequestRecordsTable: NSViewRepresentable {
             return formatter
         }()
 
-        init(selection: Binding<UUID?>) { self.selection = selection }
+        init(selection: Binding<UUID?>, defaults: UserDefaults) {
+            self.selection = selection
+            self.defaults = defaults
+            if let saved = defaults.dictionary(forKey: RequestRecordsTable.columnWidthsKey) {
+                let widths = RecordColumn.allCases.compactMap { column -> CGFloat? in
+                    guard let value = saved[column.rawValue] as? Double,
+                          value.isFinite, value > 0, value < 100_000 else { return nil }
+                    return CGFloat(value)
+                }
+                if widths.count == RecordColumn.allCases.count { preferredWidths = widths }
+            }
+        }
 
         func update(records: [CaptureRecord]) {
             guard let table else { return }
@@ -111,25 +134,85 @@ struct RequestRecordsTable: NSViewRepresentable {
             }
         }
 
-        func fitColumns(to availableWidth: CGFloat) {
-            guard let table, availableWidth > 0 else { return }
-            // Compact metadata stays predictable; request/project/environment share
-            // remaining space. Even a narrow split sums exactly to the viewport.
-            let compactScale = min(1, availableWidth / 460)
-            let time: CGFloat = 74 * compactScale
-            let status: CGFloat = 56 * compactScale
-            let duration: CGFloat = 78 * compactScale
-            let flexible = max(0, availableWidth - time - status - duration)
-            let project = min(180, flexible * 0.29)
-            let environment = min(100, flexible * 0.17)
-            let request = flexible - project - environment
-            let widths = [time, status, request, project, environment, duration]
-            for (column, width) in zip(table.tableColumns, widths) where abs(column.width - width) > 0.1 {
-                column.width = width
+        func fitColumns(to width: CGFloat) {
+            guard table != nil, width > 0, abs(width - availableWidth) > 0.1 else { return }
+            availableWidth = width
+            // Record updates never overwrite a manual resize. Only viewport changes
+            // adapt the saved proportions, without persisting the temporary layout.
+            let compactScale = min(1, width / 900)
+            let time: CGFloat = max(60, 104 * compactScale)
+            let status: CGFloat = max(48, 76 * compactScale)
+            let duration: CGFloat = max(64, 92 * compactScale)
+            let flexible = max(0, width - time - status - duration)
+            let initial = [time, status, flexible * 0.40, flexible * 0.30,
+                           flexible * 0.18, flexible * 0.12, duration]
+            let weights = preferredWidths ?? initial
+            let minimums = minimumWidths
+            var widths = Array(repeating: CGFloat.zero, count: weights.count)
+            var remaining = Array(weights.indices)
+            var space = width
+            // Clamp small columns first, then distribute the remaining space by
+            // the saved proportions. Opening and closing Inspector is reversible.
+            while !remaining.isEmpty {
+                let total = remaining.reduce(CGFloat.zero) { $0 + weights[$1] }
+                let clamped = remaining.filter { space * weights[$0] / total < minimums[$0] }
+                if clamped.isEmpty {
+                    for index in remaining { widths[index] = space * weights[index] / total }
+                    break
+                }
+                for index in clamped { widths[index] = minimums[index]; space -= minimums[index] }
+                remaining.removeAll { clamped.contains($0) }
             }
-            if abs(table.frame.width - availableWidth) > 0.1 {
-                table.setFrameSize(NSSize(width: availableWidth, height: table.frame.height))
+            apply(widths)
+        }
+
+        private var minimumWidths: [CGFloat] {
+            let widths: [CGFloat] = [60, 48, 120, 80, 60, 48, 64]
+            let scale = min(1, availableWidth / (widths.reduce(0, +) * 1.5))
+            return widths.map { $0 * scale }
+        }
+
+        private func apply(_ widths: [CGFloat]) {
+            guard let table else { return }
+            applyingWidths = true
+            defer { applyingWidths = false }
+            let minimums = minimumWidths
+            let minimumTotal = minimums.reduce(0, +)
+            for (index, column) in table.tableColumns.enumerated() {
+                column.minWidth = minimums[index]
+                column.maxWidth = availableWidth - minimumTotal + minimums[index]
+                column.width = widths[index]
             }
+            table.setFrameSize(NSSize(width: availableWidth, height: table.frame.height))
+        }
+
+        func resizeColumn(_ column: NSTableColumn) {
+            guard !applyingWidths, availableWidth > 0, let table,
+                  let index = table.tableColumns.firstIndex(of: column) else { return }
+            var widths = table.tableColumns.map(\.width)
+            let minimums = minimumWidths
+            // Borrow space from the next columns, then the preceding columns.
+            // The dragged column keeps its width and the table remains viewport-wide.
+            let neighbors = Array(widths.indices.dropFirst(index + 1)) + Array((0..<index).reversed())
+            var excess = widths.reduce(0, +) - availableWidth
+            for neighbor in neighbors where excess > 0 {
+                let reduction = min(excess, max(0, widths[neighbor] - minimums[neighbor]))
+                widths[neighbor] -= reduction
+                excess -= reduction
+            }
+            if excess < 0, let neighbor = neighbors.first { widths[neighbor] -= excess }
+            apply(widths)
+            preferredWidths = widths
+        }
+
+        func tableViewColumnDidResize(_ notification: Notification) {
+            guard !applyingWidths, let table else { return }
+            // AppKit sends this notification when tracking ends. Live layout is
+            // handled by the column's width setter; persist only the final widths.
+            let widths = table.tableColumns.map(\.width)
+            defaults.set(Dictionary(uniqueKeysWithValues: zip(RecordColumn.allCases, widths).map {
+                ($0.0.rawValue, Double($0.1))
+            }), forKey: RequestRecordsTable.columnWidthsKey)
         }
 
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -151,14 +234,28 @@ struct RequestRecordsTable: NSViewRepresentable {
     }
 }
 
+// Keep AppKit's native header tracking and drawing. The resize notification
+// arrives on mouse-up, while this setter follows every native tracking update.
+@MainActor
+private final class RecordsTableColumn: NSTableColumn {
+    var widthChanged: ((NSTableColumn) -> Void)?
+
+    override var width: CGFloat {
+        didSet {
+            if abs(width - oldValue) > 0.01 { widthChanged?(self) }
+        }
+    }
+}
+
 private enum RecordColumn: String, CaseIterable {
-    case time, status, request, project, environment, duration
+    case time, status, request, rules, project, environment, duration
     var identifier: NSUserInterfaceItemIdentifier { .init(rawValue) }
     var title: String {
         switch self {
         case .time: "时间"
         case .status: "状态码"
         case .request: "请求"
+        case .rules: "命中的规则"
         case .project: "项目"
         case .environment: "环境"
         case .duration: "耗时"
@@ -172,12 +269,12 @@ private struct RecordRow: Equatable {
     let method: String
     let url: String
     let project: String
-    let workflow: String
+    let rules: [String]
     let environment: String
     let status: Int?
     let duration: String
-    let outcome: CaptureRecord.Outcome
     let result: String
+    let failure: String?
 
     init(record: CaptureRecord, timeFormatter: DateFormatter) {
         id = record.id
@@ -185,12 +282,13 @@ private struct RecordRow: Equatable {
         method = record.method
         url = record.url
         project = record.project
-        workflow = record.workflow
+        rules = record.matchedRules.map(\.summary)
         environment = record.environment
         status = record.status
-        duration = String(format: "%.0f ms", max(0, record.duration) * 1000)
-        outcome = record.outcome
+        let seconds = max(0, record.duration)
+        duration = seconds >= 1 ? String(format: "%.1f s", seconds) : String(format: "%.0f ms", seconds * 1000)
         result = record.error.map { "\(record.outcome.rawValue) · \($0)" } ?? record.outcome.rawValue
+        failure = record.error ?? (record.outcome == .failed ? record.outcome.rawValue : nil)
     }
 }
 
@@ -215,6 +313,9 @@ private final class RecordCell: NSTableCellView {
     private let primary = NSTextField(labelWithString: "")
     private let secondary = NSTextField(labelWithString: "")
     private let methodTag = RequestMethodTag()
+    private let moreRules = NSButton(title: "", target: nil, action: nil)
+    private var ruleSummaries: [String] = []
+    private var rulesPopover: NSPopover?
     private var primaryColor = NSColor.labelColor
     private var secondaryColor = NSColor.secondaryLabelColor
 
@@ -229,16 +330,24 @@ private final class RecordCell: NSTableCellView {
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             addSubview(label)
         }
-        primary.font = .systemFont(ofSize: 12)
-        secondary.font = .systemFont(ofSize: 11)
-        secondary.isHidden = column != .request && column != .project
+        primary.font = .systemFont(ofSize: 13)
+        secondary.font = .systemFont(ofSize: 12)
+        secondary.isHidden = column != .request && column != .rules
         if column == .request {
             primary.lineBreakMode = .byTruncatingMiddle
             addSubview(methodTag)
         }
+        if column == .rules {
+            moreRules.bezelStyle = .inline
+            moreRules.target = self
+            moreRules.action = #selector(showRules(_:))
+            moreRules.isHidden = true
+            moreRules.setAccessibilityLabel("查看全部命中规则")
+            addSubview(moreRules)
+        }
         if column == .duration { primary.alignment = .right }
         if column == .time || column == .status || column == .duration {
-            primary.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+            primary.font = .monospacedDigitSystemFont(ofSize: 13, weight: column == .status ? .medium : .regular)
         }
         textField = primary
     }
@@ -259,15 +368,23 @@ private final class RecordCell: NSTableCellView {
             primaryColor = .secondaryLabelColor
         case .status:
             primary.stringValue = row.status.map(String.init) ?? "—"
-            primaryColor = row.outcome == .failed || (row.status ?? 0) >= 400 ? .systemRed : .secondaryLabelColor
+            primaryColor = Self.statusColor(row.status)
         case .request:
             primary.stringValue = row.url
-            secondary.stringValue = row.result
-            secondaryColor = Self.outcomeColor(row.outcome)
+            secondary.stringValue = row.failure ?? ""
+            secondary.isHidden = row.failure == nil
+            secondaryColor = .systemRed
             methodTag.setMethod(row.method)
+        case .rules:
+            if ruleSummaries != row.rules { rulesPopover?.close() }
+            ruleSummaries = row.rules
+            primary.stringValue = row.rules.first ?? "—"
+            secondary.stringValue = row.rules.dropFirst().first ?? ""
+            secondary.isHidden = row.rules.count < 2
+            moreRules.isHidden = row.rules.count <= 2
+            moreRules.title = "+\(max(0, row.rules.count - 2))"
         case .project:
             primary.stringValue = row.project
-            secondary.stringValue = row.workflow
         case .environment:
             primary.stringValue = row.environment
         case .duration:
@@ -279,26 +396,54 @@ private final class RecordCell: NSTableCellView {
         toolTip = column == .request
             ? "\(row.method) \(row.url)\n\(row.result)"
             : (secondary.isHidden ? primary.stringValue : "\(primary.stringValue)\n\(secondary.stringValue)")
+        if column == .rules {
+            toolTip = row.rules.isEmpty ? "未命中规则" : row.rules.joined(separator: "\n")
+            setAccessibilityLabel("命中的规则")
+            setAccessibilityValue(toolTip)
+        }
         updateColors()
         needsLayout = true
     }
 
     override func layout() {
         super.layout()
-        let inset = min(8, bounds.width / 2)
+        let inset = min(12, bounds.width / 2)
         let width = max(0, bounds.width - inset * 2)
+        let lineHeight: CGFloat = 20
         if column == .request {
             let tagWidth = min(methodTag.intrinsicContentSize.width, width * 0.45)
-            let gap = min(7, max(0, width - tagWidth))
-            methodTag.frame = NSRect(x: inset, y: 5, width: tagWidth, height: 18)
-            primary.frame = NSRect(x: inset + tagWidth + gap, y: 5, width: max(0, width - tagWidth - gap), height: 18)
-            secondary.frame = NSRect(x: inset, y: 26, width: width, height: 16)
-        } else if column == .project {
-            primary.frame = NSRect(x: inset, y: 5, width: width, height: 18)
-            secondary.frame = NSRect(x: inset, y: 26, width: width, height: 16)
+            let gap = min(10, max(0, width - tagWidth))
+            let top = secondary.isHidden ? (bounds.height - 24) / 2 : 6
+            methodTag.frame = NSRect(x: inset, y: top, width: tagWidth, height: 24)
+            let textX = inset + tagWidth + gap
+            let textWidth = max(0, width - tagWidth - gap)
+            primary.frame = NSRect(x: textX, y: top + 2, width: textWidth, height: lineHeight)
+            secondary.frame = NSRect(x: textX, y: 32, width: textWidth, height: 18)
+        } else if column == .rules && !secondary.isHidden {
+            let moreWidth: CGFloat = moreRules.isHidden ? 0 : min(34, width)
+            primary.frame = NSRect(x: inset, y: 7, width: width, height: lineHeight)
+            secondary.frame = NSRect(x: inset, y: 30, width: max(0, width - moreWidth), height: lineHeight)
+            moreRules.frame = NSRect(x: bounds.width - inset - moreWidth, y: 29, width: moreWidth, height: 22)
         } else {
-            primary.frame = NSRect(x: inset, y: (bounds.height - 18) / 2, width: width, height: 18)
+            primary.frame = NSRect(x: inset, y: (bounds.height - lineHeight) / 2, width: width, height: lineHeight)
         }
+    }
+
+    @objc private func showRules(_ sender: NSButton) {
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = NSHostingController(rootView:
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("命中的规则").font(.headline)
+                    ForEach(Array(ruleSummaries.enumerated()), id: \.offset) { _, text in
+                        Text(text).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                    }
+                }.padding(16)
+            }.frame(width: 360, height: min(360, CGFloat(ruleSummaries.count) * 32 + 60))
+        )
+        rulesPopover = popover
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
     }
 
     private func updateColors() {
@@ -306,15 +451,33 @@ private final class RecordCell: NSTableCellView {
         primary.textColor = selected ? .alternateSelectedControlTextColor : primaryColor
         secondary.textColor = selected ? .alternateSelectedControlTextColor : secondaryColor
         methodTag.selected = selected
+        if column == .rules {
+            for label in [primary, secondary] {
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.lineBreakMode = .byTruncatingTail
+                let value = NSMutableAttributedString(string: label.stringValue, attributes: [
+                    .font: NSFont.systemFont(ofSize: 13),
+                    .foregroundColor: selected ? NSColor.alternateSelectedControlTextColor : NSColor.labelColor,
+                    .paragraphStyle: paragraph
+                ])
+                if let separator = label.stringValue.range(of: " · ") {
+                    let range = NSRange(label.stringValue.startIndex..<separator.upperBound, in: label.stringValue)
+                    value.addAttribute(.foregroundColor,
+                        value: selected ? NSColor.alternateSelectedControlTextColor : NSColor.secondaryLabelColor,
+                        range: range)
+                }
+                label.attributedStringValue = value
+            }
+        }
     }
 
-    private static func outcomeColor(_ outcome: CaptureRecord.Outcome) -> NSColor {
-        switch outcome {
-        case .failed: .systemRed
-        case .modified: .systemBlue
-        case .mocked: .systemPurple
-        case .tunnel: .secondaryLabelColor
-        case .forwarded: .systemGreen
+    private static func statusColor(_ status: Int?) -> NSColor {
+        switch status {
+        case .some(100..<200): .systemBlue
+        case .some(200..<300): .systemGreen
+        case .some(300..<400): .systemOrange
+        case .some(400..<600): .systemRed
+        default: .secondaryLabelColor
         }
     }
 }
@@ -329,7 +492,7 @@ private final class RequestMethodTag: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        label.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
+        label.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
         label.alignment = .center
         label.maximumNumberOfLines = 1
         label.lineBreakMode = .byTruncatingTail
@@ -355,19 +518,29 @@ private final class RequestMethodTag: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: min(86, label.intrinsicContentSize.width + 12), height: 18)
+        NSSize(width: min(90, max(72, label.intrinsicContentSize.width + 18)), height: 24)
     }
 
     override func layout() {
         super.layout()
-        label.frame = NSRect(x: min(4, bounds.width / 2), y: 2,
-                             width: max(0, bounds.width - 8), height: max(0, bounds.height - 3))
+        let textHeight = min(label.intrinsicContentSize.height, bounds.height)
+        label.frame = NSRect(x: min(6, bounds.width / 2), y: (bounds.height - textHeight) / 2,
+                             width: max(0, bounds.width - 12), height: textHeight)
     }
 
     override func draw(_ dirtyRect: NSRect) {
         let color: NSColor = selected ? .alternateSelectedControlTextColor : tint
-        color.withAlphaComponent(selected ? 0.2 : 0.12).setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: 4, yRadius: 4).fill()
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
+        color.withAlphaComponent(selected ? 0.18 : 0.10).setFill()
+        path.fill()
+        color.withAlphaComponent(selected ? 0.65 : 0.45).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColor()
     }
 
     private func updateColor() {

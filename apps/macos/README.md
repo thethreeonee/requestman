@@ -15,7 +15,7 @@
 | 响应流程 | 设置/移除 Header、状态码、替换文本 Body、重定向；Mock 同样经过响应流程 |
 | HTTPS | CA 就绪后解密 HTTP/1.1 over TLS，复用双向修改、Mock 和完整请求记录；支持 HTTP 上游 CONNECT；未配置信任时透传 |
 | 证书设置 | HTTPS 行提供自动生成、安装和当前用户 SSL 信任引导，系统负责授权，支持取消后继续 |
-| 全局记录 | 时间、状态码、请求、项目及命中规则、环境、耗时六列；方法标签、自适应列宽、右对齐耗时；项目/环境/结果筛选、搜索、执行步骤、修改前后 Header、暂停记录、清空 |
+| 全局记录 | 时间、状态码、请求、命中的规则、项目、环境、耗时七列；规则类型与名称快照、可拖动并持久化的自适应列宽；请求日志页标题栏搜索（启动按钮左侧）与列表资源分类，Popover 项目/环境/结果/方法及请求 Header 组合筛选、反向、重置、暂停记录、清空 |
 | 配置保存 | 项目/环境/代理配置异步自动保存；退出前刷新保存；环境随请求固定快照 |
 
 还未实现 HTTP/2 内容处理、WebSocket 升级、脚本、辅助请求、人工断点、JSON 局部修改、磁盘执行历史和透明应用接管。HTTPS 两侧 ALPN 协商 HTTP/1.1；证书绑定客户端仍可能拒绝调试证书。完整目标见 [产品设计](Docs/ProductDesign.md)。
@@ -52,6 +52,8 @@ CA 私钥仅保存在本机文件型钥匙串，禁止导出，由钥匙串锁�
 读取已有 CA 时从公开证书取得公钥，`KeychainSigningKey` 仅通过 `SecKeyCreateSignature` 签名，并校验实际签名与证书公钥匹配；运行期不再从钥匙串导出公钥，私钥序列化明确拒绝。文件型钥匙串的交互开关属于进程级状态，由统一同步锁覆盖配置、状态读取和签名，退出作用域后恢复；这不替代应用签名身份与钥匙串 ACL。实际系统弹窗、重新启动和重新编译后的行为仍需 App 验收。
 
 TLS 传输使用 Apple `swift-nio-ssl`。按目标域名/IP 签发短期站点证书，SAN 包含 DNS 或 IP，最多缓存 128 个站点且不晚于 CA 到期；站点私钥只保留在内存中。CA 材料与实际信任检查结果最多复用 5 秒，避免并发 CONNECT 重复读钥匙串和签名验证；状态刷新、证书设置操作与应用重新激活会触发重新检查，外部信任修改最迟在缓存到期后的新 CONNECT 生效。上游证书交给 macOS Security 校验信任链、有效期及主机名，不关闭校验，也不因失败回退到明文或其他出口。系统验证禁用网络补取，避免经系统代理递归；站点应发送完整中间证书链。
+
+请求日志筛选、Header 匹配语义和命中规则展示见 [筛选设计](Docs/Design/request-log-filters.md)。
 
 ## 行为与资源边界
 
@@ -90,6 +92,7 @@ Debug 使用 `ONLY_ACTIVE_ARCH=YES`，使宿主与 Swift Package 都面向当前
 swift test --package-path apps/macos/Packages/RequestmanCore
 python3 apps/macos/Scripts/check-native-sources.py --typecheck
 python3 apps/macos/Scripts/check-request-inspection.py
+python3 apps/macos/Scripts/check-request-filters.py
 python3 apps/macos/Scripts/check-workspace-sidebar.py
 python3 apps/macos/Scripts/check-inspector-performance.py
 python3 apps/macos/Scripts/check-browser-discovery.py

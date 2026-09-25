@@ -1,6 +1,26 @@
 import Foundation
 import os
 
+/// An executed action and its workflow name, captured before later workspace edits.
+public struct CaptureMatchedRule: Equatable, Sendable {
+    public let kind: ModificationKind
+    public let name: String
+    public let response: Bool
+    public init(kind: ModificationKind, name: String, response: Bool) {
+        self.kind = kind; self.name = String(name.prefix(128)); self.response = response
+    }
+    public var typeName: String {
+        switch kind {
+        case .setHeader: response ? "修改响应头" : "修改请求头"
+        case .removeHeader: response ? "移除响应头" : "移除请求头"
+        case .replaceBody: response ? "替换响应体" : "替换请求体"
+        case .mock: "Mock"
+        default: kind.title
+        }
+    }
+    public var summary: String { "\(typeName) · \(name)" }
+}
+
 public struct CaptureHeadersInfo: Sendable {
     public var originalCount = 0
     public var isTruncated = false
@@ -21,6 +41,8 @@ public struct CaptureRecord: Identifiable, Sendable {
     public var environment = "无环境"
     public var outcome: Outcome = .forwarded
     public var matchedWorkflowID: UUID?
+    public var matchedRules: [CaptureMatchedRule] = []
+    public var hasSentRequestHeaders = false
     public var originalStatus: Int?
     public var status: Int?
     public var duration: Double = 0
@@ -51,6 +73,7 @@ public struct CaptureRecord: Identifiable, Sendable {
         copy.project = String(project.prefix(128)); copy.workflow = String(workflow.prefix(128))
         copy.environment = String(environment.prefix(128)); copy.error = error.map { String($0.prefix(512)) }
         copy.steps = steps.prefix(64).map { String($0.prefix(128)) }
+        copy.matchedRules = Array(matchedRules.prefix(128))
         copy.requestHeadersInfo.originalCount = max(requestHeadersInfo.originalCount, requestHeaders.count)
         copy.sentHeadersInfo.originalCount = max(sentHeadersInfo.originalCount, sentHeaders.count)
         copy.receivedHeadersInfo.originalCount = max(receivedHeadersInfo.originalCount, receivedHeaders.count)

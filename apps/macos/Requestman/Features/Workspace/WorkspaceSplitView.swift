@@ -26,7 +26,7 @@ struct WorkspaceToolbarSnapshot: Equatable {
     let selectedRequestID: UUID?
     let hasSelectedRequest: Bool
     let environmentName: String
-    let search: String
+    let requestSearch: String
     let loaded: Bool
     let isCapturing: Bool
     let captureTitle: String
@@ -38,7 +38,7 @@ struct WorkspaceToolbarSnapshot: Equatable {
         selectedRequestID = model.history.selectedID
         hasSelectedRequest = model.history.selected != nil
         environmentName = model.document.environment?.name ?? "无环境"
-        search = model.history.search
+        requestSearch = model.history.filter.search
         loaded = model.loaded
         isCapturing = model.isCapturing
         captureTitle = model.captureButtonTitle
@@ -53,7 +53,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
     private enum Item {
         static let section = NSToolbarItem.Identifier("workspace.section")
         static let environment = NSToolbarItem.Identifier("workspace.environment")
-        static let search = NSToolbarItem.Identifier("workspace.search")
+        static let search = NSToolbarItem.Identifier("workspace.requestSearch")
         static let capture = NSToolbarItem.Identifier("workspace.capture")
         static let inspectorTitle = NSToolbarItem.Identifier("workspace.inspectorTitle")
         static let inspectorMore = NSToolbarItem.Identifier("workspace.inspectorMore")
@@ -89,7 +89,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
     )
     private let environmentButton = NSButton(title: "", target: nil, action: nil)
     private let captureButton = NSButton(title: "", target: nil, action: nil)
-    private let searchField = NSSearchField()
+    private let requestSearchItem = NSSearchToolbarItem(itemIdentifier: Item.search)
     private var environmentPopover: NSPopover?
 
     init(model: WorkspaceModel, snapshot: WorkspaceToolbarSnapshot, openSettings: @escaping () -> Void) {
@@ -185,7 +185,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         state = next
         if sectionChanged {
             environmentPopover?.close()
-            if next.section != .requests { searchField.window?.endEditing(for: searchField) }
+            if next.section != .requests { requestSearchItem.endSearchInteraction() }
             setCollapsed(next.section != .rules || rulesSidebarCollapsed, item: sidebarItem)
         }
         if next.section != .requests || !next.hasSelectedRequest {
@@ -293,14 +293,21 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         environmentButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
         environmentButton.widthAnchor.constraint(lessThanOrEqualToConstant: 220).isActive = true
         environmentButton.cell?.lineBreakMode = .byTruncatingTail
+        let search = NSSearchField()
+        search.placeholderString = "筛选 URL 或规则名称"
+        search.setAccessibilityLabel("筛选 URL 或规则名称")
+        search.sendsSearchStringImmediately = true
+        search.delegate = self
+        search.target = self
+        search.action = #selector(searchRequests(_:))
+        requestSearchItem.searchField = search
+        requestSearchItem.label = "筛选请求日志"
+        requestSearchItem.preferredWidthForSearchField = 260
+        requestSearchItem.visibilityPriority = .high
         captureButton.target = self
         captureButton.action = #selector(toggleCapture(_:))
         captureButton.bezelStyle = .automatic
         captureButton.imagePosition = .imageOnly
-        searchField.placeholderString = "搜索 URL 或请求修改"
-        searchField.setAccessibilityLabel("搜索 URL 或请求修改")
-        searchField.sendsSearchStringImmediately = true
-        searchField.delegate = self
     }
 
     private func updateControls() {
@@ -308,8 +315,9 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         environmentButton.title = state.environmentName
         environmentButton.setAccessibilityValue(state.environmentName)
         environmentButton.isEnabled = state.loaded
-        if searchField.stringValue != state.search { searchField.stringValue = state.search }
-        searchField.isEnabled = state.loaded
+        if requestSearchItem.searchField.stringValue != state.requestSearch {
+            requestSearchItem.searchField.stringValue = state.requestSearch
+        }
         // A nonempty NSButton.title changes .imageOnly to .imageOverlaps; use accessibility for the label.
         captureButton.toolTip = state.captureHelp
         captureButton.setAccessibilityLabel(state.captureTitle)
@@ -393,13 +401,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
             return NSTrackingSeparatorToolbarItem(identifier: identifier, splitView: splitView,
                                                   dividerIndex: identifier == .sidebarTrackingSeparator ? 0 : 1)
         }
-        if identifier == Item.search {
-            let item = NSSearchToolbarItem(itemIdentifier: identifier)
-            item.searchField = searchField
-            item.preferredWidthForSearchField = 240
-            item.label = "搜索请求"
-            return item
-        }
+        if identifier == Item.search { return requestSearchItem }
         if identifier == Item.inspectorMore {
             let item = NSMenuToolbarItem(itemIdentifier: identifier)
             item.image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "更多请求操作")
@@ -517,8 +519,14 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
     }
 
     func controlTextDidChange(_ notification: Notification) {
-        guard notification.object as? NSSearchField === searchField else { return }
-        model.history.search = searchField.stringValue
+        guard let field = notification.object as? NSSearchField,
+              field === requestSearchItem.searchField else { return }
+        searchRequests(field)
+    }
+
+    @objc private func searchRequests(_ sender: NSSearchField) {
+        guard !isTearingDown, state.section == .requests else { return }
+        model.history.filter.search = sender.stringValue
     }
 
     func tearDown() {
@@ -533,6 +541,8 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         inspectorHost.rootView = RequestInspectorView(history: model.history, isPresented: false)
         restoreWindow()
         toolbar.delegate = nil
+        requestSearchItem.searchField.delegate = nil
+        requestSearchItem.searchField.target = nil
     }
 
     private func restoreWindow() {

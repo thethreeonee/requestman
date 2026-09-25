@@ -36,7 +36,7 @@ final class WorkspaceModel {
 final class SidebarHistoryFixture {
     var records: [CaptureRecord] = []
     var selectedID: UUID?
-    var search = ""
+    var filter = CaptureRecordFilter()
     var selected: CaptureRecord? { records.first { $0.id == selectedID } }
     func clear() { records.removeAll(); selectedID = nil }
 }
@@ -263,7 +263,7 @@ struct WorkspaceSidebarChecks {
         let inspector = controller.splitViewItems[2]
         // Hidden windows do not receive viewDidAppear. A model observation refresh after mounting
         // must install the toolbar through the real representable update, without calling it here.
-        model.history.search = "fixture"
+        model.history.filter.search = "fixture"
         waitFor(host) { window.toolbar != nil }
         precondition(!inspector.isCollapsed, "Initial selected request must open the inspector through the representable")
         precondition((inspector.viewController as! NSHostingController<RequestInspectorView>).rootView.isPresented)
@@ -295,12 +295,42 @@ struct WorkspaceSidebarChecks {
         model.history.clear()
         waitFor(host) { inspector.isCollapsed && !toggleItem(window).isEnabled }
         expectToolbar(window, inspectorVisible: false, requests: true)
+        checkToolbarSearch(host, model: model, window: window)
         model.selection = .rules
         waitFor(host) { !controller.splitViewItems[0].isCollapsed }
         expectToolbar(window, inspectorVisible: false, requests: false)
         precondition(!window.isVisible, "The CLI check must never show a window")
         controller.tearDown()
         log("SwiftUI integration actions passed: Observation-driven selection/clear/page updates and native toolbar actions with empty/text/table focus.")
+    }
+
+    private static func checkToolbarSearch(_ host: NSViewController, model: WorkspaceModel, window: NSWindow) {
+        let item = window.toolbar!.items.compactMap { $0 as? NSSearchToolbarItem }.first!
+        let field = item.searchField
+        field.stringValue = "example"
+        field.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
+        waitFor(host) { model.history.filter.search == "example" }
+        precondition(model.history.filter.matches(CaptureRecord(method: "GET", url: "https://example.test")))
+        precondition(!model.history.filter.matches(CaptureRecord(method: "GET", url: "https://other.test")))
+        model.history.filter = CaptureRecordFilter()
+        waitFor(host) { field.stringValue.isEmpty }
+        model.history.filter.search = "clear-me"
+        waitFor(host) { field.stringValue == "clear-me" }
+        (field.cell as! NSSearchFieldCell).cancelButtonCell!.performClick(field)
+        waitFor(host) { model.history.filter.search.isEmpty }
+        model.history.filter.search = "retained"
+        waitFor(host) { field.stringValue == "retained" }
+        model.selection = .rules
+        waitFor(host) { !window.toolbar!.items.contains { $0 is NSSearchToolbarItem } }
+        expectToolbar(window, inspectorVisible: false, requests: false)
+        model.selection = .requests
+        waitFor(host) { window.toolbar!.items.contains { $0 is NSSearchToolbarItem } }
+        let restored = window.toolbar!.items.compactMap { $0 as? NSSearchToolbarItem }.first!
+        precondition(restored === item && restored.searchField.stringValue == "retained")
+        expectToolbar(window, inspectorVisible: false, requests: true)
+        model.history.filter = CaptureRecordFilter()
+        waitFor(host) { field.stringValue.isEmpty }
+        log("Toolbar search passed: capture-left placement, tab visibility, filtering, clear/reset and retained query")
     }
 
     private static func checkHostedBodyAction<T: NSView>(_ host: NSViewController, window: NSWindow,
@@ -482,6 +512,13 @@ struct WorkspaceSidebarChecks {
 
     private static func expectToolbar(_ window: NSWindow, inspectorVisible: Bool, requests: Bool) {
         let items = window.toolbar!.items
+        let searches = items.compactMap { $0 as? NSSearchToolbarItem }
+        precondition(searches.count == (requests ? 1 : 0), "Search appears only on the request log tab")
+        if requests {
+            let searchIndex = items.firstIndex { $0 is NSSearchToolbarItem }!
+            precondition(items[searchIndex + 1].itemIdentifier.rawValue == "workspace.capture",
+                         "Search must be immediately left of capture")
+        }
         precondition(items.filter { $0.itemIdentifier == inspectorToggleIdentifier }.count == (requests ? 1 : 0))
         precondition(items.filter { $0.itemIdentifier == sidebarToggleIdentifier }.count == (requests ? 0 : 1))
         precondition(!items.contains { $0.itemIdentifier == .toggleInspector || $0.itemIdentifier == .toggleSidebar },
