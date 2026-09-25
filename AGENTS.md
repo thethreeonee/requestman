@@ -77,6 +77,7 @@ For the macOS core, run `swift test --package-path apps/macos/Packages/Requestma
 
 ## Change Guidelines
 
+- macOS UI components must use Apple-provided native controls and system styles. Do not recreate controls or add glass/material wrappers merely to achieve a glass appearance. Follow the [native control constraints](apps/macos/AGENTS.md#原生控件约束) for all macOS UI work.
 - When changing extension behavior, check whether the change belongs in the DevTools UI, background logic, injected script layer, or manifest permissions.
 - Reuse UI primitives from `apps/browser-extension/src/components/animate-ui`, then `apps/browser-extension/src/components/ui`, and icons from `apps/browser-extension/src/components`. Business components may compose these primitives under `apps/browser-extension/src/requestman` without additional approval; do not create competing primitives or custom icon implementations there.
 - Keep shared primitives under `apps/browser-extension/src/components` unchanged unless the task authorizes changes to them. If existing primitives can satisfy the request through composition, continue. If completing the task requires an unauthorized primitive change or new dependency, identify the specific missing capability and ask only for that scope expansion; continue independent authorized work.
