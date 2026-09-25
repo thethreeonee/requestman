@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import NIOCore
+import NIOEmbedded
 import NIOHTTP1
 import NIOPosix
 import NIOSSL
@@ -14,6 +15,76 @@ import RequestmanCore
 /// Real TCP/TLS tests. All certificates and trust anchors live only in memory.
 @Suite(.serialized)
 struct HTTPSIntegrationTests {
+    @Test func idleTLSCloseDoesNotCreateHandshakeFailure() throws {
+        // Swift's NSError bridge exposes this enum case as the reported error 12.
+        #expect((NIOSSLError.uncleanShutdown as NSError).code == 12)
+        let records = CaptureRecordBuffer()
+        let channel = EmbeddedChannel(handler: ProxyConnection(
+            configuration: .init(), shared: ProxySharedState(), records: records, tlsAuthority: "example.test:443"
+        ))
+        defer { _ = try? channel.finish(acceptAlreadyClosed: true) }
+        try channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 12345)).wait()
+        channel.pipeline.fireErrorCaught(NIOSSLError.uncleanShutdown)
+        #expect(records.drain().records.isEmpty)
+        #expect(!channel.isActive)
+    }
+
+    @Test func realHandshakeFailureRetainsUnderlyingReason() throws {
+        let records = CaptureRecordBuffer()
+        let channel = EmbeddedChannel(handler: ProxyConnection(
+            configuration: .init(), shared: ProxySharedState(), records: records, tlsAuthority: "example.test:443"
+        ))
+        defer { _ = try? channel.finish(acceptAlreadyClosed: true) }
+        try channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 12345)).wait()
+        channel.pipeline.fireErrorCaught(NIOSSLError.handshakeFailed(.sslError([.eofDuringHandshake])))
+        let record = try #require(records.drain().records.first)
+        #expect(record.outcome == .failed)
+        #expect(record.error?.contains("EOF during handshake") == true)
+        #expect(!channel.isActive)
+    }
+
+    @Test func TLSCloseDuringRequestStillRecordsIncompleteBody() throws {
+        let records = CaptureRecordBuffer()
+        let shared = ProxySharedState()
+        var workflow = RequestWorkflow()
+        workflow.urlPrefix = "https://example.test/"
+        // Hold the request until its full body arrives; no script or upstream is started.
+        workflow.requestSteps = [ModificationStep(kind: .script)]
+        var project = WorkflowProject(); project.workflows = [workflow]
+        var document = WorkspaceDocument(); document.projects = [project]
+        let snapshot = document
+        shared.document.withLock { $0 = snapshot }
+        let channel = EmbeddedChannel(handler: ProxyConnection(
+            configuration: .init(), shared: shared, records: records, tlsAuthority: "example.test:443"
+        ))
+        defer { _ = try? channel.finish(acceptAlreadyClosed: true) }
+        try channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 12345)).wait()
+        try channel.writeInbound(HTTPServerRequestPart.head(HTTPRequestHead(
+            version: .http1_1, method: .POST, uri: "/upload",
+            headers: HTTPHeaders([("Host", "example.test"), ("Content-Length", "100")])
+        )))
+        try channel.writeInbound(HTTPServerRequestPart.body(channel.allocator.buffer(string: "partial")))
+        channel.pipeline.fireErrorCaught(NIOSSLError.uncleanShutdown)
+        let record = try #require(records.drain().records.first)
+        #expect(record.method == "POST" && record.outcome == .failed)
+        #expect(record.requestBody.state == .incomplete)
+        #expect(record.requestBody.data == Data("partial".utf8))
+        #expect(record.error?.contains("uncleanShutdown") == true)
+    }
+
+    @Test func browserStyleIdleTCPCloseDoesNotAddFailedCONNECT() async throws {
+        try await withHTTPSHarness { h in
+            try await h.start()
+            let replies = try await h.exchangeSequence(paths: ["/one"], abruptClose: true)
+            #expect(replies.map(\.status) == [200])
+            // Allow the peer event loop to process the raw FIN without close_notify.
+            try await Task.sleep(for: .milliseconds(100))
+            let records = h.proxy.records.drain().records
+            #expect(records.count == 1)
+            #expect(records.allSatisfy { $0.method == "GET" && $0.error == nil })
+        }
+    }
+
     @Test(arguments: [false, true])
     func sequentialHTTPSRequestsReuseBothTLSConnections(useHTTPUpstream: Bool) async throws {
         try await withHTTPSHarness { h in
@@ -381,7 +452,7 @@ private final class HTTPSHarness: @unchecked Sendable {
                                  method: method, headers: headers, body: body)
     }
 
-    func exchangeSequence(paths: [String], stopWhenIdle: Bool = false) async throws -> [HTTPSReply] {
+    func exchangeSequence(paths: [String], stopWhenIdle: Bool = false, abruptClose: Bool = false) async throws -> [HTTPSReply] {
         var configuration = TLSConfiguration.makeClientConfiguration()
         configuration.trustRoots = .certificates([try proxyAuthority.trustRoot()])
         configuration.applicationProtocols = ["http/1.1"]
@@ -410,6 +481,12 @@ private final class HTTPSHarness: @unchecked Sendable {
                 await proxy.stop()
                 try await channel.closeFuture.get()
                 #expect(!channel.isActive)
+            } else if abruptClose {
+                try await channel.eventLoop.submit {
+                    // Close below NIOSSL, reproducing a browser's bare TCP FIN.
+                    try channel.pipeline.syncOperations.context(handlerType: NIOSSLClientHandler.self).close(promise: nil)
+                }.get()
+                try await channel.closeFuture.get()
             } else { try await channel.close().get() }
             timeout.cancel()
             return replies

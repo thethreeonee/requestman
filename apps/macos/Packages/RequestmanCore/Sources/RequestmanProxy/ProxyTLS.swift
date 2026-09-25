@@ -22,6 +22,24 @@ final class ProxyTLSContexts: Sendable {
 
 /// TLS transport only; the HTTP workflow remains in ProxyConnection.
 enum ProxyTLS {
+    /// NSError's default bridge loses the TLS case and underlying BoringSSL alert.
+    static func errorDescription(_ error: Error) -> String {
+        if let tlsError = error as? NIOSSLError {
+            switch tlsError {
+            case .handshakeFailed(let reason):
+                return "TLS 握手失败：\(reason)"
+            case .shutdownFailed(let reason):
+                return "TLS 关闭失败：\(reason)"
+            case .uncleanShutdown:
+                return "对端未发送 TLS 关闭通知就断开了连接（uncleanShutdown）"
+            default:
+                return String(describing: tlsError)
+            }
+        }
+        if error is NIOSSLExtraError { return String(describing: error) }
+        return error.localizedDescription
+    }
+
     private static let clientContext: Result<NIOSSLContext, Error> = Result {
         var configuration = TLSConfiguration.makeClientConfiguration()
         configuration.minimumTLSVersion = .tlsv12

@@ -36,7 +36,7 @@ CA 材料和实际信任结果使用最多 5 秒的固定期限缓存，命中�
 
 `CertificateSetupModel.canRegenerate` 仅在私钥缺失或显式恢复中断时提供“重新生成证书”。`LocalCertificateService.regenerate` 再次检查密钥；若已恢复则复用，访问错误不能当作缺失。确认缺失后按完整 DER 匹配移除旧证书及其当前用户信任，再将公开文件移入废纸篓，最后复用生成、安装、信任与静默复核流程。清理公开文件发生在新建私钥之前，因此生成后写入失败可通过已有的孤立私钥恢复路径重试，不重复生成密钥；多个证书或不匹配材料保持原状。
 
-HTTP/1.1 顺序请求复用下游连接，每条下游最多保留一个同目标、同出口的上游连接，HTTPS 同时复用 TLS 会话。上游主动关闭后，下次请求重新建连；不重试已发送请求。每个事务完成后清空规则匹配、Body 采集器和内存租约，保留独立记录；闲置 30 秒关闭且不生成虚假失败记录，停止监听关闭在用和闲置连接。仍限制最多 256 个下游连接，不支持流水线和跨客户端连接池。
+HTTP/1.1 顺序请求复用下游连接，每条下游最多保留一个同目标、同出口的上游连接，HTTPS 同时复用 TLS 会话。上游主动关闭后，下次请求重新建连；不重试已发送请求。每个事务完成后清空规则匹配、Body 采集器和内存租约，保留独立记录；闲置 30 秒关闭且不生成虚假失败记录，停止监听关闭在用和闲置连接。仍限制最多 256 个下游连接，不支持流水线和跨客户端连接池。 浏览器预连接或请求完成后的空闲 TLS 连接收到 `uncleanShutdown`（未发送 `close_notify`）时只关闭连接，不新增失败 CONNECT；真实握手中断和进行中的请求仍记录失败与不完整 Body。TLS 错误保留 NIOSSL 枚举及底层 BoringSSL 原因，避免 NSError 桥接只显示数字错误码。
 
 主窗口由 `WorkspaceSplitView` 桥接一个 AppKit `NSSplitViewController`，持久保留项目侧栏、主内容、请求详情三个 `NSHostingController`。两侧分别使用 `NSSplitViewItem(sidebarWithViewController:)` 与 `NSSplitViewItem(inspectorWithViewController:)`，启用 `allowsFullHeightLayout`，窗口采用 `.fullSizeContentView`，由系统提供贯穿窗口高度的侧栏材质。主内容最小宽度为 420 pt；右栏范围 400–760 pt，首次展开建议宽度为 520 pt，完成布局后由分栏保存用户调整的宽度。`WorkspaceView` 保留场景生命周期、错误提示和设置入口，在 `body` 中读取模型生成 `WorkspaceToolbarSnapshot`，使 Observation 变化进入桥接更新。三个内容宿主关闭场景桥接，避免 SwiftUI 再安装窗口工具栏；原生控制器拆卸时释放观察者并恢复其接管的窗口配置。
 

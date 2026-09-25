@@ -204,10 +204,17 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     }
     func errorCaught(context: ChannelHandlerContext, error: Error) {
         if record == nil, let tlsAuthority {
+            // Browsers may close a speculative or idle TLS connection without close_notify.
+            // NIOSSL reports EOF during an actual handshake as handshakeFailed instead.
+            if error as? NIOSSLError == .uncleanShutdown {
+                finish()
+                context.close(promise: nil)
+                return
+            }
             record = CaptureRecord(method: "CONNECT", url: "https://" + tlsAuthority)
-            finish(error: "TLS 握手失败：" + error.localizedDescription)
+            finish(error: "客户端 TLS 连接失败：" + ProxyTLS.errorDescription(error))
             context.close(promise: nil)
-        } else { fail(error.localizedDescription, status: 400) }
+        } else { fail(ProxyTLS.errorDescription(error), status: 400) }
     }
     func channelInactive(context: ChannelHandlerContext) {
         timer?.cancel(); certificateTask?.cancel()
@@ -526,7 +533,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     func upstreamError(_ error: Error, channel: Channel) {
         guard channel === upstream else { return }
         if record == nil { upstream = nil; upstreamTarget = nil; closeProxyChannel(channel) }
-        else { fail(error.localizedDescription, status: 502) }
+        else { fail(ProxyTLS.errorDescription(error), status: 502) }
     }
 
     private func prepareNextRequest() {
