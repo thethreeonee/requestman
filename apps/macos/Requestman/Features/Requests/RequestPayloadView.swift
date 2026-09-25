@@ -6,11 +6,12 @@ struct RequestPayloadView: View {
     let record: CaptureRecord
     let tab: RequestDetailTab
     let isActive: Bool
-    @State private var version: InspectionVersion = .final
+    let version: InspectionVersion
     @State private var format: InspectionFormat = .tree
     @State private var search = ""
     @State private var onlyChanges = false
     @State private var presentation: RequestPayloadPresentation?
+    @State private var presentedVersion: InspectionVersion?
     @State private var isLoading = true
 
     private var visibleNodes: [RequestDataNode] {
@@ -24,7 +25,6 @@ struct RequestPayloadView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            toolbar.padding(.horizontal, 16).padding(.bottom, 10)
             if let presentation {
                 HStack(spacing: 8) {
                     Text(direction).lineLimit(1)
@@ -53,7 +53,16 @@ struct RequestPayloadView: View {
                 ProgressView("正在读取内容").controlSize(.small)
                 Spacer()
             }
+            RequestPayloadControls(
+                format: $format, search: $search,
+                searchPrompt: searchPrompt,
+                showsFormat: tab.isBody && presentation?.isJSON == true,
+                isLoading: isLoading, isActive: isActive
+            )
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
         }
+        .preference(key: RequestPayloadCopyKey.self, value: copyContent)
         .task(id: version) {
             isLoading = true
             let snapshot = record
@@ -67,38 +76,21 @@ struct RequestPayloadView: View {
             } onCancel: { worker.cancel() }
             guard !Task.isCancelled else { return }
             presentation = next
+            presentedVersion = selectedVersion
             isLoading = false
             if !next.canCompare { onlyChanges = false }
         }
         .onChange(of: format) { _, _ in NSApp.keyWindow?.makeFirstResponder(nil) }
-        .onChange(of: version) { _, _ in NSApp.keyWindow?.makeFirstResponder(nil) }
+        .onChange(of: version) { _, _ in
+            if isActive, !(NSApp.keyWindow?.firstResponder is NSSegmentedControl) {
+                NSApp.keyWindow?.makeFirstResponder(nil)
+            }
+        }
     }
 
-    private var toolbar: some View {
-        HStack(spacing: 8) {
-            Picker("数据版本", selection: $version) {
-                ForEach(InspectionVersion.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.menu).labelsHidden().fixedSize()
-            .help("原始内容、最终内容或两者的差异")
-            if tab.isBody, presentation?.isJSON == true {
-                Button(format == .tree ? "原始数据" : "树形视图") {
-                    format = format == .tree ? .source : .tree
-                }
-                .buttonStyle(.bordered).fixedSize()
-                .disabled(isLoading)
-                .help(format == .tree ? "查看当前版本的原始数据" : "以字段树查看当前版本的 JSON")
-            }
-            TextField(searchPrompt, text: $search)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityLabel(searchPrompt)
-            Button {
-                if let presentation { RequestClipboard.copy(presentation.copyText) }
-            } label: { Label("复制当前\(tab.title)", systemImage: "doc.on.doc") }
-                .labelStyle(.iconOnly).buttonStyle(.borderless)
-                .disabled(isLoading || presentation?.copyText.isEmpty != false)
-                .help("复制当前\(tab.title)")
-        }.controlSize(.small).padding(.top, 10)
+    private var copyContent: RequestPayloadCopyContent? {
+        guard isActive, !isLoading, let presentation, let presentedVersion else { return nil }
+        return RequestPayloadCopyContent(tab: tab, version: presentedVersion, text: presentation.copyText)
     }
 
     private func content(_ data: RequestPayloadPresentation) -> some View {
@@ -137,6 +129,118 @@ struct RequestPayloadView: View {
         let status = version == .original ? record.originalStatus : record.status
         let title = version == .original ? "服务器原始响应" : "发往客户端"
         return status.map { "\(title) · \($0)" } ?? title
+    }
+}
+
+struct RequestPayloadCopyContent: Equatable, Sendable {
+    let tab: RequestDetailTab
+    let version: InspectionVersion
+    let text: String
+}
+
+struct RequestPayloadCopyKey: PreferenceKey {
+    static let defaultValue: RequestPayloadCopyContent? = nil
+
+    static func reduce(value: inout RequestPayloadCopyContent?, nextValue: () -> RequestPayloadCopyContent?) {
+        if let next = nextValue() { value = next }
+    }
+}
+
+/// The inspector's bottom controls use the same AppKit sizing as the project sidebar.
+private struct RequestPayloadControls: NSViewRepresentable {
+    @Binding var format: InspectionFormat
+    @Binding var search: String
+    let searchPrompt: String
+    let showsFormat: Bool
+    let isLoading: Bool
+    let isActive: Bool
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    func makeNSView(context: Context) -> ControlsView {
+        let view = ControlsView()
+        view.formatButton.target = context.coordinator
+        view.formatButton.action = #selector(Coordinator.toggleFormat(_:))
+        view.searchField.delegate = context.coordinator
+        return view
+    }
+
+    func updateNSView(_ view: ControlsView, context: Context) {
+        context.coordinator.parent = self
+        if !isActive, let editor = view.searchField.currentEditor(), editor === view.window?.firstResponder {
+            view.window?.makeFirstResponder(nil)
+        }
+        view.isHidden = !isActive
+        let enabled = context.environment.isEnabled && isActive
+        view.formatButton.isHidden = !showsFormat
+        view.formatButton.title = format == .tree ? "原始数据" : "树形视图"
+        view.formatButton.toolTip = format == .tree ? "查看当前版本的原始数据" : "以字段树查看当前版本的 JSON"
+        view.formatButton.isEnabled = enabled && !isLoading
+        if view.searchField.stringValue != search { view.searchField.stringValue = search }
+        view.searchField.placeholderString = searchPrompt
+        view.searchField.setAccessibilityLabel(searchPrompt)
+        view.searchField.isEnabled = enabled
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: ControlsView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 376, height: nsView.fittingSize.height)
+    }
+
+    @MainActor final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var parent: RequestPayloadControls
+        init(parent: RequestPayloadControls) { self.parent = parent }
+
+        @objc func toggleFormat(_ sender: NSButton) {
+            parent.format = parent.format == .tree ? .source : .tree
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSSearchField else { return }
+            parent.search = field.stringValue
+        }
+    }
+
+    final class ControlsView: NSView {
+        let formatButton = NSButton(title: "原始数据", target: nil, action: nil)
+        let searchField = NSSearchField()
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            searchField.sendsSearchStringImmediately = true
+            searchField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            searchField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+            for control in [formatButton, searchField] as [NSControl] {
+                control.controlSize = .large
+                control.translatesAutoresizingMaskIntoConstraints = false
+            }
+            formatButton.setContentHuggingPriority(.required, for: .horizontal)
+            formatButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+            if #available(macOS 26.0, *) {
+                formatButton.bezelStyle = .glass
+                formatButton.borderShape = .capsule
+            } else {
+                formatButton.bezelStyle = .rounded
+            }
+
+            let stack = NSStackView(views: [formatButton, searchField])
+            stack.orientation = .horizontal
+            stack.alignment = .centerY
+            stack.spacing = 10
+            stack.detachesHiddenViews = true
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+                stack.topAnchor.constraint(equalTo: topAnchor),
+                stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+                searchField.heightAnchor.constraint(equalToConstant: searchField.intrinsicContentSize.height),
+                formatButton.heightAnchor.constraint(equalTo: searchField.heightAnchor)
+            ])
+        }
+
+        required init?(coder: NSCoder) { nil }
     }
 }
 

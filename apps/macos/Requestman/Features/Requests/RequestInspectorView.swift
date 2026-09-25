@@ -5,12 +5,13 @@ import RequestmanCore
 struct RequestInspectorView: View {
     let history: ExecutionHistoryModel
     let isPresented: Bool
+    let mode: RequestInspectionMode
     @State private var tab: RequestDetailTab = .requestHeaders
 
     var body: some View {
         VStack(spacing: 0) {
             if let record = history.selected {
-                RequestDetailView(record: record, tab: $tab, isPresented: isPresented).id(record.id)
+                RequestDetailView(record: record, tab: $tab, isPresented: isPresented, version: mode.version).id(record.id)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -21,28 +22,38 @@ private struct RequestDetailView: View {
     let record: CaptureRecord
     @Binding var tab: RequestDetailTab
     let isPresented: Bool
+    let version: InspectionVersion
     @State private var visited: Set<RequestDetailTab> = []
     @State private var showsURL = false
     @State private var showsRule = false
     @State private var showsQuery = false
+    @State private var payloadCopy: RequestPayloadCopyContent?
 
     var body: some View {
         VStack(spacing: 0) {
             summary.padding(16)
-            ToolbarSectionControl(
-                labels: RequestDetailTab.allCases.map(\.title), accessibilityLabel: "请求数据",
-                selection: Binding(
-                    get: { RequestDetailTab.allCases.firstIndex(of: tab) ?? 0 },
-                    set: { tab = RequestDetailTab.allCases[$0] }
+            HStack(spacing: 10) {
+                ToolbarSectionControl(
+                    labels: RequestDetailTab.allCases.map(\.title), accessibilityLabel: "请求数据",
+                    fillsAvailableWidth: true, controlSize: dataControlSize,
+                    selection: Binding(
+                        get: { RequestDetailTab.allCases.firstIndex(of: tab) ?? 0 },
+                        set: { tab = RequestDetailTab.allCases[$0] }
+                    )
                 )
-            )
-            .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity)
+                RequestPayloadCopyButton(title: "复制当前\(tab.title)", isEnabled: currentCopy != nil) {
+                    if let currentCopy { RequestClipboard.copy(currentCopy.text) }
+                }
+            }
+            .controlSize(dataControlSize == .large ? .large : .extraLarge)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 16).padding(.bottom, 10)
             // Keep visited panes mounted so native scrolling, expansion and search survive a tab switch.
             ZStack {
                 ForEach(RequestDetailTab.allCases) { item in
                     if visited.contains(item) || item == tab {
-                        RequestPayloadView(record: record, tab: item, isActive: isPresented && item == tab)
+                        RequestPayloadView(record: record, tab: item, isActive: isPresented && item == tab, version: version)
                             .opacity(item == tab ? 1 : 0)
                             .allowsHitTesting(item == tab)
                             .accessibilityHidden(item != tab)
@@ -51,6 +62,7 @@ private struct RequestDetailView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .onPreferenceChange(RequestPayloadCopyKey.self) { payloadCopy = $0 }
         .onAppear { visited.insert(tab) }
         .onChange(of: tab) { _, value in
             visited.insert(value)
@@ -62,6 +74,17 @@ private struct RequestDetailView: View {
         .onChange(of: isPresented) { _, value in
             if !value { showsURL = false }
         }
+    }
+
+    private var dataControlSize: NSControl.ControlSize {
+        if #available(macOS 26.0, *) { return .extraLarge }
+        return .large
+    }
+
+    private var currentCopy: RequestPayloadCopyContent? {
+        guard isPresented, let payloadCopy, payloadCopy.tab == tab,
+              payloadCopy.version == version, !payloadCopy.text.isEmpty else { return nil }
+        return payloadCopy
     }
 
     private var summary: some View {
@@ -168,6 +191,54 @@ private struct RequestDetailView: View {
     }
 }
 
+/// Native action beside the content tabs; the selected pane supplies its ready-to-copy data.
+private struct RequestPayloadCopyButton: NSViewRepresentable {
+    let title: String
+    let isEnabled: Bool
+    let copy: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(copy: copy) }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = NSButton(title: "", target: context.coordinator, action: #selector(Coordinator.copyContent(_:)))
+        button.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
+        button.imagePosition = .imageOnly
+        if #available(macOS 26.0, *) {
+            button.bezelStyle = .glass
+            button.borderShape = .circle
+            button.controlSize = .extraLarge
+        } else {
+            button.bezelStyle = .circular
+            button.controlSize = .large
+        }
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        button.setContentHuggingPriority(.required, for: .vertical)
+        button.setContentCompressionResistancePriority(.required, for: .vertical)
+        return button
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSButton, context: Context) -> CGSize? {
+        nsView.intrinsicContentSize
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.copy = copy
+        button.isEnabled = isEnabled && context.environment.isEnabled
+        button.toolTip = title
+        button.setAccessibilityLabel(title)
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var copy: () -> Void
+        init(copy: @escaping () -> Void) { self.copy = copy }
+        @objc func copyContent(_ sender: NSButton) {
+            guard sender.isEnabled else { return }
+            copy()
+        }
+    }
+}
+
 private struct RequestURLDetails: View {
     let record: CaptureRecord
 
@@ -176,9 +247,7 @@ private struct RequestURLDetails: View {
             HStack {
                 Text("请求 URL").font(.headline)
                 Spacer()
-                Button("复制完整 URL") { RequestClipboard.copy(record.url) }
-                    .disabled(record.urlWasTruncated)
-                    .help(record.urlWasTruncated ? "URL 记录已截断，无法复制完整地址" : "复制完整 URL")
+                copyURLButton
             }
             if record.urlWasTruncated {
                 Text("URL 超出记录上限，以下仅显示已记录的部分，地址不完整。")
@@ -195,6 +264,19 @@ private struct RequestURLDetails: View {
         }
         .padding(16)
         .frame(width: 480)
+    }
+
+    @ViewBuilder private var copyURLButton: some View {
+        let button = Button("复制完整 URL") { RequestClipboard.copy(record.url) }
+            .disabled(record.urlWasTruncated)
+            .help(record.urlWasTruncated ? "URL 记录已截断，无法复制完整地址" : "复制完整 URL")
+        if #available(macOS 15.0, *) {
+            // The popover can overlap the parent window's resize region.
+            // Scope the arrow to the button so URL text selection keeps its cursor.
+            button.pointerStyle(.default)
+        } else {
+            button
+        }
     }
 }
 

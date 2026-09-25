@@ -25,6 +25,7 @@ try:
         "swiftc", *flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore",
         str(root / "Requestman/Features/Workspace/WorkspaceSection.swift"),
         str(root / "Requestman/Features/Workspace/WorkspaceSplitView.swift"),
+        str(root / "Requestman/Features/Requests/RequestInspectionMode.swift"),
         str(root / "Requestman/Features/Requests/RequestCURL.swift"),
         str(root / "Scripts/Fixtures/WorkspaceSidebarChecks.swift"), "-o", str(executable),
     ], check=True)

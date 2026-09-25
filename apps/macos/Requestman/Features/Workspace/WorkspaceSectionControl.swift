@@ -5,6 +5,8 @@ import SwiftUI
 struct ToolbarSectionControl: NSViewRepresentable {
     var labels: [String]
     var accessibilityLabel: String
+    var fillsAvailableWidth = false
+    var controlSize: NSControl.ControlSize = .large
     @Binding var selection: Int
 
     func makeNSView(context: Context) -> NSSegmentedControl {
@@ -15,8 +17,8 @@ struct ToolbarSectionControl: NSViewRepresentable {
             action: #selector(Coordinator.selectSection(_:))
         )
         control.segmentStyle = .automatic
-        control.segmentDistribution = .fit
-        control.controlSize = .large
+        control.segmentDistribution = fillsAvailableWidth ? .fillEqually : .fit
+        control.controlSize = controlSize
         if #available(macOS 26.0, *) {
             control.borderShape = .capsule
         }
@@ -24,8 +26,10 @@ struct ToolbarSectionControl: NSViewRepresentable {
             control.role = .tabs
         }
         control.setAccessibilityLabel(accessibilityLabel)
-        control.setContentHuggingPriority(.required, for: .horizontal)
+        control.setContentHuggingPriority(fillsAvailableWidth ? .defaultLow : .required, for: .horizontal)
         control.setContentCompressionResistancePriority(.required, for: .horizontal)
+        control.setContentHuggingPriority(.required, for: .vertical)
+        control.setContentCompressionResistancePriority(.required, for: .vertical)
         return control
     }
 
@@ -35,7 +39,9 @@ struct ToolbarSectionControl: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSegmentedControl, context: Context) -> CGSize? {
-        nsView.intrinsicContentSize
+        let intrinsic = nsView.intrinsicContentSize
+        guard fillsAvailableWidth, let width = proposal.width, width.isFinite else { return intrinsic }
+        return CGSize(width: max(width, intrinsic.width), height: intrinsic.height)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }

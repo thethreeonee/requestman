@@ -3,7 +3,7 @@ import RequestmanCore
 
 func runPayloadPresentationChecks() throws {
     precondition(RequestDetailTab.allCases.map(\.title) == ["请求头", "请求体", "响应头", "响应体"])
-    precondition(InspectionVersion.allCases.map(\.title) == ["原始", "最终", "差异"])
+    precondition(InspectionVersion.allCases.map(\.title) == ["修改前", "修改后", "修改对比"])
     precondition(RequestDetailTab.requestHeaders.isRequest && !RequestDetailTab.requestHeaders.isBody)
     precondition(RequestDetailTab.responseBody.isBody && !RequestDetailTab.responseBody.isRequest)
 

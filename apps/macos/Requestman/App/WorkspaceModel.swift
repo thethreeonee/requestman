@@ -269,6 +269,10 @@ final class WorkspaceModel {
         do { try await documentStore.save(document); await captureService.update(document: document); saveState = "已保存"; return true }
         catch { errorMessage = error.localizedDescription; saveState = "保存失败"; return false }
     }
+    var selectedStep: ModificationStep? {
+        guard let workflow else { return nil }
+        return (editingResponse ? workflow.responseSteps : workflow.requestSteps).first { $0.id == selectedStepID }
+    }
     var workflow: RequestWorkflow? { document.projects.flatMap(\.workflows).first { $0.id == selectedWorkflowID } }
     var projectName: String { document.projects.first { $0.workflows.contains { $0.id == selectedWorkflowID } }?.name ?? "" }
     func updateWorkflow(_ workflow: RequestWorkflow) {
@@ -297,7 +301,8 @@ final class WorkspaceModel {
     }
     func addStep(_ kind: ModificationKind, response: Bool) {
         guard var workflow else { return }
-        let step = ModificationStep(kind: kind)
+        var step = ModificationStep(kind: kind)
+        if kind == .script { step.value = response ? "// 修改响应后返回 response\nreturn response;" : "// 修改请求后返回 request\nreturn request;" }
         if response { workflow.responseSteps.append(step) } else { workflow.requestSteps.append(step) }
         updateWorkflow(workflow); editingResponse = response; selectedStepID = step.id
     }

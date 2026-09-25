@@ -17,18 +17,6 @@ enum RequestDetailTab: String, CaseIterable, Identifiable, Sendable {
     var isBody: Bool { self == .requestBody || self == .responseBody }
 }
 
-enum InspectionVersion: String, CaseIterable, Sendable {
-    case original, final, difference
-
-    var title: String {
-        switch self {
-        case .original: "原始"
-        case .final: "最终"
-        case .difference: "差异"
-        }
-    }
-}
-
 enum InspectionFormat: String, CaseIterable, Sendable {
     case tree, source
 

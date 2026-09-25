@@ -15,6 +15,8 @@ enum RequestClipboard {
 /// transitions and snapshot adapter are compiled directly from the production source.
 @MainActor @Observable
 final class WorkspaceModel {
+    var selectedStepID: UUID?
+    var selectedStep: ModificationStep?
     var selection: WorkspaceSection = .rules
     var document = WorkspaceDocument()
     let history = SidebarHistoryFixture()
@@ -52,9 +54,10 @@ struct WorkspaceMainContent: View {
 struct RequestInspectorView: View {
     let history: SidebarHistoryFixture
     let isPresented: Bool
+    let mode: RequestInspectionMode
     var body: some View {
         Group {
-            if isPresented { BodyRespondersFixture() }
+            if isPresented { BodyRespondersFixture(version: mode.version) }
             else { Text("") }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -68,9 +71,11 @@ struct EnvironmentSelectionPopover: View {
 
 /// Native body controls exercise the actual NSHostingController/NSViewRepresentable responder path.
 private struct BodyRespondersFixture: NSViewRepresentable {
+    let version: InspectionVersion
+
     func makeNSView(context: Context) -> NSStackView {
         let text = NSTextView()
-        text.string = "Request body fixture"
+        text.string = version.title
         let table = NSTableView()
         table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("value")))
         let stack = NSStackView(views: [text, table])
@@ -79,7 +84,9 @@ private struct BodyRespondersFixture: NSViewRepresentable {
         stack.alignment = .width
         return stack
     }
-    func updateNSView(_ view: NSStackView, context: Context) {}
+    func updateNSView(_ view: NSStackView, context: Context) {
+        (view.arrangedSubviews.first as? NSTextView)?.string = version.title
+    }
 }
 
 /// Matches WorkspaceView's observation boundary; no manual controller updates are made in this path.
@@ -98,8 +105,10 @@ struct WorkspaceSidebarChecks {
     private static let inspectorToggleIdentifier = NSToolbarItem.Identifier("workspace.toggleInspector")
     private static let sidebarToggleIdentifier = NSToolbarItem.Identifier("workspace.toggleSidebar")
     private static let inspectorTitleIdentifier = NSToolbarItem.Identifier("workspace.inspectorTitle")
+    private static let inspectorModeIdentifier = NSToolbarItem.Identifier("workspace.inspectorMode")
     private static let inspectorMoreIdentifier = NSToolbarItem.Identifier("workspace.inspectorMore")
     private static var widthFailures: [String] = []
+    private static var toolbarGeometryFailures: [String] = []
 
     static func main() {
         let application = NSApplication.shared
@@ -107,7 +116,8 @@ struct WorkspaceSidebarChecks {
         checkSwiftUIIntegration()
         checkDirectController()
         precondition(widthFailures.isEmpty, widthFailures.joined(separator: "; "))
-        print("Workspace sidebar CLI checks passed: native item roles, unique toolbar toggle, title visibility, selection/clear/page changes, fixed window width, safe-area geometry and teardown")
+        precondition(toolbarGeometryFailures.isEmpty, toolbarGeometryFailures.joined(separator: "; "))
+        print("Workspace sidebar CLI checks passed: native item roles, unique toolbar toggle and display-mode control, mode actions and persistence, 400/520 pt toolbar geometry, title visibility, selection/clear/page changes, fixed window width, safe-area geometry and teardown")
         print("Actual WorkspaceSplitView.swift executed with model/content fixtures in hidden NSWindows; no user App built/launched, window shown, network request or configuration write. Visual appearance remains unverified.")
     }
 
@@ -144,6 +154,25 @@ struct WorkspaceSidebarChecks {
             widthFailures.append("Initial project sidebar must be 320 pt; actual \(sidebarWidth)")
         }
 
+        // Rules use the same window-level Inspector and native toggle, with a distinct title.
+        let step = ModificationStep(kind: .script)
+        model.selectedStep = step; model.selectedStepID = step.id
+        update(controller, model: model)
+        settle(controller) { !inspector.isCollapsed }
+        expectToolbar(window, inspectorVisible: true, requests: false)
+        precondition(window.toolbar!.items.contains { ($0.view as? NSTextField)?.stringValue == "步骤详情" })
+        checkGeometry(controller, window: window, inspector: inspector, windowWidth: window.frame.width)
+        invoke(toggleItem(window))
+        settle(controller) { inspector.isCollapsed }
+        precondition(model.selectedStepID == step.id)
+        update(controller, model: model)
+        precondition(inspector.isCollapsed)
+        invoke(toggleItem(window))
+        settle(controller) { !inspector.isCollapsed }
+        model.selectedStep = nil; model.selectedStepID = nil
+        update(controller, model: model)
+        settle(controller) { inspector.isCollapsed }
+
         // Use the actual native segmented control/action to change the model's page.
         let sections = toolbarItem(window, label: "工作区").view as! NSSegmentedControl
         sections.selectedSegment = WorkspaceSection.allCases.firstIndex(of: .requests)!
@@ -170,9 +199,12 @@ struct WorkspaceSidebarChecks {
                      "AppKit must create the native toolbar button with an explicit split-controller target")
         checkGeometry(controller, window: window, inspector: inspector, windowWidth: windowWidth)
         checkInitialInspectorWidth(inspector, scenario: "first selection after no selection")
-        let root = inspector.viewController as! NSHostingController<RequestInspectorView>
+        let root = inspector.viewController as! NSHostingController<WorkspaceInspectorContent>
         precondition(root.rootView.isPresented, "Visible inspector enables its hosted detail content")
+        let inspectionMode = root.rootView.mode
+        checkInspectionModeActions(controller, window: window, inspector: inspector)
         checkRequestMenu(controller, model: model, window: window)
+        expectInspectionMode(window, root: root, mode: inspectionMode, visible: true)
 
         // Invoke the native toolbar item; there must be exactly one entry point.
         invoke(toggleItem(window))
@@ -180,11 +212,13 @@ struct WorkspaceSidebarChecks {
         expectToolbar(window, inspectorVisible: false, requests: true)
         precondition(model.history.selectedID == record.id, "Manual collapse preserves the selected request")
         precondition(!root.rootView.isPresented)
+        expectInspectionMode(window, root: root, mode: inspectionMode, visible: false)
         update(controller, model: model)
         precondition(inspector.isCollapsed, "Unrelated updates must not reopen a manually collapsed inspector")
         invoke(toggleItem(window))
         settle(controller) { !inspector.isCollapsed }
         expectToolbar(window, inspectorVisible: true, requests: true)
+        expectInspectionMode(window, root: root, mode: inspectionMode, visible: true)
         checkGeometry(controller, window: window, inspector: inspector, windowWidth: windowWidth)
 
         invoke(toggleItem(window))
@@ -192,7 +226,8 @@ struct WorkspaceSidebarChecks {
         model.history.selectedID = nextRecord.id
         update(controller, model: model)
         settle(controller) { !inspector.isCollapsed }
-        precondition(root.rootView.history.selectedID == nextRecord.id)
+        precondition(root.rootView.model.history.selectedID == nextRecord.id)
+        expectInspectionMode(window, root: root, mode: inspectionMode, visible: true)
 
         // Removing a retained selection, even before selectedID resets, closes details.
         model.history.records.removeAll()
@@ -263,14 +298,19 @@ struct WorkspaceSidebarChecks {
         let inspector = controller.splitViewItems[2]
         // Hidden windows do not receive viewDidAppear. A model observation refresh after mounting
         // must install the toolbar through the real representable update, without calling it here.
-        model.history.filter.search = "fixture"
+        model.document.environments = [WorkspaceEnvironment(name: "fixture")]
+        model.document.selectedEnvironmentID = model.document.environments[0].id
         waitFor(host) { window.toolbar != nil }
         precondition(!inspector.isCollapsed, "Initial selected request must open the inspector through the representable")
-        precondition((inspector.viewController as! NSHostingController<RequestInspectorView>).rootView.isPresented)
+        precondition((inspector.viewController as! NSHostingController<WorkspaceInspectorContent>).rootView.isPresented)
         expectToolbar(window, inspectorVisible: true, requests: true)
         let originalWidth = window.frame.width
         checkGeometry(controller, window: window, inspector: inspector, windowWidth: originalWidth)
         checkInitialInspectorWidth(inspector, scenario: "initial snapshot already has a selection")
+        let inspectorRoot = inspector.viewController as! NSHostingController<WorkspaceInspectorContent>
+        let inspectionMode = inspectorRoot.rootView.mode
+        checkInspectionModeActions(host, window: window, inspector: inspector)
+        checkInspectorToolbarGeometry(controller, window: window, inspector: inspector)
         checkCaptureButton(host, model: model, window: window)
 
         // With no focused control, the actual native toolbar item's explicit target must still work.
@@ -280,17 +320,21 @@ struct WorkspaceSidebarChecks {
         precondition(item.target === controller && item.view == nil)
         invoke(item)
         waitFor(host) { inspector.isCollapsed }
+        expectToolbar(window, inspectorVisible: false, requests: true)
+        expectInspectionMode(window, root: inspectorRoot, mode: inspectionMode, visible: false)
 
         // Observation must update native state without calling controller.update or replacing rootView.
         model.history.selectedID = other.id
         waitFor(host) { !inspector.isCollapsed }
         expectToolbar(window, inspectorVisible: true, requests: true)
+        expectInspectionMode(window, root: inspectorRoot, mode: inspectionMode, visible: true)
         checkHostedBodyAction(host, window: window, inspector: inspector, type: NSTextView.self)
         model.history.selectedID = record.id
         waitFor(host) { !inspector.isCollapsed }
         checkHostedBodyAction(host, window: window, inspector: inspector, type: NSTableView.self)
         model.history.selectedID = other.id
         waitFor(host) { !inspector.isCollapsed }
+        expectInspectionMode(window, root: inspectorRoot, mode: inspectionMode, visible: true)
         checkTitleGeometry(window, inspector: inspector)
         model.history.clear()
         waitFor(host) { inspector.isCollapsed && !toggleItem(window).isEnabled }
@@ -299,9 +343,43 @@ struct WorkspaceSidebarChecks {
         model.selection = .rules
         waitFor(host) { !controller.splitViewItems[0].isCollapsed }
         expectToolbar(window, inspectorVisible: false, requests: false)
+        checkDividerResizing(host, controller: controller, model: model, window: window)
         precondition(!window.isVisible, "The CLI check must never show a window")
         controller.tearDown()
         log("SwiftUI integration actions passed: Observation-driven selection/clear/page updates and native toolbar actions with empty/text/table focus.")
+    }
+
+    private static func checkDividerResizing(_ host: NSViewController, controller: WorkspaceSplitController,
+                                             model: WorkspaceModel, window: NSWindow) {
+        let step = ModificationStep(kind: .setHeader)
+        model.selectedStep = step
+        model.selectedStepID = step.id
+        let sidebar = controller.splitViewItems[0]
+        let inspector = controller.splitViewItems[2]
+        waitFor(host) { !sidebar.isCollapsed && !inspector.isCollapsed }
+        for width: CGFloat in [1440, 1800, 1100] {
+            window.setContentSize(NSSize(width: width, height: 900))
+            waitFor(host) { true }
+            let windowFrame = window.frame
+            for sidebarWidth: CGFloat in [260, 400, 320] {
+                controller.splitView.setPosition(sidebarWidth, ofDividerAt: 0)
+                waitFor(host) { true }
+                for inspectorWidth: CGFloat in [400, 760] {
+                    controller.splitView.setPosition(controller.splitView.bounds.maxX - inspectorWidth
+                                                     - controller.splitView.dividerThickness, ofDividerAt: 1)
+                    waitFor(host) { true }
+                    let splitFrame = controller.splitView.convert(controller.splitView.bounds, to: host.view)
+                    precondition(abs(splitFrame.minX - host.view.bounds.minX) < 1
+                                 && abs(splitFrame.maxX - host.view.bounds.maxX) < 1,
+                                 "Divider resize must keep the workspace edge-to-edge: split=\(splitFrame), host=\(host.view.bounds)")
+                    precondition(window.frame == windowFrame, "Divider resize must not resize the window")
+                    for item in controller.splitViewItems where !item.isCollapsed {
+                        precondition(item.viewController.view.bounds.width >= item.minimumThickness - 1)
+                    }
+                }
+            }
+        }
+        log("Hosted divider resizing passed: both dividers, narrow/wide windows and workspace edges")
     }
 
     private static func checkToolbarSearch(_ host: NSViewController, model: WorkspaceModel, window: NSWindow) {
@@ -342,6 +420,97 @@ struct WorkspaceSidebarChecks {
         let item = toggleItem(window)
         invoke(item)
         waitFor(host) { inspector.isCollapsed }
+    }
+
+    private static func checkInspectionModeActions(_ host: NSViewController, window: NSWindow,
+                                                   inspector: NSSplitViewItem) {
+        let root = inspector.viewController as! NSHostingController<WorkspaceInspectorContent>
+        let mode = root.rootView.mode
+        let item = window.toolbar!.items.first { $0.itemIdentifier == inspectorModeIdentifier }!
+        let control = item.view as! NSSegmentedControl
+        precondition(mode.version == .final && control.selectedSegment == 1,
+                     "Each workspace starts with the modified request selected")
+        precondition(control.segmentCount == 3 && control.trackingMode == .selectOne)
+        precondition((0..<control.segmentCount).map { control.label(forSegment: $0) } == ["修改前", "修改后", "修改对比"])
+        // AppKit may promote the configured .large size when installing the native toolbar.
+        log("Hosted native mode style: style=\(control.segmentStyle.rawValue), distribution=\(control.segmentDistribution.rawValue), size=\(control.controlSize.rawValue)")
+        precondition(control.segmentStyle == .automatic && control.segmentDistribution == .fit)
+        if #available(macOS 26.0, *) { precondition(control.borderShape == .capsule) }
+        if #available(macOS 27.0, *) { precondition(control.role == .tabs) }
+        precondition(control.target === findController(in: host))
+        for (index, version) in InspectionVersion.allCases.enumerated() {
+            control.selectedSegment = index
+            precondition(control.sendAction(control.action, to: control.target), "Use the actual segmented-control action")
+            precondition(mode.version == version, "The native mode action must update the shared production state")
+            waitFor(host) { findView(NSTextView.self, in: root.view)?.string == version.title }
+            precondition(root.rootView.mode === mode, "The hosting root must keep the same shared mode object")
+        }
+        precondition(mode.version == .difference)
+        log("Inspector mode actions passed: three native segments update the same observable production mode and its hosted consumer; default is modified.")
+    }
+
+    private static func expectInspectionMode(_ window: NSWindow, root: NSHostingController<WorkspaceInspectorContent>,
+                                             mode: RequestInspectionMode, visible: Bool) {
+        precondition(root.rootView.mode === mode && mode.version == .difference,
+                     "Display mode must survive record changes, hosted-content updates and collapse/reopen")
+        let items = window.toolbar!.items.filter { $0.itemIdentifier == inspectorModeIdentifier }
+        precondition(items.count == (visible ? 1 : 0), "Collapsed details must remove their sole display-mode entry")
+        if visible {
+            precondition((items[0].view as! NSSegmentedControl).selectedSegment == 2,
+                         "Reopened mode control must preserve the selected segment")
+        }
+    }
+
+    private static func checkInspectorToolbarGeometry(_ controller: WorkspaceSplitController, window: NSWindow,
+                                                       inspector: NSSplitViewItem) {
+        let initialWidth = inspector.viewController.view.bounds.width
+        let windowWidth = window.frame.width
+        let identifiers = [inspectorTitleIdentifier, inspectorModeIdentifier, inspectorMoreIdentifier, inspectorToggleIdentifier]
+        for targetWidth: CGFloat in [400, 520] {
+            controller.splitView.setPosition(controller.splitView.bounds.maxX - targetWidth - controller.splitView.dividerThickness,
+                                             ofDividerAt: 1)
+            settle(controller) { !inspector.isCollapsed }
+            window.contentView?.superview?.layoutSubtreeIfNeeded()
+            let inspectorView = inspector.viewController.view
+            let inspectorFrame = inspectorView.convert(inspectorView.bounds, to: nil)
+            let actualWidth = inspectorFrame.width
+            if abs(actualWidth - targetWidth) > 1 {
+                toolbarGeometryFailures.append("Cannot validate \(targetWidth) pt inspector: actual width \(actualWidth)")
+            }
+            let items = window.toolbar!.items.filter { identifiers.contains($0.itemIdentifier) }
+            let visibleIdentifiers = Set((window.toolbar!.visibleItems ?? []).map(\.itemIdentifier))
+            var frames: [String] = []
+            for item in items {
+                if !item.isVisible || !visibleIdentifiers.contains(item.itemIdentifier) {
+                    toolbarGeometryFailures.append("\(targetWidth) pt: \(item.itemIdentifier.rawValue) overflowed or is hidden")
+                }
+                let nativeView = item.view ?? window.contentView?.superview.flatMap { frameView in
+                    findViews(NSView.self, in: frameView).first {
+                        ($0.accessibilityRole() == .button || $0.accessibilityRole() == .menuButton)
+                            && ($0.accessibilityLabel() == item.label || (item.toolTip != nil && $0.toolTip == item.toolTip))
+                            && !$0.isHiddenOrHasHiddenAncestor
+                    }
+                }
+                guard let view = nativeView, view.window === window, view.bounds.width > 0 else {
+                    toolbarGeometryFailures.append("\(targetWidth) pt: native view geometry unavailable for \(item.itemIdentifier.rawValue)")
+                    continue
+                }
+                let frame = view.convert(view.bounds, to: nil)
+                frames.append("\(item.itemIdentifier.rawValue)=\(NSStringFromRect(frame))")
+                if frame.minX < inspectorFrame.minX - 1 || frame.maxX > inspectorFrame.maxX + 1 {
+                    toolbarGeometryFailures.append("\(targetWidth) pt: \(item.itemIdentifier.rawValue) extends outside inspector \(NSStringFromRect(inspectorFrame)): \(NSStringFromRect(frame))")
+                }
+                if item.itemIdentifier == inspectorModeIdentifier,
+                   view.bounds.width + 1 < view.intrinsicContentSize.width {
+                    toolbarGeometryFailures.append("\(targetWidth) pt: native display-mode segments are compressed below their intrinsic width")
+                }
+            }
+            checkGeometry(controller, window: window, inspector: inspector, windowWidth: windowWidth)
+            log("Inspector toolbar geometry at requested \(targetWidth) pt (actual \(actualWidth)): " + frames.joined(separator: "; "))
+        }
+        controller.splitView.setPosition(controller.splitView.bounds.maxX - initialWidth - controller.splitView.dividerThickness,
+                                         ofDividerAt: 1)
+        settle(controller) { !inspector.isCollapsed }
     }
 
     private static func checkCaptureButton(_ host: NSViewController, model: WorkspaceModel, window: NSWindow) {
@@ -458,6 +627,11 @@ struct WorkspaceSidebarChecks {
         return view.subviews.lazy.compactMap { findView(type, in: $0) }.first
     }
 
+    private static func findViews<T: NSView>(_ type: T.Type, in view: NSView) -> [T] {
+        let current = (view as? T).map { [$0] } ?? []
+        return current + view.subviews.flatMap { findViews(type, in: $0) }
+    }
+
     private static func waitFor(_ host: NSViewController, file: StaticString = #fileID, line: UInt = #line,
                                 until condition: () -> Bool) {
         let deadline = Date().addingTimeInterval(3)
@@ -480,13 +654,13 @@ struct WorkspaceSidebarChecks {
         controller.splitView.layoutSubtreeIfNeeded()
     }
 
-    private static func settle(_ controller: WorkspaceSplitController, until condition: () -> Bool) {
+    private static func settle(_ controller: WorkspaceSplitController, file: StaticString = #fileID, line: UInt = #line, until condition: () -> Bool) {
         let deadline = Date().addingTimeInterval(3)
         repeat {
             controller.view.layoutSubtreeIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.03))
         } while !condition() && Date() < deadline
-        precondition(condition(), "AppKit did not reach the expected split-item state")
+        precondition(condition(), "AppKit did not reach the expected split-item state", file: file, line: line)
         // Collapse observation and toolbar reconciliation run on the main actor on the next turn.
         RunLoop.main.run(until: Date().addingTimeInterval(0.4))
         controller.view.layoutSubtreeIfNeeded()
@@ -519,18 +693,21 @@ struct WorkspaceSidebarChecks {
             precondition(items[searchIndex + 1].itemIdentifier.rawValue == "workspace.capture",
                          "Search must be immediately left of capture")
         }
-        precondition(items.filter { $0.itemIdentifier == inspectorToggleIdentifier }.count == (requests ? 1 : 0))
+        precondition(items.filter { $0.itemIdentifier == inspectorToggleIdentifier }.count == 1)
         precondition(items.filter { $0.itemIdentifier == sidebarToggleIdentifier }.count == (requests ? 0 : 1))
         precondition(!items.contains { $0.itemIdentifier == .toggleInspector || $0.itemIdentifier == .toggleSidebar },
                      "AppKit's reserved nil-target toggles must not duplicate the explicit-target native items")
         precondition(items.filter { $0.itemIdentifier == inspectorTitleIdentifier }.count == (inspectorVisible ? 1 : 0))
-        precondition(items.filter { $0.itemIdentifier == inspectorMoreIdentifier }.count == (inspectorVisible ? 1 : 0))
-        if inspectorVisible {
+        precondition(items.filter { $0.itemIdentifier == inspectorModeIdentifier }.count == (inspectorVisible && requests ? 1 : 0))
+        precondition(items.filter { $0.itemIdentifier == inspectorMoreIdentifier }.count == (inspectorVisible && requests ? 1 : 0))
+        if inspectorVisible && requests {
             let moreIndex = items.firstIndex { $0.itemIdentifier == inspectorMoreIdentifier }!
+            precondition(items[moreIndex - 1].itemIdentifier == inspectorModeIdentifier,
+                         "The only display-mode control belongs immediately before More")
             precondition(items[moreIndex + 1].itemIdentifier == inspectorToggleIdentifier,
                          "More belongs immediately before the inspector toggle")
         }
-        precondition(items.filter { $0.itemIdentifier == .inspectorTrackingSeparator }.count == (requests ? 1 : 0))
+        precondition(items.filter { $0.itemIdentifier == .inspectorTrackingSeparator }.count == 1)
     }
 
     private static func checkGeometry(_ controller: WorkspaceSplitController, window: NSWindow, inspector: NSSplitViewItem, windowWidth: CGFloat) {
@@ -547,4 +724,10 @@ struct WorkspaceSidebarChecks {
         precondition(view.safeAreaRect.width >= 0 && view.safeAreaRect.height >= 0)
         precondition(inspector.allowsFullHeightLayout && window.styleMask.contains(.fullSizeContentView))
     }
+}
+
+struct StepInspectorView: View {
+    let model: WorkspaceModel
+    var isPresented = true
+    var body: some View { Text("Step fixture") }
 }

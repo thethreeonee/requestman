@@ -24,6 +24,7 @@ try:
     subprocess.run([
         "swiftc", *flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore",
         str(sources / "RequestDataOutline.swift"), str(sources / "RequestInspectionData.swift"),
+        str(sources / "RequestInspectionMode.swift"),
         str(sources / "RequestBodyDecoding.swift"), str(sources / "RequestPayloadPresentation.swift"),
         str(sources / "RequestCURL.swift"),
         str(root / "Scripts/Fixtures/RequestInspectionChecks.swift"),
