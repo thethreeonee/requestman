@@ -92,15 +92,6 @@ final class ProxySharedState: Sendable {
     }
     let configuration = OSAllocatedUnfairLock(initialState: ExplicitProxyConfiguration())
     let document = OSAllocatedUnfairLock(initialState: WorkspaceDocument())
-    let generatedBodyBytes = OSAllocatedUnfairLock(initialState: 0)
-    func reserveBody(_ body: String) throws -> GeneratedBodyReservation {
-        let bytes = body.utf8.count
-        guard generatedBodyBytes.withLock({ used in
-            guard bytes <= 16 * 1_048_576 - used else { return false }
-            used += bytes; return true
-        }) else { throw WorkflowError.invalid("替换内容的全局内存预算已满（16 MiB）") }
-        return GeneratedBodyReservation(bytes: bytes, budget: generatedBodyBytes)
-    }
     let channels = OSAllocatedUnfairLock(initialState: [ObjectIdentifier: Channel]())
     func register(_ channel: Channel) -> Bool {
         channels.withLock { channels in
@@ -129,12 +120,10 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     private var request: HTTPMessageDraft?
     private var response: HTTPMessageDraft?
     private var pending: [HTTPServerRequestPart] = []
-    private var pendingBytes = 0
     private var lastRequestWrite: EventLoopFuture<Void>?
     private var lastResponseWrite: EventLoopFuture<Void>?
     private var responseEnded = false
     private var informationalResponse = false
-    private var bodyReservations: [GeneratedBodyReservation] = []
     private var connected = false
     private var requestEnded = false
     private var responseStarted = false
@@ -180,14 +169,17 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         case .body(let buffer):
             record?.requestBytes += buffer.readableBytes
             requestBodyCollector?.append(buffer.readableBytesView)
-            if !connected { enqueue(part, bytes: buffer.readableBytes) } else { forward(part) }
+            if !connected { enqueue(part) } else { forward(part) }
         case .end:
             requestEnded = true
-            if !connected { enqueue(part, bytes: 0) } else { forward(part) }
+            if !connected { enqueue(part) } else { forward(part) }
         }
     }
     func channelReadComplete(context: ChannelHandlerContext) {
-        guard connected, isProcessing, !tunnel else { return }
+        guard isProcessing, !tunnel else { return }
+        // A header can span multiple socket reads before the decoder emits its head.
+        if record == nil { context.read(); return }
+        guard connected else { return }
         flushRequest()
     }
     func errorCaught(context: ChannelHandlerContext, error: Error) {
@@ -202,9 +194,8 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         if !finished { finish(error: "客户端连接已关闭") }
         if let upstream { closeProxyChannel(upstream) }
     }
-    private func enqueue(_ part: HTTPServerRequestPart, bytes: Int) {
-        pendingBytes += bytes
-        guard pendingBytes <= 65_536, pending.count < 128 else { return fail("连接预读缓冲已满", status: 503) }
+    private func enqueue(_ part: HTTPServerRequestPart) {
+        guard pending.count < 128 else { return fail("连接预读缓冲已满", status: 503) }
         pending.append(part)
     }
     private func begin(_ input: HTTPRequestHead) {
@@ -267,7 +258,6 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                     environment: match.environment?.values ?? [:], id: record.id, date: record.startedAt)
             }
             record?.finalURL = draft.url; record?.sentMethod = draft.method
-            try reserveBody(draft.replacementBody)
             request = draft
             if draft.isMock {
                 record?.outcome = .mocked
@@ -278,7 +268,6 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                     self.record?.steps += try WorkflowEngine.apply(match.workflow.responseSteps, response: true, to: &reply,
                         environment: match.environment?.values ?? [:], id: record.id, date: record.startedAt)
                 }
-                if reply.replacementBody != draft.replacementBody { try reserveBody(reply.replacementBody) }
                 return sendStatic(reply)
             }
             guard let target = URLComponents(string: draft.url), let host = target.host else { throw WorkflowError.invalid("目标地址无效") }
@@ -319,7 +308,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                         trackRequestWrite(channel.write(HTTPClientRequestPart.body(.byteBuffer(channel.allocator.buffer(string: body)))))
                     }
                     for part in pending { forward(part) }
-                    pending.removeAll(); pendingBytes = 0
+                    pending.removeAll()
                     flushRequest()
                     channel.read()
                 }
@@ -433,7 +422,6 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                     self.record?.steps += try WorkflowEngine.apply(match.workflow.responseSteps, response: true, to: &draft,
                         environment: match.environment?.values ?? [:], id: record.id, date: record.startedAt)
                 }
-                try reserveBody(draft.replacementBody)
                 response = draft
                 responseKeepsAlive = clientKeepsAlive && requestEnded && requestWriteComplete
                 let headers = responseHeaders(draft, keepAlive: responseKeepsAlive)
@@ -499,9 +487,8 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             closeProxyChannel(previous)
         }
         record = nil; match = nil; request = nil; response = nil
-        pending.removeAll(keepingCapacity: true); pendingBytes = 0
+        pending.removeAll(keepingCapacity: true)
         lastRequestWrite = nil; lastResponseWrite = nil
-        bodyReservations.removeAll()
         requestBodyCollector = nil; sentBodyCollector = nil
         receivedBodyCollector = nil; responseBodyCollector = nil
         connected = false; requestEnded = false; responseStarted = false; responseEnded = false
@@ -518,9 +505,6 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         }
     }
 
-    private func reserveBody(_ body: String?) throws {
-        if let body { bodyReservations.append(try shared.reserveBody(body)) }
-    }
     private func sendStatic(_ draft: HTTPMessageDraft) {
         guard let client else { return }
         responseStarted = true
@@ -796,19 +780,11 @@ private extension ChannelPipeline {
     }
 }
 
-// Reservations outlive writes and are released with the closed connection's handlers.
-final class GeneratedBodyReservation: Sendable {
-    let bytes: Int
-    let budget: OSAllocatedUnfairLock<Int>
-    init(bytes: Int, budget: OSAllocatedUnfairLock<Int>) { self.bytes = bytes; self.budget = budget }
-    deinit { budget.withLock { $0 -= bytes } }
-}
-
 private func proxyDecoderLimits() -> NIOHTTPDecoderLimitConfiguration {
     var limits = NIOHTTPDecoderLimitConfiguration()
-    limits.maxHeaderFieldSize = 32_768
-    limits.maxHeaderListSize = 32_768
-    limits.maxHeaderFieldCount = 128
+    limits.maxHeaderFieldSize = .max
+    limits.maxHeaderListSize = .max
+    limits.maxHeaderFieldCount = .max
     return limits
 }
 

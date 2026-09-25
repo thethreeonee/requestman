@@ -11,18 +11,16 @@ public final class FlowExecutionContext: Sendable {
     public let id: UUID
     public let plan: FlowExecutionPlan
     private let limits: ExecutionLimits
-    private let budget: BodyBufferBudget
     private let deadline: ContinuousClock.Instant
     private let state = OSAllocatedUnfairLock(initialState: State())
 
     init(
         id: UUID, plan: FlowExecutionPlan, limits: ExecutionLimits,
-        budget: BodyBufferBudget, deadline: ContinuousClock.Instant
+        deadline: ContinuousClock.Instant
     ) {
         self.id = id
         self.plan = plan
         self.limits = limits
-        self.budget = budget
         self.deadline = deadline
     }
 
@@ -41,7 +39,7 @@ public final class FlowExecutionContext: Sendable {
         switch plan.bodyMode(for: phase) {
         case .streaming: return .streaming(reader)
         case .buffered:
-            let body = try await BodyCollector.collect(from: reader, limits: limits, budget: budget)
+            let body = try await BodyCollector.collect(from: reader, limits: limits)
             try Task.checkCancellation()
             guard !state.withLock({ $0.finished }) else { throw ExecutionResourceError.executionFinished }
             guard deadline > .now else { throw ExecutionResourceError.timedOut }
@@ -57,13 +55,11 @@ public final class FlowExecutionContext: Sendable {
 public final class FlowExecutionRuntime: Sendable {
     public let limits: ExecutionLimits
     public let events: ExecutionEventBuffer
-    public let bodyBudget: BodyBufferBudget
     private let gate: BoundedExecutionGate
 
     public init(limits: ExecutionLimits) throws {
         self.limits = limits
         gate = try BoundedExecutionGate(maximumActive: limits.maximumActive, maximumWaiting: limits.maximumWaiting)
-        bodyBudget = try BodyBufferBudget(capacity: limits.maximumBufferedBytes)
         events = try ExecutionEventBuffer(capacity: limits.eventCapacity, maximumBatch: limits.maximumEventBatch)
     }
 
@@ -91,7 +87,7 @@ public final class FlowExecutionRuntime: Sendable {
                         self.record(.started, id: id, plan: plan)
                         let context = FlowExecutionContext(
                             id: id, plan: plan, limits: self.limits,
-                            budget: self.bodyBudget, deadline: end
+                            deadline: end
                         )
                         defer { context.finish() }
                         return try await operation(context)

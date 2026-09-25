@@ -81,7 +81,6 @@ private struct EnvironmentSidebar: View {
 
 private struct EnvironmentEditor: View {
     @Bindable var model: WorkspaceModel
-    @State private var revealsValues = false
 
     var body: some View {
         Group {
@@ -94,12 +93,10 @@ private struct EnvironmentEditor: View {
                         }.disabled(model.document.selectedEnvironmentID == model.selectedEnvironmentID)
                     }
                     Section {
-                        Toggle("显示值", isOn: $revealsValues)
                         ForEach($model.document.environments[index].variables) { $variable in
                             HStack {
                                 TextField("变量名称", text: $variable.name)
-                                if revealsValues { TextField("值", text: $variable.value) }
-                                else { SecureField("值", text: $variable.value) }
+                                TextField("值", text: $variable.value)
                                 Button("删除变量", systemImage: "minus.circle", role: .destructive) {
                                     let id = variable.id
                                     model.document.environments[index].variables.removeAll { $0.id == id }

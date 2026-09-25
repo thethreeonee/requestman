@@ -50,7 +50,6 @@ struct RequestPayloadPresentation: Sendable {
         let changes = nodes.filter { $0.change != .unchanged }.count
         var notes: [String] = []
         if originalInfo.isTruncated || finalInfo.isTruncated { notes.append("部分 Header 超出记录上限；不完整字段不计算差异。") }
-        if !originalInfo.redactedNames.isEmpty || !finalInfo.redactedNames.isEmpty { notes.append("凭据已隐藏，不参与值比较。") }
         if version == .difference && !comparisonAvailable { notes.append("没有可对照的原始消息，当前显示最终内容。") }
         return Self(nodes: nodes,
                     copyText: fields.map { "\($0.name): \($0.value)" }.joined(separator: "\r\n"),

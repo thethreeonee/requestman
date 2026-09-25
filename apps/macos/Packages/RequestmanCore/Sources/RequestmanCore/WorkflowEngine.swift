@@ -41,7 +41,6 @@ public enum WorkflowEngine {
     }
 
     public static func resolve(_ template: String, environment: [String: String], id: UUID, date: Date) throws -> String {
-        guard template.utf8.count <= 1_048_576 else { throw WorkflowError.invalid("模板超过 1 MiB") }
         // Single pass: values cannot inject a second template expansion.
         var output = ""
         var remaining = template[...]
@@ -61,10 +60,8 @@ public enum WorkflowEngine {
                 output += value
             }
             remaining = remaining[end.upperBound...]
-            guard output.utf8.count <= 1_048_576 else { throw WorkflowError.invalid("动态值超过 1 MiB") }
         }
         output += remaining
-        guard output.utf8.count <= 1_048_576 else { throw WorkflowError.invalid("动态值超过 1 MiB") }
         return output
     }
 
@@ -111,14 +108,8 @@ public enum WorkflowEngine {
                 draft.replacementBody = ""; draft.isMock = !response
                 clearBodyEncoding(&draft)
             }
-            guard draft.headers.reduce(0, { $0 + $1.name.utf8.count + $1.value.utf8.count }) <= 32_768 else {
-                throw WorkflowError.invalid("Header 总大小超过 32 KiB")
-            }
             trace.append(step.kind.title)
             if !response && draft.isMock { break }
-        }
-        guard draft.headers.reduce(0, { $0 + $1.name.utf8.count + $1.value.utf8.count }) <= 32_768 else {
-            throw WorkflowError.invalid("Header 总大小超过 32 KiB")
         }
         return trace
     }

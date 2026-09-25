@@ -86,7 +86,6 @@ import Testing
         try await context.prepareBody(reader, for: .request)
     }
     #expect(await reader.calls == 0)
-    #expect(runtime.bodyBudget.reservedBytes == 0)
 }
 
 @Test func cancellationWhileQueuedReleasesRuntimeWaiter() async throws {
@@ -158,7 +157,6 @@ private enum TestFailure: Error { case expected }
 @Test func limitsRejectInvalidConfigurations() {
     #expect(throws: ExecutionResourceError.invalidLimits) { try ExecutionLimits(maximumActive: 0) }
     #expect(throws: ExecutionResourceError.invalidLimits) { try ExecutionLimits(maximumWaiting: -1) }
-    #expect(throws: ExecutionResourceError.invalidLimits) { try ExecutionLimits(maximumBodyBytes: Int.max) }
     #expect(throws: ExecutionResourceError.invalidLimits) { try ExecutionLimits(timeout: .zero) }
     #expect(throws: ExecutionResourceError.invalidLimits) { try ExecutionEventBuffer(capacity: 1, maximumBatch: 2) }
 }

@@ -9,7 +9,7 @@ func runCURLChecks() throws {
 }
 
 private func checkCURLVersionsAndQuoting() throws {
-    let url = "https://example.test/a/../[1]/{x,y}?quote='&arg=$(printf injection)&雪=1"
+    let url = ("https://example.test/a/../[1]/{x,y}?quote='&arg=$(printf injection)&雪=1&long=" + String(repeating: "x", count: 8_192))
         .replacingOccurrences(of: " ", with: "%20")
     let text = "@payload.json\n{\"quote\":\"'`printf injection`$(printf injection)\\\\雪\"}\r\n"
     var record = CaptureRecord(method: "POST", url: url)
@@ -19,6 +19,10 @@ private func checkCURLVersionsAndQuoting() throws {
     record.finalURL = "https://final.example.test/changed"
     record.sentHeaders = [HTTPField("Content-Type", "application/json")]
     record.sentBody = bodySnapshot(Data(#"{"final":true}"#.utf8))
+    let cookie = "session=" + String(repeating: "a", count: 8_192)
+    record.requestHeaders.append(HTTPField("Cookie", cookie + "; source=original"))
+    record.sentHeaders.append(HTTPField("Cookie", cookie + "; source=modified"))
+    record = record.bounded()
     for shell in ["/bin/sh", "/bin/zsh"] {
         let before = try captureCURL(requireCommand(record, .original), shell: shell)
         precondition(option("--request", in: before.arguments) == "POST")
@@ -27,6 +31,7 @@ private func checkCURLVersionsAndQuoting() throws {
         precondition(before.input.isEmpty)
         precondition(before.arguments.first == "--disable" && before.arguments.contains("--globoff") && before.arguments.contains("--path-as-is"))
         precondition(headerValues(before.arguments).contains("Host: virtual.example.test"))
+        precondition(headerValues(before.arguments).contains("Cookie: " + cookie + "; source=original"))
         precondition(headerValues(before.arguments).contains("X-Quote: '$(printf injection)`printf injection`"))
         precondition(headerValues(before.arguments).filter { $0 == "X-Empty;" }.count == 2, "Duplicate empty headers remain separate, present fields")
         precondition(headerValues(before.arguments).contains("Content-Type:"), "curl's form content type must not be invented")
@@ -35,6 +40,7 @@ private func checkCURLVersionsAndQuoting() throws {
         precondition(option("--url", in: after.arguments) == record.finalURL)
         precondition(option("--data-raw", in: after.arguments) == #"{"final":true}"#)
         precondition(headerValues(after.arguments).contains("Content-Type: application/json"))
+        precondition(headerValues(after.arguments).contains("Cookie: " + cookie + "; source=modified"))
         precondition(!headerValues(after.arguments).contains("Content-Type:"))
     }
 }
@@ -45,11 +51,11 @@ private func checkCURLBinaryAndHeaders() throws {
     record.requestHeaders = [HTTPField("Content-Length", "9999"), HTTPField("Transfer-Encoding", "chunked"),
                              HTTPField("Connection", "close, X-Hop"), HTTPField("X-Hop", "connection-only"),
                              HTTPField("X-Value", "one"), HTTPField("X-Value", "two"), HTTPField("Content-Encoding", "gzip"),
-                             HTTPField("Authorization", "••••••"), HTTPField("Cookie", "••••••")]
-    record.requestHeadersInfo.redactedNames = ["authorization", "cookie"]
+                             HTTPField("Authorization", "secret"), HTTPField("Cookie", "session=abc; theme=dark")]
     record.requestBody = bodySnapshot(binary, headers: record.requestHeaders)
+    record = record.bounded()
     let command = requireCommand(record, .original)
-    precondition(command.hasPrefix(": ") && command.contains("authorization") && command.contains("cookie") && command.contains("已脱敏"))
+    precondition(command.hasPrefix("printf ") && !command.contains("已脱敏"))
     for shell in ["/bin/sh", "/bin/zsh"] {
         let result = try captureCURL(command, shell: shell)
         precondition(result.input == binary, "Binary and content-encoded entity bytes must be replayed without decoding or normalization")
@@ -58,12 +64,13 @@ private func checkCURLBinaryAndHeaders() throws {
         let headers = headerValues(result.arguments)
         precondition(!headers.contains { $0.lowercased().hasPrefix("content-length:") || $0.lowercased().hasPrefix("transfer-encoding:") || $0.lowercased().hasPrefix("x-hop:") })
         precondition(headers.filter { $0.hasPrefix("X-Value:") } == ["X-Value: one", "X-Value: two"])
-        precondition(headers.contains("Content-Encoding: gzip") && headers.contains("Authorization: ••••••"))
+        precondition(headers.contains("Content-Encoding: gzip") && headers.contains("Authorization: secret"))
+        precondition(headers.contains("Cookie: session=abc; theme=dark"))
         precondition(["Accept:", "User-Agent:", "Expect:", "Content-Type:"].allSatisfy(headers.contains))
     }
     let interactive = try captureCURL(command, shell: "/bin/zsh", interactive: true)
-    precondition(interactive.input == binary, "Redaction notices must not become failed commands in interactive zsh")
-    precondition(headerValues(interactive.arguments).contains("Authorization: ••••••"))
+    precondition(interactive.input == binary, "Binary exports must work in interactive zsh")
+    precondition(headerValues(interactive.arguments).contains("Authorization: secret"))
     // Even text-shaped content-encoded bytes must use the binary route, never an implicit decompression.
     record.requestBody = bodySnapshot(Data("encoded-ascii".utf8), headers: [HTTPField("Content-Encoding", "deflate")])
     let encoded = try captureCURL(requireCommand(record, .original), shell: "/bin/sh")
@@ -107,7 +114,7 @@ private func checkCURLEmptyAndUnavailable() throws {
         assertUnavailable(record)
     }
     record.requestHeaders = []
-    for body in [CaptureBodySnapshot.notCollected, .unavailable("没有上游请求"), bodySnapshot(Data(), complete: false), bodySnapshot(Data("abcdef".utf8), maximumBytes: 3)] {
+    for body in [CaptureBodySnapshot.notCollected, .unavailable("没有上游请求"), bodySnapshot(Data(), complete: false)] {
         record.requestBody = body
         assertUnavailable(record)
     }
@@ -118,8 +125,8 @@ private func checkCURLEmptyAndUnavailable() throws {
     precondition(RequestCURL.command(for: record, version: .original) != nil, "Availability is independent for original and modified snapshots")
 }
 
-private func bodySnapshot(_ data: Data, headers: [HTTPField] = [], complete: Bool = true, maximumBytes: Int = CaptureBodySnapshot.maximumBytes) -> CaptureBodySnapshot {
-    let collector = CaptureBodyCollector(headers: headers, maximumBytes: maximumBytes)
+private func bodySnapshot(_ data: Data, headers: [HTTPField] = [], complete: Bool = true) -> CaptureBodySnapshot {
+    let collector = CaptureBodyCollector(headers: headers)
     collector.append(data)
     return collector.snapshot(isComplete: complete)
 }

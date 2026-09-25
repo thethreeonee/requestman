@@ -2,7 +2,7 @@ import Foundation
 import RequestmanCore
 
 /// Replays the captured HTTP entity, while curl rebuilds connection and transfer framing.
-/// Only complete snapshots can be exported; credential redaction remains explicit in the command.
+/// Only complete snapshots can be exported.
 enum RequestCURL {
     enum Version { case original, modified }
 
@@ -45,12 +45,7 @@ enum RequestCURL {
         let framing = Set(connectionFields + ["connection", "proxy-connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "proxy-authorization", "proxy-authenticate", "content-length"])
         let headers = request.headers.filter { !framing.contains($0.name.lowercased()) }
         let names = Set(headers.map { $0.name.lowercased() })
-        let redacted = request.info.redactedNames.map { $0.lowercased() }.filter { names.contains($0) }.sorted()
         var lines: [String] = []
-        if !redacted.isEmpty {
-            // A quoted no-op also works when interactive zsh has INTERACTIVE_COMMENTS disabled.
-            lines.append(": " + quote("以下请求头的值已脱敏，执行前请自行替换：" + redacted.joined(separator: "、")))
-        }
         // --disable must be curl's first option; do not inherit ~/.curlrc options or credentials.
         var options = ["curl --disable", "--globoff", "--path-as-is", "--http1.1", "--request " + quote(request.method)]
         if request.method == "HEAD" { options.append("--head") }

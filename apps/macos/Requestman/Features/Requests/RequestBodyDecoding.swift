@@ -2,18 +2,14 @@ import Foundation
 import RequestmanCore
 import zlib
 
-/// Decodes a complete, bounded capture only when its detail view is opened.
+/// Decodes a complete capture only when its detail view is opened.
 /// Call from the inspection worker, never while forwarding network traffic.
 enum RequestBodyDecoding {
-    static let maximumDecodedBytes = 256 * 1_024
-    private static let maximumEncodingLayers = 8
 
     enum DecodingError: LocalizedError, Sendable, Equatable {
         case incompleteSnapshot
         case unsupportedEncoding(String)
         case invalidEncoding
-        case tooManyEncodings
-        case decodedBodyTooLarge
         case invalidCompressedData
         case truncatedCompressedData
         case trailingCompressedData
@@ -28,10 +24,6 @@ enum RequestBodyDecoding {
                 "暂不支持 \(encoding) 内容编码。"
             case .invalidEncoding:
                 "内容编码格式无效，无法解压。"
-            case .tooManyEncodings:
-                "内容编码层数过多，无法预览。"
-            case .decodedBodyTooLarge:
-                "解压后的内容超过 256 KB 预览上限。"
             case .invalidCompressedData:
                 "压缩内容已损坏或格式不受支持，无法解压。"
             case .truncatedCompressedData:
@@ -57,14 +49,13 @@ enum RequestBodyDecoding {
         let encodings = encodingHeader.split(separator: ",", omittingEmptySubsequences: false)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
         guard !encodings.contains("") else { throw DecodingError.invalidEncoding }
-        guard encodings.count <= maximumEncodingLayers else { throw DecodingError.tooManyEncodings }
         for encoding in encodings where !["identity", "gzip", "x-gzip", "deflate"].contains(encoding) {
             throw DecodingError.unsupportedEncoding(encoding)
         }
 
         var data = snapshot.data
         // Content-Encoding lists the encodings in application order. Undo the
-        // outermost layer first, enforcing the same bound for every layer.
+        // outermost layer first.
         for encoding in encodings.reversed() {
             try Task.checkCancellation()
             switch encoding {
@@ -78,7 +69,6 @@ enum RequestBodyDecoding {
     }
 
     private static func inflate(_ data: Data, gzip: Bool) throws -> Data {
-        guard data.count <= maximumDecodedBytes else { throw DecodingError.decodedBodyTooLarge }
         var stream = z_stream()
         // HTTP "deflate" is a zlib-wrapped stream. Do not guess raw DEFLATE
         // after a checksum or format error, which could accept damaged input.
@@ -90,14 +80,20 @@ enum RequestBodyDecoding {
 
         return try data.withUnsafeBytes { input in
             let bytes = input.bindMemory(to: Bytef.self)
-            stream.next_in = UnsafeMutablePointer(mutating: bytes.baseAddress)
-            stream.avail_in = uInt(bytes.count)
+            var inputOffset = 0
             var output = Data()
-            output.reserveCapacity(min(maximumDecodedBytes, max(1_024, data.count)))
+            output.reserveCapacity(max(1_024, data.count))
             var buffer = [UInt8](repeating: 0, count: 16 * 1_024)
 
             while true {
                 try Task.checkCancellation()
+                // zlib uses a 32-bit input count; feed chunks so large captures never narrow an Int.
+                if stream.avail_in == 0, inputOffset < bytes.count {
+                    let count = min(64 * 1_024, bytes.count - inputOffset)
+                    stream.next_in = UnsafeMutablePointer(mutating: bytes.baseAddress!.advanced(by: inputOffset))
+                    stream.avail_in = uInt(count)
+                    inputOffset += count
+                }
                 let previousInput = stream.avail_in
                 let status = buffer.withUnsafeMutableBytes { destination in
                     stream.next_out = destination.bindMemory(to: Bytef.self).baseAddress
@@ -105,15 +101,12 @@ enum RequestBodyDecoding {
                     return zlib.inflate(&stream, Z_NO_FLUSH)
                 }
                 let produced = buffer.count - Int(stream.avail_out)
-                guard produced <= maximumDecodedBytes - output.count else {
-                    throw DecodingError.decodedBodyTooLarge
-                }
                 output.append(contentsOf: buffer.prefix(produced))
 
                 if status == Z_STREAM_END {
-                    guard stream.avail_in == 0 else {
-                        let offset = bytes.count - Int(stream.avail_in)
-                        if gzip, stream.avail_in >= 2, bytes[offset] == 0x1f, bytes[offset + 1] == 0x8b {
+                    let offset = inputOffset - Int(stream.avail_in)
+                    guard offset == bytes.count else {
+                        if gzip, bytes.count - offset >= 2, bytes[offset] == 0x1f, bytes[offset + 1] == 0x8b {
                             throw DecodingError.concatenatedGzipMembers
                         }
                         throw DecodingError.trailingCompressedData
@@ -123,7 +116,7 @@ enum RequestBodyDecoding {
 
                 switch status {
                 case Z_OK:
-                    if produced == 0, stream.avail_in == 0 {
+                    if produced == 0, stream.avail_in == 0, inputOffset == bytes.count {
                         throw DecodingError.truncatedCompressedData
                     }
                     guard produced > 0 || stream.avail_in < previousInput else {

@@ -13,17 +13,19 @@ func runBodyDecodingChecks() throws {
     let overLimit = fixture("H4sIAAAAAAAC/+3BMQEAAADCoKzrX8LfDEABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJwBZzUEdAEABAA=")
     var corruptChecksum = gzip
     corruptChecksum[corruptChecksum.count - 8] ^= 0xff
+    let largeInput = Data((0..<(512 * 1_024 + 3)).map { UInt8(truncatingIfNeeded: $0) })
 
     let cases: [BodyDecodingCheck] = [
         .init("identity", bytes: plain, expected: plain),
         .init("explicit identity", bytes: plain, encoding: "identity", expected: plain),
+        .init("compressed input across read chunks", bytes: storedZlib(largeInput), encoding: "deflate", expected: largeInput),
         .init("gzip", bytes: gzip, encoding: "gzip", expected: plain),
         .init("deflate", bytes: deflate, encoding: "deflate", expected: plain),
         .init("multiple encodings", bytes: multiple, encoding: "gzip, deflate", expected: plain),
         .init("empty gzip", bytes: empty, encoding: "gzip", expected: Data()),
         .init("exact output limit", bytes: atLimit, encoding: "gzip",
-              expected: Data(repeating: 0x61, count: RequestBodyDecoding.maximumDecodedBytes)),
-        .init("oversized output", bytes: overLimit, encoding: "gzip", error: .decodedBodyTooLarge),
+              expected: Data(repeating: 0x61, count: (256 * 1_024))),
+        .init("output beyond former limit", bytes: overLimit, encoding: "gzip", expected: Data(repeating: 0x61, count: 256 * 1_024 + 1)),
         .init("truncated gzip", bytes: Data(gzip.dropLast()), encoding: "gzip", error: .truncatedCompressedData),
         .init("corrupt checksum", bytes: corruptChecksum, encoding: "gzip", error: .invalidCompressedData),
         .init("trailing bytes", bytes: gzip + Data("trailing".utf8), encoding: "gzip", error: .trailingCompressedData),
@@ -32,16 +34,14 @@ func runBodyDecodingChecks() throws {
         .init("empty compressed input", bytes: Data(), encoding: "gzip", error: .truncatedCompressedData),
         .init("unsupported br", bytes: plain, encoding: "br", error: .unsupportedEncoding("br")),
         .init("incomplete record", bytes: gzip, encoding: "gzip", error: .incompleteSnapshot, isComplete: false),
-        .init("truncated snapshot", bytes: gzip, encoding: "gzip", error: .incompleteSnapshot, maximumBytes: 5),
         .init("invalid encoding list", bytes: gzip, encoding: "gzip,,identity", error: .invalidEncoding),
         .init("excessive encoding layers", bytes: plain,
-              encoding: Array(repeating: "identity", count: 9).joined(separator: ","), error: .tooManyEncodings),
+              encoding: Array(repeating: "identity", count: 9).joined(separator: ","), expected: plain),
         .init("case insensitive encoding", bytes: gzip, encoding: " GZip ", expected: plain),
     ]
-    precondition(RequestBodyDecoding.maximumDecodedBytes == 256 * 1_024)
     for test in cases {
         let headers = test.encoding.map { [HTTPField("Content-Encoding", $0)] } ?? []
-        let collector = CaptureBodyCollector(headers: headers, budget: CaptureBodyBudget(), maximumBytes: test.maximumBytes)
+        let collector = CaptureBodyCollector(headers: headers)
         collector.append(test.bytes)
         let snapshot = collector.snapshot(isComplete: test.isComplete)
         do {
@@ -55,7 +55,7 @@ func runBodyDecodingChecks() throws {
                          "\(test.name): decoding errors must explain the unavailable preview")
         }
     }
-    print("Body decoding checks passed: \(cases.count) fixtures, actual capture snapshots, gzip/deflate and resource bounds")
+    print("Body decoding checks passed: \(cases.count) fixtures, actual capture snapshots, gzip/deflate, large output and malformed input")
 }
 
 private struct BodyDecodingCheck {
@@ -65,22 +65,41 @@ private struct BodyDecodingCheck {
     let expected: Data?
     let error: RequestBodyDecoding.DecodingError?
     let isComplete: Bool
-    let maximumBytes: Int
 
     init(_ name: String, bytes: Data, encoding: String? = nil, expected: Data? = nil,
-         error: RequestBodyDecoding.DecodingError? = nil, isComplete: Bool = true,
-         maximumBytes: Int = CaptureBodySnapshot.maximumBytes) {
+         error: RequestBodyDecoding.DecodingError? = nil, isComplete: Bool = true) {
         self.name = name
         self.bytes = bytes
         self.encoding = encoding
         self.expected = expected
         self.error = error
         self.isComplete = isComplete
-        self.maximumBytes = maximumBytes
     }
 }
 
 private func fixture(_ base64: String) -> Data {
     guard let data = Data(base64Encoded: base64) else { preconditionFailure("Invalid compressed fixture") }
     return data
+}
+
+// Independent uncompressed DEFLATE blocks exercise incremental zlib input beyond 64 KiB.
+private func storedZlib(_ data: Data) -> Data {
+    var result = Data([0x78, 0x01])
+    var offset = 0
+    while offset < data.count {
+        let count = min(65_535, data.count - offset)
+        let length = UInt16(count)
+        result.append(offset + count == data.count ? 1 : 0)
+        for value in [length, ~length] {
+            result.append(UInt8(truncatingIfNeeded: value))
+            result.append(UInt8(truncatingIfNeeded: value >> 8))
+        }
+        result.append(data[offset..<(offset + count)])
+        offset += count
+    }
+    var a: UInt32 = 1, b: UInt32 = 0
+    for byte in data { a = (a + UInt32(byte)) % 65_521; b = (b + a) % 65_521 }
+    let checksum = (b << 16) | a
+    for shift in [24, 16, 8, 0] { result.append(UInt8(truncatingIfNeeded: checksum >> shift)) }
+    return result
 }

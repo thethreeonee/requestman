@@ -53,11 +53,11 @@ struct ProxyIntegrationTests {
             #expect(records.count == 1); #expect(records.first?.outcome == .modified)
             #expect(records.first?.requestBytes == body.utf8.count)
             let record = try #require(records.first)
-            #expect(record.requestBody.state == .complete && record.requestBody.isTruncated)
-            #expect(record.requestBody.data.count == CaptureBodySnapshot.maximumBytes)
+            #expect(record.requestBody.isComplete)
+            #expect(record.requestBody.data == Data(body.utf8))
             #expect(record.requestBody.observedByteCount == body.utf8.count)
             #expect(record.sentBody.data == record.requestBody.data)
-            #expect(record.sentBody.state == .complete && record.sentBody.isTruncated)
+            #expect(record.sentBody.isComplete)
             #expect(record.receivedBody.data == Data("origin-body".utf8))
             #expect(record.responseBody.data == record.receivedBody.data)
             #expect(record.originalStatus == 200 && record.status == 202)
@@ -173,16 +173,42 @@ struct ProxyIntegrationTests {
             }
         }
     }
-    @Test func generatedBodyBudgetIsGlobalAndReleasedWithOwner() throws {
-        let state = ProxySharedState()
-        var reservations: [GeneratedBodyReservation] = []
-        let body = String(repeating: "x", count: 1_048_576)
-        for _ in 0..<16 { reservations.append(try state.reserveBody(body)) }
-        #expect(throws: WorkflowError.self) { try state.reserveBody("x") }
-        reservations.removeAll()
-        #expect(state.generatedBodyBytes.withLock { $0 } == 0)
-        let lease = try state.reserveBody(body)
-        #expect(lease.bytes == 1_048_576)
+    @Test func largeHeadersURLsAndGeneratedBodiesRemainComplete() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            let body = String(repeating: "b", count: 2 * 1_048_576)
+            var mock = ModificationStep(kind: .mock); mock.value = body
+            var header = ModificationStep(kind: .setHeader); header.name = "X-Large"; header.value = String(repeating: "h", count: 100_000)
+            workflow.requestSteps = [mock]; workflow.responseSteps = [header]
+            try await h.start(workflow: workflow)
+            let url = h.originURL + String(repeating: "path", count: 1_024)
+            let auth = "Bearer " + String(repeating: "a", count: 100_000)
+            let headers = (0..<150).map { "X-\($0): value\r\n" }.joined()
+            let reply = try await h.exchange("GET \(url) HTTP/1.1\r\nHost: localhost\r\nAuthorization: \(auth)\r\n" + headers + "\r\n")
+            #expect(reply.hasSuffix(body))
+            #expect(reply.contains("X-Large: " + header.value))
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(record.url == url && !record.urlWasTruncated)
+            #expect(record.requestHeaders.count == 153 && !record.requestHeadersInfo.isTruncated)
+            #expect(record.requestHeaders.first { $0.name == "Authorization" }?.value == auth)
+            #expect(record.responseBody.isComplete && record.responseBody.data == Data(body.utf8))
+            #expect(h.observation.withLock { $0.requests } == 0)
+        }
+    }
+    @Test func largeUpstreamHeadersAreForwardedAndCapturedWithoutMasking() async throws {
+        try await withHarness { h in
+            try await h.start()
+            let reply = try await h.exchange("GET \(h.originURL)large-headers HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            let cookie = "session=" + String(repeating: "c", count: 100_000)
+            #expect(reply.contains("Set-Cookie: " + cookie))
+            #expect(reply.contains("origin-body"))
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(record.receivedHeaders.count > 128)
+            #expect(record.receivedHeaders.first { $0.name == "Set-Cookie" }?.value == cookie)
+            #expect(record.responseBody.data == Data("origin-body".utf8))
+            #expect(record.responseHeaders.first { $0.name == "Set-Cookie" }?.value == cookie)
+            #expect(!record.receivedHeadersInfo.isTruncated && !record.responseHeadersInfo.isTruncated)
+        }
     }
     @Test func largeResponseStreamsAllBytesAndRedirectDoesNotReflectCredentials() async throws {
         try await withHarness { h in
@@ -329,6 +355,10 @@ private final class OriginHandler: ChannelInboundHandler, @unchecked Sendable {
             let bytes = uri.hasSuffix("/encoded") ? gzipJSONFixture : Array(body.utf8)
             let interrupted = uri.hasSuffix("/interrupted")
             var headers = HTTPHeaders([("Content-Length", String(bytes.count + (interrupted ? 32 : 0))), ("Connection", "close")])
+            if uri.hasSuffix("/large-headers") {
+                headers.add(name: "Set-Cookie", value: "session=" + String(repeating: "c", count: 100_000))
+                for index in 0..<150 { headers.add(name: "X-\(index)", value: "value") }
+            }
             if uri.hasSuffix("/encoded") {
                 headers.add(name: "Content-Encoding", value: "gzip")
                 headers.add(name: "Content-Type", value: "application/json")

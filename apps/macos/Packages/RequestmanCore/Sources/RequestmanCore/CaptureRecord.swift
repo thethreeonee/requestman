@@ -4,8 +4,6 @@ import os
 public struct CaptureHeadersInfo: Sendable {
     public var originalCount = 0
     public var isTruncated = false
-    /// Lowercased names; comparisons for these fields must not imply knowledge of hidden values.
-    public var redactedNames: Set<String> = []
     public var truncatedNames: Set<String> = []
     public init() {}
 }
@@ -47,35 +45,17 @@ public struct CaptureRecord: Identifiable, Sendable {
     public init(id: UUID = UUID(), method: String, url: String) {
         self.id = id; self.method = method; self.sentMethod = method; self.url = url; self.finalURL = url; self.startedAt = Date()
     }
-    /// Bound metadata and redact credentials before insertion; body storage owns its shared budget lease.
+    /// Bound display metadata while retaining complete URL, Header and Body content.
     public func bounded() -> Self {
         var copy = self
-        copy.urlWasTruncated = urlWasTruncated || url.count > 2048
-        copy.finalURLWasTruncated = finalURLWasTruncated || finalURL.count > 2048
-        copy.url = String(url.prefix(2048)); copy.finalURL = String(finalURL.prefix(2048))
         copy.project = String(project.prefix(128)); copy.workflow = String(workflow.prefix(128))
         copy.environment = String(environment.prefix(128)); copy.error = error.map { String($0.prefix(512)) }
         copy.steps = steps.prefix(64).map { String($0.prefix(128)) }
-        copy.requestHeaders = Self.redact(requestHeaders, info: &copy.requestHeadersInfo)
-        copy.sentHeaders = Self.redact(sentHeaders, info: &copy.sentHeadersInfo)
-        copy.responseHeaders = Self.redact(responseHeaders, info: &copy.responseHeadersInfo)
-        copy.receivedHeaders = Self.redact(receivedHeaders, info: &copy.receivedHeadersInfo)
+        copy.requestHeadersInfo.originalCount = max(requestHeadersInfo.originalCount, requestHeaders.count)
+        copy.sentHeadersInfo.originalCount = max(sentHeadersInfo.originalCount, sentHeaders.count)
+        copy.receivedHeadersInfo.originalCount = max(receivedHeadersInfo.originalCount, receivedHeaders.count)
+        copy.responseHeadersInfo.originalCount = max(responseHeadersInfo.originalCount, responseHeaders.count)
         return copy
-    }
-    private static func redact(_ fields: [HTTPField], info: inout CaptureHeadersInfo) -> [HTTPField] {
-        info.originalCount = max(info.originalCount, fields.count)
-        info.isTruncated = info.isTruncated || fields.count > 40
-        return fields.prefix(40).map { field in
-            let name = field.name.lowercased()
-            let sensitive = ["authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key"].contains(name)
-            if sensitive { info.redactedNames.insert(name) }
-            if field.name.count > 128 || (!sensitive && field.value.count > 256) {
-                info.isTruncated = true
-                info.truncatedNames.insert(name)
-                info.truncatedNames.insert(String(field.name.prefix(128)).lowercased())
-            }
-            return HTTPField(String(field.name.prefix(128)), sensitive ? "••••••" : String(field.value.prefix(256)))
-        }
     }
 }
 

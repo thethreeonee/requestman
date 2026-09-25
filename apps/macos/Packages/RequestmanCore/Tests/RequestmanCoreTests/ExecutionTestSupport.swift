@@ -41,13 +41,10 @@ actor ChunkReader: BodyReader {
 
 func smallLimits(
     maximumActive: Int = 2,
-    maximumWaiting: Int = 2,
-    maximumBodyBytes: Int = 8,
-    maximumBufferedBytes: Int = 32
+    maximumWaiting: Int = 2
 ) throws -> ExecutionLimits {
     try ExecutionLimits(
         maximumActive: maximumActive, maximumWaiting: maximumWaiting,
-        maximumBodyBytes: maximumBodyBytes, maximumBufferedBytes: maximumBufferedBytes,
         readChunkBytes: 4, eventCapacity: 16, maximumEventBatch: 8
     )
 }

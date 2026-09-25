@@ -15,7 +15,6 @@ import Testing
     }
     #expect(await request.calls == 0)
     #expect(await response.calls == 0)
-    #expect(runtime.bodyBudget.reservedBytes == 0)
 }
 
 @Test func responseBodyRequirementDoesNotBufferRequest() async throws {
@@ -30,46 +29,27 @@ import Testing
         }
         #expect(body.chunks == [Data("abcd".utf8), Data("efgh".utf8)])
         #expect(body.byteCount == 8)
-        #expect(runtime.bodyBudget.reservedBytes == 8)
         await #expect(throws: ExecutionResourceError.bodyAlreadyPrepared) {
             try await context.prepareBody(response, for: .response)
         }
     }
     #expect(await request.calls == 0)
-    #expect(runtime.bodyBudget.reservedBytes == 0)
 }
 
-@Test func oversizedBodyFailsAndReleasesAllReservations() async throws {
-    let runtime = try FlowExecutionRuntime(limits: smallLimits())
-    await #expect(throws: ExecutionResourceError.bodyTooLarge) {
-        try await runtime.execute(plan: executionPlan(request: [.completeBody])) { context in
-            _ = try await context.prepareBody(ChunkReader("123456789"), for: .request)
-        }
+@Test func completeBodiesCanExceedFormerSizeLimitsAndRemainShared() async throws {
+    let runtime = try FlowExecutionRuntime(limits: ExecutionLimits(readChunkBytes: 65_536))
+    let payload = String(repeating: "x", count: 5 * 1_048_576)
+    let first = try await runtime.execute(plan: executionPlan(request: [.completeBody])) { context in
+        try await context.prepareBody(ChunkReader(payload, chunkSize: 65_536), for: .request)
     }
-    #expect(runtime.bodyBudget.reservedBytes == 0)
-    #expect(runtime.admission.active == 0)
-}
-
-@Test func sharedBudgetCountsBodiesUntilTheirLastOwnerReleasesThem() async throws {
-    let limits = try smallLimits(maximumBufferedBytes: 12)
-    let runtime = try FlowExecutionRuntime(limits: limits)
-    var first: PreparedBody? = try await runtime.execute(plan: executionPlan(request: [.completeBody])) { context in
-        try await context.prepareBody(ChunkReader("12345678"), for: .request)
+    let second = try await runtime.execute(plan: executionPlan(response: [.completeBody])) { context in
+        try await context.prepareBody(ChunkReader(payload, chunkSize: 65_536), for: .response)
     }
-    #expect(runtime.bodyBudget.reservedBytes == 8)
-    await #expect(throws: ExecutionResourceError.bodyBudgetExhausted) {
-        try await runtime.execute(plan: executionPlan(response: [.completeBody])) { context in
-            _ = try await context.prepareBody(ChunkReader("abcdefgh"), for: .response)
-        }
+    for prepared in [first, second] {
+        guard case let .buffered(body) = prepared else { Issue.record("Expected buffered body"); return }
+        #expect(body.byteCount == payload.utf8.count)
+        #expect(body.chunks.reduce(into: Data()) { $0.append($1) } == Data(payload.utf8))
     }
-    #expect(runtime.bodyBudget.reservedBytes == 8)
-    #expect(first != nil)
-    first = nil
-    #expect(runtime.bodyBudget.reservedBytes == 0)
-    try await runtime.execute(plan: executionPlan(request: [.completeBody])) { context in
-        _ = try await context.prepareBody(ChunkReader("12345678"), for: .request)
-    }
-    #expect(runtime.bodyBudget.reservedBytes == 0)
 }
 
 private struct InvalidChunkReader: BodyReader {
@@ -87,7 +67,6 @@ func invalidReaderChunksCannotCreateAnUnboundedLoop(empty: Bool) async throws {
             _ = try await context.prepareBody(InvalidChunkReader(empty: empty), for: .request)
         }
     }
-    #expect(runtime.bodyBudget.reservedBytes == 0)
 }
 
 private struct SuspendedReader: BodyReader {
@@ -101,7 +80,7 @@ private struct SuspendedReader: BodyReader {
     }
 }
 
-@Test func cancellingBodyReadReleasesPendingReadAllowance() async throws {
+@Test func cancellingBodyReadReleasesAdmission() async throws {
     let runtime = try FlowExecutionRuntime(limits: smallLimits())
     let entered = TestLatch()
     let pair = AsyncStream.makeStream(of: Data.self, bufferingPolicy: .bufferingNewest(1))
@@ -112,10 +91,8 @@ private struct SuspendedReader: BodyReader {
         }
     }
     await entered.wait()
-    #expect(runtime.bodyBudget.reservedBytes == 4)
     task.cancel()
     await #expect(throws: CancellationError.self) { try await task.value }
     pair.continuation.finish()
-    #expect(runtime.bodyBudget.reservedBytes == 0)
     #expect(runtime.admission.active == 0)
 }

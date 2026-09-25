@@ -42,14 +42,21 @@ struct WorkflowEngineTests {
         _ = try WorkflowEngine.apply([status], response: true, to: &draft, environment: [:], id: UUID(), date: Date())
         #expect(draft.status == 201); #expect(draft.replacementBody == "hello")
     }
-    @Test func historyIsBoundedPausedAndRedacted() {
+    @Test func historyIsBoundedPausedAndKeepsCredentials() {
         let buffer = CaptureRecordBuffer(capacity: 2)
         var record = CaptureRecord(method: "GET", url: "http://localhost/")
-        record.requestHeaders = [HTTPField("Cookie", "secret")]
+        record.requestHeaders = [HTTPField("Cookie", "session=original"), HTTPField("Authorization", "secret")]
+        record.sentHeaders = [HTTPField("cOoKiE", "session=modified")]
+        record.receivedHeaders = [HTTPField("Set-Cookie", "session=server; HttpOnly"), HTTPField("Set-Cookie", "theme=dark")]
+        record.responseHeaders = [HTTPField("set-cookie", "session=client; HttpOnly")]
         buffer.append(record); buffer.append(record); buffer.append(record)
         let batch = buffer.drain(limit: 1)
         #expect(batch.records.count == 1); #expect(batch.dropped == 1)
-        #expect(batch.records[0].requestHeaders[0].value == "••••••")
+        #expect(batch.records[0].requestHeaders[0].value == "session=original")
+        #expect(batch.records[0].requestHeaders[1].value == "secret")
+        #expect(batch.records[0].sentHeaders == record.sentHeaders)
+        #expect(batch.records[0].receivedHeaders == record.receivedHeaders)
+        #expect(batch.records[0].responseHeaders == record.responseHeaders)
         buffer.setPaused(true); buffer.append(record)
         #expect(buffer.drain().records.count == 1)
         #expect(buffer.drain().records.isEmpty)

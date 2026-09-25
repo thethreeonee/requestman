@@ -26,7 +26,7 @@
 
 证书引导由 `WorkspaceModel.certificateSetup` 持有 `CertificateSetupModel`，经 `CertificateService` 访问独立的 `LocalCertificateService` actor；SwiftUI 不直接读写 Security。只在用户点击“设置证书…”后串行检查、生成、安装、授权和复核，已完成步骤可复用，取消不会自动重弹授权。私钥使用不可导出的文件型钥匙串键，由登录钥匙串锁和 ACL 保护；此选择兼容当前无专用 Keychain entitlement 的 macOS 宿主，公开 CA 安装到浏览器读取的默认钥匙串。证书编码和签名使用 [Apple swift-certificates](https://github.com/apple/swift-certificates)，不手写 X.509 或把私钥写到磁盘。当前用户信任只指定 SSL policy，授权由 `SecTrustSettingsSetTrustSettings` 系统面板执行；验证使用短期内存测试叶证书、主机名及系统 SSL 信任链，不设置自定义 anchors、不关闭证书校验。过期、损坏或密钥不匹配时报告错误并保留原材料，不静默轮换。证书与捕获服务共享同一个 actor。新 CONNECT 连接经 `TLSCertificateProviding` 获取短期站点证书；未完成信任时保持透传，已信任时升级到 NIOSSL 服务端并复用 HTTP 流程，按 CONNECT authority 校验内层 Host 与目标。CA 密钥不导出，P-256 站点密钥仅在内存中使用；SAN 支持 DNS/IPv4/IPv6，证书最多有效 7 天、不超过 CA 到期，缓存上限 128 个。已有透传连接需重建，历史记录不回填。
 
-`ProxyTLS` 使用 Apple NIOSSL 处理 TLS，出站验证异步交给 macOS `SecTrust`，同时检查真实目标的主机名和系统/用户信任；关闭网络证书补取避免系统代理递归，不关闭证书校验。仅 internal 测试构造器允许内存测试锚点。CONNECT 建立、升级后等待内层请求、每个 HTTP 事务分别限时 30 秒，上游 TLS 握手计入该 HTTP 事务；升级时先安装 TLS 处理器，再释放 CONNECT decoder 缓冲的首包数据。解密记录包含 URL、方法和双向 Header 的有界快照，Body 旁路采集每方向最多 64 KiB 的预览；网络线程不等待完整内容、不解压。回环测试不安装或信任本机 CA。
+`ProxyTLS` 使用 Apple NIOSSL 处理 TLS，出站验证异步交给 macOS `SecTrust`，同时检查真实目标的主机名和系统/用户信任；关闭网络证书补取避免系统代理递归，不关闭证书校验。仅 internal 测试构造器允许内存测试锚点。CONNECT 建立、升级后等待内层请求、每个 HTTP 事务分别限时 30 秒，上游 TLS 握手计入该 HTTP 事务；升级时先安装 TLS 处理器，再释放 CONNECT decoder 缓冲的首包数据。解密记录完整保留 URL、方法、双向 Header 和旁路采集的 Body；网络线程不等待完整内容、不解压。回环测试不安装或信任本机 CA。
 
 依赖方向：`Features → WorkspaceModel → CaptureService / RequestmanCore`。本轮本地代理库运行在宿主进程的独立 NIO 事件循环。未来系统扩展和代理核心需要明确的 IPC 协议，不直接跨进程共享 UI 状态。`CaptureConfiguration` 目前只是 Swift 模块间的数据契约，还不是稳定 IPC 协议。
 
@@ -50,11 +50,11 @@ HTTP/1.1 顺序请求复用下游连接，每条下游最多保留一个同目�
 
 详情内容复用 `ToolbarSectionControl`，直接使用 `NSSegmentedControl` 展示请求头、请求体、响应头、响应体四项；macOS 26+ 用控件自身的 `borderShape = .capsule` 配置胶囊形状，macOS 27+ 设 `.tabs` 语义，继续使用 `.automatic` 分段样式；主工作区和设置分段控件采用相同配置。形状与绘制均由 AppKit 提供，不添加 `NSGlassEffectView` 包装。版本继续使用独立菜单；请求体、响应体的 JSON 显示方式改由原生 `Button` 切换，树形时显示“原始数据”，源码时显示“树形视图”，不改变当前版本。`RequestInspectorView` 固定摘要、独立查询参数入口与条件规则入口，查询参数来自原始/最终 URL，不混入 Body；`RequestPayloadView` 保留各 Tab 浏览状态，`RequestDataOutline` 通过 `NSOutlineView` 提供 Header 和 JSON 字段树。原始数据使用只读 `NSTextView`，保留文本缩进、换行和字段顺序，不重新格式化；非 JSON 直接显示文本或十六进制，不提供无效切换。Payload、Outline 和 Source 不再设置独立白背景，由系统 Inspector 背景贯穿；字段仍仅用系统色的低透明度背景表达变更。原生按钮在行悬停时以 0.15 秒淡入淡出并复制值或完整子树，遵循减少动态效果设置；提供右键与键盘替代。`RequestInspectionData` 在后台构造差异和节点，隐藏/不完整数据不产生推测性差异。系统侧栏建议宽度 520 pt，可在 400–760 pt 调整。外观与鼠标交互仍待 App 运行验收。
 
-`CaptureBodyCollector` 随流量记录原始请求、发出请求、服务器响应和最终响应的有界前缀，`CaptureBodySnapshot` 持有全局 32 MiB 预算租约直到最后一个快照释放；单快照 64 KiB。记录包括完整、未完成、未采集和不可用状态，Mock 无上游原始响应。写入失败不会被后续结束标记成功掩盖。`RequestBodyDecoding` 只对完整快照在详情后台任务中使用系统 zlib 解码 gzip / deflate，每层输出限 256 KiB；JSON 树另限 64 层与每侧 4,096 节点。Body 预览不落盘，详见 [性能边界](Performance.md) 与 [请求详情设计](Design/request-inspector.md)。
+`CaptureBodyCollector` 随流量完整记录原始请求、发出请求、服务器响应和最终响应，`CaptureBodySnapshot` 共享不可变内容，不设置单快照尺寸或全局 Body 预算。URL 和 Header 完整保留，所有凭据与环境变量直接显示原值。记录包括完整、未完成、未采集和不可用状态，Mock 无上游原始响应。写入失败不会被后续结束标记成功掩盖。`RequestBodyDecoding` 只对完整快照在详情后台任务中使用系统 zlib 解码 gzip / deflate，不设置解压输出尺寸和编码层数上限；JSON 树不设置应用层字节数、层数和节点数上限。Body 预览不落盘，详见 [性能边界](Performance.md) 与 [请求详情设计](Design/request-inspector.md)。
 
 详情顶部以原生 `Button` 承载单行中间省略的 URL，保留原字号与系统全文悬停提示。点击通过 SwiftUI `.popover` 展示 `RequestURLDetails`，完整已记录文本可选择、折行并在超长时滚动，原生按钮调用 `RequestClipboard.copy(record.url)`；`urlWasTruncated` 时显示不完整提示并禁用完整复制。侧栏隐藏时关闭 URL Popover，切换记录沿用 `.id(record.id)` 生命周期。
 
-更多菜单由工作区的 `NSMenuToolbarItem` 承载，设 `isBordered = true` 使用系统按钮外观，位于展开侧栏工具栏的收起按钮左侧，折叠时隐藏，不再占用 URL 摘要。菜单依次提供“复制完整 URL / 复制原始请求为 cURL / 复制修改后请求为 cURL”，不完整时禁用相应项并提供原因。`RequestCURL` 使用原始或发送快照导出，正文保持采集的实体字节，不复用解压或格式化后的显示文本；传输分帧与长度交给 curl 重建。URL、Header 或 Body 不完整时不生成误导性的完整请求，已脱敏 Header 仍保留脱敏语义。命令只在用户点击复制时构造，不自动执行请求。
+更多菜单由工作区的 `NSMenuToolbarItem` 承载，设 `isBordered = true` 使用系统按钮外观，位于展开侧栏工具栏的收起按钮左侧，折叠时隐藏，不再占用 URL 摘要。菜单依次提供“复制完整 URL / 复制原始请求为 cURL / 复制修改后请求为 cURL”，不完整时禁用相应项并提供原因。`RequestCURL` 使用原始或发送快照导出，正文保持采集的实体字节，不复用解压或格式化后的显示文本；传输分帧与长度交给 curl 重建。URL、Header 或 Body 不完整时不生成误导性的完整请求，Header 原值直接用于导出。命令只在用户点击复制时构造，不自动执行请求。
 
 `RequestDataNode.jsonStringValue` 保存可检查字符串的实际值，与显示摘要、JSON 引号及复制载荷分开；Header 按当前显示版本的完整性决定是否提供该值。行悬停时通过后台任务调用 `RequestInspectionData.stringJSONPreview`，复用既有 JSON 解析限制与节点生成；成功后用原生按钮打开 `NSPopover`，其 `NSHostingController` 内容仍是 `RequestDataOutline`。解析不替换原节点，嵌套字符串按需逐层检查，不预先递归解码所有字符串。
 
@@ -68,7 +68,7 @@ HTTP/1.1 顺序请求复用下游连接，每条下游最多保留一个同目�
 
 `LocalProxyCaptureService` 的全局会话先监听再调用 `SystemProxyController` 接管，先恢复系统设置再关闭监听；浏览器会话的正常启动、重配、回滚和停止不调用系统代理服务。全局恢复失败保留监听与恢复文件，并阻止正常退出；UI 同步仍在运行的监听端口。上次异常退出的系统代理恢复由 App 载入时独立执行，失败时记录待恢复状态，阻止新浏览器会话沿用残留全局代理；下次启动动作先重试旧会话恢复，退出也会重试。`SystemProxyController` 在独立 actor 中锁定网络偏好会话，按服务 ID 保存原配置后统一 commit/apply。接管当前网络位置中已启用且支持代理协议的服务，临时关闭 PAC、自动发现、SOCKS 和绕过列表；恢复仅覆盖仍与接管值一致的字段组，保留其他工具的新设置。恢复文件写入成功后才能设置代理，恢复 commit/apply 成功后才清空记录。没有常驻恢复 helper；新增网络服务或切换网络位置后需重新开始全局接管。API 的持久化与运行时应用是两个步骤，见 [Apple SCPreferences 文档](https://developer.apple.com/documentation/systemconfiguration/scpreferences-ft8)。
 
-`RequestmanCore` 已提供 `FlowExecutionRuntime`：不可变计划/环境版本、按需 Body 读取、有界准入与缓冲预算、可批量读取的元数据环形缓冲。它与 UI、数据库和代理框架无关，详细容量、取消与接入契约见 [性能与资源边界](Performance.md)。基础代理在 NIO 事件循环直接执行 metadata/static-body 动作，使用连接准入和写完成后的拉取背压；不把每个网络块转成 Swift Task，也没有把两套准入队列叠加。`FlowExecutionRuntime` 为后续需要完整 Body 的异步动作保留，尚未包裹 NIO 转发。
+`RequestmanCore` 已提供 `FlowExecutionRuntime`：不可变计划/环境版本、按需 Body 读取、有界准入、可批量读取的元数据环形缓冲。它与 UI、数据库和代理框架无关，详细容量、取消与接入契约见 [性能与资源边界](Performance.md)。基础代理在 NIO 事件循环直接执行 metadata/static-body 动作，使用连接准入和写完成后的拉取背压；不把每个网络块转成 Swift Task，也没有把两套准入队列叠加。`FlowExecutionRuntime` 为后续需要完整 Body 的异步动作保留，尚未包裹 NIO 转发。
 
 ## 预期流量路径
 

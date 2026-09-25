@@ -76,17 +76,12 @@ func runPayloadPresentationChecks() throws {
     precondition(!partialJSON.isJSON && partialJSON.nodes.isEmpty && !partialJSON.canCompare)
     precondition(partialJSON.source == #"{"valid":"JSON"}"# && partialJSON.notice?.contains("传输未完成") == true)
 
-    var truncated = record
-    truncated.responseBody = payloadSnapshot(#"{"payload":"long"}"#, maximumBytes: 6)
-    let truncatedView = RequestPayloadPresentation.make(record: truncated, tab: .responseBody, version: .final)
-    precondition(!truncatedView.isJSON && !truncatedView.canCompare && truncatedView.source.utf8.count == 6)
-    precondition(truncatedView.notice?.contains("截断") == true)
-    var exhausted = record
-    exhausted.responseBody = payloadSnapshot(#"{"payload":"unretained"}"#, budget: 0)
-    let exhaustedView = RequestPayloadPresentation.make(record: exhausted, tab: .responseBody, version: .final)
-    precondition(exhaustedView.emptyTitle == "没有可用的内容预览" && !exhaustedView.canCompare)
-    precondition(exhaustedView.emptyDescription?.contains("截断") == true)
-    precondition(exhaustedView.emptyTitle != emptyRequest.emptyTitle, "Budget exhaustion cannot masquerade as an empty body")
+    var large = record
+    let largeText = "{\"payload\":\"" + String(repeating: "x", count: 1_048_576) + "\"}"
+    large.responseBody = payloadSnapshot(largeText)
+    let largeView = RequestPayloadPresentation.make(record: large, tab: .responseBody, version: .final)
+    precondition(largeView.isJSON && largeView.source == largeText)
+    precondition(largeView.nodes[0].children[0].copyValue.utf8.count == 1_048_578)
 
     var changedFormat = record
     changedFormat.receivedBody = payloadSnapshot("previous plain text", contentType: "text/plain")
@@ -130,21 +125,18 @@ func runPayloadPresentationChecks() throws {
 }
 
 private func payloadSnapshot(
-    _ text: String, contentType: String = "application/json", isComplete: Bool = true,
-    maximumBytes: Int = CaptureBodySnapshot.maximumBytes, budget: Int = 1_048_576
+    _ text: String, contentType: String = "application/json", isComplete: Bool = true
 ) -> CaptureBodySnapshot {
-    payloadSnapshot(bytes: Data(text.utf8), contentType: contentType, isComplete: isComplete,
-                    maximumBytes: maximumBytes, budget: budget)
+    payloadSnapshot(bytes: Data(text.utf8), contentType: contentType, isComplete: isComplete)
 }
 
 private func payloadSnapshot(
     bytes: Data, contentType: String = "application/json", encoding: String? = nil,
-    isComplete: Bool = true, maximumBytes: Int = CaptureBodySnapshot.maximumBytes,
-    budget: Int = 1_048_576
+    isComplete: Bool = true
 ) -> CaptureBodySnapshot {
     var headers = [HTTPField("Content-Type", contentType)]
     if let encoding { headers.append(HTTPField("Content-Encoding", encoding)) }
-    let collector = CaptureBodyCollector(headers: headers, budget: CaptureBodyBudget(capacity: budget), maximumBytes: maximumBytes)
+    let collector = CaptureBodyCollector(headers: headers)
     collector.append(bytes)
     return collector.snapshot(isComplete: isComplete)
 }

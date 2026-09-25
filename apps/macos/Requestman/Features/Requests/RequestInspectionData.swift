@@ -42,9 +42,6 @@ enum InspectionFormat: String, CaseIterable, Sendable {
 
 /// Pure presentation data. Parsing and comparison can run away from the main actor.
 enum RequestInspectionData {
-    static let maximumJSONBytes = 262_144
-    private static let maximumJSONDepth = 64
-    private static let maximumJSONNodes = 4_096
 
     static func headers(
         original: [HTTPField],
@@ -57,8 +54,8 @@ enum RequestInspectionData {
         let new = indexedHeaders(final)
         let oldByID = Dictionary(uniqueKeysWithValues: old.map { ($0.id, $0.field) })
         let newByID = Dictionary(uniqueKeysWithValues: new.map { ($0.id, $0.field) })
-        let originalUnavailableNames = Set(originalInfo.redactedNames.union(originalInfo.truncatedNames).map { $0.lowercased() })
-        let finalUnavailableNames = Set(finalInfo.redactedNames.union(finalInfo.truncatedNames).map { $0.lowercased() })
+        let originalUnavailableNames = Set(originalInfo.truncatedNames.map { $0.lowercased() })
+        let finalUnavailableNames = Set(finalInfo.truncatedNames.map { $0.lowercased() })
         let unavailableNames = originalUnavailableNames.union(finalUnavailableNames)
         let order: [IndexedHeader]
         switch version {
@@ -122,10 +119,9 @@ enum RequestInspectionData {
     }
 
     /// Parse the decoded string value, never the quoted or shortened cell label.
-    /// Discovery is lazy in the native row; reuse the body parser's limits and cancellation.
+    /// Discovery is lazy in the native row; reuse the body parser and cancellation.
     static func stringJSONPreview(_ source: String) -> [RequestDataNode]? {
-        guard source.utf8.count <= maximumJSONBytes,
-              let value = try? parseJSON(Data(source.utf8)),
+        guard let value = try? parseJSON(Data(source.utf8)),
               let root = makeJSONNode(name: "$", path: "$", original: nil, final: value,
                                       version: .final, canCompare: false) else { return nil }
         return [root]
@@ -233,34 +229,14 @@ enum RequestInspectionData {
 
     private static func parseJSON(_ data: Data) throws -> JSONValue {
         try Task.checkCancellation()
-        guard data.count <= maximumJSONBytes else { throw InspectionJSONError.tooLarge }
-        // Bound nesting before Foundation creates a potentially deep object graph.
-        var depth = 0
-        var isString = false
-        var escaped = false
-        for byte in data {
-            if isString {
-                if escaped { escaped = false }
-                else if byte == 0x5C { escaped = true }
-                else if byte == 0x22 { isString = false }
-            } else if byte == 0x22 { isString = true }
-            else if byte == 0x7B || byte == 0x5B {
-                depth += 1
-                guard depth <= maximumJSONDepth else { throw InspectionJSONError.tooDeep }
-            } else if byte == 0x7D || byte == 0x5D { depth -= 1 }
-        }
         let object = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
-        var remaining = maximumJSONNodes
-        func convert(_ object: Any, depth: Int) throws -> JSONValue {
-            remaining -= 1
-            guard remaining >= 0 else { throw InspectionJSONError.tooManyNodes }
-            guard depth <= maximumJSONDepth else { throw InspectionJSONError.tooDeep }
-            if remaining.isMultiple(of: 64) { try Task.checkCancellation() }
+        func convert(_ object: Any) throws -> JSONValue {
+            try Task.checkCancellation()
             if let fields = object as? [String: Any] {
-                return .object(try fields.mapValues { try convert($0, depth: depth + 1) })
+                return .object(try fields.mapValues { try convert($0) })
             }
             if let items = object as? [Any] {
-                return .array(try items.map { try convert($0, depth: depth + 1) })
+                return .array(try items.map { try convert($0) })
             }
             if let value = object as? String { return .string(value) }
             if let value = object as? NSNumber {
@@ -270,7 +246,7 @@ enum RequestInspectionData {
             }
             return .null
         }
-        return try convert(object, depth: 0)
+        return try convert(object)
     }
 
     /// A different body representation cannot invalidate the selected JSON view.
@@ -361,18 +337,6 @@ enum RequestInspectionData {
         case let (.object(old)?, .object(new)?): return old.count != new.count
         case let (.array(old)?, .array(new)?): return old.count != new.count
         default: return true
-        }
-    }
-}
-
-enum InspectionJSONError: LocalizedError {
-    case tooLarge, tooDeep, tooManyNodes
-
-    var errorDescription: String? {
-        switch self {
-        case .tooLarge: "内容超过 256 KiB，请切换到源码查看。"
-        case .tooDeep: "JSON 嵌套超过 64 层，请切换到源码查看。"
-        case .tooManyNodes: "JSON 字段超过 4,096 项，请切换到源码查看。"
         }
     }
 }

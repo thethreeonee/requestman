@@ -38,14 +38,42 @@ struct RequestInspectionChecks {
 
         var limited = CaptureHeadersInfo()
         limited.isTruncated = true
-        limited.redactedNames = ["Authorization"]
-        limited.truncatedNames = ["X-Long"]
+        limited.truncatedNames = ["authorization", "x-long"]
         let uncertain = RequestInspectionData.headers(
             original: [HTTPField("Authorization", "hidden"), HTTPField("X-Long", "abc…"), HTTPField("Missing", "1")],
             final: [HTTPField("authorization", "other"), HTTPField("x-long", "ab…"), HTTPField("New", "2")],
             originalInfo: limited, finalInfo: limited, version: .difference
         )
         precondition(uncertain.allSatisfy { $0.change == .unchanged }, "Unavailable Header values cannot establish differences")
+
+        var credentials = CaptureRecord(method: "GET", url: "https://example.test/")
+        credentials.requestHeaders = [HTTPField("Authorization", "Bearer original"), HTTPField("X-API-Key", "old-key")]
+        credentials.sentHeaders = [HTTPField("Authorization", "Bearer modified"), HTTPField("X-API-Key", "new-key")]
+        credentials = credentials.bounded()
+        let credentialDiff = RequestInspectionData.headers(original: credentials.requestHeaders, final: credentials.sentHeaders,
+            originalInfo: credentials.requestHeadersInfo, finalInfo: credentials.sentHeadersInfo, version: .difference)
+        precondition(credentialDiff.allSatisfy { $0.change == .modified })
+        precondition(credentialDiff[0].originalValue == "Bearer original" && credentialDiff[0].copyValue == "Bearer modified")
+
+        let cookie = "session=" + String(repeating: "a", count: 8_192)
+        var record = CaptureRecord(method: "GET", url: "https://example.test/")
+        record.requestHeaders = [HTTPField("Cookie", cookie + "-old")]
+        record.sentHeaders = [HTTPField("Cookie", cookie + "-new")]
+        record.receivedHeaders = [HTTPField("Set-Cookie", cookie + "-server; HttpOnly")]
+        record.responseHeaders = [HTTPField("Set-Cookie", cookie + "-client; HttpOnly")]
+        record = record.bounded().bounded()
+        let snapshots = [
+            (record.requestHeaders, record.sentHeaders, record.requestHeadersInfo, record.sentHeadersInfo),
+            (record.receivedHeaders, record.responseHeaders, record.receivedHeadersInfo, record.responseHeadersInfo)
+        ]
+        for (original, final, originalInfo, finalInfo) in snapshots {
+            precondition(!originalInfo.isTruncated && !finalInfo.isTruncated)
+            let nodes = RequestInspectionData.headers(original: original, final: final,
+                originalInfo: originalInfo, finalInfo: finalInfo, version: .difference)
+            precondition(nodes.count == 1 && nodes[0].change == .modified)
+            precondition(nodes[0].originalValue == original[0].value && nodes[0].copyValue == final[0].value,
+                         "Long Cookie and Set-Cookie values must retain their differing suffixes for comparison and copying")
+        }
     }
 
     private static func checkJSON() throws {
@@ -131,9 +159,9 @@ struct RequestInspectionChecks {
         for invalid in ["", "hello", "{broken}", "{} trailing", "[1,] trailing"] {
             precondition(RequestInspectionData.stringJSONPreview(invalid) == nil)
         }
-        precondition(RequestInspectionData.stringJSONPreview(String(repeating: " ", count: RequestInspectionData.maximumJSONBytes) + "{}") == nil)
-        precondition(RequestInspectionData.stringJSONPreview(String(repeating: "[", count: 65) + "0" + String(repeating: "]", count: 65)) == nil)
-        precondition(RequestInspectionData.stringJSONPreview("[" + Array(repeating: "0", count: 4_096).joined(separator: ",") + "]") == nil)
+        precondition(RequestInspectionData.stringJSONPreview(String(repeating: " ", count: 1_048_576) + "{}") != nil)
+        precondition(RequestInspectionData.stringJSONPreview(String(repeating: "[", count: 65) + "0" + String(repeating: "]", count: 65)) != nil)
+        precondition(RequestInspectionData.stringJSONPreview("[" + Array(repeating: "0", count: 5_000).joined(separator: ",") + "]") != nil)
 
         let before = try JSONSerialization.data(withJSONObject: ["value": "[1]"])
         let after = try JSONSerialization.data(withJSONObject: ["value": "[2]"])
@@ -143,14 +171,13 @@ struct RequestInspectionChecks {
         precondition(difference[0].children[0].jsonStringValue == "[2]", "Preview follows the displayed version")
 
         var headerInfo = CaptureHeadersInfo()
-        headerInfo.redactedNames = ["x-private"]
         headerInfo.truncatedNames = ["x-partial"]
         let headers = RequestInspectionData.headers(original: [],
             final: [HTTPField("X-JSON", embedded), HTTPField("X-Private", "{}"), HTTPField("X-Partial", "[]")],
             originalInfo: .init(), finalInfo: headerInfo, version: .final)
         precondition(headers[0].jsonStringValue == embedded)
-        precondition(headers[1].jsonStringValue == nil && headers[2].jsonStringValue == nil,
-                     "Truncated and redacted headers cannot masquerade as complete JSON")
+        precondition(headers[1].jsonStringValue == "{}" && headers[2].jsonStringValue == nil,
+                     "Incomplete headers cannot masquerade as complete JSON")
         var truncatedInfo = CaptureHeadersInfo()
         truncatedInfo.truncatedNames = ["x-json"]
         let fields = [HTTPField("X-JSON", "{}")]
@@ -181,22 +208,15 @@ struct RequestInspectionChecks {
         precondition(null[0].valueKind == .null && null[0].copyValue == "null")
 
         assertThrows { _ = try RequestInspectionData.json(original: nil, final: data("{"), version: .final) }
-        assertThrows {
-            let nested = String(repeating: "[", count: 65) + "0" + String(repeating: "]", count: 65)
-            _ = try RequestInspectionData.json(original: nil, final: data(nested), version: .final)
-        }
-        assertThrows {
-            let tooMany = "[" + Array(repeating: "0", count: 4_096).joined(separator: ",") + "]"
-            _ = try RequestInspectionData.json(original: nil, final: data(tooMany), version: .final)
-        }
-        let limit = RequestInspectionData.maximumJSONBytes
-        let atLimit = data("\"" + String(repeating: "x", count: limit - 2) + "\"")
-        let largeString = try RequestInspectionData.json(original: nil, final: atLimit, version: .final)
-        precondition(largeString[0].copyValue.utf8.count == limit, "JSON at the decoded byte limit remains inspectable")
-        do {
-            _ = try RequestInspectionData.json(original: nil, final: atLimit + data(" "), version: .final)
-            preconditionFailure("Expected JSON larger than 256 KiB to be rejected")
-        } catch InspectionJSONError.tooLarge {}
+        let nested = String(repeating: "[", count: 128) + "0" + String(repeating: "]", count: 128)
+        let deep = try RequestInspectionData.json(original: nil, final: data(nested), version: .final)
+        precondition(flattened(deep).count == 129)
+        let many = "[" + Array(repeating: "0", count: 5_000).joined(separator: ",") + "]"
+        let wide = try RequestInspectionData.json(original: nil, final: data(many), version: .final)
+        precondition(wide[0].children.count == 5_000)
+        let large = data("\"" + String(repeating: "x", count: 1_048_576) + "\"")
+        let largeString = try RequestInspectionData.json(original: nil, final: large, version: .final)
+        precondition(largeString[0].copyValue.utf8.count == large.count)
         let bracesInString = data("\"" + String(repeating: "[", count: 128) + "\"")
         let string = try RequestInspectionData.json(original: nil, final: bracesInString, version: .final)
         precondition(string[0].valueKind == .string, "Brackets inside strings do not increase nesting")
@@ -207,7 +227,7 @@ struct RequestInspectionChecks {
         nodes.flatMap { [$0] + flattened($0.children) }
     }
     private static func assertThrows(_ action: () throws -> Void) {
-        do { try action(); preconditionFailure("Expected invalid or oversized JSON to be rejected") }
+        do { try action(); preconditionFailure("Expected invalid JSON to be rejected") }
         catch {}
     }
 }
