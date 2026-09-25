@@ -11,4 +11,6 @@ INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.developer-tools
 INFOPLIST_KEY_NSPrincipalClass = NSApplication
 ENABLE_HARDENED_RUNTIME = YES
 CODE_SIGN_STYLE = Automatic
-// Configure your own team and bundle identifier before signing for distribution.
+// Keep the development identity stable across rebuilds for Keychain authorization.
+// Copy Signing.local.xcconfig.example and select your own development team.
+#include? "Signing.local.xcconfig"

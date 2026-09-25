@@ -21,6 +21,31 @@ struct CertificateSetupModelTests {
         #expect(model.errorMessage == nil)
     }
 
+    @Test func startupMigratesOnceAndLaterActivationsOnlyRefresh() async {
+        let service = SetupServiceFixture(status: .init(generated: true, installed: true, trusted: true))
+        let model = CertificateSetupModel(service: service)
+        await model.prepareForStartup()
+        #expect(model.isConfigured)
+        await model.prepareForStartup()
+        #expect(await service.events == ["migrate", "status"])
+        #expect(await service.migrationInteraction == [false])
+    }
+
+    @Test func deniedStartupMigrationDoesNotPromptOrRetryUntilExplicitSetup() async {
+        let service = SetupServiceFixture(status: .init(generated: true, installed: true, trusted: true),
+                                          requiresAuthorization: true)
+        let model = CertificateSetupModel(service: service)
+        await model.prepareForStartup()
+        #expect(!model.isConfigured)
+        #expect(!model.canRegenerate)
+        #expect(model.errorMessage == LocalCertificateError.authorizationRequired.localizedDescription)
+        await model.prepareForStartup()
+        #expect(await service.events == ["migrate", "status"])
+        #expect(await service.migrationInteraction == [false])
+        await model.run()
+        #expect(model.isConfigured)
+    }
+
     @Test func reusesAlreadyTrustedCertificateWithoutWriting() async {
         let service = SetupServiceFixture(status: .init(generated: true, installed: true, trusted: true))
         let model = CertificateSetupModel(service: service)
@@ -190,6 +215,7 @@ struct CertificateSetupModelTests {
 
 private actor SetupServiceFixture: CertificateService {
     var events: [String] = []
+    var migrationInteraction: [Bool] = []
     private var current: CertificateStatus
     private var cancelTrustOnce: Bool
     private var cancelRegenerateOnce: Bool
@@ -231,6 +257,14 @@ private actor SetupServiceFixture: CertificateService {
         events.append("generate")
         if repairTakesEffect { requiresAuthorization = false }
         current.generated = true
+        return current
+    }
+
+    func migrateAuthorization(allowingUI: Bool) async throws -> CertificateStatus {
+        events.append("migrate")
+        migrationInteraction.append(allowingUI)
+        if allowingUI && repairTakesEffect { requiresAuthorization = false }
+        if requiresAuthorization { throw LocalCertificateError.authorizationRequired }
         return current
     }
 

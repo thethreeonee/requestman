@@ -28,6 +28,7 @@ public struct CertificateStatus: Equatable, Sendable {
 
 public protocol CertificateService: Sendable {
     func status() async throws -> CertificateStatus
+    func migrateAuthorization(allowingUI: Bool) async throws -> CertificateStatus
     func generate() async throws -> CertificateStatus
     func regenerate() async throws -> CertificateStatus
     func install() async throws -> CertificateStatus

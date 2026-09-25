@@ -15,9 +15,13 @@ struct WorkspaceView: View {
             })) {
                 Button("好") { model.errorMessage = nil }
             } message: { Text(model.errorMessage ?? "") }
-            .task { await model.load(); await model.collectRecords() }
+            .task {
+                await model.certificateSetup.prepareForStartup()
+                await model.load()
+                await model.collectRecords()
+            }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { Task { await model.certificateSetup.refreshStatus() } }
+                if phase == .active { Task { await model.certificateSetup.prepareForStartup() } }
                 else { Task { await model.flushSave() } }
             }
     }

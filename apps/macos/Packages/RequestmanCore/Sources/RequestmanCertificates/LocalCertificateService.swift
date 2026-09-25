@@ -91,6 +91,21 @@ public actor LocalCertificateService: CertificateService, TLSCertificateProvidin
         }
     }
 
+    /// Repairs access to an existing CA only. Never generates, installs or trusts a CA.
+    public func migrateAuthorization(allowingUI: Bool) throws -> CertificateStatus {
+        do { return try status() }
+        catch LocalCertificateError.authorizationRequired { }
+        return try CertificateKeychainInteraction.perform(allowingUI: allowingUI) {
+            try Task.checkCancellation()
+            guard let data = try documentStore.read() ?? trustStore.installedCertificateData() else {
+                throw LocalCertificateError.certificateNotGenerated
+            }
+            try requireValidDate(CertificateMaterial.decodeRoot(data))
+            try keyStore.authorizeSigning()
+            return try status() // Success requires a fresh, noninteractive signing/trust check.
+        }
+    }
+
     public func generate() throws -> CertificateStatus {
         return try CertificateKeychainInteraction.perform(allowingUI: true) {
             authorityLease = nil

@@ -2,10 +2,10 @@ import AppKit
 import SwiftUI
 
 enum WorkspaceSettingsSection: CaseIterable {
-    case general, connection, environments
+    case general, environments
 
     var title: String {
-        switch self { case .general: "通用"; case .connection: "连接"; case .environments: "环境管理" }
+        switch self { case .general: "通用"; case .environments: "环境管理" }
     }
 }
 
@@ -17,8 +17,6 @@ struct WorkspaceSettingsView: View {
             switch model.settingsSection {
             case .general:
                 GeneralSettingsView(model: model)
-            case .connection:
-                ConnectionSettingsView(model: model)
             case .environments:
                 EnvironmentsView(model: model)
             }

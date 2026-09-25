@@ -26,17 +26,32 @@ public final class CertificateSetupModel {
     }
 
     @ObservationIgnored private let service: any CertificateService
+    @ObservationIgnored private var attemptedStartupMigration = false
 
     public init(service: any CertificateService) { self.service = service }
 
     /// Refresh display state without generating, installing or changing trust settings.
     public func refreshStatus() async {
+        await refreshStatus(migratingAuthorization: false)
+    }
+
+    /// The first activation attempts silent migration; subsequent activations only read status.
+    public func prepareForStartup() async {
+        guard !isRunning else { return }
+        let shouldMigrate = !attemptedStartupMigration
+        attemptedStartupMigration = true
+        await refreshStatus(migratingAuthorization: shouldMigrate)
+    }
+
+    private func refreshStatus(migratingAuthorization: Bool) async {
         guard !isRunning else { return }
         phase = .checking
         errorMessage = nil
         canRegenerate = false
         do {
-            status = try await service.status()
+            status = migratingAuthorization
+                ? try await service.migrateAuthorization(allowingUI: false)
+                : try await service.status()
             phase = isConfigured ? .complete : .idle
         } catch {
             status = nil

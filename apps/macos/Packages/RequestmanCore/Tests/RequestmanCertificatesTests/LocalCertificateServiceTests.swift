@@ -91,6 +91,67 @@ struct LocalCertificateServiceTests {
         #expect(fixture.snapshot().authorizationRepairs == 1)
     }
 
+    @Test func migrationReusesExistingCAAndDoesNotChangeTrust() async throws {
+        let fixture = MemoryCertificates()
+        let service = fixture.service()
+        _ = try await service.generate()
+        _ = try await service.install()
+        _ = try await service.trust()
+        let original = fixture.snapshot()
+        fixture.requireAuthorization()
+        let migrated = try await service.migrateAuthorization(allowingUI: true)
+        #expect(migrated.trusted)
+        #expect(try await fixture.service().status().trusted)
+        _ = try await service.migrateAuthorization(allowingUI: true)
+        let after = fixture.snapshot()
+        #expect(after.authorizationRepairs == 1)
+        #expect(after.keyCreates == original.keyCreates)
+        #expect(after.installs == original.installs)
+        #expect(after.trusts == original.trusts)
+        #expect(after.document == original.document)
+        #expect(after.removedCertificates.isEmpty)
+        #expect(after.interactiveKeyReads == 0)
+    }
+
+    @Test func silentMigrationCannotEscalateOrReplaceTheCA() async throws {
+        let fixture = MemoryCertificates()
+        let service = fixture.service()
+        _ = try await service.generate()
+        fixture.requireAuthorization()
+        await #expect(throws: LocalCertificateError.authorizationRequired) {
+            try await service.migrateAuthorization(allowingUI: false)
+        }
+        #expect(fixture.snapshot().authorizationRepairs == 0)
+        #expect(fixture.snapshot().keyCreates == 1)
+        #expect(fixture.snapshot().installs == 0)
+        #expect(fixture.snapshot().trusts == 0)
+    }
+
+    @Test func migrationDoesNotSetUpMissingCertificatesOrRepairDamagedMaterial() async throws {
+        let empty = MemoryCertificates()
+        #expect(try await empty.service().migrateAuthorization(allowingUI: true) == .missing)
+        #expect(empty.snapshot().keyCreates == 0)
+        let damaged = MemoryCertificates(document: Data([0, 1, 2]))
+        await #expect(throws: LocalCertificateError.invalidCertificate) {
+            try await damaged.service().migrateAuthorization(allowingUI: true)
+        }
+        #expect(damaged.snapshot().authorizationRepairs == 0)
+        #expect(damaged.snapshot().document == Data([0, 1, 2]))
+    }
+
+    @Test func cancelledMigrationLeavesRuntimeNoninteractive() async throws {
+        let fixture = MemoryCertificates()
+        let service = fixture.service()
+        _ = try await service.generate()
+        fixture.requireAuthorization(cancelRepair: true)
+        await #expect(throws: CancellationError.self) {
+            try await service.migrateAuthorization(allowingUI: true)
+        }
+        await #expect(throws: LocalCertificateError.authorizationRequired) { try await service.status() }
+        #expect(fixture.snapshot().interactiveKeyReads == 0)
+        #expect(fixture.snapshot().authorizationRepairs == 0)
+    }
+
     @Test func cancelledSetupDoesNotEnableBackgroundAuthorization() async throws {
         let fixture = MemoryCertificates()
         let service = fixture.service()
@@ -452,7 +513,7 @@ private final class MemoryCertificates: CertificateKeyStore, CertificateDocument
             guard state.needsAuthorization else { return }
             var allowed = DarwinBoolean(false)
             #expect(SecKeychainGetUserInteractionAllowed(&allowed) == errSecSuccess)
-            #expect(allowed.boolValue)
+            guard allowed.boolValue else { throw LocalCertificateError.authorizationRequired }
             if state.cancelRepair { throw CancellationError() }
             state.needsAuthorization = false
             state.authorizationRepairs += 1

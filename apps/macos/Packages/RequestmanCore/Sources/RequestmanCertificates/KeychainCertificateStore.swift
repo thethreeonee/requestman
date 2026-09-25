@@ -56,6 +56,17 @@ struct KeychainCertificateStore: CertificateKeyStore, CertificateTrustStore {
         try check(SecACLUpdateAuthorizations(acl, [kSecACLAuthorizationSign] as CFArray),
                   operation: "配置 HTTPS 签名权限")
         try check(SecKeychainItemSetAccess(item, access), operation: "保存 HTTPS 证书授权")
+        // A trusted-app ACL alone does not authorize a new code-signing partition.
+        // Exercise signing here, while explicit setup permits Security's authorization
+        // UI. Runtime signers and the final setup check remain strictly noninteractive.
+        var error: Unmanaged<CFError>?
+        let challenge = Data("Requestman HTTPS CA signing authorization v1".utf8)
+        guard SecKeyCreateSignature(key, .ecdsaSignatureMessageX962SHA256,
+                                    challenge as CFData, &error) != nil else {
+            let code = error.map { Int32(CFErrorGetCode($0.takeRetainedValue())) } ?? errSecInternalError
+            try check(code, operation: "授权 HTTPS 证书签名")
+            throw LocalCertificateError.authorizationRequired
+        }
     }
 
     private static let accessName = "Requestman HTTPS 调试 CA"

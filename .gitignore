@@ -151,3 +151,4 @@ vite.config.ts.timestamp-*
 DerivedData/
 xcuserdata/
 *.xcuserstate
+apps/macos/Configuration/Signing.local.xcconfig

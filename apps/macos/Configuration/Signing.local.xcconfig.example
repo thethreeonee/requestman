@@ -1,0 +1,4 @@
+// Copy to Signing.local.xcconfig (ignored by Git) and replace YOUR_TEAM_ID.
+// This signs the App, not the HTTPS debugging CA.
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+CODE_SIGN_IDENTITY = Apple Development

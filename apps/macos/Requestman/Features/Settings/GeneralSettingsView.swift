@@ -4,6 +4,7 @@ import RequestmanCore
 
 struct GeneralSettingsView: View {
     @Bindable var model: WorkspaceModel
+    @State private var showsCertificateSetup = false
 
     var body: some View {
         Form {
@@ -43,11 +44,42 @@ struct GeneralSettingsView: View {
             } footer: {
                 Text("列出已安装的 Chrome 及同类 Chromium 浏览器。").font(.footnote)
             }
+            ConnectionSettingsView(model: model)
+            Section {
+                LabeledContent("证书状态") {
+                    if model.certificateSetup.isConfigured {
+                        Label("已完成配置", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    } else {
+                        HStack(spacing: 12) {
+                            Text("未配置").foregroundStyle(.secondary)
+                            Button("设置证书…") { showsCertificateSetup = true }
+                                .disabled(model.certificateSetup.isRunning)
+                        }
+                    }
+                }
+                if let error = model.certificateSetup.errorMessage {
+                    Text(error).font(.footnote).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("HTTPS 证书")
+            } footer: {
+                Text("配置并信任本机调试证书后，新建 HTTPS 连接可解密、修改并记录。").font(.footnote)
+            }
         }
         .formStyle(.grouped)
-        .task { await model.refreshBrowsers() }
+        .task {
+            await model.refreshBrowsers()
+            await model.certificateSetup.refreshStatus()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            Task { await model.refreshBrowsers() }
+            Task {
+                await model.refreshBrowsers()
+                if !showsCertificateSetup { await model.certificateSetup.refreshStatus() }
+            }
+        }
+        .sheet(isPresented: $showsCertificateSetup) {
+            CertificateSetupView(model: model.certificateSetup)
         }
     }
 }
