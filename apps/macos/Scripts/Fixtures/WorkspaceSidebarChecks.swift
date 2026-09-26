@@ -3,6 +3,19 @@ import Foundation
 import Observation
 import RequestmanCore
 
+/// Simulates key-window state without showing a window or changing the user's active app.
+@MainActor
+final class KeyboardCheckWindow: NSWindow {
+    var hasKeyboardFocus = true
+    override var isKeyWindow: Bool { hasKeyboardFocus }
+}
+
+@MainActor
+final class KeyboardCommandReceiver: NSObject {
+    var command: WorkspaceCommand?
+    @objc func performWorkspaceCommand(_ item: NSMenuItem) { command = WorkspaceCommand(rawValue: item.tag) }
+}
+
 /// Capture menu results without touching the user's pasteboard.
 @MainActor
 enum RequestClipboard {
@@ -34,10 +47,13 @@ final class WorkspaceModel {
     }
     var captureButtonHelp: String { "测试捕获控件" }
     func toggleCapture() async { isCapturing.toggle() }
+    func setRecordingPaused(_ paused: Bool) { history.paused = paused }
+    func clearHistory() { history.clear() }
 }
 
 @MainActor @Observable
 final class SidebarHistoryFixture {
+    var paused = false
     var records: [CaptureRecord] = []
     var selectedID: UUID?
     var filter = CaptureRecordFilter()
@@ -48,16 +64,27 @@ final class SidebarHistoryFixture {
 enum WorkspaceSettingsSection { case general, environments }
 
 @MainActor final class ProjectSidebarViewController: NSViewController {
+    let outline = NSOutlineView()
+    let searchField = NSSearchField()
+    func canPerform(_ command: WorkspaceCommand) -> Bool { false }
+    func perform(_ command: WorkspaceCommand) {}
+    func createProject() {}
+    func addRequest() {}
     init(model: WorkspaceModel) { super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { nil }
     override func loadView() { view = NSView() }
 }
 @MainActor final class RulesViewController: NSViewController {
+    func canPerform(_ command: WorkspaceCommand) -> Bool { false }
+    func perform(_ command: WorkspaceCommand) {}
+    func focusName() {}
     init(model: WorkspaceModel) { super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { nil }
     override func loadView() { view = NSView() }
 }
 @MainActor final class RequestsViewController: NSViewController {
+    func showFilters() {}
+    func focusList() {}
     init(model: WorkspaceModel) { super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { nil }
     override func loadView() { view = NSView() }
@@ -102,6 +129,7 @@ struct WorkspaceSidebarChecks {
     static func main() {
         let application = NSApplication.shared
         application.setActivationPolicy(.prohibited)
+        checkKeyboardCommands()
         checkEnvironmentSelection()
         checkObservationIntegration()
         checkDirectController()
@@ -109,6 +137,82 @@ struct WorkspaceSidebarChecks {
         precondition(toolbarGeometryFailures.isEmpty, toolbarGeometryFailures.joined(separator: "; "))
         print("Workspace sidebar CLI checks passed: native item roles, unique toolbar toggle and display-mode control, mode actions and persistence, 400/520 pt toolbar geometry, title visibility, selection/clear/page changes, fixed window width, safe-area geometry and teardown")
         print("Actual WorkspaceSplitView.swift executed with model/content fixtures in hidden NSWindows; no user App built/launched, window shown, network request or configuration write. Visual appearance remains unverified.")
+    }
+
+    private static func checkKeyboardCommands() {
+        let model = WorkspaceModel()
+        model.selection = .requests
+        let record = CaptureRecord(method: "GET", url: "https://example.test/keyboard")
+        model.history.records = [record]; model.history.selectedID = record.id
+        let controller = WorkspaceSplitController(model: model, snapshot: .init(model: model), openSettings: {})
+        let window = KeyboardCheckWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentViewController = controller
+        controller.viewDidAppear()
+        let oldMenu = NSApp.mainMenu
+        let menu = NSMenu(title: "Fixture")
+        let parent = NSMenuItem(); let commands = NSMenu(title: "Commands")
+        menu.addItem(parent); parent.submenu = commands
+        var keys = Set<String>()
+        for command in WorkspaceCommand.allCases {
+            let item = command.menuItem(target: controller)
+            precondition(keys.insert("\(item.keyEquivalent):\(item.keyEquivalentModifierMask.rawValue)").inserted,
+                         "Shortcuts must be unique")
+            commands.addItem(item)
+        }
+        NSApp.mainMenu = menu
+        defer { NSApp.mainMenu = oldMenu; controller.tearDown(); window.close() }
+        func invoke(_ command: WorkspaceCommand) {
+            commands.update()
+            let keyCodes: [String: UInt16] = ["n": 45, "d": 2, "\r": 36, "\u{8}": 51, "l": 37,
+                                               "1": 18, "2": 19, "f": 3, "s": 1, "i": 34, "e": 14,
+                                               "r": 15, "k": 40, "c": 8]
+            // Match at the NSMenu boundary. Its Backspace equivalent is 0x08;
+            // physical Delete event translation (0x7F) still needs full-App acceptance.
+            let characters = command.modifiers.contains(.shift) ? command.key.uppercased() : command.key
+            let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: command.modifiers,
+                timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCodes[command.key]!)!
+            precondition(menu.performKeyEquivalent(with: event), "Native menu must dispatch \(command)")
+        }
+        let receiver = KeyboardCommandReceiver()
+        for item in commands.items { item.target = receiver }
+        for command in WorkspaceCommand.allCases {
+            receiver.command = nil
+            invoke(command)
+            precondition(receiver.command == command, "Key combination must invoke only \(command)")
+        }
+        for item in commands.items { item.target = controller }
+        precondition(controller.canPerform(.capture) && controller.canPerform(.clear))
+        model.isTransitioning = true
+        precondition(!controller.canPerform(.capture))
+        model.isTransitioning = false
+        invoke(.copyURL)
+        precondition(RequestClipboard.copied == record.url)
+        invoke(.recording)
+        precondition(model.history.paused && !model.isCapturing)
+        let recording = commands.items.first { $0.tag == WorkspaceCommand.recording.rawValue }!
+        _ = controller.validateMenuItem(recording)
+        precondition(recording.title == "恢复记录")
+        invoke(.recording)
+        precondition(!model.history.paused)
+        var truncated = record; truncated.urlWasTruncated = true
+        model.history.records = [truncated]
+        precondition(!controller.canPerform(.copyURL) && !controller.canPerform(.copyCURL))
+        model.history.records = [record]
+        invoke(.clear)
+        precondition(model.history.records.isEmpty && !controller.canPerform(.clear) && !controller.canPerform(.copyURL))
+        invoke(.rules)
+        precondition(model.selection == .rules && !controller.canPerform(.recording))
+        invoke(.requests)
+        precondition(model.selection == .requests)
+        window.hasKeyboardFocus = false
+        precondition(!controller.canPerform(.capture) && !controller.canPerform(.newWorkflow),
+                     "Workspace commands must not act behind another key window")
+        window.hasKeyboardFocus = true
+        model.loaded = false
+        precondition(!controller.canPerform(.newWorkflow))
+        print("Keyboard commands passed: native menu dispatch, unique bindings, recording/clear/copy, page changes and key-window/state validation")
     }
 
     private static func checkEnvironmentSelection() {
@@ -150,8 +254,11 @@ struct WorkspaceSidebarChecks {
         controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: search))
         precondition(table.numberOfRows == 1 && table.selectedRow == -1)
         checkListFits()
-        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-        precondition(NSApp.sendAction(table.action!, to: table.target, from: table))
+        let editor = NSTextView()
+        precondition(controller.control(search, textView: editor, doCommandBy: #selector(NSResponder.moveDown(_:))))
+        precondition(table.selectedRow == 0 && model.document.selectedEnvironmentID == dev.id,
+                     "Arrow navigation must not commit an environment")
+        precondition(controller.control(search, textView: editor, doCommandBy: #selector(NSResponder.insertNewline(_:))))
         precondition(model.document.selectedEnvironmentID == prod.id && dismissals == 1)
         controller.cancelOperation(nil)
         precondition(dismissals == 2 && model.document.selectedEnvironmentID == prod.id)
@@ -187,6 +294,17 @@ struct WorkspaceSidebarChecks {
         search.stringValue = "Environment 1"
         controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: search))
         checkListFits()
+        let beforeKeyboardSelection = model.document.selectedEnvironmentID
+        let down = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                   windowNumber: window.windowNumber, context: nil, characters: "\u{f701}",
+                                   charactersIgnoringModifiers: "\u{f701}", isARepeat: false, keyCode: 125)!
+        table.keyDown(with: down)
+        precondition(table.selectedRow == 0 && model.document.selectedEnvironmentID == beforeKeyboardSelection)
+        let enter = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                    windowNumber: window.windowNumber, context: nil, characters: "\r",
+                                    charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
+        table.keyDown(with: enter)
+        precondition(model.document.selectedEnvironmentID == model.document.environments[0].id)
         print("Environment popover checks passed: one/seven rows fit, eight rows scroll, filtering after scrolling, current selection, empty/reset, cancel and settings routing")
     }
 
@@ -595,7 +713,7 @@ struct WorkspaceSidebarChecks {
                      "Browser names must not widen the icon-only capture button")
         precondition(button.imagePosition == .imageOnly && button.image != nil,
                      "Capture updates must preserve the native icon-only layout")
-        precondition(button.toolTip == model.captureButtonHelp)
+        precondition(button.toolTip == model.captureButtonHelp + "（⌘R）")
 
         model.isTransitioning = true
         waitFor(host) { !button.isEnabled }

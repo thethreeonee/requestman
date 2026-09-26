@@ -80,9 +80,9 @@ final class RequestFilterControls: NSView {
         self.filter = filter; self.records = records
         pause.image = NSImage(systemSymbolName: paused ? "play" : "pause", accessibilityDescription: nil)
         pause.setAccessibilityLabel(paused ? "继续记录" : "暂停记录")
-        pause.toolTip = paused ? "继续记录" : "暂停记录（代理继续工作）"
+        pause.toolTip = (paused ? "继续记录" : "暂停记录（代理继续工作）") + "（⌘⇧R）"
         clearButton.isEnabled = !records.isEmpty
-        clearButton.toolTip = "清空全部请求日志"
+        clearButton.toolTip = "清空全部请求日志（⌘K）"
         primary.selectedSegment = primaryTypes.firstIndex(of: filter.resource) ?? -1
         let count = filter.activeConditionCount
         filterButton.bezelColor = count == 0 ? nil : .systemBlue
@@ -91,6 +91,7 @@ final class RequestFilterControls: NSView {
         }
         filterButton.setAccessibilityValue(count == 0 ? "无筛选条件" : "\(count) 个筛选条件")
         filterButton.toolTip = count == 0 ? "筛选状态码、URL、域名、请求方法、环境和请求 Header" : "筛选（\(count) 个条件）"
+        filterButton.toolTip = (filterButton.toolTip ?? "筛选") + "（⌘⌥F）"
         panel?.update(filter: filter, records: records)
         needsLayout = true
     }
@@ -116,7 +117,7 @@ final class RequestFilterControls: NSView {
         guard primaryTypes.indices.contains(primary.selectedSegment) else { return }
         changeResource(primaryTypes[primary.selectedSegment])
     }
-    @objc private func showFilters() {
+    @objc func showFilters() {
         if let popover, popover.isShown { popover.close(); return }
         let panel = RequestFilterPanel(filter: filter, records: records) { [weak self] in self?.onFilterChange($0) }
         let popover = NSPopover(); popover.behavior = .transient
@@ -187,6 +188,10 @@ final class RequestFilterPanel: NSViewController, NSTextFieldDelegate, NSComboBo
         NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20))
         for child in [grid, urlRow, rowsScroll, bottom] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         refreshControls()
+    }
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        view.window?.makeFirstResponder(statuses)
     }
     override func viewDidLayout() {
         super.viewDidLayout()

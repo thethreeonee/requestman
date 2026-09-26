@@ -29,6 +29,8 @@ final class RequestsViewController: ObservedViewController {
         for child in [filters, separator, tableContainer] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         tableContainer.setContentHuggingPriority(.defaultLow, for: .vertical)
     }
+    func focusList() { table.focusList() }
+    func showFilters() { filters.showFilters() }
     override func viewWillAppear() { super.viewWillAppear(); model.history.selectedID = nil }
     override func refresh() {
         let history = model.history, records = model.history.filtered

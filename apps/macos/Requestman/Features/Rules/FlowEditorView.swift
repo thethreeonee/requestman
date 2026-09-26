@@ -92,6 +92,14 @@ import RequestmanCore
         lanes.setContentHuggingPriority(.defaultLow, for: .vertical)
         lanes.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
     }
+    func focusName() { name.selectText(nil) }
+    func canPerform(_ command: WorkspaceCommand) -> Bool {
+        requestLane.canPerform(command) || responseLane.canPerform(command)
+    }
+    func perform(_ command: WorkspaceCommand) {
+        if requestLane.canPerform(command) { requestLane.perform(command) }
+        else { responseLane.perform(command) }
+    }
     override func refresh() {
         guard let workflow = model.workflow else { return }
         project.stringValue = model.projectName
@@ -241,6 +249,18 @@ import RequestmanCore
         menu.removeAllItems(); guard model.loaded, steps.indices.contains(table.clickedRow) else { return }; let step = steps[table.clickedRow]
         menu.addItem(RulesMenuItem(step.enabled ? "停用" : "启用") { [weak self] in self?.modify(step.id, remove: false) })
         menu.addItem(RulesMenuItem("删除步骤") { [weak self] in self?.modify(step.id, remove: true) })
+    }
+    func canPerform(_ command: WorkspaceCommand) -> Bool {
+        guard model.loaded, model.selection == .rules, !table.isHiddenOrHasHiddenAncestor, window?.firstResponder === table,
+              steps.indices.contains(table.selectedRow),
+              let workflow = model.workflow else { return false }
+        let current = response ? workflow.responseSteps : workflow.requestSteps
+        return [.delete, .toggleEnabled].contains(command) && current.contains { $0.id == steps[table.selectedRow].id }
+    }
+    func perform(_ command: WorkspaceCommand) {
+        guard canPerform(command) else { return }
+        modify(steps[table.selectedRow].id, remove: command == .delete)
+        refresh()
     }
     private func modify(_ id: UUID, remove: Bool) {
         guard var workflow = model.workflow else { return }

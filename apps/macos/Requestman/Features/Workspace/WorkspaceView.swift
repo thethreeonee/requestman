@@ -35,8 +35,8 @@ final class WorkspaceSidebarController: WorkspacePaneController {
 
 @MainActor
 final class WorkspaceMainController: WorkspacePaneController {
-    private let rules: RulesViewController
-    private let requests: RequestsViewController
+    let rules: RulesViewController
+    let requests: RequestsViewController
     init(model: WorkspaceModel) {
         rules = RulesViewController(model: model)
         requests = RequestsViewController(model: model)
@@ -80,7 +80,7 @@ final class EnvironmentSelectionPopover: ObservedViewController, NSTableViewData
     private let onDismiss: () -> Void
     private let openSettings: () -> Void
     private let search = NSSearchField()
-    private let table = NSTableView()
+    private let table = EnvironmentSelectionTable()
     private let scroll = NSScrollView()
     private var environments: [(id: UUID?, name: String)] = []
     private let empty = NativeUI.label("没有匹配的环境", secondary: true)
@@ -101,6 +101,8 @@ final class EnvironmentSelectionPopover: ObservedViewController, NSTableViewData
         table.addTableColumn(NSTableColumn(identifier: .init("environment")))
         table.dataSource = self; table.delegate = self
         table.target = self; table.action = #selector(selectEnvironment(_:))
+        table.confirm = { [weak self] in self?.confirmSelection() }
+        table.dismiss = { [weak self] in self?.onDismiss() }
         scroll.autohidesScrollers = true; scroll.drawsBackground = false
         scroll.verticalScrollElasticity = .none; scroll.horizontalScrollElasticity = .none
         scroll.documentView = table
@@ -109,6 +111,9 @@ final class EnvironmentSelectionPopover: ObservedViewController, NSTableViewData
             guard let self else { return }
             model.settingsSection = .environments; onDismiss(); openSettings()
         }
+        search.nextKeyView = table
+        table.nextKeyView = manage
+        manage.nextKeyView = search
         let stack = NativeUI.stack([search, NativeUI.label("环境", size: 11, secondary: true), scroll, empty, NativeUI.separator(), manage])
         NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12))
         for item in [search, scroll] as [NSView] { item.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
@@ -143,6 +148,24 @@ final class EnvironmentSelectionPopover: ObservedViewController, NSTableViewData
         if preferredContentSize != size { preferredContentSize = size }
     }
     func controlTextDidChange(_ obj: Notification) { observeModel() }
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        switch commandSelector {
+        case #selector(NSResponder.moveDown(_:)), #selector(NSResponder.moveUp(_:)):
+            guard !environments.isEmpty else { return true }
+            let delta = commandSelector == #selector(NSResponder.moveDown(_:)) ? 1 : -1
+            let row = table.selectedRow < 0 ? (delta > 0 ? 0 : environments.count - 1)
+                : min(max(0, table.selectedRow + delta), environments.count - 1)
+            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            table.scrollRowToVisible(row)
+            return true
+        case #selector(NSResponder.insertNewline(_:)):
+            if table.selectedRow < 0, !environments.isEmpty { table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false) }
+            confirmSelection(); return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            onDismiss(); return true
+        default: return false
+        }
+    }
     func numberOfRows(in tableView: NSTableView) -> Int { environments.count }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard environments.indices.contains(row) else { return nil }
@@ -162,9 +185,35 @@ final class EnvironmentSelectionPopover: ObservedViewController, NSTableViewData
         return cell
     }
     @objc private func selectEnvironment(_ sender: NSTableView) {
+        confirmSelection()
+    }
+    private func confirmSelection() {
         guard !updating, environments.indices.contains(table.selectedRow) else { return }
         model.document.selectedEnvironmentID = environments[table.selectedRow].id
         onDismiss()
     }
     override func cancelOperation(_ sender: Any?) { onDismiss() }
+}
+
+@MainActor
+private final class EnvironmentSelectionTable: NSTableView {
+    var confirm: () -> Void = {}
+    var dismiss: () -> Void = {}
+    override func keyDown(with event: NSEvent) {
+        guard event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else {
+            super.keyDown(with: event); return
+        }
+        switch event.charactersIgnoringModifiers {
+        case "\r", "\u{3}": confirm()
+        case "\u{1b}": dismiss()
+        case "\u{f700}", "\u{f701}":
+            guard numberOfRows > 0 else { return }
+            let delta = event.charactersIgnoringModifiers == "\u{f701}" ? 1 : -1
+            let row = selectedRow < 0 ? (delta > 0 ? 0 : numberOfRows - 1)
+                : min(max(0, selectedRow + delta), numberOfRows - 1)
+            selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            scrollRowToVisible(row)
+        default: super.keyDown(with: event)
+        }
+    }
 }

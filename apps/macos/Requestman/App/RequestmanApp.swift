@@ -15,7 +15,7 @@ struct RequestmanEntry {
 }
 
 @MainActor
-final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate {
+final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private(set) var model: WorkspaceModel!
     private var workspaceWindow: WorkspaceWindowController?
     private var settingsWindow: WorkspaceSettingsWindowController?
@@ -65,6 +65,14 @@ final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc private func showWorkspace(_ sender: Any?) { workspaceWindow?.showWindow(sender) }
 
+    @objc func performWorkspaceCommand(_ sender: NSMenuItem) {
+        workspaceWindow?.workspace.performWorkspaceCommand(sender)
+    }
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        guard item.action == WorkspaceCommand.action else { return true }
+        return workspaceWindow?.workspace.validateMenuItem(item) ?? false
+    }
+
     private func installMenus() {
         let menu = NSMenu()
         let appItem = NSMenuItem(); menu.addItem(appItem)
@@ -85,12 +93,26 @@ final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate {
         app.addItem(.separator())
         app.addItem(withTitle: "退出 Requestman", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
+        let fileItem = NSMenuItem(); menu.addItem(fileItem)
+        let file = NSMenu(title: "文件"); fileItem.submenu = file
+        for command in [WorkspaceCommand.newWorkflow, .newProject] { file.addItem(command.menuItem(target: self)) }
+
         let editItem = NSMenuItem(); menu.addItem(editItem)
         let edit = NSMenu(title: "编辑"); editItem.submenu = edit
         for (title, selector, key) in [("撤销", "undo:", "z"), ("重做", "redo:", "Z"),
                                        ("剪切", "cut:", "x"), ("复制", "copy:", "c"),
                                        ("粘贴", "paste:", "v"), ("全选", "selectAll:", "a")] {
             edit.addItem(withTitle: title, action: NSSelectorFromString(selector), keyEquivalent: key)
+        }
+        edit.addItem(.separator())
+        for command in [WorkspaceCommand.duplicate, .rename, .delete, .toggleEnabled] { edit.addItem(command.menuItem(target: self)) }
+        edit.addItem(.separator())
+        for command in [WorkspaceCommand.search, .copyURL, .copyCURL] { edit.addItem(command.menuItem(target: self)) }
+        for (title, commands) in [("显示", [WorkspaceCommand.rules, .requests, .filters, .sidebar, .inspector, .environment]),
+                                  ("捕获", [WorkspaceCommand.capture, .recording, .clear])] {
+            let item = NSMenuItem(); menu.addItem(item)
+            let submenu = NSMenu(title: title); item.submenu = submenu
+            for command in commands { submenu.addItem(command.menuItem(target: self)) }
         }
         let windowItem = NSMenuItem(); menu.addItem(windowItem)
         let windows = NSMenu(title: "窗口"); windowItem.submenu = windows

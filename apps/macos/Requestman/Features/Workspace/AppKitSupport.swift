@@ -1,4 +1,71 @@
 import AppKit
+
+/// Business commands have explicit targets; standard text editing retains the responder chain.
+@MainActor
+enum WorkspaceCommand: Int, CaseIterable {
+    case newWorkflow, newProject, duplicate, rename, delete, toggleEnabled
+    case rules, requests, search, filters, sidebar, inspector, environment
+    case capture, recording, clear, copyURL, copyCURL
+
+    var title: String {
+        switch self {
+        case .newWorkflow: "新建请求修改"
+        case .newProject: "新建项目"
+        case .duplicate: "复制选中项"
+        case .rename: "重命名"
+        case .delete: "删除选中项"
+        case .toggleEnabled: "启用 / 停用选中项"
+        case .rules: "请求修改"
+        case .requests: "请求日志"
+        case .search: "搜索当前页面"
+        case .filters: "日志筛选…"
+        case .sidebar: "显示 / 隐藏项目侧栏"
+        case .inspector: "显示 / 隐藏详情"
+        case .environment: "切换环境…"
+        case .capture: "开始捕获"
+        case .recording: "暂停记录"
+        case .clear: "清空请求日志"
+        case .copyURL: "复制完整 URL"
+        case .copyCURL: "复制原始请求为 cURL"
+        }
+    }
+    var key: String {
+        switch self {
+        case .newWorkflow, .newProject: "n"
+        case .duplicate: "d"
+        case .rename: "\r"
+        case .delete: "\u{8}"
+        case .toggleEnabled: "l"
+        case .rules: "1"
+        case .requests: "2"
+        case .search, .filters: "f"
+        case .sidebar: "s"
+        case .inspector: "i"
+        case .environment: "e"
+        case .capture, .recording: "r"
+        case .clear: "k"
+        case .copyURL, .copyCURL: "c"
+        }
+    }
+    var modifiers: NSEvent.ModifierFlags {
+        switch self {
+        case .rename: []
+        case .newProject, .toggleEnabled, .environment, .recording, .copyURL: [.command, .shift]
+        case .filters, .sidebar, .inspector, .copyCURL: [.command, .option]
+        default: [.command]
+        }
+    }
+    static let action = NSSelectorFromString("performWorkspaceCommand:")
+    func menuItem(target: AnyObject? = nil) -> NSMenuItem {
+        let equivalent = modifiers.contains(.shift) ? key.uppercased() : key
+        let item = NSMenuItem(title: title, action: Self.action, keyEquivalent: equivalent)
+        item.keyEquivalentModifierMask = modifiers
+        item.tag = rawValue
+        item.target = target
+        return item
+    }
+}
+
 import Observation
 
 /// Re-registers one-shot model observation without polling or replacing the view hierarchy.

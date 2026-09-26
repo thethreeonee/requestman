@@ -39,6 +39,7 @@ import RequestmanCore
         add.setAccessibilityLabel("添加")
         if #available(macOS 26.0, *) { add.bezelStyle = .glass; add.borderShape = .circle } else { add.bezelStyle = .circular }
         searchField.controlSize = .large; searchField.placeholderString = "搜索请求修改"; searchField.delegate = self
+        searchField.toolTip = "搜索请求修改（⌘F）"
         searchField.sendsSearchStringImmediately = true; searchField.setAccessibilityLabel("搜索请求修改")
         searchField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let footer = NativeUI.stack([add, searchField], vertical: false, spacing: 10)
@@ -52,6 +53,7 @@ import RequestmanCore
         ])
     }
     override func refresh() {
+        let focusedItemID = (outline.item(atRow: outline.selectedRow) as? Item)?.id
         synchronizing = true
         defer { synchronizing = false }
         let projects = model.document.projects
@@ -83,7 +85,8 @@ import RequestmanCore
         }
         if searchField.stringValue != search { searchField.stringValue = search }
         searchField.isEnabled = model.loaded
-        if let selected = (0..<outline.numberOfRows).first(where: { (outline.item(atRow: $0) as? Item)?.id == model.selectedWorkflowID }) {
+        let selectionID = selectionChanged ? model.selectedWorkflowID : (focusedItemID ?? model.selectedWorkflowID)
+        if let selected = (0..<outline.numberOfRows).first(where: { (outline.item(atRow: $0) as? Item)?.id == selectionID }) {
             outline.selectRowIndexes(IndexSet(integer: selected), byExtendingSelection: false)
             if selectionChanged { outline.scrollRowToVisible(selected) }
         } else { outline.deselectAll(nil) }
@@ -91,7 +94,7 @@ import RequestmanCore
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int { (item as? Item).map { workflowItems[$0.id]?.count ?? 0 } ?? roots.count }
     func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any { if let item = item as? Item { return workflowItems[item.id]![index] }; return roots[index] }
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool { (item as? Item)?.isProject == true }
-    func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool { model.loaded && (item as? Item)?.isProject == false }
+    func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool { model.loaded }
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat { 40 }
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         guard let item = item as? Item else { return nil }
@@ -109,7 +112,54 @@ import RequestmanCore
     func toggleProject(at row: Int) -> Bool {
         guard model.loaded, let item = outline.item(atRow: row) as? Item, item.isProject else { return false }
         if outline.isItemExpanded(item) { outline.collapseItem(item) } else { outline.expandItem(item) }
+        outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        view.window?.makeFirstResponder(outline)
         return true
+    }
+
+    func canPerform(_ command: WorkspaceCommand) -> Bool {
+        guard model.loaded, model.selection == .rules, !outline.isHiddenOrHasHiddenAncestor, view.window?.firstResponder === outline,
+              let item = outline.item(atRow: outline.selectedRow) as? Item,
+              let project = model.document.projects.first(where: { $0.id == item.projectID }),
+              item.isProject || project.workflows.contains(where: { $0.id == item.id }) else { return false }
+        return [.duplicate, .rename, .delete, .toggleEnabled].contains(command)
+    }
+
+    func perform(_ command: WorkspaceCommand) {
+        guard canPerform(command), let item = outline.item(atRow: outline.selectedRow) as? Item else { return }
+        perform(command, item: item)
+    }
+
+    private func perform(_ command: WorkspaceCommand, item: Item) {
+        guard model.loaded, let project = model.document.projects.first(where: { $0.id == item.projectID }) else { return }
+        switch command {
+        case .rename: rename(item)
+        case .duplicate:
+            if item.isProject { model.duplicateProject(item.id) }
+            else if let workflow = project.workflows.first(where: { $0.id == item.id }) {
+                model.duplicateWorkflow(workflow, projectID: item.projectID)
+            }
+        case .toggleEnabled:
+            if item.isProject { updateProject(item.id) { $0.enabled.toggle() } }
+            else if var workflow = project.workflows.first(where: { $0.id == item.id }) {
+                workflow.enabled.toggle(); model.updateWorkflow(workflow)
+            }
+        case .delete:
+            if item.isProject {
+                model.document.projects.removeAll { $0.id == item.id }
+                if model.workflow == nil { model.selectedWorkflowID = nil; model.selectedStepID = nil }
+            } else { model.deleteWorkflow(item.id) }
+        default: return
+        }
+        refresh()
+    }
+
+    func createProject() {
+        guard model.loaded else { return }
+        search = ""
+        model.addProject()
+        refresh()
+        if let root = roots.last { rename(root) }
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -125,10 +175,10 @@ import RequestmanCore
         let menu = NSMenu()
         if item.isProject {
             menu.addItem(RulesMenuItem(project.enabled ? "禁用整个项目" : "启用整个项目") { [weak self] in
-                self?.updateProject(item.id) { $0.enabled.toggle() }
+                self?.perform(.toggleEnabled, item: item)
             })
-            menu.addItem(RulesMenuItem("复制整个项目") { [weak self] in self?.model.duplicateProject(item.id) })
-            menu.addItem(RulesMenuItem("重命名") { [weak self] in self?.rename(item) })
+            menu.addItem(RulesMenuItem("复制整个项目") { [weak self] in self?.perform(.duplicate, item: item) })
+            menu.addItem(RulesMenuItem("重命名") { [weak self] in self?.perform(.rename, item: item) })
             let icons = NSMenu()
             for (title, symbol) in [("文件夹", "folder"), ("网络", "network"), ("地球", "globe"), ("服务器", "server.rack"),
                                     ("终端", "terminal"), ("代码", "curlybraces"), ("工具", "wrench.and.screwdriver"),
@@ -144,19 +194,15 @@ import RequestmanCore
             })
             menu.addItem(.separator())
             menu.addItem(RulesMenuItem("删除项目") { [weak self] in
-                guard let self else { return }
-                model.document.projects.removeAll { $0.id == item.id }
-                if model.workflow == nil { model.selectedWorkflowID = nil; model.selectedStepID = nil }
+                self?.perform(.delete, item: item)
             })
         } else if let workflow = project.workflows.first(where: { $0.id == item.id }) {
             menu.addItem(RulesMenuItem(workflow.enabled ? "禁用" : "启用") { [weak self] in
-                guard let self, var current = model.document.projects.flatMap(\.workflows).first(where: { $0.id == item.id }) else { return }
-                current.enabled.toggle(); model.updateWorkflow(current)
+                self?.perform(.toggleEnabled, item: item)
             })
-            menu.addItem(RulesMenuItem("重命名") { [weak self] in self?.rename(item) })
+            menu.addItem(RulesMenuItem("重命名") { [weak self] in self?.perform(.rename, item: item) })
             menu.addItem(RulesMenuItem("复制") { [weak self] in
-                guard let self, let flow = model.document.projects.flatMap(\.workflows).first(where: { $0.id == item.id }) else { return }
-                model.duplicateWorkflow(flow, projectID: item.projectID)
+                self?.perform(.duplicate, item: item)
             })
             menu.addItem(RulesMenuItem("导出…") { [weak self] in
                 guard let self, let current = model.document.projects.first(where: { $0.id == item.projectID }),
@@ -164,7 +210,7 @@ import RequestmanCore
                 WorkspaceTransfer.export(WorkspaceArchive(project: current, workflowID: item.id), name: flow.name, window: view.window)
             })
             menu.addItem(.separator())
-            menu.addItem(RulesMenuItem("删除") { [weak self] in self?.model.deleteWorkflow(item.id) })
+            menu.addItem(RulesMenuItem("删除") { [weak self] in self?.perform(.delete, item: item) })
         }
         return menu
     }
@@ -202,8 +248,12 @@ import RequestmanCore
         menu.popUp(positioning: nil, at: NSPoint(x: 12, y: 46), in: view)
     }
     func addRequest() {
+        guard model.loaded else { return }
+        let selectedProjectID = (outline.item(atRow: outline.selectedRow) as? Item)?.projectID
         search = ""
-        let project = model.document.projects.first { $0.workflows.contains { $0.id == model.selectedWorkflowID } } ?? model.document.projects.first
+        let project = model.document.projects.first { $0.id == selectedProjectID }
+            ?? model.document.projects.first { $0.workflows.contains { $0.id == model.selectedWorkflowID } }
+            ?? model.document.projects.first
         if let project { collapsedProjects.remove(project.id); model.addWorkflow(projectID: project.id) }
         else { model.addProject() }
     }
@@ -260,6 +310,9 @@ import RequestmanCore
     init(model: WorkspaceModel) { self.model = model; super.init() }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func loadView() { view = content }
+    func focusName() { refresh(); editor?.focusName() }
+    func canPerform(_ command: WorkspaceCommand) -> Bool { editor?.canPerform(command) ?? false }
+    func perform(_ command: WorkspaceCommand) { editor?.perform(command) }
     override func refresh() {
         let current = model.workflow
         if lastID != current?.id || content.subviews.isEmpty {

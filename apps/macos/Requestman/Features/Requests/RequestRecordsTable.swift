@@ -19,6 +19,8 @@ final class RequestRecordsTable: NSView {
     }
     required init?(coder: NSCoder) { nil }
 
+    func focusList() { window?.makeFirstResponder(scrollView.documentView) }
+
     private func configure() {
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false

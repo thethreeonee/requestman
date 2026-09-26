@@ -273,6 +273,42 @@ import RequestmanCore
         precondition(model.document.projects[0].workflows.first { $0.id == contextID }?.enabled == false,
                      "The menu belongs to the clicked rule, not the selected rule")
         sidebar.outline.didCloseMenu(contextMenu, with: contextEvent)
+        // Focus determines the target; editing text must never delete or duplicate a rule.
+        window.makeFirstResponder(sidebar.outline)
+        sidebar.outline.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        precondition(sidebar.canPerform(.duplicate) && sidebar.canPerform(.toggleEnabled))
+        let enabledBefore = model.document.projects[0].enabled
+        sidebar.perform(.toggleEnabled)
+        precondition(model.document.projects[0].enabled != enabledBefore && sidebar.outline.selectedRow == 0)
+        let projectCount = model.document.projects.count
+        sidebar.perform(.duplicate)
+        precondition(model.document.projects.count == projectCount + 1)
+        sidebar.outline.selectRowIndexes(IndexSet(integer: sidebar.outline.numberOfRows - 1), byExtendingSelection: false)
+        sidebar.searchField.selectText(nil)
+        let workflowsBefore = model.document.projects.flatMap(\.workflows).count
+        precondition(!sidebar.canPerform(.delete) && !sidebar.canPerform(.rename))
+        sidebar.perform(.delete)
+        precondition(model.document.projects.flatMap(\.workflows).count == workflowsBefore)
+        window.makeFirstResponder(sidebar.outline)
+        sidebar.perform(.delete)
+        precondition(model.document.projects.flatMap(\.workflows).count == workflowsBefore - 1)
+        // Add a step in each lane and target the focused lane, independent of model selection.
+        model.selectedWorkflowID = model.document.projects[0].workflows[0].id
+        model.addStep(.setHeader, response: false)
+        model.addStep(.setHeader, response: true)
+        rules.refresh()
+        let lanes = descendants(rules.view).compactMap { $0 as? NSTableView }
+        let responseTable = lanes.first { $0.accessibilityLabel() == "响应步骤" }!
+        responseTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        window.makeFirstResponder(responseTable)
+        precondition(rules.canPerform(.toggleEnabled) && !rules.canPerform(.duplicate))
+        let responseEnabled = model.workflow!.responseSteps[0].enabled
+        rules.perform(.toggleEnabled)
+        precondition(model.workflow!.responseSteps[0].enabled != responseEnabled)
+        let requestCount = model.workflow!.requestSteps.count
+        let responseCount = model.workflow!.responseSteps.count
+        rules.perform(.delete)
+        precondition(model.workflow!.responseSteps.count == responseCount - 1 && model.workflow!.requestSteps.count == requestCount)
         print("Rules UI checks passed: native sidebar, live field identity, both lanes, step ordering, all inspector kinds and preview inputs. Hidden CLI window only; no App built or run.")
     }
     static func descendants(_ view: NSView) -> [NSView] { view.subviews.flatMap { [$0] + descendants($0) } }
