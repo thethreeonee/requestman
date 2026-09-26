@@ -40,7 +40,7 @@ struct WorkspaceToolbarSnapshot: Equatable {
 }
 
 @MainActor
-final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, NSMenuDelegate, NSSearchFieldDelegate, NSMenuItemValidation, NSPopoverDelegate {
+final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, NSMenuDelegate, NSSearchFieldDelegate, NSMenuItemValidation, NSPopoverDelegate, StepInspectorPresenting {
     private enum Item {
         static let section = NSToolbarItem.Identifier("workspace.section")
         static let environment = NSToolbarItem.Identifier("workspace.environment")
@@ -211,6 +211,16 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         updateControls()
         reconcileToolbarItems()
         installToolbarIfNeeded()
+    }
+
+    func showStepInspector(_ sender: Any?) {
+        guard !isTearingDown, model.selection == .rules, model.selectedStep != nil else { return }
+        // Selection observation may still be queued when the table sends its action.
+        update(snapshot: WorkspaceToolbarSnapshot(model: model), openSettings: openSettings)
+        setCollapsed(false, item: inspectorItem)
+        updateInspectorContentVisibility()
+        reconcileToolbarItems()
+        updateToggleItems()
     }
 
     private func setCollapsed(_ collapsed: Bool, item: NSSplitViewItem) {

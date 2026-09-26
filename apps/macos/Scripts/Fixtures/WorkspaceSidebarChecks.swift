@@ -375,9 +375,13 @@ struct WorkspaceSidebarChecks {
         settle(controller) { inspector.isCollapsed }
         precondition(model.selectedStepID == step.id)
         update(controller, model: model)
-        precondition(inspector.isCollapsed)
-        invoke(toggleItem(window))
+        precondition(inspector.isCollapsed, "Ordinary refresh must preserve manual collapse")
+        precondition(controller.view.tryToPerform(#selector(StepInspectorPresenting.showStepInspector(_:)), with: controller.view))
         settle(controller) { !inspector.isCollapsed }
+        expectToolbar(window, inspectorVisible: true, requests: false)
+        precondition(model.selectedStepID == step.id, "Reactivating the same step must reveal its inspector without clearing selection")
+        controller.showStepInspector(nil)
+        precondition(!inspector.isCollapsed, "Repeated activation reveals rather than toggles the inspector")
         model.selectedStep = nil; model.selectedStepID = nil
         update(controller, model: model)
         settle(controller) { inspector.isCollapsed }

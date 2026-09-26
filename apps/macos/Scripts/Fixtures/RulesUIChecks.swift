@@ -39,6 +39,11 @@ import RequestmanCore
     }
 }
 
+@MainActor private final class StepInspectorReceiver: NSResponder, StepInspectorPresenting {
+    var count = 0
+    func showStepInspector(_ sender: Any?) { count += 1 }
+}
+
 @main @MainActor struct RulesUIChecks {
     static func checkHeaderEditing(_ inspector: StepInspectorViewController, model: WorkspaceModel, window: NSWindow) {
         func button(_ title: String) -> NSButton {
@@ -133,6 +138,76 @@ import RequestmanCore
         precondition(model.selectedStepID == nil && model.workflow?.requestSteps.contains { $0.id == step.id } == false)
     }
 
+    static func checkMatchFieldScrolling() {
+        let model = WorkspaceModel(); model.addProject()
+        var workflow = model.workflow!
+        let value = "https://example.test/" + String(repeating: "long-path/", count: 30)
+        workflow.matchPattern = value
+        workflow.matchHeaderEnabled = true; workflow.matchHeaderName = "X-Route"; workflow.matchHeaderPattern = value
+        model.updateWorkflow(workflow)
+        let controller = FlowEditorViewController(model: model)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 900), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentViewController = controller
+        defer { window.close() }
+        controller.refresh()
+        let fields = descendants(controller.view).compactMap { $0 as? ActionTextField }.filter {
+            ["匹配值", "Header 匹配值"].contains($0.accessibilityLabel() ?? "")
+        }
+        precondition(fields.count == 2)
+        for field in fields {
+            window.makeFirstResponder(field)
+            let editor = field.currentEditor() as! NSTextView
+            editor.setSelectedRange(NSRange(location: (value as NSString).length, length: 0))
+            for width: CGFloat in [900, 420, 680, 420] {
+                window.setContentSize(NSSize(width: width, height: 900))
+                for _ in 0..<3 {
+                    window.contentView?.layoutSubtreeIfNeeded()
+                    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+                }
+                editor.scrollRangeToVisible(editor.selectedRange())
+                let layout = editor.layoutManager!
+                layout.ensureLayout(for: editor.textContainer!)
+                var lineCount = 0
+                layout.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: layout.numberOfGlyphs)) { _, _, _, _, _ in lineCount += 1 }
+                precondition(lineCount == 1, "Long matching values must remain on one line during resizing")
+                precondition(editor.isHorizontallyResizable && !editor.textContainer!.widthTracksTextView,
+                             "The native field editor must allow horizontal scrolling instead of wrapping")
+                precondition(field.currentEditor() === editor && editor.string == value)
+            }
+            editor.insertText("x", replacementRange: editor.selectedRange())
+            precondition(field.stringValue == value + "x")
+            precondition(field.accessibilityLabel() == "匹配值" ? model.workflow?.matchPattern == value + "x" : model.workflow?.matchHeaderPattern == value + "x")
+            window.makeFirstResponder(nil)
+        }
+    }
+
+    static func checkStepActivation() {
+        let model = WorkspaceModel(); model.addProject()
+        model.addStep(.setHeader, response: false); model.addStep(.replaceBody, response: true)
+        let flow = FlowEditorViewController(model: model)
+        _ = flow.view; flow.refresh()
+        let receiver = StepInspectorReceiver(); flow.nextResponder = receiver
+        let tables = descendants(flow.view).compactMap { $0 as? NSTableView }
+        precondition(tables.count == 2)
+        for table in tables {
+            precondition(table.action != nil && table.target != nil)
+            table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+            let selected = model.selectedStepID
+            for _ in 0..<2 {
+                let count = receiver.count
+                precondition(table.sendAction(table.action, to: table.target))
+                precondition(receiver.count == count + 1 && model.selectedStepID == selected,
+                             "Every row activation must request its inspector, including unchanged selection")
+            }
+            let count = receiver.count
+            flow.refresh()
+            precondition(receiver.count == count, "Programmatic refresh must not reopen a collapsed inspector")
+            table.deselectAll(nil)
+            _ = table.sendAction(table.action, to: table.target)
+            precondition(receiver.count == count, "An empty selection must not request an inspector")
+        }
+    }
+
     static func checkTemplateCaret() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 120), styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -222,6 +297,8 @@ import RequestmanCore
 
     static func main() {
         NSApplication.shared.setActivationPolicy(.prohibited)
+        checkMatchFieldScrolling()
+        checkStepActivation()
         checkTemplateCaret()
         checkTemplateValues()
         let model = WorkspaceModel(); model.addProject(); model.addStep(.setHeader, response: false); model.addStep(.replaceBody, response: false)

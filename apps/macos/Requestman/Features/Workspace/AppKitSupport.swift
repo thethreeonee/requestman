@@ -1,5 +1,10 @@
 import AppKit
 
+/// A row activation can reveal its inspector even when the selection is unchanged.
+@MainActor @objc protocol StepInspectorPresenting {
+    func showStepInspector(_ sender: Any?)
+}
+
 /// Business commands have explicit targets; standard text editing retains the responder chain.
 @MainActor
 enum WorkspaceCommand: Int, CaseIterable {

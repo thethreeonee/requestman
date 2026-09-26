@@ -57,6 +57,10 @@ extension ModificationKind {
         headerRule.setAccessibilityLabel("Header 匹配规则")
         headerPattern.setAccessibilityLabel("Header 匹配值")
         for field in [pattern, headerPattern] {
+            field.cell?.usesSingleLineMode = true
+            field.cell?.wraps = false
+            field.cell?.isScrollable = true
+            field.lineBreakMode = .byClipping
             field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         }
@@ -211,6 +215,7 @@ extension ModificationKind {
         table.headerView = nil; table.rowHeight = 64; table.intercellSpacing = NSSize(width: 0, height: 0)
         table.style = .fullWidth; table.selectionHighlightStyle = .none; table.backgroundColor = .clear; table.dataSource = self; table.delegate = self
         table.allowsEmptySelection = true; table.setAccessibilityLabel(response ? "响应步骤" : "请求步骤")
+        table.target = self; table.action = #selector(activateStep(_:))
         table.registerForDraggedTypes([Self.dragType]); table.setDraggingSourceOperationMask(.move, forLocal: true)
         let menu = NSMenu(); menu.delegate = self; table.menu = menu
         let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
@@ -276,6 +281,12 @@ extension ModificationKind {
     }
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         let view = NSTableRowView(); view.selectionHighlightStyle = .none; return view
+    }
+    @objc private func activateStep(_ sender: NSTableView) {
+        guard !updating, model.loaded, steps.indices.contains(sender.selectedRow) else { return }
+        model.editingResponse = response; model.selectedStepID = steps[sender.selectedRow].id
+        // Start in this table's responder chain so the request stays in its workspace window.
+        _ = sender.tryToPerform(#selector(StepInspectorPresenting.showStepInspector(_:)), with: sender)
     }
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard !updating, model.loaded, steps.indices.contains(table.selectedRow) else { return }
