@@ -87,6 +87,8 @@ TLS 传输使用 Apple `swift-nio-ssl`。按目标域名/IP 签发短期站点�
 
 ## 工程与验证
 
+主图标使用 [AppIcon.icon](Requestman/Resources/AppIcon.icon)，要求 Xcode 26 或更新版本处理 Icon Composer 资源。深灰至黑色渐变与橙白请求/响应图形分层保存，圆角与材质由系统生成；`Base.xcconfig` 指定图标名，工程资源阶段编译该文档。最低部署版本仍为 macOS 14，旧系统位图由 Xcode 的图标编译流程生成。素材、预览与验证方式见[图标说明](Docs/Design/app-icon.md)。
+
 证书模块测试覆盖 CA 格式与签名、内存 SecKey 签名、安装与信任幂等、授权取消重试、错误状态、文件恢复、最终信任复核与重复启动保护。测试只使用内存材料和替身；实际 Security 校验只读验证未安装的随机 CA 不可信，不写入本机钥匙串或信任设置。真实回环 TLS 测试覆盖完整 URL/方法/Header、双向修改、Mock、HTTP 上游 CONNECT、首包 ClientHello 保留，以及不受信/错域名服务器证书的拒绝。测试专用锚点仅注入到内存验证实例，不写入系统信任。新增依赖为 Apple `swift-certificates` 和 `swift-nio-ssl`，版本锁定在 Package.resolved，分发时需包含其及传递依赖的许可证。
 
 宿主通过 `CaptureService` 访问实现；`RequestmanCore` 保存模型、动作与资源契约，`RequestmanProxy` 使用 SwiftNIO 处理真实连接。依赖版本记录在 [Package.resolved](Packages/RequestmanCore/Package.resolved)。

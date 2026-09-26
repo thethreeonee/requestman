@@ -24,6 +24,22 @@ references = {key: root / value["path"] for key, value in objects.items()
 assert set(references.values()) == sources, "Swift source files and project references differ"
 compiled_refs = {objects[file]["fileRef"] for value in objects.values() if value.get("isa") == "PBXSourcesBuildPhase" for file in value["files"]}
 assert compiled_refs == set(references), "Source build phase is missing files or includes stale files"
+icon = root / "Requestman/Resources/AppIcon.icon"
+icon_refs = {key for key, value in objects.items()
+             if value.get("isa") == "PBXFileReference"
+             and value.get("path") == str(icon.relative_to(root))
+             and value.get("lastKnownFileType") == "folder.iconcomposer.icon"}
+resource_refs = {objects[file]["fileRef"] for value in objects.values()
+                 if value.get("isa") == "PBXResourcesBuildPhase" for file in value["files"]}
+assert len(icon_refs) == 1 and icon_refs <= resource_refs, "AppIcon.icon must be compiled as a target resource"
+assert re.search(r"^ASSETCATALOG_COMPILER_APPICON_NAME\s*=\s*AppIcon\s*$",
+                 (root / "Configuration/Base.xcconfig").read_text(), re.MULTILINE), "App icon name is not configured"
+icon_document = json.loads((icon / "icon.json").read_text())
+icon_layers = [layer for group in icon_document["groups"] for layer in group["layers"]]
+assert icon_layers, "App icon has no foreground artwork"
+for layer in icon_layers:
+    assert (icon / "Assets" / layer["image-name"]).is_file(), "Missing app icon layer asset"
+print("Icon Composer document, layer assets and target resource reference OK")
 products = {value.get("productName") for value in objects.values() if value.get("isa") == "XCSwiftPackageProductDependency"}
 required_products = {"RequestmanCore", "RequestmanProxy", "RequestmanCertificates"}
 assert required_products <= products, "Missing local package products"
