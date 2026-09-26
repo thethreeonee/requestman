@@ -182,7 +182,7 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 ## 多 Header 与动态模板编辑（2026-09-26）
 
-`ModificationStep.headers` 保存可增删的 Header 条目，缺省时 `headerEntries` 读取旧 `name/value`；显式空数组表示不操作。`WorkflowEngine` 在整组解析与校验通过后才应用 Header，保证后续条目失败不会留下半组修改。`$env.` 是新的环境引用前缀，旧 `env.` 保持兼容，单次替换语义不变。
+`ModificationStep.headers` 为添加/覆盖和移除步骤保存可增删的 Header 条目，缺省时 `headerEntries` 读取旧 `name/value`；显式空数组表示不操作。`WorkflowEngine` 在整组解析与校验通过后才应用 Header，保证后续条目失败不会留下半组修改。移除步骤只校验名称并一次移除所有匹配项，忽略条目值；两种编辑器共享多条目区块，区块显式约束内容边距，滚动文档固定顶部与水平起点。`$env.` 是新的环境引用前缀，旧 `env.` 保持兼容，单次替换语义不变。
 
 步骤 Inspector 的多行 Header 表单可滚动；底部移除排序按钮，红色删除按钮使用 transient `NSPopover` 确认，并检查原步骤、工作流和阶段仍匹配。模板文本继续使用原生 `NSTextView` 的纯文本编辑、撤销和复制；`TemplateLayoutManager` 只绘制完整表达式的浅蓝圆角背景和文字颜色，值编辑器裁切为 8 pt 圆角。脚本编辑器不启用模板标记。内置变量与格式见[内置变量](Design/request-modification.md#内置变量)。`WorkflowTemplateContext` 在代理匹配原始请求后生成时间、随机值和原始请求快照，流式执行与脚本后台执行显式传递同一 Sendable 值；本地预览同样共享上下文。响应状态码在响应流程入口固定，Mock 使用本地生成状态码。模板标记按 Core Text 的实际字形轮廓垂直居中，左右扩展 4 pt，背景围绕文字中心对称限制在实际行高内；排版基线居中，24 pt 行高为相邻 20 pt 标记保留至少 4 pt 间隔，短值编辑器可完整显示两行。
 

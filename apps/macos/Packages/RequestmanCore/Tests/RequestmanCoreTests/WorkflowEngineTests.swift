@@ -58,6 +58,32 @@ struct WorkflowEngineTests {
             #expect(draft.headers == [HTTPField("X-First", "original")])
         }
     }
+    @Test func removeMultipleHeadersAndLegacyRoundTrip() throws {
+        var step = ModificationStep(kind: .removeHeader); step.name = "X-Legacy"
+        let legacy = try JSONDecoder().decode(ModificationStep.self, from: JSONEncoder().encode(step))
+        #expect(legacy.headers == nil && legacy.headerEntries[0].name == "X-Legacy")
+        step.headerEntries = [NamedValue(name: "x-key", value: "{{$env.unused}}"), NamedValue(name: "X-Trace"), NamedValue(name: "X-Missing")]
+        #expect(try JSONDecoder().decode(ModificationStep.self, from: JSONEncoder().encode(step)) == step)
+        for response in [false, true] {
+            var draft = HTTPMessageDraft(method: "GET", url: "http://localhost/", headers: [HTTPField("X-Key", "one"), HTTPField("x-key", "two"), HTTPField("X-Trace", "trace"), HTTPField("X-Legacy", "old"), HTTPField("Other", "keep")])
+            _ = try WorkflowEngine.apply([step, legacy], response: response, to: &draft, environment: [:], id: UUID(), date: Date())
+            #expect(draft.headers == [HTTPField("Other", "keep")])
+            var empty = step; empty.headerEntries = []
+            _ = try WorkflowEngine.apply([empty], response: response, to: &draft, environment: [:], id: UUID(), date: Date())
+            #expect(draft.headers == [HTTPField("Other", "keep")])
+        }
+    }
+    @Test func invalidRemovalBatchDoesNotPartiallyApply() {
+        for response in [false, true] {
+            for name in ["Host", "Content-Length", "Bad Name", ""] {
+                var step = ModificationStep(kind: .removeHeader)
+                step.headerEntries = [NamedValue(name: "X-First"), NamedValue(name: name)]
+                var draft = HTTPMessageDraft(method: "GET", url: "http://localhost/", headers: [HTTPField("X-First", "original")])
+                #expect(throws: WorkflowError.self) { try WorkflowEngine.apply([step], response: response, to: &draft, environment: [:], id: UUID(), date: Date()) }
+                #expect(draft.headers == [HTTPField("X-First", "original")])
+            }
+        }
+    }
     @Test func invalidHeadersAndFramingAreRejected() {
         for (name, value) in [("Bad Name", "value"), ("X-Key", "value\r\nInjected: yes"), ("Content-Length", "99")] {
             var step = ModificationStep(kind: .setHeader); step.name = name; step.value = value

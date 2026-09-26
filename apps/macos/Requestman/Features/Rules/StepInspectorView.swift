@@ -8,11 +8,9 @@ import RequestmanCore
     private let titleLabel = NativeUI.label("", size: 18, weight: .bold)
     private let typeIcon = NSImageView()
     private lazy var enabled = RulesSwitch { [weak self] value in self?.modify { $0.enabled = value } }
-    private var header: HeaderNameField?
     private var name: RulesTextArea?
     private var status: ActionTextField?
     private var value: RulesTextArea?
-    private var managedWarning: NSTextField?
     private var script: ScriptEditorViewController?
     let deletion = NSPopover()
     private var headerEditors: [HeaderEntryEditor] = []
@@ -23,25 +21,23 @@ import RequestmanCore
     override func refresh() {
         let selected = model.selectedStep
         if stepID != selected?.id || view.subviews.isEmpty ||
-            (selected?.kind == .setHeader && headerEditors.map(\.entryID) != selected?.headerEntries.map(\.id)) { rebuild(selected) }
+            (selected.map { [.setHeader, .removeHeader].contains($0.kind) } == true && headerEditors.map(\.entryID) != selected?.headerEntries.map(\.id)) { rebuild(selected) }
         guard let selected else { return }
         titleLabel.stringValue = selected.kind.title; enabled.state = selected.enabled ? .on : .off
         typeIcon.image = NSImage(systemSymbolName: selected.kind.symbolName, accessibilityDescription: nil)
-        if header?.stringValue != selected.name { header?.stringValue = selected.name }
         name?.string = selected.name
         for (editor, entry) in zip(headerEditors, selected.headerEntries) { editor.update(entry, editable: model.loaded) }
         if status?.integerValue != selected.status { status?.integerValue = selected.status }
         value?.string = selected.value
-        managedWarning?.isHidden = !WorkflowEngine.managedHeaders.contains(selected.name.lowercased())
         removeButton.isEnabled = model.loaded
-        enabled.isEnabled = model.loaded; header?.isEnabled = model.loaded; name?.textView.isEditable = model.loaded; status?.isEnabled = model.loaded
+        enabled.isEnabled = model.loaded; name?.textView.isEditable = model.loaded; status?.isEnabled = model.loaded
         value?.textView.isEditable = model.loaded
         script?.update(step: selected, response: model.editingResponse, environment: model.document.environment?.values ?? [:])
     }
     private func rebuild(_ selected: ModificationStep?) {
         script?.isPresented = false; script?.removeFromParent(); script = nil
         deletion.close(); headerEditors = []
-        header = nil; name = nil; status = nil; value = nil; managedWarning = nil
+        name = nil; status = nil; value = nil
         view.subviews.forEach { $0.removeFromSuperview() }; stepID = selected?.id
         guard let selected else {
             let empty = NativeUI.stack([NativeUI.label("选择一个步骤", size: 20, weight: .semibold), NativeUI.label("配置请求或响应的修改动作。", secondary: true)], spacing: 10)
@@ -60,9 +56,9 @@ import RequestmanCore
             controller.isPresented = isPresented; addChild(controller); script = controller; content = controller.view
         } else {
             let fields = NativeUI.stack([], spacing: 14)
-            if selected.kind == .setHeader {
+            if [.setHeader, .removeHeader].contains(selected.kind) {
                 for entry in selected.headerEntries {
-                    let editor = HeaderEntryEditor(entry: entry, onChange: { [weak self] updated in
+                    let editor = HeaderEntryEditor(entry: entry, includesValue: selected.kind == .setHeader, onChange: { [weak self] updated in
                         self?.modify { step in
                             var entries = step.headerEntries
                             guard let index = entries.firstIndex(where: { $0.id == updated.id }) else { return }
@@ -82,16 +78,6 @@ import RequestmanCore
                 add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
                 add.isEnabled = model.loaded; fields.addArrangedSubview(add)
 
-            }
-            if selected.kind == .removeHeader {
-                let control = HeaderNameField(name: selected.name) { [weak self] value in self?.modify { $0.name = value } }; header = control
-                let row = NativeUI.stack([NativeUI.label("Header 名称"), control], vertical: false, spacing: 14)
-                control.setContentHuggingPriority(.defaultLow, for: .horizontal)
-                control.widthAnchor.constraint(greaterThanOrEqualToConstant: 170).isActive = true
-                fields.addArrangedSubview(row); row.widthAnchor.constraint(equalTo: fields.widthAnchor).isActive = true
-                let warning = NativeUI.label("此 Header 由代理维护。请通过目标地址或 Body 步骤修改。", size: 11)
-                warning.textColor = .systemRed; warning.maximumNumberOfLines = 0; warning.lineBreakMode = .byWordWrapping
-                managedWarning = warning; fields.addArrangedSubview(warning)
             }
             if [.setQueryParameter, .replaceURLString].contains(selected.kind) {
                 let label = selected.kind == .setQueryParameter ? "参数名称" : "查找字符串"
@@ -124,7 +110,7 @@ import RequestmanCore
                 area.heightAnchor.constraint(equalToConstant: body ? 200 : 72).isActive = true
             }
             let stack: NSStackView
-            if selected.kind == .setHeader { stack = fields }
+            if [.setHeader, .removeHeader].contains(selected.kind) { stack = fields }
             else {
                 let box = fieldBox(fields)
                 stack = NativeUI.stack([box], spacing: 16)
@@ -134,7 +120,11 @@ import RequestmanCore
             NativeUI.pin(stack, to: document, insets: NSEdgeInsets(top: 0, left: 0, bottom: 12, right: 0))
             let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.drawsBackground = false
             scroll.documentView = document; document.translatesAutoresizingMaskIntoConstraints = false
-            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
+            NSLayoutConstraint.activate([
+                document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+                document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+                document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor)
+            ])
             content = scroll
         }
         let footerSpacer = NSView(); footerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -144,8 +134,10 @@ import RequestmanCore
         let footer = NativeUI.stack([footerSpacer, removeButton], vertical: false)
         let divider = NativeUI.separator()
         var sections: [NSView] = [heading]
-        if selected.kind == .setHeader {
-            let hint = NativeUI.label("不存在时添加；存在时覆盖。同名 Header 不区分大小写，后面的值优先。", size: 11, secondary: true)
+        if [.setHeader, .removeHeader].contains(selected.kind) {
+            let hint = NativeUI.label(selected.kind == .setHeader
+                ? "不存在时添加；存在时覆盖。同名 Header 不区分大小写，后面的值优先。"
+                : "按名称移除以下 Header，不区分大小写；不存在时跳过。", size: 11, secondary: true)
             hint.identifier = .init("rules.stepDescription")
             hint.maximumNumberOfLines = 0; hint.lineBreakMode = .byWordWrapping
             sections.append(hint)
@@ -158,7 +150,8 @@ import RequestmanCore
     }
     private func fieldBox(_ content: NSView) -> NSBox {
         let box = NSBox(); box.titlePosition = .noTitle
-        box.contentViewMargins = NSSize(width: 12, height: 14); box.contentView = NSView()
+        box.contentViewMargins = .zero; box.contentView = NSView()
+        NativeUI.pin(box.contentView!, to: box, insets: NSEdgeInsets(top: 14, left: 12, bottom: 14, right: 12))
         NativeUI.pin(content, to: box.contentView!)
         return box
     }
@@ -211,7 +204,7 @@ import RequestmanCore
     }
     private let warning = NativeUI.label("此 Header 由代理维护，请通过目标地址或 Body 步骤修改。", size: 11)
     private let remove: ActionButton
-    init(entry: NamedValue, onChange: @escaping (NamedValue) -> Void, onRemove: @escaping () -> Void) {
+    init(entry: NamedValue, includesValue: Bool, onChange: @escaping (NamedValue) -> Void, onRemove: @escaping () -> Void) {
         self.entry = entry; self.onChange = onChange
         remove = ActionButton(title: "") { onRemove() }
         super.init(frame: .zero)
@@ -219,12 +212,15 @@ import RequestmanCore
         remove.setAccessibilityLabel("删除 Header"); remove.toolTip = "删除此 Header"
         name.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let row = NativeUI.stack([name, remove], vertical: false)
-        value.textView.setAccessibilityLabel("Header 值 / 模板")
-        value.heightAnchor.constraint(equalToConstant: 72).isActive = true
+        if includesValue {
+            value.textView.setAccessibilityLabel("Header 值 / 模板")
+            value.heightAnchor.constraint(equalToConstant: 72).isActive = true
+        }
         warning.textColor = .systemRed; warning.maximumNumberOfLines = 0; warning.lineBreakMode = .byWordWrapping
-        let stack = NativeUI.stack([row, value, warning], spacing: 8)
+        let sections: [NSView] = includesValue ? [row, value, warning] : [row, warning]
+        let stack = NativeUI.stack(sections, spacing: 8)
         NativeUI.pin(stack, to: self)
-        for wide in [row, value, warning] as [NSView] { wide.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        for wide in sections { wide.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         update(entry, editable: true)
     }
     required init?(coder: NSCoder) { nil }

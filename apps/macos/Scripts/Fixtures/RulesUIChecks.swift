@@ -138,6 +138,49 @@ import RequestmanCore
         precondition(model.selectedStepID == nil && model.workflow?.requestSteps.contains { $0.id == step.id } == false)
     }
 
+    static func checkRemovalHeaderEditing() {
+        let model = WorkspaceModel(); model.addProject(); model.addStep(.removeHeader, response: false)
+        var workflow = model.workflow!; workflow.requestSteps[0].name = "X-Legacy"; model.updateWorkflow(workflow)
+        let inspector = StepInspectorViewController(model: model)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 440), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentViewController = inspector; inspector.refresh()
+        window.setContentSize(NSSize(width: 400, height: 440))
+        defer { window.close() }
+        func settle() {
+            for _ in 0..<3 { window.contentView?.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        }
+        func button(_ title: String) -> NSButton { descendants(inspector.view).compactMap { $0 as? NSButton }.first { $0.title == title }! }
+        func scroll() -> NSScrollView { descendants(inspector.view).compactMap { $0 as? NSScrollView }.first! }
+        settle()
+        precondition(descendants(inspector.view).compactMap { $0 as? RulesTextArea }.isEmpty, "Removal edits names only")
+        let legacyField = descendants(inspector.view).compactMap { $0 as? HeaderNameField }.first!
+        precondition(legacyField.stringValue == "X-Legacy")
+        let firstBox = descendants(inspector.view).compactMap { $0 as? NSBox }.first { $0.identifier?.rawValue == "rules.headerEntry" }!
+        precondition(firstBox.frame.height >= legacyField.frame.height + 28, "A name-only box must enclose its control and padding")
+        precondition(scroll().contentView.bounds.contains(legacyField.convert(legacyField.bounds, to: scroll().contentView)), "A short form must start fully visible: clip=\(scroll().contentView.bounds), field=\(legacyField.convert(legacyField.bounds, to: scroll().contentView)), doc=\(scroll().documentView!.frame), scroll=\(scroll().frame)")
+        button("添加 Header").performClick(nil); inspector.refresh(); settle()
+        let fields = descendants(inspector.view).compactMap { $0 as? HeaderNameField }
+        fields[1].stringValue = "Host"; fields[1].controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: fields[1])); inspector.refresh(); settle()
+        precondition(model.selectedStep?.headerEntries.map(\.name) == ["X-Legacy", "Host"])
+        precondition(descendants(inspector.view).compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains("此 Header 由代理维护") && !$0.isHiddenOrHasHiddenAncestor })
+        for _ in 0..<10 { button("添加 Header").performClick(nil); inspector.refresh() }; settle()
+        let scrolling = scroll(), document = scrolling.documentView!
+        precondition(document.frame.height > scrolling.contentSize.height)
+        let allFields = descendants(inspector.view).compactMap { $0 as? HeaderNameField }
+        precondition(allFields.count == 12 && allFields.allSatisfy { $0.frame.width > 100 })
+        document.scroll(NSPoint(x: 0, y: document.bounds.maxY)); settle()
+        precondition(scrolling.contentView.bounds.contains(button("添加 Header").convert(button("添加 Header").bounds, to: scrolling.contentView)), "The last add button must be reachable by scrolling")
+        for _ in 0..<12 {
+            descendants(inspector.view).compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "删除 Header" }!.performClick(nil)
+            inspector.refresh()
+        }
+        settle(); precondition(model.selectedStep?.headerEntries.isEmpty == true)
+        button("添加 Header").performClick(nil); inspector.refresh(); settle()
+        precondition(model.selectedStep?.headerEntries.count == 1)
+        let newField = descendants(inspector.view).compactMap { $0 as? HeaderNameField }.first!
+        precondition(scroll().contentView.bounds.contains(newField.convert(newField.bounds, to: scroll().contentView)), "Returning to a short form must restore a visible first row")
+    }
+
     static func checkMatchFieldScrolling() {
         let model = WorkspaceModel(); model.addProject()
         var workflow = model.workflow!
@@ -514,6 +557,7 @@ import RequestmanCore
         precondition(model.selectedStep?.headerEntries.first?.name == "X-Custom")
         precondition(descendants(inspector.view).contains { $0 === combo }, "Header editing must retain focus and selection")
         checkHeaderEditing(inspector, model: model, window: window)
+        checkRemovalHeaderEditing()
         sidebar.search = "does-not-match"; precondition(sidebar.outline.numberOfRows == 1)
         sidebar.addRequest(); sidebar.refresh(); precondition(sidebar.search.isEmpty && model.document.projects[0].workflows.count == 2)
         sidebar.outline.collapseItem(sidebar.outline.item(atRow: 0))

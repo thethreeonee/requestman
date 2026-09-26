@@ -97,7 +97,7 @@ public enum WorkflowEngine {
         for step in steps where step.enabled {
             try control?.check()
             guard step.kind.supports(response: response) else { throw WorkflowError.invalid("步骤不适用于当前方向") }
-            let value = [.script, .setHeader].contains(step.kind) ? step.value : try resolveValue(step.value)
+            let value = [.script, .setHeader, .removeHeader].contains(step.kind) ? step.value : try resolveValue(step.value)
             switch step.kind {
             case .script:
                 draft = try WorkflowScript.run(source: value, draft: draft, response: response, request: request,
@@ -111,8 +111,10 @@ public enum WorkflowEngine {
                 }
                 for header in headers { draft.setHeader(header.name, header.value) }
             case .removeHeader:
-                try validateHeader(step.name, value: "")
-                draft.setHeader(step.name, nil)
+                // Validate every name before removing any fields. Values are unused.
+                let headers = step.headerEntries
+                for header in headers { try validateHeader(header.name, value: "") }
+                for header in headers { draft.setHeader(header.name, nil) }
             case .replaceBody: draft.replacementBody = value; clearBodyEncoding(&draft)
             case .rewriteURL:
                 guard let url = URL(string: value), ["http", "https"].contains(url.scheme ?? ""), url.host != nil, url.user == nil, url.fragment == nil else {

@@ -363,7 +363,7 @@ extension ModificationKind {
         NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: 16), icon.heightAnchor.constraint(equalToConstant: 16)])
         let heading = NativeUI.stack([icon, title], vertical: false, spacing: 6)
         var summary = step.kind == .script ? (step.name.isEmpty ? "JavaScript" : step.name) : step.kind == .setStatus ? String(step.status) : (step.name.isEmpty ? (step.value.isEmpty ? "点击配置" : step.value) : step.name)
-        if step.kind == .setHeader {
+        if [.setHeader, .removeHeader].contains(step.kind) {
             summary = step.headerEntries.isEmpty ? "点击添加 Header" : step.headerEntries.map { $0.name.isEmpty ? "未命名 Header" : $0.name }.joined(separator: ", ")
         }
         if !step.name.isEmpty {
