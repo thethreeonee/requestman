@@ -118,7 +118,10 @@ enum SettingsUI {
         let content = NativeUI.stack(rows, spacing: 12)
         content.alignment = .leading
         for row in rows { row.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true }
-        box.contentView = content
+        // NSBox manages its content view's frame; pin the form inside it so its
+        // fitting height participates in the surrounding stack's Auto Layout.
+        box.contentView = NSView()
+        NativeUI.pin(content, to: box.contentView!)
         if let footer {
             let stack = NativeUI.stack([box, note(footer)], spacing: 6)
             stack.alignment = .leading
