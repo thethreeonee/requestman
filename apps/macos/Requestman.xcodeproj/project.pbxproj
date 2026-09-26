@@ -302,6 +302,16 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "E993CA47D7D0AC8845B4A238";
 		};
+        "B126AABB0000000000000001" = {
+            "isa" = "PBXFileReference";
+            "lastKnownFileType" = "sourcecode.swift";
+            "path" = "Requestman/Features/Workspace/WorkspaceTransfer.swift";
+            "sourceTree" = "<group>";
+        };
+        "B126AABB0000000000000002" = {
+            "isa" = "PBXBuildFile";
+            "fileRef" = "B126AABB0000000000000001";
+        };
 		"7C28A29B34E8034AC7DD0C18" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -380,6 +390,7 @@
                 "6DEF4499A370158C3E868307",
 				"E993CA47D7D0AC8845B4A238",
 				"7C28A29B34E8034AC7DD0C18",
+                "B126AABB0000000000000001",
 				"B0EAAA525C3106E1DE8CB93D",
 			);
 			"name" = "Requestman";
@@ -444,6 +455,7 @@
                 "81833207DF5631BF81282D3A",
 				"BFC10EFC1AB3448A59D900DC",
 				"3F3F99DF960C01BEA0551DBB",
+                "B126AABB0000000000000002",
 				"32B96703F25DC6C7865528FB",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";

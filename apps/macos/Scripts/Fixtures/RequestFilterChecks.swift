@@ -343,6 +343,17 @@ private enum RequestFilterChecks {
         precondition(zip(widths, restoredTable.tableColumns).allSatisfy { abs($0 - $1.width) < 1 },
                      "A new table must restore persisted widths: expected=\(widths), actual=\(restoredTable.tableColumns.map(\.width)), viewport=\(restoredTable.enclosingScrollView!.contentSize.width), saved=\(saved)")
         restoredWindow.close()
+        var importedWidths = saved
+        importedWidths["request"] = (saved["request"] ?? 320) * 1.5
+        defaults.set(importedWidths, forKey: key)
+        NotificationCenter.default.post(name: .init("Requestman.preferencesRestored"), object: nil)
+        settle(host.view)
+        precondition(abs(table.tableColumns[2].width - widths[2]) > 10, "Import must apply widths to an existing table immediately")
+        precondition(defaults.dictionary(forKey: key) as! [String: Double] == importedWidths)
+        defaults.set(saved, forKey: key)
+        NotificationCenter.default.post(name: .init("Requestman.preferencesRestored"), object: nil)
+        settle(host.view)
+        precondition(zip(widths, table.tableColumns).allSatisfy { abs($0 - $1.width) < 1 })
         defaults.set(["request": -20], forKey: key)
         let fallback = FilterFixtureView(model: FilterFixture(), defaults: defaults)
         let fallbackWindow = makeWindow(fallback)

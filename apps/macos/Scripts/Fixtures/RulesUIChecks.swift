@@ -5,6 +5,8 @@ import RequestmanCore
 @MainActor @Observable final class WorkspaceModel {
     var selection: WorkspaceSection = .rules
     var document = WorkspaceDocument()
+    func importArchive(_ archive: WorkspaceArchive) async throws { preconditionFailure("Unexpected file import") }
+    var isTransitioning = false
     var loaded = true
     var selectedWorkflowID: UUID?
     var selectedStepID: UUID?
@@ -25,6 +27,10 @@ import RequestmanCore
         var copy = workflow; copy.id = UUID(); copy.name += " 副本"; document.projects[index].workflows.append(copy); selectedWorkflowID = copy.id
     }
     func deleteWorkflow(_ id: UUID) { for p in document.projects.indices { document.projects[p].workflows.removeAll { $0.id == id } }; if selectedWorkflowID == id { selectedWorkflowID = nil; selectedStepID = nil } }
+    func duplicateProject(_ id: UUID) {
+        var copy = document.projects.first { $0.id == id }!.duplicated(); copy.name += " 副本"
+        document.projects.append(copy); selectedWorkflowID = copy.workflows.first?.id; selectedStepID = nil
+    }
     func addStep(_ kind: ModificationKind, response: Bool) {
         guard var workflow else { return }; let step = ModificationStep(kind: kind)
         if response { workflow.responseSteps.append(step) } else { workflow.requestSteps.append(step) }
@@ -56,6 +62,42 @@ import RequestmanCore
         window.contentView?.layoutSubtreeIfNeeded()
 
         precondition(sidebar.outline.numberOfRows == 2, "Project and workflow must be visible")
+        let projectItem = sidebar.outline.item(atRow: 0)!
+        let flowItem = sidebar.outline.item(atRow: 1)!
+        precondition(sidebar.outlineView(sidebar.outline, heightOfRowByItem: projectItem) == 40)
+        precondition(sidebar.outlineView(sidebar.outline, heightOfRowByItem: flowItem) == 40)
+        let flowCell = sidebar.outline.view(atColumn: 0, row: 1, makeIfNecessary: true)!
+        precondition(!descendants(flowCell).compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains(model.workflow!.matchPattern) })
+        let selectedBeforeCollapse = model.selectedWorkflowID
+        // Exercise the actual mouse entry point at the row's trailing whitespace and disclosure.
+        for x in [sidebar.outline.bounds.width - 6, CGFloat(8)] {
+            for expectedRows in [1, 2] {
+                let local = NSPoint(x: x, y: sidebar.outline.rect(ofRow: 0).midY)
+                let point = sidebar.outline.convert(local, to: nil)
+                let event = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0,
+                                              windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+                sidebar.outline.mouseDown(with: event)
+                sidebar.refresh()
+                precondition(sidebar.outline.numberOfRows == expectedRows, "A project row click must toggle exactly once")
+                precondition(model.selectedWorkflowID == selectedBeforeCollapse)
+            }
+        }
+        var projectMenu = sidebar.menu(forRow: 0)!
+        precondition(projectMenu.items.filter { !$0.isSeparatorItem }.map(\.title) == ["禁用整个项目", "复制整个项目", "重命名", "修改图标", "导出整组…", "删除项目"])
+        projectMenu.performActionForItem(at: 0); sidebar.refresh()
+        precondition(!model.document.projects[0].enabled && model.workflow!.enabled)
+        projectMenu = sidebar.menu(forRow: 0)!
+        precondition(projectMenu.item(at: 0)?.title == "启用整个项目")
+        projectMenu.performActionForItem(at: 0)
+        let icons = projectMenu.item(withTitle: "修改图标")!.submenu!
+        icons.performActionForItem(at: 1); sidebar.refresh()
+        precondition(model.document.projects[0].symbol == "network")
+        let flowMenu = sidebar.menu(forRow: 1)!
+        precondition(flowMenu.items.filter { !$0.isSeparatorItem }.map(\.title) == ["禁用", "重命名", "复制", "导出…", "删除"])
+        flowMenu.performActionForItem(at: 0); sidebar.refresh()
+        precondition(!model.workflow!.enabled)
+        sidebar.menu(forRow: 1)!.performActionForItem(at: 0); sidebar.refresh()
+        precondition(model.workflow!.enabled)
         let addButton = descendants(sidebar.view).compactMap { $0 as? NSButton }.first { $0.identifier?.rawValue == "rules.sidebarAdd" }!
         let addRect = addButton.convert(addButton.bounds, to: sidebar.view)
         let searchRect = sidebar.searchField.convert(sidebar.searchField.bounds, to: sidebar.view)
@@ -212,6 +254,25 @@ import RequestmanCore
         let input = ScriptPreviewInputViewController(input: ScriptPreviewInput(), response: true) { _ in }
         _ = input.view; input.view.layoutSubtreeIfNeeded()
         precondition(descendants(input.view).compactMap { $0 as? RulesTextArea }.count == 4)
+        let originalSelection = model.selectedWorkflowID
+        model.addWorkflow(projectID: model.document.projects[0].id)
+        let contextID = model.selectedWorkflowID!
+        model.selectedWorkflowID = originalSelection
+        sidebar.refresh(); window.contentView?.layoutSubtreeIfNeeded()
+        let targetRow = sidebar.outline.numberOfRows - 1
+        let targetPoint = sidebar.outline.convert(NSPoint(x: sidebar.outline.bounds.midX,
+                                                         y: sidebar.outline.rect(ofRow: targetRow).midY), to: nil)
+        let contextEvent = NSEvent.mouseEvent(with: .rightMouseDown, location: targetPoint, modifierFlags: [], timestamp: 0,
+                                             windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        let selectedRow = sidebar.outline.selectedRow
+        let contextMenu = sidebar.outline.menu(for: contextEvent)!
+        precondition(sidebar.outline.clickedRow == targetRow, "Native menu handling must track the row for its contextual outline")
+        precondition(sidebar.outline.selectedRow == selectedRow && model.selectedWorkflowID == originalSelection,
+                     "Right-clicking an unselected rule must preserve the editor selection")
+        contextMenu.performActionForItem(at: 0)
+        precondition(model.document.projects[0].workflows.first { $0.id == contextID }?.enabled == false,
+                     "The menu belongs to the clicked rule, not the selected rule")
+        sidebar.outline.didCloseMenu(contextMenu, with: contextEvent)
         print("Rules UI checks passed: native sidebar, live field identity, both lanes, step ordering, all inspector kinds and preview inputs. Hidden CLI window only; no App built or run.")
     }
     static func descendants(_ view: NSView) -> [NSView] { view.subviews.flatMap { [$0] + descendants($0) } }

@@ -19,6 +19,14 @@ final class GeneralSettingsViewController: ObservedViewController {
     private let certificateStatus = NativeUI.label("未配置", secondary: true)
     private let certificateError = SettingsUI.note("")
     private lazy var setupButton = ActionButton(title: "设置证书…") { [weak self] in self?.showCertificateSetup() }
+    private lazy var importButton = ActionButton(title: "导入…") { [weak self] in
+        guard let self else { return }
+        WorkspaceTransfer.importFile(model: model, window: view.window)
+    }
+    private lazy var exportButton = ActionButton(title: "导出全部…") { [weak self] in
+        guard let self else { return }
+        WorkspaceTransfer.exportAll(model: model, window: view.window)
+    }
     private var browserOptions: [BrowserPickerOption] = []
     private weak var certificateSheet: CertificateSetupViewController?
 
@@ -46,7 +54,9 @@ final class GeneralSettingsViewController: ObservedViewController {
             SettingsUI.section("启动", rows: [SettingsUI.row("启动方式", mode)], footer: "全局接管会修改系统 HTTP/HTTPS 代理；仅启动浏览器只为所选浏览器打开代理调试窗口。启动方式的修改将在下次启动时生效。"),
             SettingsUI.section("浏览器", rows: [browserRow, browserStatus, refreshRow], footer: "列出已安装的 Chrome 及同类 Chromium 浏览器。"),
             connection,
-            SettingsUI.section("HTTPS 证书", rows: [SettingsUI.row("证书状态", statusRow), certificateError], footer: "配置并信任本机调试证书后，新建 HTTPS 连接可解密、修改并记录。")
+            SettingsUI.section("HTTPS 证书", rows: [SettingsUI.row("证书状态", statusRow), certificateError], footer: "配置并信任本机调试证书后，新建 HTTPS 连接可解密、修改并记录。"),
+            SettingsUI.section("导入导出", rows: [NativeUI.stack([importButton, exportButton], vertical: false)],
+                               footer: "导出所有项目、请求修改、环境及设置，不含证书。导入会添加项目与请求修改；全量备份中的环境、设置和列宽将覆盖当前数据。")
         ]
         let stack = NativeUI.stack(sections, spacing: 18)
         stack.alignment = .leading
@@ -61,6 +71,8 @@ final class GeneralSettingsViewController: ObservedViewController {
     }
 
     override func refresh() {
+        importButton.isEnabled = model.loaded && !model.isTransitioning
+        exportButton.isEnabled = model.loaded
         mode.selectItem(at: CaptureMode.allCases.firstIndex(of: model.captureMode) ?? 0)
         mode.isEnabled = model.loaded && !model.isTransitioning
         let options = model.installedBrowsers.map { BrowserPickerOption(id: $0.id, title: model.browserDisplayName($0), applicationURL: $0.applicationURL) }

@@ -94,6 +94,21 @@ final class RequestRecordsTable: NSView {
 
         init(defaults: UserDefaults) {
             self.defaults = defaults
+            super.init()
+            reloadPreferences()
+            NotificationCenter.default.addObserver(self, selector: #selector(preferencesRestored),
+                                                   name: .init("Requestman.preferencesRestored"), object: nil)
+        }
+
+        @objc private func preferencesRestored() {
+            reloadPreferences()
+            let width = availableWidth
+            availableWidth = 0
+            fitColumns(to: width)
+        }
+
+        private func reloadPreferences() {
+            preferredWidths = nil
             if let saved = defaults.dictionary(forKey: RequestRecordsTable.columnWidthsKey) {
                 let widths = RecordColumn.allCases.compactMap { column -> CGFloat? in
                     guard let value = saved[column.rawValue] as? Double,

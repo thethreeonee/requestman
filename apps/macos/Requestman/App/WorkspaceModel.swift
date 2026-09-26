@@ -309,11 +309,44 @@ final class WorkspaceModel {
     }
     func duplicateWorkflow(_ workflow: RequestWorkflow, projectID: UUID) {
         guard let i = document.projects.firstIndex(where: { $0.id == projectID }) else { return }
-        var copy = workflow; copy.id = UUID(); copy.name += " 副本"
-        copy.requestSteps = copy.requestSteps.map { var step = $0; step.id = UUID(); return step }
-        copy.responseSteps = copy.responseSteps.map { var step = $0; step.id = UUID(); return step }
-        document.projects[i].workflows.append(copy); selectedWorkflowID = copy.id
+        var copy = workflow.duplicated(); copy.name += " 副本"
+        document.projects[i].workflows.append(copy); selectedWorkflowID = copy.id; selectedStepID = nil
     }
+    func duplicateProject(_ id: UUID) {
+        guard let project = document.projects.first(where: { $0.id == id }) else { return }
+        var copy = project.duplicated(); copy.name += " 副本"
+        document.projects.append(copy)
+        selectedWorkflowID = copy.workflows.first?.id; selectedStepID = nil
+    }
+
+    func importArchive(_ archive: WorkspaceArchive) async throws {
+        guard loaded, !isTransitioning else { throw WorkflowError.invalid("请等待当前操作完成后再导入") }
+        let merged = try archive.merging(into: document)
+        let preferences = archive.scope == .workspace ? try archive.preferenceValues() : nil
+        isTransitioning = true
+        loaded = false
+        defer { loaded = true; isTransitioning = false }
+        revision += 1
+        saveTask?.cancel()
+        // Save first: a bad file or disk failure must leave the current workspace intact.
+        do { try await documentStore.save(merged) }
+        catch { scheduleSave(); throw error }
+        let previousProxy = document.proxy
+        document = merged
+        if let preferences {
+            UserDefaults.standard.setPersistentDomain(preferences, forName: WorkspaceTransfer.preferencesDomain)
+            captureMode = CaptureMode(rawValue: preferences["captureMode"] as? String ?? "") ?? .systemProxy
+            selectedBrowserID = preferences["selectedBrowserID"] as? String ?? ""
+            NotificationCenter.default.post(name: WorkspaceTransfer.preferencesRestored, object: nil)
+        }
+        selectedEnvironmentID = document.selectedEnvironmentID ?? document.environments.first?.id
+        selectedWorkflowID = document.projects.suffix(archive.document.projects.count).first?.workflows.first?.id ?? selectedWorkflowID
+        selectedStepID = nil
+        saveState = "已保存"
+        await captureService.update(document: document)
+        if document.proxy != previousProxy { scheduleProxyConfiguration() }
+    }
+
     func addStep(_ kind: ModificationKind, response: Bool) {
         guard var workflow else { return }
         var step = ModificationStep(kind: kind)

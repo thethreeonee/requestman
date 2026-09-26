@@ -20,6 +20,7 @@ try:
                         "-emit-module-path", str(temporary / f"{name}.swiftmodule"),
                         "-o", str(temporary / f"lib{name}.a"), *map(str, files)], check=True)
     files = [source / "Features/Workspace/AppKitSupport.swift", source / "Features/Workspace/WorkspaceSectionControl.swift"]
+    files += [source / "Features/Workspace/WorkspaceTransfer.swift"]
     files += sorted((source / "Features/Settings").glob("*.swift"))
     files += sorted((source / "Features/Environments").glob("*.swift"))
     files += [source / "Features/Connection/ConnectionSettingsView.swift", source / "Features/Connection/CertificateSetupView.swift"]

@@ -1,7 +1,7 @@
 import AppKit
 import RequestmanCore
 
-@MainActor final class ProjectSidebarViewController: ObservedViewController, NSOutlineViewDataSource, NSOutlineViewDelegate, NSSearchFieldDelegate, NSMenuDelegate {
+@MainActor final class ProjectSidebarViewController: ObservedViewController, NSOutlineViewDataSource, NSOutlineViewDelegate, NSSearchFieldDelegate {
     private final class Item: NSObject {
         let id: UUID
         let projectID: UUID
@@ -9,7 +9,7 @@ import RequestmanCore
         init(id: UUID, projectID: UUID, isProject: Bool) { self.id = id; self.projectID = projectID; self.isProject = isProject }
     }
     let model: WorkspaceModel
-    let outline = NSOutlineView()
+    let outline = ProjectOutlineView()
     let searchField = NSSearchField()
     private var roots: [Item] = []
     private var workflowItems: [UUID: [Item]] = [:]
@@ -29,7 +29,8 @@ import RequestmanCore
         outline.headerView = nil; outline.style = .sourceList; outline.rowSizeStyle = .custom
         outline.dataSource = self; outline.delegate = self
         outline.setAccessibilityLabel("项目与请求修改")
-        let menu = NSMenu(); menu.delegate = self; outline.menu = menu
+        outline.projectClick = { [weak self] row in self?.toggleProject(at: row) ?? false }
+        outline.contextMenu = { [weak self] row in self?.menu(forRow: row) }
         let scroll = NSScrollView(); scroll.documentView = outline; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         let add = ActionButton(title: "") { [weak self] in self?.showAddMenu() }
         add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "添加")
@@ -91,7 +92,7 @@ import RequestmanCore
     func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any { if let item = item as? Item { return workflowItems[item.id]![index] }; return roots[index] }
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool { (item as? Item)?.isProject == true }
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool { model.loaded && (item as? Item)?.isProject == false }
-    func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat { (item as? Item)?.isProject == true ? 30 : 52 }
+    func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat { 40 }
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         guard let item = item as? Item else { return nil }
         let cell = RulesSidebarCell(); configure(cell, item: item); return cell
@@ -99,15 +100,18 @@ import RequestmanCore
     private func configure(_ cell: RulesSidebarCell, item: Item) {
         guard let project = model.document.projects.first(where: { $0.id == item.projectID }) else { return }
         if item.isProject {
-            cell.configure(title: project.name, subtitle: nil, symbol: "folder", suffix: "\(project.workflows.count)", enabled: true, editable: model.loaded)
-            cell.titleField.onChange = { [weak self] name in
-                guard let self, let index = model.document.projects.firstIndex(where: { $0.id == item.id }) else { return }
-                model.document.projects[index].name = name
-            }
+            cell.configure(title: project.name, symbol: project.symbol, suffix: "\(project.workflows.count)", enabled: project.enabled, project: true)
         } else if let workflow = project.workflows.first(where: { $0.id == item.id }) {
-            cell.configure(title: workflow.name, subtitle: "\(workflow.method) · \(workflow.matchPattern)", symbol: nil, suffix: workflow.enabled ? "" : "⏸", enabled: workflow.enabled, editable: false)
+            cell.configure(title: workflow.name, symbol: nil, suffix: workflow.enabled ? "" : "⏸", enabled: project.enabled && workflow.enabled, project: false)
         }
     }
+    @discardableResult
+    func toggleProject(at row: Int) -> Bool {
+        guard model.loaded, let item = outline.item(atRow: row) as? Item, item.isProject else { return false }
+        if outline.isItemExpanded(item) { outline.collapseItem(item) } else { outline.expandItem(item) }
+        return true
+    }
+
     func outlineViewSelectionDidChange(_ notification: Notification) {
         guard !synchronizing, let item = outline.item(atRow: outline.selectedRow) as? Item, !item.isProject else { return }
         if model.selectedWorkflowID != item.id { model.selectedStepID = nil; model.selectedWorkflowID = item.id }
@@ -115,23 +119,80 @@ import RequestmanCore
     func outlineViewItemDidCollapse(_ notification: Notification) { if !synchronizing, let item = notification.userInfo?["NSObject"] as? Item { collapsedProjects.insert(item.id) } }
     func outlineViewItemDidExpand(_ notification: Notification) { if !synchronizing, let item = notification.userInfo?["NSObject"] as? Item { collapsedProjects.remove(item.id) } }
     func controlTextDidChange(_ notification: Notification) { search = searchField.stringValue }
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-        guard model.loaded, let item = outline.item(atRow: outline.clickedRow) as? Item else { return }
+    func menu(forRow row: Int) -> NSMenu? {
+        guard model.loaded, let item = outline.item(atRow: row) as? Item,
+              let project = model.document.projects.first(where: { $0.id == item.projectID }) else { return nil }
+        let menu = NSMenu()
         if item.isProject {
-            menu.addItem(RulesMenuItem("添加请求修改") { [weak self] in self?.model.addWorkflow(projectID: item.id) })
+            menu.addItem(RulesMenuItem(project.enabled ? "禁用整个项目" : "启用整个项目") { [weak self] in
+                self?.updateProject(item.id) { $0.enabled.toggle() }
+            })
+            menu.addItem(RulesMenuItem("复制整个项目") { [weak self] in self?.model.duplicateProject(item.id) })
+            menu.addItem(RulesMenuItem("重命名") { [weak self] in self?.rename(item) })
+            let icons = NSMenu()
+            for (title, symbol) in [("文件夹", "folder"), ("网络", "network"), ("地球", "globe"), ("服务器", "server.rack"),
+                                    ("终端", "terminal"), ("代码", "curlybraces"), ("工具", "wrench.and.screwdriver"),
+                                    ("星标", "star"), ("闪电", "bolt"), ("盒子", "shippingbox")] {
+                let choice = RulesMenuItem(title, symbol: symbol) { [weak self] in self?.updateProject(item.id) { $0.symbol = symbol } }
+                choice.state = project.symbol == symbol ? .on : .off
+                icons.addItem(choice)
+            }
+            let iconItem = NSMenuItem(title: "修改图标", action: nil, keyEquivalent: ""); iconItem.submenu = icons; menu.addItem(iconItem)
+            menu.addItem(RulesMenuItem("导出整组…") { [weak self] in
+                guard let self, let current = model.document.projects.first(where: { $0.id == item.id }) else { return }
+                WorkspaceTransfer.export(WorkspaceArchive(project: current), name: current.name, window: view.window)
+            })
+            menu.addItem(.separator())
             menu.addItem(RulesMenuItem("删除项目") { [weak self] in
                 guard let self else { return }
                 model.document.projects.removeAll { $0.id == item.id }
                 if model.workflow == nil { model.selectedWorkflowID = nil; model.selectedStepID = nil }
             })
-        } else {
+        } else if let workflow = project.workflows.first(where: { $0.id == item.id }) {
+            menu.addItem(RulesMenuItem(workflow.enabled ? "禁用" : "启用") { [weak self] in
+                guard let self, var current = model.document.projects.flatMap(\.workflows).first(where: { $0.id == item.id }) else { return }
+                current.enabled.toggle(); model.updateWorkflow(current)
+            })
+            menu.addItem(RulesMenuItem("重命名") { [weak self] in self?.rename(item) })
             menu.addItem(RulesMenuItem("复制") { [weak self] in
                 guard let self, let flow = model.document.projects.flatMap(\.workflows).first(where: { $0.id == item.id }) else { return }
                 model.duplicateWorkflow(flow, projectID: item.projectID)
             })
+            menu.addItem(RulesMenuItem("导出…") { [weak self] in
+                guard let self, let current = model.document.projects.first(where: { $0.id == item.projectID }),
+                      let flow = current.workflows.first(where: { $0.id == item.id }) else { return }
+                WorkspaceTransfer.export(WorkspaceArchive(project: current, workflowID: item.id), name: flow.name, window: view.window)
+            })
+            menu.addItem(.separator())
             menu.addItem(RulesMenuItem("删除") { [weak self] in self?.model.deleteWorkflow(item.id) })
         }
+        return menu
+    }
+    private func updateProject(_ id: UUID, change: (inout WorkflowProject) -> Void) {
+        guard model.loaded, let index = model.document.projects.firstIndex(where: { $0.id == id }) else { return }
+        change(&model.document.projects[index])
+    }
+    private func rename(_ item: Item) {
+        guard let project = model.document.projects.first(where: { $0.id == item.projectID }) else { return }
+        let name = item.isProject ? project.name : project.workflows.first { $0.id == item.id }?.name ?? ""
+        let field = NSTextField(string: name)
+        field.frame = NSRect(x: 0, y: 0, width: 300, height: 24)
+        field.setAccessibilityLabel(item.isProject ? "项目名称" : "请求修改名称")
+        let alert = NSAlert()
+        alert.messageText = item.isProject ? "重命名项目" : "重命名请求修改"
+        alert.addButton(withTitle: "保存"); alert.addButton(withTitle: "取消")
+        alert.accessoryView = field; alert.window.initialFirstResponder = field
+        let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .alertFirstButtonReturn, let self, model.loaded else { return }
+            let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return }
+            if item.isProject { updateProject(item.id) { $0.name = name } }
+            else if var workflow = model.document.projects.flatMap(\.workflows).first(where: { $0.id == item.id }) {
+                workflow.name = name; model.updateWorkflow(workflow)
+            }
+        }
+        if let window = view.window { alert.beginSheetModal(for: window, completionHandler: completion) }
+        else { completion(alert.runModal()) }
     }
     private func showAddMenu() {
         guard model.loaded else { return }
@@ -148,29 +209,45 @@ import RequestmanCore
     }
 }
 
+/// Keep native outline keyboard navigation/disclosure accessibility; intercept only project clicks.
+@MainActor final class ProjectOutlineView: NSOutlineView {
+    var projectClick: (Int) -> Bool = { _ in false }
+    var contextMenu: (Int) -> NSMenu? = { _ in nil }
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) { super.mouseDown(with: event); return }
+        let row = row(at: convert(event.locationInWindow, from: nil))
+        if !projectClick(row) { super.mouseDown(with: event) }
+    }
+    override func menu(for event: NSEvent) -> NSMenu? {
+        menu = contextMenu(row(at: convert(event.locationInWindow, from: nil)))
+        guard menu != nil else { return nil }
+        // AppKit tracks the clicked row and draws/clears its native contextual-menu outline
+        // without changing the selected workflow. Returning our menu directly bypasses it.
+        return super.menu(for: event)
+    }
+}
+
 @MainActor private final class RulesSidebarCell: NSTableCellView {
-    let titleField = ActionTextField(onChange: { _ in })
-    private let subtitle = NativeUI.label("", size: 11, secondary: true)
+    private let title = NativeUI.label("")
     private let icon = NSImageView()
     private let suffix = NativeUI.label("", size: 11, secondary: true)
     override init(frame: NSRect) {
         super.init(frame: frame)
-        titleField.isBordered = false; titleField.drawsBackground = false
-        titleField.lineBreakMode = .byTruncatingTail; subtitle.lineBreakMode = .byTruncatingTail
-        let text = NativeUI.stack([titleField, subtitle], spacing: 4)
-        let row = NativeUI.stack([icon, text, suffix], vertical: false, spacing: 8)
+        textField = title
+        let row = NativeUI.stack([icon, title, suffix], vertical: false, spacing: 8)
         NativeUI.pin(row, to: self, insets: NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 4))
         icon.widthAnchor.constraint(equalToConstant: 18).isActive = true
-        text.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        suffix.setContentCompressionResistancePriority(.required, for: .horizontal)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    func configure(title: String, subtitle: String?, symbol: String?, suffix: String, enabled: Bool, editable: Bool) {
-        if titleField.stringValue != title { titleField.stringValue = title }
-        titleField.isEditable = editable; titleField.isSelectable = editable
-        titleField.font = .systemFont(ofSize: 13, weight: subtitle == nil ? .semibold : .regular)
-        self.subtitle.stringValue = subtitle ?? ""; self.subtitle.isHidden = subtitle == nil
-        icon.image = symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }; icon.isHidden = symbol == nil
-        icon.contentTintColor = .controlAccentColor
+    func configure(title: String, symbol: String?, suffix: String, enabled: Bool, project: Bool) {
+        self.title.stringValue = title; self.title.toolTip = title
+        self.title.font = .systemFont(ofSize: 13, weight: project ? .semibold : .regular)
+        icon.image = symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }
+        if project && icon.image == nil { icon.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil) }
+        icon.isHidden = symbol == nil; icon.contentTintColor = .controlAccentColor
         self.suffix.stringValue = suffix; alphaValue = enabled ? 1 : 0.55
     }
 }

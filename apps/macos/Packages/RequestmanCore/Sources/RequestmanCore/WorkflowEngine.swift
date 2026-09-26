@@ -35,7 +35,7 @@ public enum WorkflowEngine {
     public static let managedHeaders = ["content-length", "transfer-encoding", "connection", "host", "upgrade", "trailer"]
     /// First enabled match in project order wins, keeping rule composition deterministic.
     public static func match(_ document: WorkspaceDocument, method: String, url: String, headers: [HTTPField] = []) -> WorkflowMatch? {
-        for project in document.projects {
+        for project in document.projects where project.enabled {
             if let workflow = project.workflows.first(where: { $0.matches(method: method, url: url, headers: headers) }) {
                 return WorkflowMatch(project: project.name, workflow: workflow, environment: document.environment)
             }

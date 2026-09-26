@@ -124,7 +124,24 @@ public struct WorkflowProject: Codable, Equatable, Identifiable, Sendable {
     public var id = UUID()
     public var name: String
     public var workflows: [RequestWorkflow] = []
+    public var enabled = true
+    public var symbol = "folder"
     public init(name: String = "新项目") { self.name = name }
+    private enum CodingKeys: String, CodingKey { case id, name, workflows, enabled, symbol }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        workflows = try values.decode([RequestWorkflow].self, forKey: .workflows)
+        enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        symbol = try values.decodeIfPresent(String.self, forKey: .symbol) ?? "folder"
+    }
+    public func duplicated() -> WorkflowProject {
+        var copy = self
+        copy.id = UUID()
+        copy.workflows = workflows.map { $0.duplicated() }
+        return copy
+    }
 }
 
 public struct ExplicitProxyConfiguration: Codable, Equatable, Sendable {
@@ -174,5 +191,15 @@ public actor WorkspaceDocumentStore {
         let data = try JSONEncoder().encode(document)
         try data.write(to: url, options: [.atomic])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+}
+
+extension RequestWorkflow {
+    public func duplicated() -> RequestWorkflow {
+        var copy = self
+        copy.id = UUID()
+        copy.requestSteps = requestSteps.map { var step = $0; step.id = UUID(); return step }
+        copy.responseSteps = responseSteps.map { var step = $0; step.id = UUID(); return step }
+        return copy
     }
 }

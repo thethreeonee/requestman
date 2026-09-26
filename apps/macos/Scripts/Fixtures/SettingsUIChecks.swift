@@ -14,6 +14,7 @@ final class WorkspaceModel {
     var settingsSection: WorkspaceSettingsSection = .general
     var captureMode: CaptureMode = .systemProxy
     var document = WorkspaceDocument()
+    func importArchive(_ archive: WorkspaceArchive) async throws { preconditionFailure("Unexpected file import") }
     var loaded = true
     var isTransitioning = false
     var installedBrowsers: [ChromiumBrowser] = []
@@ -62,6 +63,8 @@ struct SettingsUIChecks {
         precondition(window.toolbar?.items.contains { $0.view is ToolbarSectionControl } == true)
         checkFormGeometry(in: controller.view)
 
+        precondition(button("导入…", in: controller.view).isEnabled)
+        precondition(button("导出全部…", in: controller.view).isEnabled)
         let port = field("本地代理端口", in: controller.view)
         precondition(port.bounds.width == 140 && port.bounds.height > 0)
         port.onChange("9191")
@@ -69,6 +72,7 @@ struct SettingsUIChecks {
         model.isTransitioning = true
         try await Task.sleep(for: .milliseconds(50))
         precondition(!port.isEnabled)
+        precondition(!button("导入…", in: controller.view).isEnabled)
         model.isTransitioning = false
 
         let general = controller.children.first as! GeneralSettingsViewController
