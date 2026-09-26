@@ -137,6 +137,23 @@ struct SettingsUIChecks {
         environments.refresh()
         precondition(model.document.environments[0].values["apiKey"] == "secret-value")
         precondition(field("变量值", in: environments.view).stringValue == "secret-value")
+        let nameBox = descendants(environments.view).compactMap { $0 as? NSBox }.first { $0.title == "名称" }!
+        precondition(descendants(nameBox).compactMap { $0 as? ActionTextField }.count == 1)
+        let type = descendants(environments.view).compactMap { $0 as? ActionPopUpButton }.first { $0.accessibilityLabel() == "变量数据类型" }!
+        precondition(type.itemTitles == ["字符串", "数值", "布尔", "数组", "对象"])
+        for (kind, value) in [(EnvironmentValueType.number, "123"), (.boolean, "true"), (.array, "[1, false]"), (.object, #"{"enabled":true}"#)] {
+            type.onChange(EnvironmentValueType.allCases.firstIndex(of: kind)!)
+            variableValue.onChange(value)
+            environments.refresh()
+            precondition(model.document.environments[0].variables[0].type == kind)
+            precondition(model.document.environments[0].variables[0].value == value)
+        }
+        variableValue.onChange("invalid JSON")
+        precondition(model.document.environments[0].variables[0].value == #"{"enabled":true}"#)
+        precondition(variableValue.stringValue == "invalid JSON")
+        checkFormGeometry(in: environments.view)
+        type.onChange(0)
+        variableValue.onChange("secret-value")
         checkFormGeometry(in: environments.view)
         try snapshotForm(in: environments.view, name: "environment")
         model.addEnvironment()
@@ -165,9 +182,8 @@ struct SettingsUIChecks {
         precondition(rebuiltName.stringValue == "production" && nameError.isHidden)
         rebuiltName.onChange("production")
         precondition(nameError.isHidden, "An environment must not conflict with its own name")
-        button("切换到此环境", in: environments.view).performClick(nil)
-        environments.refresh()
-        precondition(model.document.selectedEnvironmentID == model.selectedEnvironmentID)
+        precondition(!descendants(environments.view).compactMap { $0 as? NSButton }.contains { $0.title == "切换到此环境" || $0.title == "正在使用" })
+        precondition(model.document.selectedEnvironmentID == firstID, "Editing another environment must not activate it")
         window.contentView?.layoutSubtreeIfNeeded()
         let split = environments.children.first as! NSSplitViewController
         split.splitView.setPosition(220, ofDividerAt: 0)
@@ -179,7 +195,7 @@ struct SettingsUIChecks {
         button("删除环境", in: environments.view).performClick(nil)
         environments.refresh()
         precondition(model.document.environments.count == 1)
-        precondition(model.document.selectedEnvironmentID == nil)
+        precondition(model.document.selectedEnvironmentID == firstID)
         precondition(model.selectedEnvironmentID == firstID)
         button("删除变量", in: environments.view, accessibility: true).performClick(nil)
         environments.refresh()
@@ -193,7 +209,7 @@ struct SettingsUIChecks {
         precondition(certificate.view.fittingSize.width == 480)
         precondition(!model.certificateSetup.isRunning)
         checkOutsideClickEditing()
-        print("Settings AppKit checks OK: form containment and non-overlap, browser/certificate states, upstream expansion and wrapped errors, scrolling, window, toolbar, proxy binding, environment editing/switch/delete, split geometry, read-only state and certificate construction (no App or certificate changes)")
+        print("Settings AppKit checks OK: form containment and non-overlap, browser/certificate states, upstream expansion and wrapped errors, scrolling, window, toolbar, proxy binding, environment name/typed variables/validation/delete, split geometry, read-only state and certificate construction (no App or certificate changes)")
     }
 
     private static func checkOutsideClickEditing() {

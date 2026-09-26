@@ -184,6 +184,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     private var originKeepsAlive = false
     private var upstreamTarget: String?
     private var scriptLease: ScriptFlowLease?
+    private var suspendedFlowControl: ScriptExecutionControl?
     private var scriptRequestHead: HTTPRequestHead?
     private var scriptRequestDraft: HTTPMessageDraft?
     private var scriptResponseDraft: HTTPMessageDraft?
@@ -201,7 +202,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     private func activate(_ context: ChannelHandlerContext) {
         guard client == nil else { return }
         client = context.channel
-        timer = context.eventLoop.scheduleTask(in: .seconds(30)) { [self] in fail("请求超时", status: 504) }
+        timer = context.eventLoop.scheduleTask(in: .seconds(30)) { [self] in fail("等待请求超时", status: 504) }
         context.read()
     }
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
@@ -266,8 +267,11 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     }
     private func begin(_ input: HTTPRequestHead) {
         guard let client else { return }
-        timer?.cancel()
-        timer = client.eventLoop.scheduleTask(in: .seconds(30)) { [self] in fail("请求超时", status: 504) }
+        timer?.cancel(); timer = nil
+        // Bound tunnel establishment, but do not put a deadline on an HTTP transaction.
+        if input.method == .CONNECT {
+            timer = client.eventLoop.scheduleTask(in: .seconds(30)) { [self] in fail("CONNECT 建立超时", status: 504) }
+        }
         clientKeepsAlive = input.isKeepAlive
         var head = input
         if let tlsAuthority {
@@ -347,7 +351,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                 record?.sentBody = .unavailable("本地响应，请求未发送至上游")
                 record?.receivedBody = .unavailable("本地响应，没有上游响应")
                 var reply = draft
-                if match?.workflow.responseSteps.contains(where: { $0.enabled && $0.kind == .script }) == true {
+                if match?.workflow.responseSteps.contains(where: { $0.enabled && [.script, .delay].contains($0.kind) }) == true {
                     executeScriptFlow(response: true, draft: reply) { [self] in sendStatic($0) }
                     return
                 }
@@ -502,8 +506,10 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                 record?.receivedHeaders = draft.headers
                 record?.originalStatus = draft.status
                 receivedBodyCollector = CaptureBodyCollector(headers: draft.headers)
-                if match?.workflow.responseSteps.contains(where: { $0.enabled && $0.kind == .script }) == true {
-                    guard reserveScriptFlow() else { return }
+                if match?.workflow.responseSteps.contains(where: { $0.enabled && [.script, .delay].contains($0.kind) }) == true {
+                    if match?.workflow.responseSteps.contains(where: { $0.enabled && $0.kind == .script }) == true {
+                        guard reserveScriptFlow() else { return }
+                    }
                     scriptResponseDraft = draft
                     return
                 }
@@ -637,6 +643,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     private func fail(_ message: String, status: Int) {
         guard isProcessing else { return }
         failureMessage = message
+        suspendedFlowControl?.cancel()
         scriptLease?.control.cancel()
         timer?.cancel(); certificateTask?.cancel()
         if let upstream { closeProxyChannel(upstream) }
@@ -663,7 +670,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                                     to draft: inout HTTPMessageDraft) throws {
         guard let match, let snapshot = record else { return }
         _ = try WorkflowEngine.apply(steps, response: response, to: &draft,
-            environment: match.environment?.values ?? [:], id: snapshot.id, date: snapshot.startedAt, request: request, templateContext: templateContext) { kind in
+            environment: match.environment?.values ?? [:], id: snapshot.id, date: snapshot.startedAt, request: request, templateContext: templateContext, environmentTypes: match.environment?.valueTypes ?? [:]) { kind in
                 self.record?.steps.append(kind.title)
                 self.record?.matchedRules.append(CaptureMatchedRule(
                     kind: kind, name: match.workflow.name, response: response
@@ -680,8 +687,13 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
 
     private func executeScriptFlow(response isResponse: Bool, draft: HTTPMessageDraft,
                                    completion: @escaping @Sendable (HTTPMessageDraft) -> Void) {
-        guard reserveScriptFlow(), let lease = scriptLease, let client, let match, let snapshot = record else { return }
+        guard let client, let match, let snapshot = record else { return }
         let steps = isResponse ? match.workflow.responseSteps : match.workflow.requestSteps
+        let hasScript = steps.contains { $0.enabled && $0.kind == .script }
+        if hasScript { guard reserveScriptFlow() else { return } }
+        let lease = scriptLease
+        let control = ScriptExecutionControl()
+        suspendedFlowControl = control
         var requestSnapshot = request
         if isResponse, requestSnapshot?.bodyText == nil, let requestBodyCollector, requestEnded {
             let body = requestBodyCollector.snapshot(isComplete: true)
@@ -690,22 +702,23 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         if snapshot.hasSentRequestHeaders { requestSnapshot?.headers = snapshot.sentHeaders }
         let inputRequest = requestSnapshot
         let inputTemplateContext = templateContext
-        DispatchQueue.global(qos: .userInitiated).async { [self, lease] in
-            _ = lease // Keep the admission slot until the worker actually exits, even after a client cancellation.
+        Task.detached(priority: .userInitiated) { [self, lease] in
+            // Keep the admission slot until the worker exits, including across suspended delays.
+            defer { withExtendedLifetime(lease) {} }
             var output = draft
             var kinds: [ModificationKind] = []
             let result: Result<HTTPMessageDraft, Error>
             do {
-                try lease.control.check()
-                if let data = output.bodyData { output.bodyText = try ScriptBodyText.decode(data, headers: output.headers, control: lease.control) }
+                try control.check()
+                if hasScript, let data = output.bodyData { output.bodyText = try ScriptBodyText.decode(data, headers: output.headers, control: control) }
                 var preparedRequest = inputRequest
-                if let data = preparedRequest?.bodyData, preparedRequest?.replacementBody == nil {
+                if hasScript, let data = preparedRequest?.bodyData, preparedRequest?.replacementBody == nil {
                     let headers = preparedRequest?.headers ?? []
-                    preparedRequest?.bodyText = try ScriptBodyText.decode(data, headers: headers, control: lease.control)
+                    preparedRequest?.bodyText = try ScriptBodyText.decode(data, headers: headers, control: control)
                 }
-                _ = try WorkflowEngine.apply(steps, response: isResponse, to: &output,
+                _ = try await WorkflowEngine.applyAsync(steps, response: isResponse, to: &output,
                     environment: match.environment?.values ?? [:], id: snapshot.id, date: snapshot.startedAt,
-                    request: preparedRequest, control: lease.control, templateContext: inputTemplateContext, onApplied: { kinds.append($0) })
+                    request: preparedRequest, control: control, templateContext: inputTemplateContext, environmentTypes: match.environment?.valueTypes ?? [:], onApplied: { kinds.append($0) })
                 result = .success(output)
             } catch { result = .failure(error) }
             let appliedKinds = kinds
@@ -749,6 +762,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     private func finish(error: String? = nil) {
         guard !finished else { return }
         finished = true; timer?.cancel(); certificateTask?.cancel()
+        suspendedFlowControl?.cancel(); suspendedFlowControl = nil
         scriptLease?.control.cancel()
         scriptLease = nil; scriptRequestHead = nil; scriptRequestDraft = nil; scriptResponseDraft = nil
         scriptRequestBytes = Data(); scriptResponseBytes = Data()
@@ -776,6 +790,10 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             .channelOption(ChannelOptions.autoRead, value: false)
             .channelOption(ChannelOptions.maxMessagesPerRead, value: 1)
             .channelOption(ChannelOptions.recvAllocator, value: FixedSizeRecvByteBufferAllocator(capacity: 16_384))
+            .channelInitializer { [shared] channel in
+                guard shared.register(channel, downstream: false) else { return channel.close() }
+                return channel.eventLoop.makeSucceededVoidFuture()
+            }
     }
     private func fields(_ headers: HTTPHeaders) -> [HTTPField] { headers.map { HTTPField($0.name, $0.value) } }
     private func cleanHeaders(_ fields: [HTTPField]) -> HTTPHeaders {
@@ -790,10 +808,6 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
               target.fragment == nil, (1...65535).contains(port), !isLoop(host, port: port) else {
             return fail("CONNECT 目标无效", status: 400)
         }
-            .channelInitializer { [shared] channel in
-                guard shared.register(channel, downstream: false) else { return channel.close() }
-                return channel.eventLoop.makeSucceededVoidFuture()
-            }
         guard head.headers["transfer-encoding"].isEmpty,
               head.headers["content-length"].allSatisfy({ $0 == "0" }) else { return fail("CONNECT 不接受 HTTP Body", status: 400) }
         if let provider = shared.certificateProvider {

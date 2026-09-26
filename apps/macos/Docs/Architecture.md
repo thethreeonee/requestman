@@ -26,7 +26,7 @@
 
 证书配置入口位于设置 → 通用的“HTTPS 证书”分组，本地代理、上游代理和协议支持也统一放在通用页。证书引导由 `WorkspaceModel.certificateSetup` 持有 `CertificateSetupModel`，经 `CertificateService` 访问独立的 `LocalCertificateService` actor；界面控制器不直接读写 Security。只在用户点击“设置证书…”后串行检查、生成、安装、授权和复核，已完成步骤可复用，取消不会自动重弹授权。私钥使用不可导出的文件型钥匙串键，由登录钥匙串锁和 ACL 保护；此选择兼容当前无专用 Keychain entitlement 的 macOS 宿主，公开 CA 安装到浏览器读取的默认钥匙串。证书编码和签名使用 [Apple swift-certificates](https://github.com/apple/swift-certificates)，不手写 X.509 或把私钥写到磁盘。当前用户信任只指定 SSL policy，授权由 `SecTrustSettingsSetTrustSettings` 系统面板执行；验证使用短期内存测试叶证书、主机名及系统 SSL 信任链，不设置自定义 anchors、不关闭证书校验。过期、损坏或密钥不匹配时报告错误并保留原材料，不静默轮换。证书与捕获服务共享同一个 actor。新 CONNECT 连接经 `TLSCertificateProviding` 获取短期站点证书；未完成信任时保持透传，已信任时升级到 NIOSSL 服务端并复用 HTTP 流程，按 CONNECT authority 校验内层 Host 与目标。CA 密钥不导出，P-256 站点密钥仅在内存中使用；SAN 支持 DNS/IPv4/IPv6，证书最多有效 7 天、不超过 CA 到期，缓存上限 128 个。已有透传连接需重建，历史记录不回填。
 
-`ProxyTLS` 使用 Apple NIOSSL 处理 TLS，出站验证异步交给 macOS `SecTrust`，同时检查真实目标的主机名和系统/用户信任；关闭网络证书补取避免系统代理递归，不关闭证书校验。仅 internal 测试构造器允许内存测试锚点。CONNECT 建立、升级后等待内层请求、每个 HTTP 事务分别限时 30 秒，上游 TLS 握手计入该 HTTP 事务；升级时先安装 TLS 处理器，再释放 CONNECT decoder 缓冲的首包数据。解密记录完整保留 URL、方法、双向 Header 和旁路采集的 Body；网络线程不等待完整内容、不解压。回环测试不安装或信任本机 CA。
+`ProxyTLS` 使用 Apple NIOSSL 处理 TLS，出站验证异步交给 macOS `SecTrust`，同时检查真实目标的主机名和系统/用户信任；关闭网络证书补取避免系统代理递归，不关闭证书校验。仅 internal 测试构造器允许内存测试锚点。CONNECT 建立、升级后等待内层请求分别限时 30 秒；HTTP 请求头收到后取消等待计时器，事务不设总时限；升级时先安装 TLS 处理器，再释放 CONNECT decoder 缓冲的首包数据。解密记录完整保留 URL、方法、双向 Header 和旁路采集的 Body；网络线程不等待完整内容、不解压。回环测试不安装或信任本机 CA。
 
 依赖方向：`Features → WorkspaceModel → CaptureService / RequestmanCore`。本轮本地代理库运行在宿主进程的独立 NIO 事件循环。未来系统扩展和代理核心需要明确的 IPC 协议，不直接跨进程共享 UI 状态。`CaptureConfiguration` 目前只是 Swift 模块间的数据契约，还不是稳定 IPC 协议。
 
@@ -112,7 +112,7 @@ macOS 26+ 主内容栏启用 `allowsFullHeightLayout`，请求日志筛选栏与
 
 按应用透明接管模式中，应用列表的 Bundle ID 是用户选择键，不能等同于网络流的签名身份。实际接管必须解析签名信息、审计令牌及辅助进程归属，避免误捕获。空选择必须拒绝启动，不能退化为全局捕获。未来显式代理入口需要独立的配置与校验契约，不通过放宽现有 CaptureConfiguration 的空选择校验实现。
 
-请求流程在主请求发往上游前执行，响应流程在对应内容返回客户端前执行。Mock 跳过主上游请求并进入响应流程；辅助 HTTP 请求独立标记，默认跳过普通流程匹配。暂停、脚本和辅助请求共享执行时间预算，不能保证客户端无限等待。完整 Body 编辑、头部处理与流式透传的边界见产品设计文档。
+请求流程在主请求发往上游前执行，响应流程在对应内容返回客户端前执行。Mock 跳过主上游请求并进入响应流程；辅助 HTTP 请求独立标记，默认跳过普通流程匹配。响应的“添加延迟”以 ms 保存，`WorkflowEngine.applyAsync` 按步骤异步等待，结束后才继续，保留阶段入口的模板快照。含延迟的响应复用完整 Body 后台流程，纯延迟不进行文本解码、不占用脚本名额；取消随流程传递，HTTP 事务和流程预览不设总时限；单次脚本超时独立保留。客户端仍可主动断开或按自身策略超时。完整 Body 编辑、头部处理与流式透传的边界见产品设计文档。
 
 ## Surge 共存
 
@@ -161,9 +161,11 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 ## 请求修改配置与同步脚本（2026-09-26）
 
-匹配配置改为 URL / Host 与四类规则，并支持独立 Header 条件与地址、方法同时匹配，旧前缀按转义正则迁移，工作区保存版本为 2。步骤详情接入同一个窗口级 Inspector，Header 使用插件候选列表的原生可编辑组合框。同步 JavaScript 通过可终止的独立进程执行，具有脚本的阶段在后台读取完整 Body、解码文本后执行；未带脚本的阶段保留 NIO 流式路径。取消与事务截止时间沿脚本流程传递；输入/输出没有新增载荷尺寸上限。完整 API、并发和时限、验收范围见[请求修改配置](Design/request-modification.md)。
+匹配配置改为 URL / Host 与四类规则，并支持独立 Header 条件与地址、方法同时匹配，旧前缀按转义正则迁移，工作区保存版本为 2。步骤详情接入同一个窗口级 Inspector，Header 使用插件候选列表的原生可编辑组合框。同步 JavaScript 通过可终止的独立进程执行，具有脚本的阶段在后台读取完整 Body、解码文本后执行；未带脚本的阶段保留 NIO 流式路径。取消沿脚本流程传递，单次脚本限时独立于无总时限的事务；输入/输出没有新增载荷尺寸上限。完整 API、并发和时限、验收范围见[请求修改配置](Design/request-modification.md)。
 
 ## AppKit 界面迁移（2026-09-26）
+
+`FlowEditorViewController` 的匹配条件首行提供“测试匹配”，通过 `WorkflowMatchTestViewController` 原生 Sheet 输入请求方法、URL 和示例 Header。`WorkflowMatchTest` 在独立后台任务中复用 Core 匹配器，输出条件级诊断及首次匹配范围；不触发代理、步骤或脚本执行。规则摘要是打开时的快照，示例不持久化，输入变更及关闭对话框使旧任务结果失效。匹配测试只检查条件，启用状态、项目状态及规则顺序仍由实际捕获处理。
 
 `RequestmanEntry` 在处理脚本 worker 参数后创建 `NSApplication`。`WorkspaceAppDelegate` 安装系统菜单、持有主窗口和设置窗口，负责启动加载、前台证书状态刷新、后台保存及退出前恢复代理。所有界面与测试替身移除 SwiftUI 和 Hosting 桥接，核心 Observation 模型、代理、证书及脚本契约保留。`check-native-sources.py` 同时检查工程源引用及 AppKit-only 约束，阻止重新引入声明式桥接。工作区、请求详情、筛选、Header、规则编辑和设置使用隐藏 AppKit 窗口回归；完整 App 的系统外观、真实鼠标体验与浏览器网络验收仍单独报告。
 
@@ -184,6 +186,8 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 `WorkspaceArchiveTests` 覆盖完整内容往返、三种导出范围、重复追加和 ID 隔离、环境覆盖、未知版本/坏文件拒绝、旧项目默认值与项目禁用匹配。规则 UI 检查覆盖行高、隐藏副标题、空白区/箭头整行点击与菜单动作；请求列表检查覆盖已存在表格的列宽恢复。隐藏窗口回归与完整 App 的文件面板和视觉验收分别报告。
 
+带边框的单行表单输入框由 `ActionTextField` 统一使用原生 `.squareBezel`、浅色控件外观和白底黑字；`HeaderNameField` 可编辑组合框不绘制背景，不固定外观和文字颜色，跟随系统原生样式。不添加背景容器或自绘控件。普通单行输入框在浅色和深色窗口中均保持白色输入区域，请求名称平时显示无边框标题，仅在编辑时显示原生圆角输入框；按系统文字内边距补偿布局，使两种状态的文字都与下方条件标题左对齐。文字布局宽度优先为 450 pt、窄窗口可收缩，编辑框高度至少 40 pt，跟随窗口外观；编辑前后保留文字位置；单行文字与原生 field editor 使用同一块按字体实际行高垂直居中的区域。规则隐藏窗口回归对匹配值、查询参数、URL 查找、状态码、延迟及脚本备注进行聚焦前后像素与输入检查，Header 组合框保留编辑行为检查。
+
 ## 工作区键盘命令
 
 `WorkspaceCommand` 定义固定映射，由 `WorkspaceAppDelegate` 安装到原生菜单，由 App delegate 转交 `WorkspaceSplitController`（即使没有文本或列表焦点也能使用）。菜单校验与执行共用 `canPerform`，检查当前 key window、sheet、加载状态、捕获过渡状态、页面、选中记录完整性和列表焦点；不安装全局键盘监听。启停捕获复用 `WorkspaceModel.toggleCapture`，暂停记录和清空复用既有 history 接口。侧栏上下文菜单和快捷键共用项目 / 规则动作，步骤动作按实际聚焦的阶段列表定位，文本编辑器保留原生编辑按键。
@@ -192,8 +196,10 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 ## 多 Header 与动态模板编辑（2026-09-26）
 
-`ModificationStep.headers` 为添加/覆盖和移除步骤保存可增删的 Header 条目，缺省时 `headerEntries` 读取旧 `name/value`；显式空数组表示不操作。`WorkflowEngine` 在整组解析与校验通过后才应用 Header，保证后续条目失败不会留下半组修改。移除步骤只校验名称并一次移除所有匹配项，忽略条目值；两种编辑器共享多条目区块，区块显式约束内容边距，滚动文档固定顶部与水平起点。`$env.` 是新的环境引用前缀，旧 `env.` 保持兼容，单次替换语义不变。
+`ModificationStep.headers` 为统一“修改 Header”步骤保存可增删条目及各自的 `add` / `modify` / `remove` 操作，同一步可按顺序添加、修改及删除。添加始终追加，修改只更新已有同名项的值并保留其名称、数量和顺序；没有匹配时跳过。旧 `set` 保留添加或覆盖行为，显式选择方法后才切换语义；Header 条目下方不展示操作说明或旧配置兼容说明。旧条目缺少操作时按 `setHeader` / `removeHeader` 类型读取，缺省数组时读取旧 `name/value`；显式空数组表示不操作。`WorkflowEngine` 在整组解析与校验通过后才应用，保证后续条目失败不会留下半组修改。删除只校验名称；删除和未匹配的修改忽略保存的值。编辑器逐条提供原生修改方法下拉框，删除时隐藏值、切回保留值；添加菜单仅保留统一入口。区块显式约束内容边距，滚动文档固定顶部与水平起点。`$env.` 是新的环境引用前缀，旧 `env.` 保持兼容，单次替换语义不变。
 
 步骤 Inspector 的多行 Header 表单可滚动；底部移除排序按钮，红色删除按钮使用 transient `NSPopover` 确认，并检查原步骤、工作流和阶段仍匹配。模板文本继续使用原生 `NSTextView` 的纯文本编辑、撤销和复制；`TemplateLayoutManager` 只绘制完整表达式的浅蓝圆角背景和文字颜色，值编辑器裁切为 8 pt 圆角。脚本编辑器不启用模板标记。内置变量与格式见[内置变量](Design/request-modification.md#内置变量)。`WorkflowTemplateContext` 在代理匹配原始请求后生成时间、随机值和原始请求快照，流式执行与脚本后台执行显式传递同一 Sendable 值；本地预览同样共享上下文。响应状态码在响应流程入口固定，Mock 使用本地生成状态码。模板标记按 Core Text 的实际字形轮廓垂直居中，左右扩展 4 pt，背景围绕文字中心对称限制在实际行高内；排版基线居中，24 pt 行高为相邻 20 pt 标记保留至少 4 pt 间隔，短值编辑器可完整显示两行。
 
-步骤类型说明位于 Inspector 标题下方；每个 Header 使用独立 `NSBox`，添加按钮置于列表外。`WorkspaceSplitController` 在步骤 Inspector 的收起按钮左侧提供独立原生玻璃 info 按钮，由 `TemplateValuesViewController` 在 Popover 内展示内置变量和当前环境变量名称。原生复制按钮按行悬停淡入淡出，键盘焦点与减少动态效果均有替代行为。`TemplateLayoutManager` 用仅影响排版的字距属性为变量与普通文本保留实际空隙，不修改底层字符串。
+步骤类型说明位于 Inspector 标题下方；每个 Header 使用独立 `NSBox`，添加按钮置于列表外。Header、查询参数操作与 URL 字符串替换配置区块右上角的移除按钮统一使用 24 pt 原生圆形减号按钮，保留删除提示与辅助功能名称。`WorkspaceSplitController` 在步骤 Inspector 的收起按钮左侧提供独立原生玻璃 info 按钮，由 `TemplateValuesViewController` 在 Popover 内展示内置变量和当前环境变量名称。原生复制按钮按行悬停淡入淡出，键盘焦点与减少动态效果均有替代行为。`TemplateLayoutManager` 用仅影响排版的字距属性为变量与普通文本保留实际空隙，不修改底层字符串。
+
+环境管理首组使用“名称”标题和单个输入框，环境切换保留在主窗口。变量行提供字符串、数值、布尔、数组、对象类型；`NamedValue.type` 持久化类型，旧配置缺少类型时默认为字符串。非字符串值按 JSON 格式校验，无效编辑保留为当前表单草稿并显示错误，合法后才保存。模板按文本插入变量值；代理、流程预览和脚本试运行传递同一环境快照的类型，脚本 `env` 将非字符串解析为对应 JavaScript 值并递归冻结。

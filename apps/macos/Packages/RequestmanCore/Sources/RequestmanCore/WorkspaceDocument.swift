@@ -1,10 +1,111 @@
 import Foundation
+import CoreFoundation
+
+public enum EnvironmentValueType: String, Codable, CaseIterable, Sendable {
+    case string, number, boolean, array, object
+
+    public var title: String {
+        switch self {
+        case .string: "字符串"
+        case .number: "数值"
+        case .boolean: "布尔"
+        case .array: "数组"
+        case .object: "对象"
+        }
+    }
+
+    public var placeholder: String {
+        switch self {
+        case .string: "值"
+        case .number: "例如 123 或 3.14"
+        case .boolean: "true 或 false"
+        case .array: "例如 [1, 2, 3]"
+        case .object: #"例如 {"key": "value"}"#
+        }
+    }
+
+    public func accepts(_ value: String) -> Bool {
+        if self == .string { return true }
+        guard let json = try? JSONSerialization.jsonObject(with: Data(value.utf8), options: [.fragmentsAllowed]) else { return false }
+        switch self {
+        case .string: return true
+        case .number:
+            guard let number = json as? NSNumber else { return false }
+            return CFGetTypeID(number) != CFBooleanGetTypeID() && number.doubleValue.isFinite
+        case .boolean: return value.trimmingCharacters(in: .whitespacesAndNewlines) == "true" || value.trimmingCharacters(in: .whitespacesAndNewlines) == "false"
+        case .array: return json is [Any]
+        case .object: return json is [String: Any]
+        }
+    }
+}
 
 public struct NamedValue: Codable, Equatable, Identifiable, Sendable {
     public var id = UUID()
     public var name: String
     public var value: String
-    public init(name: String = "", value: String = "") { self.name = name; self.value = value }
+    public var type: EnvironmentValueType
+    public init(name: String = "", value: String = "", type: EnvironmentValueType = .string) {
+        self.name = name; self.value = value; self.type = type
+    }
+    private enum CodingKeys: String, CodingKey { case id, name, value, type }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        value = try values.decode(String.self, forKey: .value)
+        type = try values.decodeIfPresent(EnvironmentValueType.self, forKey: .type) ?? .string
+    }
+}
+
+public enum HeaderOperation: String, Codable, CaseIterable, Sendable {
+    case add, modify, remove
+    /// Retained only for saved add-or-replace configurations.
+    case set
+    public static let editableCases: [Self] = [.add, .modify, .remove]
+    public var title: String {
+        switch self {
+        case .add: "添加"
+        case .modify: "修改"
+        case .remove: "删除"
+        case .set: "添加或覆盖（旧配置）"
+        }
+    }
+}
+
+public struct HeaderEntry: Codable, Equatable, Identifiable, Sendable {
+    public var id = UUID()
+    /// Missing operations inherit the legacy step kind.
+    public var operation: HeaderOperation?
+    public var name: String
+    public var value: String
+    public init(operation: HeaderOperation? = nil, name: String = "", value: String = "") {
+        self.operation = operation; self.name = name; self.value = value
+    }
+}
+
+public enum QueryParameterOperation: String, Codable, CaseIterable, Sendable {
+    case add, modify, remove
+}
+
+public struct QueryParameterEntry: Codable, Equatable, Identifiable, Sendable {
+    public var id = UUID()
+    /// nil preserves the legacy add-or-replace behavior until an operation is chosen.
+    public var operation: QueryParameterOperation?
+    public var matchRule: WorkflowMatchRule
+    public var name: String
+    public var value: String
+    public init(operation: QueryParameterOperation? = .add, name: String = "", value: String = "", matchRule: WorkflowMatchRule = .equals) {
+        self.operation = operation; self.name = name; self.value = value; self.matchRule = matchRule
+    }
+    private enum CodingKeys: String, CodingKey { case id, operation, matchRule, name, value }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        operation = try values.decodeIfPresent(QueryParameterOperation.self, forKey: .operation)
+        matchRule = try values.decodeIfPresent(WorkflowMatchRule.self, forKey: .matchRule) ?? .equals
+        name = try values.decode(String.self, forKey: .name)
+        value = try values.decode(String.self, forKey: .value)
+    }
 }
 
 public struct WorkspaceEnvironment: Codable, Equatable, Identifiable, Sendable {
@@ -12,17 +113,19 @@ public struct WorkspaceEnvironment: Codable, Equatable, Identifiable, Sendable {
     public var name: String
     public var variables: [NamedValue] = []
     public init(name: String) { self.name = name }
+    public var valueTypes: [String: EnvironmentValueType] {
+        variables.reduce(into: [:]) { if !$1.name.isEmpty { $0[$1.name] = $1.type } }
+    }
     public var values: [String: String] {
         variables.reduce(into: [:]) { if !$1.name.isEmpty { $0[$1.name] = $1.value } }
     }
 }
 
 public enum ModificationKind: String, Codable, CaseIterable, Sendable {
-    case setHeader, removeHeader, replaceBody, rewriteURL, setQueryParameter, replaceURLString, setMethod, setStatus, mock, redirect, script
+    case setHeader, removeHeader, replaceBody, rewriteURL, setQueryParameter, replaceURLString, setMethod, setStatus, mock, redirect, script, delay
     public var title: String {
         switch self {
-        case .setHeader: "添加或覆盖 Header"
-        case .removeHeader: "移除 Header"
+        case .setHeader, .removeHeader: "修改 Header"
         case .replaceBody: "替换 Body"
         case .rewriteURL: "改写请求 URL"
         case .setQueryParameter: "修改查询参数"
@@ -32,10 +135,20 @@ public enum ModificationKind: String, Codable, CaseIterable, Sendable {
         case .mock: "返回静态数据"
         case .redirect: "返回重定向"
         case .script: "执行脚本"
+        case .delay: "添加延迟"
         }
     }
     public func supports(response: Bool) -> Bool {
-        response ? ![.rewriteURL, .setQueryParameter, .replaceURLString, .setMethod, .mock].contains(self) : self != .setStatus
+        response ? ![.rewriteURL, .setQueryParameter, .replaceURLString, .setMethod, .mock].contains(self) : ![.setStatus, .delay].contains(self)
+    }
+}
+
+public struct URLReplacementEntry: Codable, Equatable, Identifiable, Sendable {
+    public var id = UUID()
+    public var search: String
+    public var replacement: String
+    public init(search: String = "", replacement: String = "") {
+        self.search = search; self.replacement = replacement
     }
 }
 
@@ -47,12 +160,40 @@ public struct ModificationStep: Codable, Equatable, Identifiable, Sendable {
     public var value = ""
     public var status = 200
     /// nil reads the legacy single name/value pair; an empty array is an empty step.
-    public var headers: [NamedValue]?
-    public var headerEntries: [NamedValue] {
+    public var headers: [HeaderEntry]?
+    public var queryParameters: [QueryParameterEntry]?
+    public var urlReplacements: [URLReplacementEntry]?
+    public var urlReplacementEntries: [URLReplacementEntry] {
         get {
-            if let headers { return headers }
-            var entry = NamedValue(name: name, value: value); entry.id = id
+            if let urlReplacements { return urlReplacements }
+            var entry = URLReplacementEntry(search: name, replacement: value)
+            entry.id = id
             return [entry]
+        }
+        set { urlReplacements = newValue }
+    }
+    public var queryParameterEntries: [QueryParameterEntry] {
+        get {
+            if let queryParameters { return queryParameters }
+            var entry = QueryParameterEntry(operation: name.isEmpty && value.isEmpty ? .add : nil, name: name, value: value)
+            entry.id = id
+            return [entry]
+        }
+        set { queryParameters = newValue }
+    }
+    public var headerEntries: [HeaderEntry] {
+        get {
+            let entries: [HeaderEntry]
+            if let headers { entries = headers }
+            else {
+                var entry = HeaderEntry(operation: kind == .setHeader && name.isEmpty && value.isEmpty ? .add : nil, name: name, value: value); entry.id = id
+                entries = [entry]
+            }
+            return entries.map { entry in
+                var entry = entry
+                if entry.operation == nil { entry.operation = kind == .removeHeader ? .remove : .set }
+                return entry
+            }
         }
         set { headers = newValue }
     }
@@ -61,6 +202,7 @@ public struct ModificationStep: Codable, Equatable, Identifiable, Sendable {
         self.kind = kind
         if kind == .redirect { status = 302 }
         if kind == .mock { value = "{\n  \"ok\": true\n}" }
+        if kind == .delay { value = "1000" }
     }
 }
 

@@ -36,7 +36,7 @@ struct WorkflowEngineTests {
         var step = ModificationStep(kind: .setHeader); step.name = "X-Legacy"; step.value = "old"
         let legacy = try JSONDecoder().decode(ModificationStep.self, from: JSONEncoder().encode(step))
         #expect(legacy.headers == nil && legacy.headerEntries[0].name == "X-Legacy")
-        step.headerEntries = [NamedValue(name: "X-Key", value: "{{$env.api}}"), NamedValue(name: "X-Trace", value: "{{$uuid}}"), NamedValue(name: "x-key", value: "last")]
+        step.headerEntries = [HeaderEntry(name: "X-Key", value: "{{$env.api}}"), HeaderEntry(name: "X-Trace", value: "{{$uuid}}"), HeaderEntry(name: "x-key", value: "last")]
         #expect(try JSONDecoder().decode(ModificationStep.self, from: JSONEncoder().encode(step)) == step)
         let id = UUID()
         for response in [false, true] {
@@ -50,9 +50,9 @@ struct WorkflowEngineTests {
         #expect(empty.headers.isEmpty)
     }
     @Test func invalidHeaderBatchDoesNotPartiallyApply() {
-        for entry in [NamedValue(name: "Host", value: "bad"), NamedValue(name: "Bad Name", value: "bad"), NamedValue(name: "X-Bad", value: "\r\nInjected: yes"), NamedValue(name: "X-Missing", value: "{{$env.missing}}") ] {
+        for entry in [HeaderEntry(name: "Host", value: "bad"), HeaderEntry(name: "Bad Name", value: "bad"), HeaderEntry(name: "X-Bad", value: "\r\nInjected: yes"), HeaderEntry(name: "X-Missing", value: "{{$env.missing}}") ] {
             var step = ModificationStep(kind: .setHeader)
-            step.headerEntries = [NamedValue(name: "X-First", value: "changed"), entry]
+            step.headerEntries = [HeaderEntry(name: "X-First", value: "changed"), entry]
             var draft = HTTPMessageDraft(method: "GET", url: "http://localhost/", headers: [HTTPField("X-First", "original")])
             #expect(throws: WorkflowError.self) { try WorkflowEngine.apply([step], response: false, to: &draft, environment: [:], id: UUID(), date: Date()) }
             #expect(draft.headers == [HTTPField("X-First", "original")])
@@ -62,7 +62,7 @@ struct WorkflowEngineTests {
         var step = ModificationStep(kind: .removeHeader); step.name = "X-Legacy"
         let legacy = try JSONDecoder().decode(ModificationStep.self, from: JSONEncoder().encode(step))
         #expect(legacy.headers == nil && legacy.headerEntries[0].name == "X-Legacy")
-        step.headerEntries = [NamedValue(name: "x-key", value: "{{$env.unused}}"), NamedValue(name: "X-Trace"), NamedValue(name: "X-Missing")]
+        step.headerEntries = [HeaderEntry(name: "x-key", value: "{{$env.unused}}"), HeaderEntry(name: "X-Trace"), HeaderEntry(name: "X-Missing")]
         #expect(try JSONDecoder().decode(ModificationStep.self, from: JSONEncoder().encode(step)) == step)
         for response in [false, true] {
             var draft = HTTPMessageDraft(method: "GET", url: "http://localhost/", headers: [HTTPField("X-Key", "one"), HTTPField("x-key", "two"), HTTPField("X-Trace", "trace"), HTTPField("X-Legacy", "old"), HTTPField("Other", "keep")])
@@ -77,11 +77,75 @@ struct WorkflowEngineTests {
         for response in [false, true] {
             for name in ["Host", "Content-Length", "Bad Name", ""] {
                 var step = ModificationStep(kind: .removeHeader)
-                step.headerEntries = [NamedValue(name: "X-First"), NamedValue(name: name)]
+                step.headerEntries = [HeaderEntry(name: "X-First"), HeaderEntry(name: name)]
                 var draft = HTTPMessageDraft(method: "GET", url: "http://localhost/", headers: [HTTPField("X-First", "original")])
                 #expect(throws: WorkflowError.self) { try WorkflowEngine.apply([step], response: response, to: &draft, environment: [:], id: UUID(), date: Date()) }
                 #expect(draft.headers == [HTTPField("X-First", "original")])
             }
+        }
+    }
+    @Test func mixedHeaderOperationsPreserveOrderAndIgnoreRemovedValues() throws {
+        for response in [false, true] {
+            var step = ModificationStep(kind: .setHeader)
+            step.headerEntries = [
+                HeaderEntry(operation: .remove, name: "x-key", value: "{{$env.unused}}"),
+                HeaderEntry(operation: .set, name: "X-Key", value: "{{$env.key}}"),
+                HeaderEntry(operation: .set, name: "X-Temporary", value: "temporary"),
+                HeaderEntry(operation: .remove, name: "x-temporary"),
+                HeaderEntry(operation: .remove, name: "X-Missing")
+            ]
+            let restored = try JSONDecoder().decode(ModificationStep.self, from: JSONEncoder().encode(step))
+            #expect(restored == step)
+            var draft = HTTPMessageDraft(method: "GET", url: "http://localhost/", headers: [HTTPField("X-Key", "old"), HTTPField("x-key", "duplicate")])
+            _ = try WorkflowEngine.apply([restored], response: response, to: &draft, environment: ["key": "new"], id: UUID(), date: Date())
+            #expect(draft.headers == [HTTPField("X-Key", "new")])
+            step.headerEntries.append(HeaderEntry(operation: .set, name: "X-Fail", value: "{{$env.missing}}"))
+            #expect(throws: WorkflowError.self) { try WorkflowEngine.apply([step], response: response, to: &draft, environment: ["key": "changed"], id: UUID(), date: Date()) }
+            #expect(draft.headers == [HTTPField("X-Key", "new")])
+        }
+    }
+    @Test func headerAddAppendsAndModifyUpdatesOnlyExistingMatches() throws {
+        for response in [false, true] {
+            var step = ModificationStep(kind: .setHeader)
+            #expect(step.headerEntries.first?.operation == .add)
+            step.headerEntries = [
+                HeaderEntry(operation: .add, name: "X-Key", value: "added"),
+                HeaderEntry(operation: .modify, name: "x-key", value: "{{$env.key}}"),
+                HeaderEntry(operation: .modify, name: "X-Missing", value: "{{$env.unused}}"),
+                HeaderEntry(operation: .add, name: "X-Key", value: "last"),
+                HeaderEntry(operation: .add, name: "X-New", value: "new"),
+                HeaderEntry(operation: .remove, name: "x-drop", value: "{{$env.unused}}")
+            ]
+            let original = [HTTPField("x-key", "one"), HTTPField("Other", "keep"), HTTPField("X-KEY", "two"), HTTPField("X-Drop", "drop")]
+            var draft = HTTPMessageDraft(method: "GET", url: "http://localhost/", headers: original)
+            let restored = try JSONDecoder().decode(ModificationStep.self, from: JSONEncoder().encode(step))
+            #expect(restored == step)
+            _ = try WorkflowEngine.apply([restored], response: response, to: &draft, environment: ["key": "changed"], id: UUID(), date: Date())
+            #expect(draft.headers == [HTTPField("x-key", "changed"), HTTPField("Other", "keep"), HTTPField("X-KEY", "changed"), HTTPField("X-Key", "changed"), HTTPField("X-Key", "last"), HTTPField("X-New", "new")])
+            for invalid in [HeaderEntry(operation: .add, name: "X-Bad", value: "\r\nInjected: yes"), HeaderEntry(operation: .modify, name: "X-Key", value: "{{$env.missing}}"), HeaderEntry(operation: .remove, name: "Host")] {
+                var invalidStep = step; invalidStep.headerEntries.append(invalid)
+                draft.headers = original
+                #expect(throws: WorkflowError.self) { try WorkflowEngine.apply([invalidStep], response: response, to: &draft, environment: ["key": "changed"], id: UUID(), date: Date()) }
+                #expect(draft.headers == original)
+            }
+            step.headerEntries = [HeaderEntry(operation: .add, name: "X-Key", value: "one"), HeaderEntry(operation: .add, name: "x-key", value: "two")]
+            draft.headers = []
+            _ = try WorkflowEngine.apply([step], response: response, to: &draft, environment: [:], id: UUID(), date: Date())
+            #expect(draft.headers == [HTTPField("X-Key", "one"), HTTPField("x-key", "two")])
+        }
+    }
+    @Test func oldHeaderArraysInheritTheirStepOperation() throws {
+        for kind in [ModificationKind.setHeader, .removeHeader] {
+            let id = UUID()
+            let json = """
+            {"id":"\(UUID())","kind":"\(kind.rawValue)","enabled":true,"name":"","value":"","status":200,
+             "headers":[{"id":"\(id)","name":"X-Legacy","value":"old"}]}
+            """
+            let step = try JSONDecoder().decode(ModificationStep.self, from: Data(json.utf8))
+            #expect(step.headers?.first?.operation == nil)
+            #expect(step.headerEntries.first?.operation == (kind == .removeHeader ? .remove : .set))
+            #expect(step.headerEntries.first?.id == id)
+            #expect(try JSONDecoder().decode(ModificationStep.self, from: JSONEncoder().encode(step)) == step)
         }
     }
     @Test func invalidHeadersAndFramingAreRejected() {

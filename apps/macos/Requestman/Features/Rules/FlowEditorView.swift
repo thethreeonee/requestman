@@ -4,8 +4,7 @@ import RequestmanCore
 extension ModificationKind {
     var symbolName: String {
         switch self {
-        case .setHeader: "text.badge.plus"
-        case .removeHeader: "text.badge.minus"
+        case .setHeader, .removeHeader: "slider.horizontal.3"
         case .replaceBody: "doc.text"
         case .rewriteURL: "link"
         case .setQueryParameter: "slider.horizontal.3"
@@ -15,14 +14,14 @@ extension ModificationKind {
         case .mock: "doc.on.doc"
         case .redirect: "arrow.turn.up.right"
         case .script: "chevron.left.forwardslash.chevron.right"
+        case .delay: "clock"
         }
     }
 }
 
 @MainActor final class FlowEditorViewController: ObservedViewController {
     let model: WorkspaceModel
-    private let project = NativeUI.label("", size: 12, secondary: true)
-    private lazy var name = ActionTextField(placeholder: "请求修改名称") { [weak self] value in self?.modify { $0.name = value } }
+    private lazy var name = WorkflowNameTextField(placeholder: "请求修改名称") { [weak self] value in self?.modify { $0.name = value } }
     private lazy var enabled = RulesSwitch { [weak self] value in self?.modify { $0.enabled = value } }
     private lazy var target = ActionPopUpButton(items: WorkflowMatchTarget.allCases.map(\.title)) { [weak self] index in self?.modify { $0.matchTarget = WorkflowMatchTarget.allCases[index] } }
     private lazy var rule = ActionPopUpButton(items: WorkflowMatchRule.allCases.map(\.title)) { [weak self] index in self?.modify { $0.matchRule = WorkflowMatchRule.allCases[index] } }
@@ -34,6 +33,8 @@ extension ModificationKind {
     private lazy var headerRule = ActionPopUpButton(items: WorkflowMatchRule.allCases.map(\.title)) { [weak self] index in self?.modify { $0.matchHeaderRule = WorkflowMatchRule.allCases[index] } }
     private lazy var headerPattern = ActionTextField(placeholder: "Header 匹配值") { [weak self] value in self?.modify { $0.matchHeaderPattern = value } }
     private var headerFields: NSStackView!
+    private var headerFieldsBottom: NSLayoutConstraint!
+    private var collapsedHeaderHeight: NSLayoutConstraint!
     private let headerExplanation = NativeUI.label("", size: 11, secondary: true)
     private let explanation = NativeUI.label("", size: 11, secondary: true)
     private lazy var requestLane = RulesStepLane(model: model, response: false)
@@ -43,9 +44,20 @@ extension ModificationKind {
     override func loadView() {
         view = NSView()
         view.widthAnchor.constraint(greaterThanOrEqualToConstant: 420).isActive = true
-        name.isBezeled = false; name.drawsBackground = false; name.font = .systemFont(ofSize: 22, weight: .bold)
-        name.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let title = NativeUI.stack([name, NativeUI.label("已启用"), enabled], vertical: false)
+        name.bezelStyle = .roundedBezel; name.controlSize = .large
+        name.font = .systemFont(ofSize: 22, weight: .bold)
+        name.appearance = nil; name.textColor = .labelColor
+        name.backgroundColor = .textBackgroundColor
+        name.isBezeled = false; name.drawsBackground = false
+        name.cell?.usesSingleLineMode = true; name.cell?.wraps = false; name.cell?.isScrollable = true
+        let nameLayout = WorkflowNameLayout(field: name)
+        let nameWidth = nameLayout.widthAnchor.constraint(equalToConstant: 450)
+        nameWidth.priority = .init(249)
+        NSLayoutConstraint.activate([nameWidth, nameLayout.widthAnchor.constraint(lessThanOrEqualToConstant: 450),
+                                     nameLayout.heightAnchor.constraint(equalToConstant: 32)])
+        let titleSpacer = NSView()
+        titleSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let title = NativeUI.stack([nameLayout, titleSpacer, NativeUI.label("已启用"), enabled], vertical: false)
         method.setAccessibilityLabel("请求方法匹配")
         target.setAccessibilityLabel("地址匹配目标")
         rule.setAccessibilityLabel("地址匹配规则")
@@ -73,7 +85,14 @@ extension ModificationKind {
         let methodLabel = NativeUI.label("请求方法")
         methodLabel.widthAnchor.constraint(equalToConstant: targetWidth).isActive = true
         let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let methodRow = NativeUI.stack([methodLabel, method, spacer], vertical: false, spacing: 8)
+        let testMatch = ActionButton(title: "测试匹配") { [weak self] in
+            guard let self else { return }
+            view.window?.makeFirstResponder(nil)
+            guard let workflow = model.workflow else { return }
+            presentAsSheet(WorkflowMatchTestViewController(workflow: workflow))
+        }
+        testMatch.identifier = .init("rules.testMatch")
+        let methodRow = NativeUI.stack([methodLabel, method, spacer, testMatch], vertical: false, spacing: 8)
         methodRow.identifier = .init("rules.matchMethodRow")
         let addressRow = NativeUI.stack([target, rule, pattern], vertical: false, spacing: 8)
         addressRow.identifier = .init("rules.matchAddressRow")
@@ -83,11 +102,22 @@ extension ModificationKind {
         let headerInputs = HeaderMatchInputRow(name: headerName, rule: headerRule, pattern: headerPattern)
         headerFields = NativeUI.stack([headerInputs, headerExplanation], spacing: 6)
         for child in [headerInputs, headerExplanation] { child.widthAnchor.constraint(equalTo: headerFields.widthAnchor).isActive = true }
-        let headerRow = NativeUI.stack([headerEnabled, headerFields], vertical: false, spacing: 8)
+        let headerFieldsContainer = NSView()
+        headerFields.translatesAutoresizingMaskIntoConstraints = false
+        headerFieldsContainer.addSubview(headerFields)
+        NSLayoutConstraint.activate([
+            headerFields.leadingAnchor.constraint(equalTo: headerFieldsContainer.leadingAnchor),
+            headerFields.trailingAnchor.constraint(equalTo: headerFieldsContainer.trailingAnchor),
+            headerFields.topAnchor.constraint(equalTo: headerFieldsContainer.topAnchor)
+        ])
+        headerFieldsBottom = headerFields.bottomAnchor.constraint(equalTo: headerFieldsContainer.bottomAnchor)
+        headerFieldsBottom.isActive = true
+        collapsedHeaderHeight = headerFieldsContainer.heightAnchor.constraint(equalToConstant: 0)
+        let headerRow = NativeUI.stack([headerEnabled, headerFieldsContainer], vertical: false, spacing: 8)
         headerRow.identifier = .init("rules.matchHeaderRow")
         headerRow.alignment = .top; headerRow.distribution = .fill
-        // Keep the hidden fields in layout so the fixed-width checkbox cannot shrink the row.
-        headerRow.detachesHiddenViews = false
+        // Preserve horizontal sizing while collapsing only the hidden fields' container height.
+        headerFieldsContainer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         headerFields.setContentHuggingPriority(.defaultLow, for: .horizontal)
         for note in [explanation, headerExplanation] {
             note.maximumNumberOfLines = 0; note.lineBreakMode = .byWordWrapping
@@ -98,7 +128,9 @@ extension ModificationKind {
         conditions.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         for row in conditionRows { row.widthAnchor.constraint(equalTo: conditions.widthAnchor, constant: -24).isActive = true }
         let box = NSBox(); box.titlePosition = .noTitle; box.contentViewMargins = .zero
-        box.contentView = NSView(); NativeUI.pin(conditions, to: box.contentView!)
+        box.contentView = NSView()
+        NativeUI.pin(box.contentView!, to: box)
+        NativeUI.pin(conditions, to: box.contentView!)
         let matching = NativeUI.stack([NativeUI.label("满足以下所有条件", weight: .medium), box], spacing: 8)
         box.widthAnchor.constraint(equalTo: matching.widthAnchor).isActive = true
         let lanes = NativeUI.stack([requestLane, responseLane], vertical: false, spacing: 20)
@@ -108,7 +140,7 @@ extension ModificationKind {
             presentAsSheet(WorkflowPreviewViewController(workflow: workflow, environment: model.document.environment))
         }
         preview.image = NSImage(systemSymbolName: "play", accessibilityDescription: nil); preview.imagePosition = .imageLeading
-        let stack = NativeUI.stack([project, title, matching, lanes, preview], spacing: 22)
+        let stack = NativeUI.stack([title, matching, lanes, preview], spacing: 22)
         NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 24, left: 24, bottom: 24, right: 24))
         for wide in [title, matching, lanes] { wide.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         lanes.setContentHuggingPriority(.defaultLow, for: .vertical)
@@ -124,7 +156,6 @@ extension ModificationKind {
     }
     override func refresh() {
         guard let workflow = model.workflow else { return }
-        project.stringValue = model.projectName
         if name.stringValue != workflow.name { name.stringValue = workflow.name }
         enabled.state = workflow.enabled ? .on : .off
         target.selectItem(at: WorkflowMatchTarget.allCases.firstIndex(of: workflow.matchTarget) ?? 0)
@@ -134,6 +165,13 @@ extension ModificationKind {
         if headerName.stringValue != workflow.matchHeaderName { headerName.stringValue = workflow.matchHeaderName }
         headerEnabled.state = workflow.matchHeaderEnabled ? .on : .off
         headerFields.isHidden = !workflow.matchHeaderEnabled
+        if workflow.matchHeaderEnabled {
+            collapsedHeaderHeight.isActive = false
+            headerFieldsBottom.isActive = true
+        } else {
+            headerFieldsBottom.isActive = false
+            collapsedHeaderHeight.isActive = true
+        }
         headerRule.selectItem(at: WorkflowMatchRule.allCases.firstIndex(of: workflow.matchHeaderRule) ?? 0)
         if headerPattern.stringValue != workflow.matchHeaderPattern { headerPattern.stringValue = workflow.matchHeaderPattern }
         let headerError = WorkflowMatcher.headerValidationError(name: workflow.matchHeaderName, rule: workflow.matchHeaderRule,
@@ -160,6 +198,102 @@ extension ModificationKind {
     }
     @objc private func toggleHeaderMatching() { modify { $0.matchHeaderEnabled = headerEnabled.state == .on } }
     private func modify(_ update: (inout RequestWorkflow) -> Void) { guard model.loaded, var workflow = model.workflow else { return }; update(&workflow); model.updateWorkflow(workflow) }
+}
+
+/// Keeps the title's text aligned with the form while AppKit adds its editing bezel outside it.
+@MainActor private final class WorkflowNameTextField: ActionTextField {
+    private var titleInsets = NSEdgeInsetsZero
+
+    override class var cellClass: AnyClass? {
+        get { WorkflowNameTextFieldCell.self }
+        set {}
+    }
+
+    var contentInsets: NSEdgeInsets {
+        var insets = isBezeled ? titleInsets : super.alignmentRectInsets
+        if isBezeled, let cell = cell as? WorkflowNameTextFieldCell {
+            // Measure at the editing size, not the smaller title frame during focus changes.
+            let editingBounds = NSRect(x: 0, y: 0, width: 450, height: 40)
+            let content = cell.bezelDrawingRect(forBounds: editingBounds)
+            insets.top += editingBounds.maxY - content.maxY
+            insets.left += content.minX
+            insets.bottom += content.minY
+            insets.right += editingBounds.maxX - content.maxX
+        }
+        return insets
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        setEditingAppearance(true)
+        let accepted = super.becomeFirstResponder()
+        if !accepted { setEditingAppearance(false) }
+        return accepted
+    }
+
+    override func selectText(_ sender: Any?) {
+        setEditingAppearance(true)
+        super.selectText(sender)
+        if currentEditor() == nil { setEditingAppearance(false) }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        setEditingAppearance(true)
+        super.mouseDown(with: event)
+        if currentEditor() == nil { setEditingAppearance(false) }
+    }
+
+    override func controlTextDidEndEditing(_ notification: Notification) {
+        super.controlTextDidEndEditing(notification)
+        setEditingAppearance(false)
+    }
+
+    private func setEditingAppearance(_ editing: Bool) {
+        guard isBezeled != editing else { return }
+        if editing { titleInsets = super.alignmentRectInsets }
+        isBezeled = editing
+        drawsBackground = editing
+        invalidateIntrinsicContentSize()
+        superview?.needsLayout = true
+        superview?.layoutSubtreeIfNeeded()
+        needsDisplay = true
+    }
+}
+
+/// Centers the native single-line text area without changing AppKit's bezel or focus ring.
+@MainActor private final class WorkflowNameTextFieldCell: NSTextFieldCell {
+    func bezelDrawingRect(forBounds bounds: NSRect) -> NSRect {
+        super.drawingRect(forBounds: bounds)
+    }
+
+    override func drawingRect(forBounds bounds: NSRect) -> NSRect {
+        var rect = super.drawingRect(forBounds: bounds)
+        guard let font else { return rect }
+        let lineHeight = min(rect.height, NSLayoutManager().defaultLineHeight(for: font))
+        rect.origin.y += (rect.height - lineHeight) / 2
+        rect.size.height = lineHeight
+        return rect
+    }
+}
+
+/// A stable text slot keeps native bezel metrics from moving the title or the rows below it.
+@MainActor private final class WorkflowNameLayout: NSView {
+    private let field: WorkflowNameTextField
+
+    init(field: WorkflowNameTextField) {
+        self.field = field
+        super.init(frame: .zero)
+        clipsToBounds = false
+        addSubview(field)
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        let insets = field.contentInsets
+        field.frame = NSRect(x: -insets.left, y: -insets.bottom,
+                             width: bounds.width + insets.left + insets.right,
+                             height: bounds.height + insets.top + insets.bottom)
+    }
 }
 
 /// Only changes native control layout; fields retain their identity and editing state.
@@ -225,7 +359,7 @@ extension ModificationKind {
         addButton.addItem(withTitle: "添加步骤")
         addButton.item(at: 0)?.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
         addButton.setAccessibilityLabel(response ? "添加响应步骤" : "添加请求步骤")
-        for kind in ModificationKind.allCases where kind.supports(response: response) {
+        for kind in ModificationKind.allCases where kind != .removeHeader && kind.supports(response: response) {
             let item = RulesMenuItem(kind.title, symbol: kind.symbolName) { [weak self] in
                 guard let self, self.model.loaded else { return }; self.model.addStep(kind, response: self.response)
             }
@@ -233,13 +367,25 @@ extension ModificationKind {
             if #available(macOS 27.0, *) { item.preferredImageVisibility = .visible }
             addButton.menu?.addItem(item)
         }
-        let contents = NativeUI.stack([scroll, addButton], spacing: 10)
+        let addRow = NSView()
+        addRow.addSubview(addButton); addButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            addButton.leadingAnchor.constraint(equalTo: addRow.leadingAnchor, constant: 16),
+            addButton.topAnchor.constraint(equalTo: addRow.topAnchor),
+            addButton.bottomAnchor.constraint(equalTo: addRow.bottomAnchor),
+            addButton.trailingAnchor.constraint(lessThanOrEqualTo: addRow.trailingAnchor, constant: -16)
+        ])
+        let contents = NativeUI.stack([scroll, addRow], spacing: 10)
         scroll.widthAnchor.constraint(equalTo: contents.widthAnchor).isActive = true
+        addRow.widthAnchor.constraint(equalTo: contents.widthAnchor).isActive = true
         let box = NSBox(); box.identifier = .init("rules.laneBorder")
         box.boxType = .custom; box.titlePosition = .noTitle
         box.borderWidth = 1; box.borderColor = .separatorColor; box.fillColor = .clear; box.cornerRadius = 10
-        box.contentViewMargins = NSSize(width: 10, height: 10)
-        box.contentView = NSView(); NativeUI.pin(contents, to: box.contentView!)
+        box.contentViewMargins = .zero
+        box.contentView = NSView()
+        // Keep the native scrollbar against the border; horizontal padding belongs to the rows.
+        NativeUI.pin(box.contentView!, to: box, insets: NSEdgeInsets(top: 10, left: 1, bottom: 10, right: 1))
+        NativeUI.pin(contents, to: box.contentView!)
         let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
         let stack = NativeUI.stack([heading, subtitle, box, spacer], spacing: 12)
         NativeUI.pin(stack, to: self)
@@ -344,7 +490,7 @@ extension ModificationKind {
         card.boxType = .custom; card.titlePosition = .noTitle
         card.borderWidth = 1; card.cornerRadius = 8; card.contentViewMargins = .zero
         card.wantsLayer = true; card.layer?.cornerRadius = card.cornerRadius; card.layer?.masksToBounds = true
-        NativeUI.pin(card, to: self, insets: NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0))
+        NativeUI.pin(card, to: self, insets: NSEdgeInsets(top: 4, left: 16, bottom: 4, right: 16))
         let badge = NSBox(); badge.identifier = .init("rules.stepNumber")
         badge.boxType = .custom; badge.titlePosition = .noTitle; badge.borderWidth = 0; badge.borderColor = .clear
         badge.fillColor = NSColor.labelColor.withAlphaComponent(0.045); badge.cornerRadius = 6
@@ -368,8 +514,13 @@ extension ModificationKind {
         }
         if !step.name.isEmpty {
             if step.kind == .setQueryParameter { summary = "\(step.name) = \(step.value)" }
-            if step.kind == .replaceURLString { summary = "\(step.name) → \(step.value.isEmpty ? "（空）" : step.value)" }
         }
+        if step.kind == .replaceURLString {
+            summary = step.urlReplacementEntries.isEmpty ? "点击添加替换配置" : step.urlReplacementEntries.map {
+                "\($0.search.isEmpty ? "未配置查找字符串" : $0.search) → \($0.replacement.isEmpty ? "（空）" : $0.replacement)"
+            }.joined(separator: ", ")
+        }
+        if step.kind == .delay { summary = "等待 \(step.value) ms" }
         let detail = NativeUI.label(summary, size: 11, secondary: true); detail.toolTip = summary
         let texts = NativeUI.stack([heading, detail], spacing: 5)
         heading.widthAnchor.constraint(equalTo: texts.widthAnchor).isActive = true

@@ -46,7 +46,7 @@ struct WorkflowTemplateTests {
         #expect(draft.replacementBody == "GET https://original.test/original?q=1 \(random) \(random)")
         var status = ModificationStep(kind: .setStatus); status.status = 203
         var header = ModificationStep(kind: .setHeader)
-        header.headerEntries = [NamedValue(name: "X-Context", value: "{{$response.status}} {{$request.host}} {{$randomString}}")]
+        header.headerEntries = [HeaderEntry(name: "X-Context", value: "{{$response.status}} {{$request.host}} {{$randomString}}")]
         _ = try WorkflowEngine.apply([status, header], response: true, to: &draft, environment: [:], id: id, date: date, templateContext: context)
         #expect(draft.headers.last?.value == "202 original.test \(random)")
         #expect(draft.status == 203)

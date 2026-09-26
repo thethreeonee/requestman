@@ -38,6 +38,7 @@ private struct ScriptInput: Codable {
     let request: ScriptMessage
     let response: ScriptMessage?
     let env: [String: String]
+    let environmentTypes: [String: EnvironmentValueType]
 }
 
 private struct ScriptOutput: Codable {
@@ -53,14 +54,20 @@ public enum WorkflowScript {
 
     /// Synchronous by design; callers execute on a bounded background queue, never on the UI/NIO loop.
     public static func run(source: String, draft: HTTPMessageDraft, response: Bool,
-                           request: HTTPMessageDraft?, environment: [String: String], timeoutMilliseconds: Int, control: ScriptExecutionControl? = nil) throws -> HTTPMessageDraft {
+                           request: HTTPMessageDraft?, environment: [String: String], timeoutMilliseconds: Int, control: ScriptExecutionControl? = nil,
+                           environmentTypes: [String: EnvironmentValueType] = [:]) throws -> HTTPMessageDraft {
         guard !source.isEmpty else { throw WorkflowError.invalid("脚本不能为空") }
         try control?.check()
         guard (50...5000).contains(timeoutMilliseconds) else { throw WorkflowError.invalid("脚本超时需在 50–5000 ms 之间") }
         guard slots.wait(timeout: .now()) == .success else { throw WorkflowError.invalid("脚本执行已满，请稍后重试") }
         defer { slots.signal() }
+        for (name, value) in environment {
+            guard (environmentTypes[name] ?? .string).accepts(value) else {
+                throw WorkflowError.invalid("环境变量 \(name) 的值与数据类型不符")
+            }
+        }
         let input = ScriptInput(source: source, request: ScriptMessage(request ?? draft, response: false),
-                                response: response ? ScriptMessage(draft, response: true) : nil, env: environment)
+                                response: response ? ScriptMessage(draft, response: true) : nil, env: environment, environmentTypes: environmentTypes)
         let data = try JSONEncoder().encode(input)
         let process = Process()
         process.executableURL = try workerExecutable()
@@ -142,7 +149,9 @@ public enum WorkflowScript {
         // JSON serialization stays inside the disposable process: hostile getters/toJSON cannot hang the host.
         let wrapper = #"""
         (() => {
-            const { source, request, response = null, env } = __input;
+            const { source, request, response = null, env: rawEnv, environmentTypes } = __input;
+            const env = Object.fromEntries(Object.entries(rawEnv).map(([name, value]) =>
+                [name, !environmentTypes[name] || environmentTypes[name] === 'string' ? value : JSON.parse(value)]));
             delete globalThis.__input;
             request.body ??= null;
             if (response) response.body ??= null;
@@ -215,12 +224,11 @@ public enum WorkflowScript {
     }
 }
 
-/// Cancellation and the transaction deadline follow the worker even after the socket closes.
+/// Cancellation follows the worker even after the socket closes. Each script has its own timeout.
 public final class ScriptExecutionControl: Sendable {
     private let cancelled = OSAllocatedUnfairLock(initialState: false)
-    private let deadline: ContinuousClock.Instant
-    public init(deadline: ContinuousClock.Instant = .now.advanced(by: .seconds(30))) { self.deadline = deadline }
-    public var isCancelled: Bool { cancelled.withLock { $0 } || ContinuousClock.now >= deadline }
+    public init() {}
+    public var isCancelled: Bool { cancelled.withLock { $0 } }
     public func cancel() { cancelled.withLock { $0 = true } }
-    public func check() throws { if isCancelled { throw WorkflowError.invalid("脚本流程已取消或超过事务时限") } }
+    public func check() throws { if isCancelled { throw WorkflowError.invalid("流程已取消") } }
 }

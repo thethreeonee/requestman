@@ -333,7 +333,7 @@ import QuartzCore
             titleLeading, title.centerYAnchor.constraint(equalTo: centerYAnchor),
             title.trailingAnchor.constraint(equalTo: suffix.leadingAnchor, constant: -8),
             suffix.centerYAnchor.constraint(equalTo: centerYAnchor), suffix.widthAnchor.constraint(greaterThanOrEqualToConstant: 16),
-            suffix.trailingAnchor.constraint(equalTo: menuSlot.leadingAnchor, constant: -8),
+            suffix.trailingAnchor.constraint(equalTo: menuSlot.trailingAnchor, constant: -4),
             menuSlot.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             menuSlot.centerYAnchor.constraint(equalTo: centerYAnchor),
             menuSlot.widthAnchor.constraint(equalToConstant: 24), menuSlot.heightAnchor.constraint(equalToConstant: 24)
@@ -361,7 +361,10 @@ import QuartzCore
         updateSelectionAppearance()
     }
 
-    func showActions(_ visible: Bool) { moreButton.isHidden = !visible }
+    func showActions(_ visible: Bool) {
+        moreButton.isHidden = !visible
+        suffix.isHidden = visible
+    }
 
     func updateSelectionAppearance() {
         let emphasized = (superview as? NSTableRowView).map { $0.isSelected && $0.isEmphasized } ?? false

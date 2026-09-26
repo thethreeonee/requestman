@@ -192,13 +192,17 @@ final class ActionButton: NSButton {
 }
 
 @MainActor
-final class ActionTextField: NSTextField, NSTextFieldDelegate {
+class ActionTextField: NSTextField, NSTextFieldDelegate {
     var onChange: (String) -> Void
+    var onSubmit: (() -> Void)?
     init(_ value: String = "", placeholder: String = "", onChange: @escaping (String) -> Void) {
         self.onChange = onChange
         super.init(frame: .zero)
         stringValue = value; placeholderString = placeholder
-        isEditable = true; isSelectable = true; isBezeled = true; bezelStyle = .roundedBezel
+        isEditable = true; isSelectable = true; isBezeled = true; bezelStyle = .squareBezel
+        // The rounded bezel uses a system fill instead of the requested input background.
+        appearance = NSAppearance(named: .aqua)
+        drawsBackground = true; backgroundColor = .white; textColor = .black
         delegate = self
     }
     required init?(coder: NSCoder) { nil }
@@ -206,7 +210,9 @@ final class ActionTextField: NSTextField, NSTextFieldDelegate {
     func controlTextDidEndEditing(_ notification: Notification) { onChange(stringValue) }
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         guard commandSelector == #selector(NSResponder.insertNewline(_:)), !textView.hasMarkedText() else { return false }
-        return window?.makeFirstResponder(nil) == true
+        guard window?.makeFirstResponder(nil) == true else { return false }
+        onSubmit?()
+        return true
     }
 }
 

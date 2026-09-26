@@ -15,6 +15,7 @@ import AppKit
         super.init(frame: .zero)
         addItems(withObjectValues: Self.suggestions)
         isEditable = true; completes = true; numberOfVisibleItems = 12
+        drawsBackground = false
         placeholderString = "选择或输入 Header"
         setAccessibilityLabel("Header 名称")
         delegate = self; stringValue = name

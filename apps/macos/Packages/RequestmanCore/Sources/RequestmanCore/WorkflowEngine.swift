@@ -85,11 +85,12 @@ public enum WorkflowEngine {
     public static func apply(_ steps: [ModificationStep], response: Bool, to draft: inout HTTPMessageDraft,
                              environment: [String: String], id: UUID, date: Date,
                              request: HTTPMessageDraft? = nil, control: ScriptExecutionControl? = nil,
-                             templateContext: WorkflowTemplateContext? = nil,
+                             templateContext: WorkflowTemplateContext? = nil, originalResponseStatus: Int? = nil,
+                             environmentTypes: [String: EnvironmentValueType] = [:],
                              onApplied: ((ModificationKind) -> Void)? = nil) throws -> [String] {
         guard steps.count <= 64 else { throw WorkflowError.invalid("每个方向最多执行 64 个步骤") }
         let context = templateContext ?? WorkflowTemplateContext(id: id, date: date, request: response ? request : draft)
-        let responseStatus = response ? draft.status : nil
+        let responseStatus = response ? (originalResponseStatus ?? draft.status) : nil
         func resolveValue(_ text: String) throws -> String {
             try resolve(text, environment: environment, context: context, responseStatus: responseStatus)
         }
@@ -97,24 +98,39 @@ public enum WorkflowEngine {
         for step in steps where step.enabled {
             try control?.check()
             guard step.kind.supports(response: response) else { throw WorkflowError.invalid("步骤不适用于当前方向") }
-            let value = [.script, .setHeader, .removeHeader].contains(step.kind) ? step.value : try resolveValue(step.value)
+            let value = [.script, .setHeader, .removeHeader, .setQueryParameter, .replaceURLString].contains(step.kind) ? step.value : try resolveValue(step.value)
             switch step.kind {
+            case .delay:
+                throw WorkflowError.invalid("延迟步骤需要异步执行流程")
             case .script:
                 draft = try WorkflowScript.run(source: value, draft: draft, response: response, request: request,
-                    environment: environment, timeoutMilliseconds: (step.scriptOptions ?? ScriptOptions()).timeoutMilliseconds, control: control)
-            case .setHeader:
-                // Validate the complete step before changing the draft.
-                let headers = try step.headerEntries.map { entry -> HTTPField in
-                    let value = try resolveValue(entry.value)
-                    try validateHeader(entry.name, value: value)
-                    return HTTPField(entry.name, value)
+                    environment: environment, timeoutMilliseconds: (step.scriptOptions ?? ScriptOptions()).timeoutMilliseconds, control: control, environmentTypes: environmentTypes)
+            case .setHeader, .removeHeader:
+                // Stage sequential edits so a later invalid entry cannot partially change the draft.
+                var headers = draft.headers
+                for entry in step.headerEntries {
+                    try validateHeader(entry.name, value: "")
+                    let matches = headers.indices.filter { headers[$0].name.caseInsensitiveCompare(entry.name) == .orderedSame }
+                    switch entry.operation {
+                    case .remove:
+                        headers.removeAll { $0.name.caseInsensitiveCompare(entry.name) == .orderedSame }
+                    case .modify:
+                        guard !matches.isEmpty else { continue }
+                        let value = try resolveValue(entry.value)
+                        try validateHeader(entry.name, value: value)
+                        for index in matches { headers[index].value = value }
+                    case .add:
+                        let value = try resolveValue(entry.value)
+                        try validateHeader(entry.name, value: value)
+                        headers.append(HTTPField(entry.name, value))
+                    case .set, nil:
+                        let value = try resolveValue(entry.value)
+                        try validateHeader(entry.name, value: value)
+                        headers.removeAll { $0.name.caseInsensitiveCompare(entry.name) == .orderedSame }
+                        headers.append(HTTPField(entry.name, value))
+                    }
                 }
-                for header in headers { draft.setHeader(header.name, header.value) }
-            case .removeHeader:
-                // Validate every name before removing any fields. Values are unused.
-                let headers = step.headerEntries
-                for header in headers { try validateHeader(header.name, value: "") }
-                for header in headers { draft.setHeader(header.name, nil) }
+                draft.headers = headers
             case .replaceBody: draft.replacementBody = value; clearBodyEncoding(&draft)
             case .rewriteURL:
                 guard let url = URL(string: value), ["http", "https"].contains(url.scheme ?? ""), url.host != nil, url.user == nil, url.fragment == nil else {
@@ -122,32 +138,66 @@ public enum WorkflowEngine {
                 }
                 draft.url = value
             case .setQueryParameter:
-                let name = try resolveValue(step.name)
-                guard !name.isEmpty, var components = URLComponents(string: draft.url) else {
+                // Stage the whole list locally so a later invalid entry cannot partially edit the URL.
+                let entries: [QueryParameterEntry]
+                if let configured = step.queryParameters { entries = configured }
+                else { entries = [QueryParameterEntry(operation: nil, name: step.name, value: step.value)] }
+                if entries.isEmpty { break }
+                guard var components = URLComponents(string: draft.url) else {
                     throw WorkflowError.invalid("查询参数名称或 URL 无效")
                 }
-                // Encode only the edited pair. Keep unrelated query bytes, order and duplicates intact.
                 let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
-                let pair = name.addingPercentEncoding(withAllowedCharacters: allowed)! + "=" + value.addingPercentEncoding(withAllowedCharacters: allowed)!
-                let parts = components.percentEncodedQuery.map { $0.isEmpty ? [] : $0.components(separatedBy: "&") } ?? []
-                var updated: [String] = []
-                var replaced = false
-                for part in parts {
-                    let key = String(part.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)[0])
-                    if key.removingPercentEncoding == name {
-                        if !replaced { updated.append(pair); replaced = true }
-                    } else { updated.append(part) }
+                for entry in entries {
+                    let name = try resolveValue(entry.name)
+                    guard !name.isEmpty else { throw WorkflowError.invalid("查询参数名称不能为空") }
+                    let matchRule = entry.operation == .modify || entry.operation == .remove ? entry.matchRule : .equals
+                    if let error = WorkflowMatcher.validationError(rule: matchRule, pattern: name) {
+                        throw WorkflowError.invalid("查询参数名称：" + error)
+                    }
+                    let parts = components.percentEncodedQuery.map { $0.isEmpty ? [] : $0.components(separatedBy: "&") } ?? []
+                    func matches(_ part: String) -> Bool {
+                        guard !part.isEmpty else { return false }
+                        let key = String(part.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)[0])
+                        guard let decoded = key.removingPercentEncoding else { return false }
+                        return WorkflowMatcher.matchesQueryParameterName(decoded, rule: matchRule, pattern: name)
+                    }
+                    let exists = parts.contains(where: matches)
+                    if entry.operation == .add && exists || entry.operation == .modify && !exists { continue }
+                    if entry.operation == .remove {
+                        guard exists else { continue }
+                        let remaining = parts.filter { !matches($0) }
+                        components.percentEncodedQuery = remaining.isEmpty ? nil : remaining.joined(separator: "&")
+                        continue
+                    }
+                    let value = try resolveValue(entry.value)
+                    let encodedValue = value.addingPercentEncoding(withAllowedCharacters: allowed)!
+                    let pair = name.addingPercentEncoding(withAllowedCharacters: allowed)! + "=" + encodedValue
+                    var updated: [String] = []
+                    var replaced = false
+                    for part in parts {
+                        if matches(part) {
+                            if entry.operation == .modify {
+                                let key = part.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)[0]
+                                updated.append(String(key) + "=" + encodedValue)
+                            } else if !replaced { updated.append(pair) }
+                            replaced = true
+                        } else { updated.append(part) }
+                    }
+                    if !replaced { updated.append(pair) }
+                    components.percentEncodedQuery = updated.joined(separator: "&")
                 }
-                if !replaced { updated.append(pair) }
-                components.percentEncodedQuery = updated.joined(separator: "&")
                 guard let url = components.string else { throw WorkflowError.invalid("查询参数修改后的 URL 无效") }
                 try validateEditedURL(url)
                 draft.url = url
             case .replaceURLString:
-                let search = try resolveValue(step.name)
-                guard !search.isEmpty else { throw WorkflowError.invalid("查找字符串不能为空") }
-                let url = draft.url.replacingOccurrences(of: search, with: value, options: .literal)
-                try validateEditedURL(url)
+                var url = draft.url
+                for entry in step.urlReplacementEntries {
+                    let search = try resolveValue(entry.search)
+                    guard !search.isEmpty else { throw WorkflowError.invalid("查找字符串不能为空") }
+                    let replacement = try resolveValue(entry.replacement)
+                    url = url.replacingOccurrences(of: search, with: replacement, options: .literal)
+                    try validateEditedURL(url)
+                }
                 draft.url = url
             case .setMethod:
                 guard isToken(value), !["CONNECT", "TRACE"].contains(value.uppercased()) else {
@@ -175,6 +225,50 @@ public enum WorkflowEngine {
             if !response && draft.isMock { break }
         }
         return trace
+    }
+
+    /// Runs suspended steps in order without blocking a network or UI thread.
+    public static func applyAsync(_ steps: [ModificationStep], response: Bool, to draft: inout HTTPMessageDraft,
+                                  environment: [String: String], id: UUID, date: Date,
+                                  request: HTTPMessageDraft? = nil, control: ScriptExecutionControl? = nil,
+                                  templateContext: WorkflowTemplateContext? = nil,
+                                  environmentTypes: [String: EnvironmentValueType] = [:],
+                                  onApplied: ((ModificationKind) -> Void)? = nil) async throws -> [String] {
+        guard steps.count <= 64 else { throw WorkflowError.invalid("每个方向最多执行 64 个步骤") }
+        let control = control ?? ScriptExecutionControl()
+        let context = templateContext ?? WorkflowTemplateContext(id: id, date: date, request: response ? request : draft)
+        let responseStatus = response ? draft.status : nil
+        var trace: [String] = []
+        for step in steps where step.enabled {
+            try Task.checkCancellation()
+            try control.check()
+            guard step.kind.supports(response: response) else { throw WorkflowError.invalid("步骤不适用于当前方向") }
+            if step.kind == .delay {
+                let milliseconds = try delayMilliseconds(step.value)
+                let end = ContinuousClock.now.advanced(by: .milliseconds(milliseconds))
+                while ContinuousClock.now < end {
+                    try control.check()
+                    try await Task.sleep(until: min(end, .now.advanced(by: .milliseconds(25))), clock: .continuous)
+                }
+                try Task.checkCancellation()
+                try control.check()
+                trace.append(step.kind.title)
+                onApplied?(step.kind)
+            } else {
+                trace += try apply([step], response: response, to: &draft, environment: environment, id: id, date: date,
+                                   request: request, control: control, templateContext: context,
+                                   originalResponseStatus: responseStatus, environmentTypes: environmentTypes, onApplied: onApplied)
+            }
+            if !response && draft.isMock { break }
+        }
+        return trace
+    }
+
+    public static func delayMilliseconds(_ value: String) throws -> Int {
+        guard !value.isEmpty, value.utf8.allSatisfy({ (48...57).contains($0) }), let milliseconds = Int(value) else {
+            throw WorkflowError.invalid("延迟时间需为非负整数，单位 ms")
+        }
+        return milliseconds
     }
 
     private static func validateEditedURL(_ value: String) throws {

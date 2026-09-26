@@ -16,6 +16,12 @@ import RequestmanCore
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0, width: 680, height: 500))
+        NSLayoutConstraint.activate([
+            view.widthAnchor.constraint(equalToConstant: 680),
+            view.heightAnchor.constraint(equalToConstant: 500)
+        ])
+        url.cell?.usesSingleLineMode = true; url.cell?.wraps = false; url.cell?.isScrollable = true
+        url.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let done = ActionButton(title: "完成") { [weak self] in self?.execution?.cancel(); self?.dismiss(nil) }; done.keyEquivalent = "\r"
         let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let heading = NativeUI.stack([NativeUI.label("预览流程", size: 18, weight: .bold), spacer, done], vertical: false)
@@ -44,9 +50,9 @@ import RequestmanCore
                     guard workflow.matches(method: request.method, url: request.url, headers: request.headers) else { return "此输入未命中匹配条件。" }
                     let id = UUID(), date = Date()
                     let context = WorkflowTemplateContext(id: id, date: date, request: request)
-                    var trace = try WorkflowEngine.apply(workflow.requestSteps, response: false, to: &request, environment: environment?.values ?? [:], id: id, date: date, control: control, templateContext: context)
+                    var trace = try WorkflowEngine.apply(workflow.requestSteps, response: false, to: &request, environment: environment?.values ?? [:], id: id, date: date, control: control, templateContext: context, environmentTypes: environment?.valueTypes ?? [:])
                     var response = request.isMock ? request : try input.response()
-                    trace += try WorkflowEngine.apply(workflow.responseSteps, response: true, to: &response, environment: environment?.values ?? [:], id: id, date: date, request: request, control: control, templateContext: context)
+                    trace += try await WorkflowEngine.applyAsync(workflow.responseSteps, response: true, to: &response, environment: environment?.values ?? [:], id: id, date: date, request: request, control: control, templateContext: context, environmentTypes: environment?.valueTypes ?? [:])
                     let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
                     return trace.joined(separator: " → ") + "\n\n请求\n" + String(decoding: try encoder.encode(ScriptMessage(request, response: false)), as: UTF8.self)
                         + "\n\n响应\n" + String(decoding: try encoder.encode(ScriptMessage(response, response: true)), as: UTF8.self)

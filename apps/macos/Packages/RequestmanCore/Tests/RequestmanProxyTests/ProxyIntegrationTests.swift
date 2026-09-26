@@ -10,6 +10,166 @@ import RequestmanCore
 
 @Suite(.serialized)
 struct ProxyIntegrationTests {
+    @Test func originAndMockDelaysCanExceedThirtySeconds() async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for mocked in [false, true] {
+                group.addTask {
+                    try await withHarness { h in
+                        var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+                        if mocked { workflow.requestSteps = [ModificationStep(kind: .mock)] }
+                        var delay = ModificationStep(kind: .delay); delay.value = "31000"
+                        var status = ModificationStep(kind: .setStatus); status.status = 202
+                        var script = ModificationStep(kind: .script)
+                        script.value = "response.headers.push({name:'X-Completed',value:'yes'}); return response;"
+                        workflow.responseSteps = [delay, status, script]
+                        try await h.start(workflow: workflow)
+                        let start = ContinuousClock.now
+                        let reply = try await h.exchange("GET \(h.originURL)long-delay HTTP/1.1\r\nHost: localhost\r\n\r\n", timeout: .seconds(40))
+                        #expect(start.duration(to: .now) >= .seconds(31))
+                        #expect(reply.contains("202 Accepted") && reply.lowercased().contains("x-completed: yes"))
+                        let record = try #require(h.proxy.records.drain().records.first)
+                        #expect(record.error == nil && record.duration >= 31)
+                        #expect(record.matchedRules.filter(\.response).map(\.kind) == [.delay, .setStatus, .script])
+                    }
+                }
+            }
+            try await group.waitForAll()
+        }
+    }
+
+    @Test func activeHTTPAndDecryptedHTTPSUploadsHaveNoTotalDeadline() throws {
+        for secure in [false, true] {
+            let shared = ProxySharedState(), records = CaptureRecordBuffer()
+            var workflow = RequestWorkflow(); workflow.urlPrefix = "\(secure ? "https" : "http")://example.test/"
+            // Keep the body pending, without starting an upstream connection or script process.
+            workflow.requestSteps = [ModificationStep(kind: .script)]
+            var project = WorkflowProject(); project.workflows = [workflow]
+            var document = WorkspaceDocument(); document.projects = [project]
+            shared.document.withLock { [document] in $0 = document }
+            let channel = EmbeddedChannel(handler: ProxyConnection(configuration: .init(), shared: shared,
+                records: records, tlsAuthority: secure ? "example.test:443" : nil))
+            defer { _ = try? channel.finish(acceptAlreadyClosed: true) }
+            try channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 12345)).wait()
+            try channel.writeInbound(HTTPServerRequestPart.head(HTTPRequestHead(version: .http1_1, method: .POST,
+                uri: secure ? "/upload" : "http://example.test/upload",
+                headers: HTTPHeaders([("Host", "example.test"), ("Content-Length", "100")]))))
+            try channel.writeInbound(HTTPServerRequestPart.body(channel.allocator.buffer(string: "partial")))
+            channel.embeddedEventLoop.advanceTime(by: .seconds(60))
+            #expect(channel.isActive && records.drain().records.isEmpty)
+            #expect(try channel.readOutbound(as: HTTPServerResponsePart.self) == nil)
+            try channel.close().wait()
+            let record = try #require(records.drain().records.first)
+            #expect(record.requestBody.state == .incomplete && record.error == "客户端连接已关闭")
+        }
+    }
+
+    @Test func waitingForFirstRequestStillHasIdleTimeout() throws {
+        let channel = EmbeddedChannel(handler: ProxyConnection(configuration: .init(), shared: ProxySharedState(), records: CaptureRecordBuffer()))
+        defer { _ = try? channel.finish(acceptAlreadyClosed: true) }
+        try channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 12345)).wait()
+        channel.embeddedEventLoop.advanceTime(by: .seconds(31))
+        #expect(!channel.isActive)
+    }
+
+    @Test func responseDelayWaitsForOriginAndMockBeforeFollowingSteps() async throws {
+        for mocked in [false, true] {
+            try await withHarness { h in
+                var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+                if mocked { workflow.requestSteps = [ModificationStep(kind: .mock)] }
+                var delay = ModificationStep(kind: .delay); delay.value = "100"
+                var status = ModificationStep(kind: .setStatus); status.status = 202
+                workflow.responseSteps = [delay, status]
+                try await h.start(workflow: workflow)
+                let start = ContinuousClock.now
+                let reply = try await h.exchange("GET \(h.originURL)delay HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                #expect(start.duration(to: .now) >= .milliseconds(100))
+                #expect(reply.contains("202 Accepted"))
+                #expect(reply.contains(mocked ? "\"ok\": true" : "origin-body"))
+                #expect(h.observation.withLock { $0.requests } == (mocked ? 0 : 1))
+                let record = try #require(h.proxy.records.drain().records.first)
+                #expect(record.error == nil && record.duration >= 0.1)
+                #expect(record.matchedRules.filter(\.response).map(\.kind) == [.delay, .setStatus])
+            }
+        }
+    }
+
+    @Test func concurrentDelaysDoNotUseScriptSlotsOrBlockOtherRequests() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL + "delay"
+            var delay = ModificationStep(kind: .delay); delay.value = "500"
+            workflow.responseSteps = [delay]
+            try await h.start(workflow: workflow)
+            let completed = OSAllocatedUnfairLock(initialState: 0)
+            let requests = (0..<6).map { index in
+                Task {
+                    let reply = try await h.exchange("GET \(h.originURL)delay/\(index) HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                    completed.withLock { $0 += 1 }
+                    return reply
+                }
+            }
+            defer { requests.forEach { $0.cancel() } }
+            let readyDeadline = ContinuousClock.now.advanced(by: .seconds(2))
+            while h.observation.withLock({ $0.requests }) < 6 && ContinuousClock.now < readyDeadline {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            let reply = try await h.exchange("GET \(h.originURL)unmatched HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            #expect(reply.contains("200 OK") && completed.withLock { $0 } == 0)
+            for request in requests { #expect(try await request.value.contains("200 OK")) }
+            let records = h.proxy.records.drain().records
+            #expect(records.count == 7 && records.allSatisfy { $0.error == nil })
+        }
+    }
+
+    @Test func stoppingCaptureCancelsDelayAndSkipsFollowingSteps() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var delay = ModificationStep(kind: .delay); delay.value = "10000"
+            var status = ModificationStep(kind: .setStatus); status.status = 201
+            workflow.responseSteps = [delay, status]
+            try await h.start(workflow: workflow)
+            let request = Task { try await h.exchange("GET \(h.originURL)delay HTTP/1.1\r\nHost: localhost\r\n\r\n") }
+            let readyDeadline = ContinuousClock.now.advanced(by: .seconds(2))
+            while h.observation.withLock({ $0.requests }) == 0 && ContinuousClock.now < readyDeadline {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            try await Task.sleep(for: .milliseconds(50))
+            let start = ContinuousClock.now
+            await h.proxy.stop()
+            let reply = try await request.value
+            #expect(start.duration(to: .now) < .seconds(1))
+            #expect(!reply.contains("201 Created"))
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(record.matchedRules.isEmpty)
+        }
+    }
+
+    @Test func delayPreservesEncodedBytesAndWorksWithScripts() async throws {
+        for scripted in [false, true] {
+            try await withHarness { h in
+                var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+                var delay = ModificationStep(kind: .delay); delay.value = "50"
+                workflow.responseSteps = [delay]
+                if scripted {
+                    var script = ModificationStep(kind: .script)
+                    script.value = "response.headers.push({name:'X-Delayed',value:'yes'}); return response;"
+                    workflow.responseSteps.append(script)
+                }
+                try await h.start(workflow: workflow)
+                let reply = try await h.exchange("GET \(h.originURL)encoded HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                #expect(reply.contains("200 OK"))
+                let record = try #require(h.proxy.records.drain().records.first)
+                #expect(record.error == nil)
+                if scripted {
+                    #expect(reply.lowercased().contains("x-delayed: yes"))
+                    #expect(record.matchedRules.map(\.kind) == [.delay, .script])
+                } else {
+                    #expect(record.responseBody.data == Data(gzipJSONFixture))
+                    #expect(record.responseHeaders.contains { $0.name.lowercased() == "content-encoding" && $0.value == "gzip" })
+                }
+            }
+        }
+    }
+
     @Test func notifiesAtMatchingBeforeRequestBodyAndIndependentlyOfPausedHistory() throws {
         let shared = ProxySharedState(), records = CaptureRecordBuffer()
         records.setPaused(true)
@@ -57,9 +217,9 @@ struct ProxyIntegrationTests {
                 var rewrite = ModificationStep(kind: .rewriteURL); rewrite.value = h.originURL + "after"
                 var header = ModificationStep(kind: .setHeader); header.name = "X-Key"; header.value = "{{$randomHex}}"
                 var responseHeader = ModificationStep(kind: .setHeader)
-                responseHeader.headerEntries = [NamedValue(name: "X-Random", value: "{{$randomHex}}"),
-                    NamedValue(name: "X-Original", value: "{{$request.url}}"),
-                    NamedValue(name: "X-Status", value: "{{$response.status}}")]
+                responseHeader.headerEntries = [HeaderEntry(name: "X-Random", value: "{{$randomHex}}"),
+                    HeaderEntry(name: "X-Original", value: "{{$request.url}}"),
+                    HeaderEntry(name: "X-Status", value: "{{$response.status}}")]
                 var status = ModificationStep(kind: .setStatus); status.status = 202
                 workflow.requestSteps = [rewrite, header]; workflow.responseSteps = [status, responseHeader]
                 if scripted {
@@ -168,13 +328,16 @@ struct ProxyIntegrationTests {
             var query = ModificationStep(kind: .setQueryParameter)
             query.name = "q"; query.value = "中文 & value"
             var replacement = ModificationStep(kind: .replaceURLString)
-            replacement.name = "/v1/"; replacement.value = "/v2/"
+            replacement.urlReplacementEntries = [
+                URLReplacementEntry(search: "v1", replacement: "v2"),
+                URLReplacementEntry(search: "v2", replacement: "v3")
+            ]
             workflow.requestSteps = [query, replacement]
             try await h.start(workflow: workflow)
-            let original = "\(h.originURL)v1/search?keep=%2f&q=old&q=duplicate"
+            let original = "\(h.originURL)v1/v1/search?version=v1&keep=%2f&q=old&q=duplicate"
             let reply = try await h.exchange("GET \(original) HTTP/1.1\r\nHost: localhost\r\n\r\n")
             #expect(reply.contains("origin-body"))
-            let path = "/v2/search?keep=%2f&q=%E4%B8%AD%E6%96%87%20%26%20value"
+            let path = "/v3/v3/search?version=v3&keep=%2f&q=%E4%B8%AD%E6%96%87%20%26%20value"
             #expect(h.observation.withLock { $0.uri } == path)
             let record = try #require(h.proxy.records.drain().records.first)
             #expect(record.url == original)
@@ -506,7 +669,7 @@ private final class Harness: @unchecked Sendable {
             catch { if attempt == 4 { throw error } }
         }
     }
-    func exchange(_ request: String, until: String? = nil) async throws -> String {
+    func exchange(_ request: String, until: String? = nil, timeout: TimeAmount = .seconds(4)) async throws -> String {
         // This raw fixture collects until EOF; explicitly opt out of persistence.
         let request = request.hasPrefix("CONNECT ") ? request : request.replacingOccurrences(
             of: "HTTP/1.1\r\n", with: "HTTP/1.1\r\nConnection: close\r\n")
@@ -514,7 +677,7 @@ private final class Harness: @unchecked Sendable {
         let channel = try await ClientBootstrap(group: group).channelInitializer { channel in
             channel.pipeline.addHandler(RawCollector(result: promise, until: until))
         }.connect(host: "127.0.0.1", port: proxyPort).get()
-        let timeout = channel.eventLoop.scheduleTask(in: .seconds(4)) { channel.close(promise: nil) }
+        let timeout = channel.eventLoop.scheduleTask(in: timeout) { channel.close(promise: nil) }
         channel.writeAndFlush(channel.allocator.buffer(string: request), promise: nil)
         do { let reply = try await promise.futureResult.get(); timeout.cancel(); try? await channel.close().get(); return reply }
         catch { timeout.cancel(); try? await channel.close().get(); throw error }

@@ -16,8 +16,8 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
     private var nameField: ActionTextField?
     private var nameDraft: String?
     private let nameError = SettingsUI.note("环境名称已存在")
-    private var variableFields: [UUID: (name: ActionTextField, value: ActionTextField)] = [:]
-    private var useButton: ActionButton?
+    private var variableFields: [UUID: (name: ActionTextField, value: ActionTextField, type: ActionPopUpButton, error: NSTextField)] = [:]
+    private var variableDrafts: [UUID: NamedValue] = [:]
     private var editorControls: [NSControl] = []
     private var syncingSelection = false
 
@@ -106,7 +106,7 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
                 editorControls = []
                 nameField = nil
                 nameDraft = nil
-                useButton = nil
+                variableDrafts = [:]
             }
             return
         }
@@ -118,12 +118,14 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
         for variable in environment.variables {
             guard let fields = variableFields[variable.id] else { continue }
             SettingsUI.sync(fields.name, variable.name)
-            SettingsUI.sync(fields.value, variable.value)
+            let draft = variableDrafts[variable.id] ?? variable
+            SettingsUI.sync(fields.value, draft.value)
+            fields.type.selectItem(at: EnvironmentValueType.allCases.firstIndex(of: draft.type)!)
+            fields.value.placeholderString = draft.type.placeholder
+            fields.error.stringValue = "请输入有效的\(draft.type.title)：\(draft.type.placeholder)"
+            fields.error.isHidden = draft.type.accepts(draft.value)
         }
         editorControls.forEach { $0.isEnabled = model.loaded }
-        let active = environment.id == model.document.selectedEnvironmentID
-        useButton?.title = active ? "正在使用" : "切换到此环境"
-        useButton?.isEnabled = model.loaded && !active
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { listSnapshot.count }
@@ -149,7 +151,8 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
 
     private func rebuildEditor(_ environment: WorkspaceEnvironment) {
         editor.view.subviews.forEach { $0.removeFromSuperview() }
-        if editorID != environment.id { nameDraft = nil }
+        if editorID != environment.id { nameDraft = nil; variableDrafts = [:] }
+        variableDrafts = variableDrafts.filter { id, _ in environment.variables.contains { $0.id == id } }
         editorID = environment.id
         variableIDs = environment.variables.map(\.id)
         variableFields = [:]
@@ -166,12 +169,8 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
         nameError.textColor = .systemRed
         nameError.isHidden = !hasDuplicateName(nameDraft ?? environment.name, excluding: environmentID)
         name.setAccessibilityLabel("环境名称")
-        name.widthAnchor.constraint(equalToConstant: 260).isActive = true
         nameField = name
-        let use = ActionButton(title: "切换到此环境") { [weak self] in self?.model.document.selectedEnvironmentID = environmentID }
-        useButton = use
-        editorControls += [name, use]
-        let useRow = NativeUI.stack([use, NSView()], vertical: false)
+        editorControls.append(name)
         var rows: [NSView] = []
         for variable in environment.variables {
             let id = variable.id
@@ -180,9 +179,16 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
                 self.model.document.environments[index].variables[variableIndex].name = value
             }
             let variableValue = ActionTextField(variable.value, placeholder: "值") { [weak self] value in
-                guard let self, let index = self.index(of: environmentID), let variableIndex = self.model.document.environments[index].variables.firstIndex(where: { $0.id == id }) else { return }
-                self.model.document.environments[index].variables[variableIndex].value = value
+                self?.updateVariable(id, environmentID: environmentID) { $0.value = value }
             }
+            let type = ActionPopUpButton(items: EnvironmentValueType.allCases.map(\.title)) { [weak self] selection in
+                self?.updateVariable(id, environmentID: environmentID) { $0.type = EnvironmentValueType.allCases[selection] }
+            }
+            type.setAccessibilityLabel("变量数据类型")
+            type.widthAnchor.constraint(equalToConstant: 90).isActive = true
+            let error = SettingsUI.note("")
+            error.textColor = .systemRed
+            error.isHidden = true
             variableName.setAccessibilityLabel("变量名称")
             variableValue.setAccessibilityLabel("变量值")
             let remove = ActionButton(title: "") { [weak self] in
@@ -193,10 +199,15 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
             remove.imagePosition = .imageOnly
             remove.toolTip = "删除变量"
             remove.setAccessibilityLabel("删除变量")
-            rows.append(NativeUI.stack([variableName, variableValue, remove], vertical: false, spacing: 8))
+            let row = NativeUI.stack([variableName, variableValue, type, remove], vertical: false, spacing: 8)
+            let group = NativeUI.stack([row, error], spacing: 6)
+            group.alignment = .leading
+            row.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+            error.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+            rows.append(group)
             variableName.widthAnchor.constraint(equalTo: variableValue.widthAnchor).isActive = true
-            variableFields[id] = (variableName, variableValue)
-            editorControls += [variableName, variableValue, remove]
+            variableFields[id] = (variableName, variableValue, type, error)
+            editorControls += [variableName, variableValue, type, remove]
         }
         let add = ActionButton(title: "添加变量") { [weak self] in
             guard let self, let index = self.index(of: environmentID) else { return }
@@ -214,7 +225,7 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
         delete.hasDestructiveAction = true
         editorControls += [add, delete]
         let sections = [
-            SettingsUI.section("环境", rows: [SettingsUI.row("名称", name), nameError, useRow]),
+            SettingsUI.section("名称", rows: [name, nameError]),
             SettingsUI.section("变量", rows: rows, footer: "使用 {{$env.变量名}} 引用。切换环境仅影响新请求；进行中的请求保留原环境快照。"),
             NativeUI.stack([delete, NSView()], vertical: false)
         ]
@@ -229,6 +240,21 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
         for (current, next) in zip(editorControls, editorControls.dropFirst()) {
             current.nextKeyView = next
         }
+    }
+
+    private func updateVariable(_ id: UUID, environmentID: UUID, change: (inout NamedValue) -> Void) {
+        guard let index = index(of: environmentID),
+              let variableIndex = model.document.environments[index].variables.firstIndex(where: { $0.id == id }) else { return }
+        var draft = variableDrafts[id] ?? model.document.environments[index].variables[variableIndex]
+        change(&draft)
+        if draft.type.accepts(draft.value) {
+            model.document.environments[index].variables[variableIndex].value = draft.value
+            model.document.environments[index].variables[variableIndex].type = draft.type
+            variableDrafts[id] = nil
+        } else {
+            variableDrafts[id] = draft
+        }
+        refresh()
     }
 
     private func index(of id: UUID) -> Int? { model.document.environments.firstIndex { $0.id == id } }

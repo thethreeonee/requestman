@@ -100,7 +100,7 @@ enum BodyJSONPresentation {
             let line: NSRect
             if start < count { line = layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: start), effectiveRange: nil) }
             else { line = layout.extraLineFragmentRect }
-            let height = max(24, line.height)
+            let height = max(layout.defaultLineHeight(for: text.font ?? .monospacedSystemFont(ofSize: 12, weight: .regular)), line.height)
             let point = convert(NSPoint(x: 0, y: text.textContainerOrigin.y + line.minY), from: text)
             guard point.y + height >= rect.minY else { continue }
             if point.y > rect.maxY { break }

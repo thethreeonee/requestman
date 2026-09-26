@@ -5,6 +5,8 @@
 	};
 	"objectVersion" = "60";
 	"objects" = {
+        "A10926AB0000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/JavaScriptSyntax.swift"; "sourceTree" = "<group>"; };
+        "A10926AB0000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10926AB0000000000000001"; };
         "A10926E01000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Infrastructure/Capture/SystemRuleHitNotifications.swift"; "sourceTree" = "<group>"; };
         "A10926E01000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10926E01000000000000001"; };
         "A10926C01000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Workspace/JSONSyntax.swift"; "sourceTree" = "<group>"; };
@@ -29,6 +31,8 @@
 		};
 		"A10A99000000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Workspace/AppKitSupport.swift"; "sourceTree" = "<group>"; };
 		"A10A99000000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10A99000000000000000001"; };
+        "A10926F01000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/WorkflowMatchTestView.swift"; "sourceTree" = "<group>"; };
+        "A10926F01000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10926F01000000000000001"; };
         "BEB4E525F48603DE12666E8E" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/WorkflowPreviewView.swift"; "sourceTree" = "<group>"; };
         "3FE625F0ED4E4732804874D9" = { "isa" = "PBXBuildFile"; "fileRef" = "BEB4E525F48603DE12666E8E"; };
         "F38B4ECE2819FC9E4240EE95" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/StepInspectorView.swift"; "sourceTree" = "<group>"; };
@@ -399,9 +403,11 @@
                 "A109250F17E2000000000001",
 				"4C3A75160F26468EA29D5061",
 				"A8CE98D3D53D32C769A516B8",
+                "A10926F01000000000000001",
                 "BEB4E525F48603DE12666E8E",
                 "F38B4ECE2819FC9E4240EE95",
                 "A10926B0D000000000000001",
+                "A10926AB0000000000000001",
                 "A10926C01000000000000001",
                 "1ADC8B696AE5EE9F146362A5",
                 "43FA72838C312E5A373171D3",
@@ -470,9 +476,11 @@
                 "A109250F17E2000000000002",
 				"4C3A75160F26468EA29D5062",
 				"977963FF90440603C012F5DC",
+                "A10926F01000000000000002",
                 "3FE625F0ED4E4732804874D9",
                 "22372EBFC3A8E041A25BF830",
                 "A10926B0D000000000000002",
+                "A10926AB0000000000000002",
                 "A10926C01000000000000002",
                 "9AE475B59ADF0ADC61AB8C9E",
                 "D05FACDD10ACF1C575F2521E",

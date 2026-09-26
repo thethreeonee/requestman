@@ -344,17 +344,21 @@ import RequestmanCore
     let textView: NSTextView
     private let templateLayout: TemplateLayoutManager?
     private let bodyEditor: Bool
+    private let javaScript: Bool
+    private let roundedInput: Bool
     var onChange: (String) -> Void
-    init(editable: Bool = true, template: Bool = false, bodyEditor: Bool = false, onChange: @escaping (String) -> Void = { _ in }) {
+    init(editable: Bool = true, template: Bool = false, bodyEditor: Bool = false, roundedInput: Bool = false, javaScript: Bool = false, onChange: @escaping (String) -> Void = { _ in }) {
         self.onChange = onChange
         self.bodyEditor = bodyEditor
+        self.javaScript = javaScript
+        self.roundedInput = roundedInput
         if template {
             let storage = NSTextStorage()
             let layout = TemplateLayoutManager()
             let container = NSTextContainer(containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
             storage.addLayoutManager(layout); layout.addTextContainer(container)
             textView = TemplateTextView(frame: .zero, textContainer: container); templateLayout = layout
-        } else { textView = NSTextView(); templateLayout = nil }
+        } else { textView = roundedInput ? RulesInputTextView() : NSTextView(); templateLayout = nil }
         super.init(frame: .zero)
         hasVerticalScroller = true; borderType = .bezelBorder; documentView = textView
         textView.isRichText = false; textView.isEditable = editable; textView.isSelectable = true
@@ -368,6 +372,22 @@ import RequestmanCore
         textView.autoresizingMask = [.width]; textView.textContainer?.widthTracksTextView = true
         textView.textContainerInset = NSSize(width: 6, height: 8); textView.delegate = self
         textView.allowsUndo = true
+        if roundedInput {
+            borderType = .noBorder; drawsBackground = false
+            focusRingType = .exterior; textView.focusRingType = .none
+            contentView.wantsLayer = true
+            contentView.layer?.cornerRadius = 8; contentView.layer?.masksToBounds = true
+            contentView.layer?.borderWidth = 1
+            contentView.layer?.borderColor = NSColor.separatorColor.cgColor
+            (textView as? RulesInputTextView)?.focusChanged = { [weak self] focused in
+                guard let self else { return }
+                needsDisplay = true
+                // NSTextView reveals its text, but the outer form must also reveal the editor's focus ring.
+                if focused, let parent = superview {
+                    parent.scrollToVisible(convert(bounds.insetBy(dx: -6, dy: -6), to: parent))
+                }
+            }
+        }
         if template {
             let paragraph = NSMutableParagraphStyle()
             paragraph.minimumLineHeight = 24
@@ -375,13 +395,37 @@ import RequestmanCore
             textView.typingAttributes[.paragraphStyle] = paragraph
             wantsLayer = true; layer?.cornerRadius = 8; layer?.masksToBounds = true
         }
-        if bodyEditor {
+        if javaScript {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.minimumLineHeight = 20; paragraph.maximumLineHeight = 20
+            textView.defaultParagraphStyle = paragraph
+            textView.typingAttributes[.paragraphStyle] = paragraph
+            textView.isContinuousSpellCheckingEnabled = false
+        }
+        if bodyEditor || javaScript {
             verticalRulerView = BodyLineRuler(scrollView: self, orientation: .verticalRuler)
             verticalRulerView?.clientView = textView
             hasVerticalRuler = true; rulersVisible = true
         }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override var focusRingMaskBounds: NSRect { roundedInput ? bounds.insetBy(dx: 2, dy: 2) : super.focusRingMaskBounds }
+    override func drawFocusRingMask() {
+        guard roundedInput else { super.drawFocusRingMask(); return }
+        NSBezierPath(roundedRect: focusRingMaskBounds, xRadius: 6, yRadius: 6).fill()
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard roundedInput, window?.isKeyWindow == true, window?.firstResponder === textView else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSFocusRingPlacement.only.set()
+        drawFocusRingMask()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        if roundedInput { contentView.layer?.borderColor = NSColor.separatorColor.cgColor }
+    }
     override func layout() {
         super.layout()
         let minimum = NSSize(width: 0, height: max(0, contentSize.height))
@@ -395,8 +439,9 @@ import RequestmanCore
         templateLayout?.updateTokens(excluding: textView.markedRange())
         if bodyEditor {
             JSONSyntax.highlight(textView, templateRanges: templateLayout?.tokenRanges ?? [])
-            (verticalRulerView as? BodyLineRuler)?.updateLines()
         }
+        if javaScript { JavaScriptSyntax.highlight(textView) }
+        if bodyEditor || javaScript { (verticalRulerView as? BodyLineRuler)?.updateLines() }
         if templateLayout != nil { textView.typingAttributes.removeValue(forKey: .kern) }
         textView.needsDisplay = true
     }
@@ -410,6 +455,20 @@ import RequestmanCore
         textView.didChangeText()
         textView.undoManager?.setActionName("格式化 JSON")
         return true
+    }
+}
+
+@MainActor private final class RulesInputTextView: NSTextView {
+    var focusChanged: ((Bool) -> Void)?
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { focusChanged?(true) }
+        return accepted
+    }
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        if accepted { focusChanged?(false) }
+        return accepted
     }
 }
 

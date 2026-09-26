@@ -15,6 +15,10 @@ try:
                     "-emit-module-path", str(temporary / "RequestmanCore.swiftmodule"), "-o", str(temporary / "libRequestmanCore.a"),
                     *map(str, sorted((core / "Sources/RequestmanCore").glob("*.swift")))], check=True)
     binary = temporary / "check"
+    subprocess.run(["swiftc", *[flag for flag in flags if flag != "-parse-as-library"],
+                    "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore",
+                    str(core / "Sources/RequestmanScriptWorker/main.swift"),
+                    "-o", str(temporary / "RequestmanScriptWorker")], check=True)
     subprocess.run(["swiftc", *flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore",
                     str(root / "Requestman/Features/Workspace/AppKitSupport.swift"),
                     str(root / "Requestman/Features/Workspace/WorkspaceTransfer.swift"),

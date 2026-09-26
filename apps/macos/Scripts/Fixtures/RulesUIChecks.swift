@@ -44,7 +44,278 @@ import RequestmanCore
     func showStepInspector(_ sender: Any?) { count += 1 }
 }
 
+@MainActor private final class ScriptFocusCheckWindow: NSWindow {
+    override var isKeyWindow: Bool { true }
+}
+
 @main @MainActor struct RulesUIChecks {
+    static func checkSingleLineBackgrounds() {
+        let model = WorkspaceModel(); model.addProject()
+        let inspector = StepInspectorViewController(model: model)
+        let flow = FlowEditorViewController(model: model)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 1000), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        var checked = 0
+        func check(_ controller: NSViewController) {
+            window.contentViewController = controller
+            window.setContentSize(NSSize(width: 640, height: 1000))
+            for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+                window.appearance = NSAppearance(named: appearance)
+                for _ in 0..<3 {
+                    controller.view.layoutSubtreeIfNeeded()
+                    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+                }
+                let fields = descendants(controller.view).compactMap { $0 as? NSTextField }.filter {
+                    ($0 is ActionTextField || $0 is HeaderNameField) && $0.isEditable && $0.isBezeled
+                        && $0.bezelStyle != .roundedBezel && !$0.isHiddenOrHasHiddenAncestor
+                }
+                precondition(!fields.isEmpty)
+                for field in fields {
+                    for focused in [false, true] {
+                        if focused { field.selectText(nil) } else { window.makeFirstResponder(nil) }
+                        controller.view.layoutSubtreeIfNeeded()
+                        field.displayIfNeeded()
+                        guard let bitmap = field.bitmapImageRepForCachingDisplay(in: field.bounds) else {
+                            preconditionFailure("Missing input layout: \(field.accessibilityLabel() ?? field.placeholderString ?? "input"), \(field.frame)")
+                        }
+                        field.cacheDisplay(in: field.bounds, to: bitmap)
+                        var white = 0
+                        for y in 0..<bitmap.pixelsHigh {
+                            for x in 0..<bitmap.pixelsWide {
+                                if let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                                   color.alphaComponent > 0.95 && color.redComponent > 0.95 && color.greenComponent > 0.95 && color.blueComponent > 0.95 { white += 1 }
+                            }
+                        }
+                        precondition(field is HeaderNameField || white > bitmap.pixelsWide * bitmap.pixelsHigh / 3,
+                                     "Input must render an opaque white fill: \(field.accessibilityLabel() ?? field.placeholderString ?? "input"), \(appearance), focus=\(focused)")
+                        if focused {
+                            let editor = field.currentEditor() as! NSTextView
+                            let before = field.stringValue
+                            editor.insertText("x", replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+                            precondition(field.stringValue == "x")
+                            editor.insertText(before, replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+                        }
+                        checked += 1
+                    }
+                }
+            }
+            window.makeFirstResponder(nil)
+        }
+        var workflow = model.workflow!
+        workflow.matchHeaderEnabled = true
+        model.updateWorkflow(workflow)
+        check(flow)
+        for kind in [ModificationKind.setHeader, .setQueryParameter, .replaceURLString, .mock, .delay, .script] {
+            model.addStep(kind, response: kind == .delay); inspector.refresh()
+            check(inspector)
+        }
+        print("Single-line inputs: \(checked) rendered background and editing checks passed")
+    }
+
+    static func checkURLReplacementEditing() throws {
+        let model = WorkspaceModel(); model.addProject(); model.addStep(.replaceURLString, response: false)
+        var workflow = model.workflow!
+        workflow.requestSteps[0].name = "old"; workflow.requestSteps[0].value = "new"
+        model.updateWorkflow(workflow)
+        let inspector = StepInspectorViewController(model: model)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 850), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentViewController = inspector
+        defer { window.close() }
+        func settle() { inspector.refresh(); window.contentView?.layoutSubtreeIfNeeded() }
+        func boxes() -> [NSBox] { descendants(inspector.view).compactMap { $0 as? NSBox }.filter { $0.identifier?.rawValue == "rules.urlReplacementEntry" } }
+        func buttons() -> [NSButton] { descendants(inspector.view).compactMap { $0 as? NSButton } }
+        settle()
+        precondition(boxes().count == 1)
+        let description = descendants(inspector.view).compactMap { $0 as? NSTextField }.first { $0.identifier?.rawValue == "rules.stepDescription" }!
+        precondition((description.superview as? NSStackView)?.arrangedSubviews[1] === description)
+        precondition(description.stringValue.contains("区分大小写") && description.stringValue.contains("所有匹配"))
+        precondition(!description.isDescendant(of: boxes()[0]))
+        let firstBox = boxes()[0]
+        let search = descendants(firstBox).compactMap { $0 as? ActionTextField }.first!
+        let replacement = descendants(firstBox).compactMap { $0 as? RulesTextArea }.first!
+        precondition(search.stringValue == "old" && replacement.string == "new")
+        precondition(search.cell?.usesSingleLineMode == true && search.cell?.wraps == false)
+        search.selectText(nil)
+        let editor = search.currentEditor() as! NSTextView
+        editor.insertText("test", replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+        editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        precondition(search.currentEditor() == nil)
+        replacement.string = "{{$env.target}}"; replacement.textDidChange(Notification(name: NSText.didChangeNotification))
+        settle()
+        precondition(boxes()[0] === firstBox)
+        precondition(model.selectedStep?.urlReplacementEntries.first?.search == "test")
+        precondition(model.selectedStep?.urlReplacementEntries.first?.replacement == "{{$env.target}}")
+        let add = buttons().first { $0.title == "添加替换配置" }!
+        precondition(!add.isDescendant(of: firstBox))
+        add.performClick(nil); settle()
+        buttons().first { $0.title == "添加替换配置" }!.performClick(nil); settle()
+        precondition(boxes().count == 3 && Set(model.selectedStep!.urlReplacementEntries.map(\.id)).count == 3)
+        for width: CGFloat in [360, 440, 640] {
+            window.setContentSize(NSSize(width: width, height: 850)); settle()
+            precondition(abs(inspector.view.bounds.width - width) < 1)
+            for box in boxes() {
+                precondition(!box.hasAmbiguousLayout && box.bounds.width > 0)
+                for control in descendants(box) where control is ActionTextField || control is RulesTextArea || control is NSButton {
+                    let rect = control.convert(control.bounds, to: box)
+                    precondition(rect.minX >= 0 && rect.maxX <= box.bounds.width + 1)
+                }
+            }
+        }
+        let secondID = model.selectedStep!.urlReplacementEntries[1].id
+        buttons().first { $0.accessibilityLabel() == "删除替换配置" }!.performClick(nil); settle()
+        precondition(boxes().count == 2 && model.selectedStep!.urlReplacementEntries[0].id == secondID)
+        for _ in 0..<2 { buttons().first { $0.accessibilityLabel() == "删除替换配置" }!.performClick(nil); settle() }
+        precondition(boxes().isEmpty && model.selectedStep!.urlReplacementEntries.isEmpty)
+        let decoded = try JSONDecoder().decode(ModificationStep.self, from: JSONEncoder().encode(model.selectedStep!))
+        precondition(decoded.urlReplacements == [])
+        buttons().first { $0.title == "添加替换配置" }!.performClick(nil); settle()
+        precondition(boxes().count == 1 && model.selectedStep!.urlReplacementEntries[0].search.isEmpty)
+    }
+
+    static func checkQueryParameterEditing() {
+        let model = WorkspaceModel(); model.addProject(); model.addStep(.setQueryParameter, response: false)
+        let inspector = StepInspectorViewController(model: model)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 850), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentViewController = inspector
+        defer { window.close() }
+        func settle() { inspector.refresh(); window.contentView?.layoutSubtreeIfNeeded() }
+        func buttons() -> [NSButton] { descendants(inspector.view).compactMap { $0 as? NSButton } }
+        func boxes() -> [NSBox] { descendants(inspector.view).compactMap { $0 as? NSBox }.filter { $0.identifier?.rawValue == "rules.queryParameterEntry" } }
+        func text(_ box: NSBox, _ label: String) -> RulesTextArea {
+            descendants(box).compactMap { $0 as? RulesTextArea }.first { $0.textView.accessibilityLabel() == label }!
+        }
+        func parameterName(_ box: NSBox) -> ActionTextField {
+            descendants(box).compactMap { $0 as? ActionTextField }.first { $0.accessibilityLabel() == "参数名称" }!
+        }
+        settle()
+        precondition(boxes().count == 1)
+        let descriptions = descendants(inspector.view).compactMap { $0 as? NSTextField }.filter { $0.identifier?.rawValue == "rules.stepDescription" }
+        precondition(descriptions.count == 1)
+        let description = descriptions[0]
+        precondition((description.superview as? NSStackView)?.arrangedSubviews[1] === description)
+        precondition(!description.stringValue.contains("旧配置"))
+        precondition(boxes().allSatisfy { !description.isDescendant(of: $0) })
+        precondition(descendants(boxes()[0]).compactMap { $0 as? NSTextField }.filter { !$0.isEditable }.map(\.stringValue) == ["操作", "参数名称", "参数值"])
+        precondition(buttons().first { $0.title == "添加参数操作" }?.imagePosition == .imageLeading)
+        let firstBox = boxes()[0]
+        let name = parameterName(firstBox), value = text(firstBox, "参数值")
+        precondition(name.cell?.usesSingleLineMode == true && name.cell?.wraps == false)
+        name.selectText(nil)
+        let editor = name.currentEditor() as! NSTextView
+        editor.insertText("debug", replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+        editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        precondition(name.currentEditor() == nil, "Return commits the single-line parameter name")
+        value.string = "true"; value.textDidChange(Notification(name: NSText.didChangeNotification))
+        settle()
+        precondition(model.selectedStep?.queryParameterEntries.first?.name == "debug")
+        precondition(boxes()[0] === firstBox && text(firstBox, "参数值") === value, "Typing retains the field and selection")
+        let popup = descendants(firstBox).compactMap { $0 as? ActionPopUpButton }.first!
+        precondition(popup.itemTitles == ["添加", "修改", "删除"] && popup.indexOfSelectedItem == 0)
+        let matching = descendants(firstBox).compactMap { $0 as? ActionPopUpButton }.first { $0.accessibilityLabel() == "参数名称匹配规则" }!
+        precondition(matching.itemTitles == ["等于", "包含", "通配符", "正则"])
+        precondition(matching.isHiddenOrHasHiddenAncestor && matching.indexOfSelectedItem == 0)
+        popup.selectItem(at: 2); popup.onChange(2); settle()
+        precondition(!matching.isHiddenOrHasHiddenAncestor)
+        matching.selectItem(at: 3); matching.onChange(3); settle()
+        precondition(model.selectedStep?.queryParameterEntries.first?.matchRule == .regex)
+        precondition(value.isHiddenOrHasHiddenAncestor && !name.isHiddenOrHasHiddenAncestor)
+        precondition(model.selectedStep?.queryParameterEntries.first?.operation == .remove)
+        popup.selectItem(at: 1); popup.onChange(1); settle()
+        precondition(!value.isHiddenOrHasHiddenAncestor && value.string == "true")
+        precondition(model.selectedStep?.queryParameterEntries.first?.operation == .modify)
+        precondition(!matching.isHiddenOrHasHiddenAncestor && matching.indexOfSelectedItem == 3)
+        popup.selectItem(at: 0); popup.onChange(0); settle()
+        precondition(matching.isHiddenOrHasHiddenAncestor && !value.isHiddenOrHasHiddenAncestor)
+        popup.selectItem(at: 1); popup.onChange(1); settle()
+        precondition(matching.indexOfSelectedItem == 3)
+        buttons().first { $0.title == "添加参数操作" }!.performClick(nil); settle()
+        buttons().first { $0.title == "添加参数操作" }!.performClick(nil); settle()
+        precondition(boxes().count == 3 && Set(model.selectedStep!.queryParameterEntries.map(\.id)).count == 3)
+        var workflow = model.workflow!
+        workflow.requestSteps[0].queryParameterEntries = [
+            QueryParameterEntry(name: "debug", value: "true"),
+            QueryParameterEntry(operation: .modify, name: "page", value: "2"),
+            QueryParameterEntry(operation: .remove, name: "utm_*", matchRule: .wildcard)
+        ]
+        model.updateWorkflow(workflow); settle()
+        for width: CGFloat in [360, 440, 640] {
+            window.setContentSize(NSSize(width: width, height: 850)); settle()
+            precondition(abs(inspector.view.bounds.width - width) < 1, "The description wraps without widening the inspector")
+            for box in boxes() {
+                precondition(box.bounds.width > 0 && !box.hasAmbiguousLayout)
+                let menus = descendants(box).compactMap { $0 as? ActionPopUpButton }.filter { !$0.isHiddenOrHasHiddenAncestor }
+                for menu in menus {
+                    let rect = menu.convert(menu.bounds, to: box)
+                    precondition(rect.minX >= 0 && rect.maxX <= box.bounds.width + 1 && rect.width >= 60)
+                }
+                if menus.count == 2 {
+                    let first = menus[0].convert(menus[0].bounds, to: box)
+                    let second = menus[1].convert(menus[1].bounds, to: box)
+                    precondition(first.maxX <= second.minX && abs(first.midY - second.midY) < 1, "Operation and matching controls share one row")
+                }
+                for area in descendants(box).compactMap({ $0 as? RulesTextArea }) where !area.isHiddenOrHasHiddenAncestor {
+                    let rect = area.convert(area.bounds, to: box)
+                    precondition(rect.minX >= 0 && rect.maxX <= box.bounds.width + 1, "Query field must fit narrow inspector")
+                }
+            }
+        }
+        if let path = ProcessInfo.processInfo.environment["REQUESTMAN_QUERY_FORM_PREVIEW"] {
+            window.setContentSize(NSSize(width: 440, height: 850)); settle()
+            inspector.view.appearance = NSAppearance(named: .aqua)
+            inspector.view.wantsLayer = true
+            inspector.view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+            window.displayIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            for area in descendants(inspector.view).compactMap({ $0 as? RulesTextArea }) {
+                area.textView.layoutManager?.ensureLayout(for: area.textView.textContainer!)
+                area.textView.display()
+            }
+            CATransaction.flush()
+            let bitmap = inspector.view.bitmapImageRepForCachingDisplay(in: inspector.view.bounds)!
+            inspector.view.cacheDisplay(in: inspector.view.bounds, to: bitmap)
+            let image = NSImage(size: inspector.view.bounds.size)
+            image.lockFocus()
+            NSColor.windowBackgroundColor.setFill(); inspector.view.bounds.fill()
+            bitmap.draw(in: inspector.view.bounds)
+            // Layer-backed scroll views need their native document capture included separately offscreen.
+            for area in descendants(inspector.view).compactMap({ $0 as? RulesTextArea }) where !area.isHiddenOrHasHiddenAncestor {
+                let rect = area.textView.visibleRect
+                guard let textBitmap = area.textView.bitmapImageRepForCachingDisplay(in: rect) else { continue }
+                area.textView.cacheDisplay(in: rect, to: textBitmap)
+                textBitmap.draw(in: area.textView.convert(rect, to: inspector.view))
+            }
+            image.unlockFocus()
+            let rendered = NSBitmapImageRep(data: image.tiffRepresentation!)!
+            try! rendered.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
+        }
+        let decoded = try! JSONDecoder().decode(ModificationStep.self, from: JSONEncoder().encode(model.selectedStep!))
+        precondition(decoded == model.selectedStep)
+        let reopened = StepInspectorViewController(model: model); reopened.refresh()
+        precondition(descendants(reopened.view).compactMap { $0 as? ActionPopUpButton }.filter { $0.accessibilityLabel() == "参数操作" }.map(\.indexOfSelectedItem) == [0, 1, 2])
+        precondition(descendants(reopened.view).compactMap { $0 as? ActionPopUpButton }.filter { $0.accessibilityLabel() == "参数名称匹配规则" }.map(\.indexOfSelectedItem) == [0, 0, 2])
+        model.loaded = false; settle()
+        precondition(descendants(inspector.view).compactMap { $0 as? ActionPopUpButton }.allSatisfy { !$0.isEnabled })
+        model.loaded = true; settle()
+        for _ in 0..<3 { buttons().first { $0.accessibilityLabel() == "删除参数操作" }!.performClick(nil); settle() }
+        precondition(boxes().isEmpty && model.selectedStep?.queryParameterEntries.isEmpty == true)
+        buttons().first { $0.title == "添加参数操作" }!.performClick(nil); settle()
+        precondition(boxes().count == 1)
+        workflow = model.workflow!
+        workflow.requestSteps[0].queryParameters = nil
+        workflow.requestSteps[0].name = "legacy"; workflow.requestSteps[0].value = "old"
+        model.updateWorkflow(workflow); settle()
+        precondition(parameterName(boxes()[0]).stringValue == "legacy")
+        precondition(model.selectedStep?.queryParameters == nil, "Opening a legacy form must not migrate it")
+        let legacyDescription = descendants(inspector.view).compactMap { $0 as? NSTextField }.first { $0.identifier?.rawValue == "rules.stepDescription" }!
+        precondition(legacyDescription.stringValue.contains("旧配置"))
+        let legacyRule = descendants(boxes()[0]).compactMap { $0 as? ActionPopUpButton }.first { $0.accessibilityLabel() == "参数名称匹配规则" }!
+        precondition(legacyRule.indexOfSelectedItem == 0 && !legacyRule.isHiddenOrHasHiddenAncestor)
+        legacyRule.selectItem(at: 1); legacyRule.onChange(1); settle()
+        precondition(!legacyDescription.stringValue.contains("旧配置"))
+        precondition(model.selectedStep?.queryParameterEntries.first?.operation == .modify && model.selectedStep?.queryParameterEntries.first?.matchRule == .contains)
+    }
+
     static func checkBodyEditing() {
         let original = #"{"z":900719925474099312345,"a":[true,null,1.2300e+04],"name":"中文😀","id":"{{$uuid}}","count":{{$env.count}},"empty":{}}"#
         let formatted = BodyJSONPresentation.formatted(original)!
@@ -158,12 +429,12 @@ import RequestmanCore
         func button(_ title: String) -> NSButton {
             descendants(inspector.view).compactMap { $0 as? NSButton }.first { $0.title == title }!
         }
-        button("添加 Header").performClick(nil); inspector.refresh()
+        button("Header 修改").performClick(nil); inspector.refresh()
         precondition(model.selectedStep?.headerEntries.count == 2)
         window.contentView?.layoutSubtreeIfNeeded()
         let boxes = descendants(inspector.view).compactMap { $0 as? NSBox }.filter { $0.identifier?.rawValue == "rules.headerEntry" }
         precondition(boxes.count == 2 && boxes.allSatisfy { descendants($0).compactMap { $0 as? HeaderNameField }.count == 1 })
-        precondition(boxes.allSatisfy { !button("添加 Header").isDescendant(of: $0) })
+        precondition(boxes.allSatisfy { !button("Header 修改").isDescendant(of: $0) })
         let hint = descendants(inspector.view).first { $0.identifier?.rawValue == "rules.stepDescription" }!
         precondition(boxes.allSatisfy { !hint.isDescendant(of: $0) })
         precondition(hint.superview === button("删除").superview?.superview, "The type description belongs to the heading stack")
@@ -219,10 +490,21 @@ import RequestmanCore
         precondition(area.string.isEmpty && model.selectedStep?.headerEntries[1].value == "")
         area.textView.undoManager?.redo()
         precondition(area.string == original && layout.tokenRanges.count == 2)
+        let operations = descendants(inspector.view).compactMap { $0 as? ActionPopUpButton }.filter { $0.accessibilityLabel() == "Header 修改方法" }
+        precondition(operations.count == 2 && operations.allSatisfy { $0.itemTitles == ["添加", "修改", "删除"] })
+        operations[1].selectItem(at: 2); operations[1].onChange(2); inspector.refresh()
+        precondition(model.selectedStep?.headerEntries[1].operation == .remove && area.isHiddenOrHasHiddenAncestor)
+        precondition(model.selectedStep?.headerEntries[0].operation == .add)
+        precondition(model.selectedStep?.headerEntries[1].value == original)
+        operations[1].selectItem(at: 0); operations[1].onChange(0); inspector.refresh()
+        precondition(!area.isHiddenOrHasHiddenAncestor && area.string == original)
+        operations[1].selectItem(at: 1); operations[1].onChange(1); inspector.refresh()
+        precondition(model.selectedStep?.headerEntries[1].operation == .modify && !area.isHiddenOrHasHiddenAncestor)
+        precondition(model.selectedStep?.headerEntries[1].value == original)
         let removeHeader = descendants(inspector.view).compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "删除 Header" }!
         removeHeader.performClick(nil); inspector.refresh()
         precondition(model.selectedStep?.headerEntries.count == 1 && model.selectedStep?.headerEntries[0].name == "X-Token")
-        for _ in 0..<10 { button("添加 Header").performClick(nil); inspector.refresh() }
+        for _ in 0..<10 { button("Header 修改").performClick(nil); inspector.refresh() }
         window.contentView?.layoutSubtreeIfNeeded()
         let scrolling = descendants(inspector.view).compactMap { $0 as? NSScrollView }.first { !($0 is RulesTextArea) }!
         precondition(scrolling.documentView!.frame.height > scrolling.contentSize.height, "Many Header rows must scroll without growing the inspector")
@@ -261,30 +543,30 @@ import RequestmanCore
         func button(_ title: String) -> NSButton { descendants(inspector.view).compactMap { $0 as? NSButton }.first { $0.title == title }! }
         func scroll() -> NSScrollView { descendants(inspector.view).compactMap { $0 as? NSScrollView }.first! }
         settle()
-        precondition(descendants(inspector.view).compactMap { $0 as? RulesTextArea }.isEmpty, "Removal edits names only")
+        precondition(descendants(inspector.view).compactMap { $0 as? RulesTextArea }.allSatisfy(\.isHiddenOrHasHiddenAncestor), "Removal edits names only")
         let legacyField = descendants(inspector.view).compactMap { $0 as? HeaderNameField }.first!
         precondition(legacyField.stringValue == "X-Legacy")
         let firstBox = descendants(inspector.view).compactMap { $0 as? NSBox }.first { $0.identifier?.rawValue == "rules.headerEntry" }!
         precondition(firstBox.frame.height >= legacyField.frame.height + 28, "A name-only box must enclose its control and padding")
         precondition(scroll().contentView.bounds.contains(legacyField.convert(legacyField.bounds, to: scroll().contentView)), "A short form must start fully visible: clip=\(scroll().contentView.bounds), field=\(legacyField.convert(legacyField.bounds, to: scroll().contentView)), doc=\(scroll().documentView!.frame), scroll=\(scroll().frame)")
-        button("添加 Header").performClick(nil); inspector.refresh(); settle()
+        button("Header 修改").performClick(nil); inspector.refresh(); settle()
         let fields = descendants(inspector.view).compactMap { $0 as? HeaderNameField }
         fields[1].stringValue = "Host"; fields[1].controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: fields[1])); inspector.refresh(); settle()
         precondition(model.selectedStep?.headerEntries.map(\.name) == ["X-Legacy", "Host"])
         precondition(descendants(inspector.view).compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains("此 Header 由代理维护") && !$0.isHiddenOrHasHiddenAncestor })
-        for _ in 0..<10 { button("添加 Header").performClick(nil); inspector.refresh() }; settle()
+        for _ in 0..<10 { button("Header 修改").performClick(nil); inspector.refresh() }; settle()
         let scrolling = scroll(), document = scrolling.documentView!
         precondition(document.frame.height > scrolling.contentSize.height)
         let allFields = descendants(inspector.view).compactMap { $0 as? HeaderNameField }
         precondition(allFields.count == 12 && allFields.allSatisfy { $0.frame.width > 100 })
         document.scroll(NSPoint(x: 0, y: document.bounds.maxY)); settle()
-        precondition(scrolling.contentView.bounds.contains(button("添加 Header").convert(button("添加 Header").bounds, to: scrolling.contentView)), "The last add button must be reachable by scrolling")
+        precondition(scrolling.contentView.bounds.contains(button("Header 修改").convert(button("Header 修改").bounds, to: scrolling.contentView)), "The last add button must be reachable by scrolling")
         for _ in 0..<12 {
             descendants(inspector.view).compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "删除 Header" }!.performClick(nil)
             inspector.refresh()
         }
         settle(); precondition(model.selectedStep?.headerEntries.isEmpty == true)
-        button("添加 Header").performClick(nil); inspector.refresh(); settle()
+        button("Header 修改").performClick(nil); inspector.refresh(); settle()
         precondition(model.selectedStep?.headerEntries.count == 1)
         let newField = descendants(inspector.view).compactMap { $0 as? HeaderNameField }.first!
         precondition(scroll().contentView.bounds.contains(newField.convert(newField.bounds, to: scroll().contentView)), "Returning to a short form must restore a visible first row")
@@ -447,13 +729,437 @@ import RequestmanCore
         precondition(!request.rows.map(\.template).contains("{{$response.status}}"))
     }
 
+    static func checkDelayEditing() {
+        let model = WorkspaceModel(); model.addProject(); model.addStep(.delay, response: true)
+        let inspector = StepInspectorViewController(model: model)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 500),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.contentViewController = inspector; inspector.refresh(); window.contentView?.layoutSubtreeIfNeeded()
+        let field = descendants(inspector.view).compactMap { $0 as? ActionTextField }.first { $0.accessibilityLabel() == "延迟时间（ms）" }!
+        let error = descendants(inspector.view).first { $0.identifier?.rawValue == "rules.delayError" }!
+        precondition(field.stringValue == "1000" && error.isHidden)
+        for value in ["250", "-1", "0"] {
+            field.stringValue = value; field.onChange(value); inspector.refresh()
+            precondition(model.selectedStep?.value == value && field.stringValue == value)
+            precondition(error.isHidden == (value != "-1"))
+        }
+        precondition(descendants(inspector.view).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "ms" })
+        let data = try! JSONEncoder().encode(model.document)
+        let saved = try! JSONDecoder().decode(WorkspaceDocument.self, from: data)
+        precondition(saved.projects[0].workflows[0].responseSteps[0].value == "0")
+    }
+
+    static func checkScriptEditing() {
+        let code = "// const 123 😀\nconst data = JSON.parse(response.body);\n/* return true */\ndata.name = `中文😀`;\ndata.enabled = true;\ndata.count = 0xff + 1_000 + 2.5e2;\nresponse.body = JSON.stringify(data);\nreturn response;\n"
+        var step = ModificationStep(kind: .script); step.value = code
+        var saved = step
+        let editor = ScriptEditorViewController(step: step, response: true, environment: [:]) { saved = $0 }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 650), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentViewController = editor
+        window.contentView?.layoutSubtreeIfNeeded()
+        defer { window.close() }
+        let area = descendants(editor.view).compactMap { $0 as? RulesTextArea }.first!
+        let text = area.textView, layout = text.layoutManager!, ruler = area.verticalRulerView as! BodyLineRuler
+        precondition(area.rulersVisible && ruler.lineStarts.count == 9)
+        func color(_ fragment: String) -> NSColor? {
+            let range = (text.string as NSString).range(of: fragment)
+            return layout.temporaryAttribute(.foregroundColor, atCharacterIndex: range.location, effectiveRange: nil) as? NSColor
+        }
+        precondition(color("// const") == .secondaryLabelColor && color("/* return") == .secondaryLabelColor)
+        precondition(color("const data") == .systemPurple && color("true;") == .systemPurple)
+        precondition(color("JSON.parse") == .systemTeal && color("parse(") == .systemBlue)
+        precondition(color("`中文😀`") == .systemGreen && color("0xff") == .systemOrange && color("2.5e2") == .systemOrange)
+        precondition(text.string == code && text.textStorage?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor != .secondaryLabelColor,
+                     "Highlighting must not modify the stored source or persist syntax attributes")
+        window.makeFirstResponder(text)
+        text.setSelectedRange(NSRange(location: 0, length: 0))
+        text.insertText("let changed = 42;\n", replacementRange: text.selectedRange())
+        precondition(saved.value == text.string && color("let") == .systemPurple && ruler.lineStarts.count == 10)
+        text.breakUndoCoalescing(); text.undoManager?.undo()
+        precondition(saved.value == code && text.string == code && ruler.lineStarts.count == 9)
+        text.setSelectedRange(NSRange(location: 0, length: 0))
+        text.setMarkedText("拼", selectedRange: NSRange(location: 1, length: 0), replacementRange: text.selectedRange())
+        precondition(text.hasMarkedText())
+        text.insertText("拼音", replacementRange: text.markedRange())
+        precondition(text.string.hasPrefix("拼音") && saved.value == text.string)
+        for (value, lineCount) in [("", 1), ("\n", 2), ("const text = 'unterminated", 1), ("/* open\ncomment", 2), ("const s = `a\\`b`;", 1), ("// comment\r\nreturn request;\r\n", 3), ("const long = '" + String(repeating: "中文😀", count: 160) + "';\n", 2)] {
+            area.string = value; window.contentView?.layoutSubtreeIfNeeded()
+            precondition(area.string == value && ruler.lineStarts.count == lineCount)
+            text.scrollRangeToVisible(NSRange(location: (value as NSString).length, length: 0))
+            let bitmap = area.bitmapImageRepForCachingDisplay(in: area.bounds)!
+            area.cacheDisplay(in: area.bounds, to: bitmap)
+        }
+    }
+
+    static func checkScriptTrial() {
+        checkScriptEditing()
+        func waitForResult(_ button: NSButton) {
+            let deadline = Date().addingTimeInterval(5)
+            while !button.isEnabled && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+            precondition(button.isEnabled, "The trial must finish without blocking the UI")
+        }
+        for response in [false, true] {
+            var step = ModificationStep(kind: .script)
+            step.value = response ? "response.body = env.marker + request.method; return response;"
+                                  : "request.body = env.marker + request.method; return request;"
+            var saved = ScriptPreviewInput()
+            let editor = ScriptEditorViewController(step: step, response: response, environment: [:]) { _ in }
+            precondition(!descendants(editor.view).compactMap { $0 as? NSButton }.contains { $0.title == "示例输入…" })
+            precondition(descendants(editor.view).compactMap { $0 as? RulesTextArea }.count == 1)
+            let controller = ScriptPreviewInputViewController(input: saved, response: response, step: step, environment: ["marker": "trial-"]) { saved = $0 }
+            let window = ScriptFocusCheckWindow(contentViewController: controller); window.isReleasedWhenClosed = false
+            window.contentView?.layoutSubtreeIfNeeded()
+            let controls = descendants(controller.view)
+            let run = controls.compactMap { $0 as? NSButton }.first { $0.title == "运行" }!
+            let result = controls.compactMap { $0 as? RulesTextArea }.first { $0.textView.accessibilityLabel() == "脚本运行结果" }!
+            let headers = controls.compactMap { $0 as? RulesTextArea }.first { $0.textView.accessibilityLabel() == "请求 Header 数组（JSON）" }!
+            let inputScroll = controls.compactMap { $0 as? NSScrollView }.first { !($0 is RulesTextArea) }!
+            let focusRect = headers.convert(headers.bounds.insetBy(dx: -4, dy: -4), to: inputScroll.contentView)
+            precondition(inputScroll.contentView.bounds.contains(focusRect), "The outer viewport must include the complete focus ring, including its left edge")
+            func focusPixels() -> Int {
+                let bitmap = headers.bitmapImageRepForCachingDisplay(in: headers.bounds)!
+                headers.cacheDisplay(in: headers.bounds, to: bitmap)
+                var count = 0
+                for y in 0..<bitmap.pixelsHigh {
+                    for x in 0..<bitmap.pixelsWide {
+                        if let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                           color.alphaComponent > 0.2, color.blueComponent > color.redComponent + 0.15,
+                           color.blueComponent > color.greenComponent + 0.05 { count += 1 }
+                    }
+                }
+                return count
+            }
+            window.makeFirstResponder(nil)
+            let unfocusedPixels = focusPixels()
+            precondition(window.makeFirstResponder(headers.textView))
+            precondition(focusPixels() > unfocusedPixels + 50, "Focused text areas must visibly render the native blue focus ring")
+            window.makeFirstResponder(nil)
+            precondition(focusPixels() == unfocusedPixels, "Moving focus away must remove the focus ring")
+            precondition(controller.view.bounds.size == NSSize(width: 900, height: 620))
+            precondition(result.bounds.width > 380 && result.bounds.height > 400, "Unexpected result viewport: \(result.bounds)")
+            let inputRect = headers.convert(headers.bounds, to: controller.view)
+            let outputRect = result.convert(result.bounds, to: controller.view)
+            precondition(inputRect.maxX < outputRect.minX, "Inputs and results must remain side by side")
+            let divider = controls.compactMap { $0 as? NSBox }.first { $0.boxType == .separator }!
+            func checkColumnSpacing() {
+                let left = headers.convert(headers.bounds, to: controller.view)
+                let right = result.convert(result.bounds, to: controller.view)
+                // NSBox adds 2 pt on each side of its separator's alignment rectangle.
+                let middle = divider.superview!.convert(divider.alignmentRect(forFrame: divider.frame), to: controller.view)
+                precondition(abs(left.width - right.width) < 1, "Input and output editors must have equal visible widths")
+                precondition(abs(middle.minX - left.maxX - 24) < 1 && abs(right.minX - middle.maxX - 24) < 1,
+                             "Expected symmetric divider gaps: left=\(left), divider=\(middle), right=\(right)")
+            }
+            checkColumnSpacing()
+            if response {
+                let scroll = controls.compactMap { $0 as? NSScrollView }.first { !($0 is RulesTextArea) }!
+                for style in [NSScroller.Style.overlay, .legacy] {
+                    scroll.scrollerStyle = style
+                    window.contentView?.layoutSubtreeIfNeeded()
+                    checkColumnSpacing()
+                    let scroller = scroll.verticalScroller!
+                    let gutter = scroller.convert(scroller.bounds, to: scroll)
+                    let dividerRect = divider.superview!.convert(divider.alignmentRect(forFrame: divider.frame), to: scroll)
+                    precondition(gutter.maxX <= dividerRect.minX + 1, "The scrollbar must stay inside the input-side gutter")
+                    for field in descendants(scroll.documentView!) where field is ActionTextField || field is RulesTextArea {
+                        let rect = field.convert(field.bounds, to: scroll)
+                        precondition(rect.maxX <= gutter.minX - 7, "Either system scrollbar style must leave input controls unobstructed")
+                    }
+                }
+                let document = scroll.documentView!
+                let bottom = max(0, document.bounds.height - scroll.contentView.bounds.height)
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: bottom)); scroll.reflectScrolledClipView(scroll.contentView)
+                window.contentView?.layoutSubtreeIfNeeded()
+                let body = controls.compactMap { $0 as? RulesTextArea }.first { $0.textView.accessibilityLabel() == "响应 Body（文本）" }!
+                let bodyRect = body.convert(body.bounds, to: scroll.contentView)
+                precondition(scroll.contentView.bounds.contains(bodyRect), "The last input must be fully reachable after scrolling")
+                scroll.contentView.scroll(to: .zero); scroll.reflectScrolledClipView(scroll.contentView)
+            }
+            checkInputFocusVisibility(controller.view, window: window)
+            precondition(result.string.contains("点击“运行”"), "Opening the dialog must not run the script")
+            run.performClick(nil); waitForResult(run)
+            precondition(result.string.contains("trial-GET"), "Both phases must use the configured script and environment")
+            headers.string = "invalid"; headers.onChange(headers.string)
+            precondition(result.string == "输入已更改，请重新运行。" && saved.requestHeaders == "invalid")
+            run.performClick(nil); waitForResult(run)
+            precondition(result.string.hasPrefix("执行失败："))
+            headers.string = "[]"; headers.onChange(headers.string)
+            run.performClick(nil); waitForResult(run)
+            precondition(result.string.contains("trial-GET"), "The user must be able to fix input and run again")
+            run.performClick(nil)
+            headers.string = "[ ]"; headers.onChange(headers.string)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+            precondition(result.string == "输入已更改，请重新运行。", "Cancelled output must not replace the changed-input message")
+            run.performClick(nil); controller.viewWillDisappear()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+            precondition(result.string == "正在运行…", "Closing must invalidate the pending result")
+            window.close()
+        }
+    }
+
+    static func checkInputFocusVisibility(_ root: NSView, window: NSWindow) {
+        let scroll = descendants(root).compactMap { $0 as? NSScrollView }.first { !($0 is RulesTextArea) }!
+        let areas = descendants(scroll.documentView!).compactMap { $0 as? RulesTextArea }
+        for style in [NSScroller.Style.overlay, .legacy] {
+            scroll.scrollerStyle = style
+            root.layoutSubtreeIfNeeded()
+            for area in areas.reversed() {
+                window.makeFirstResponder(nil)
+                // Start with the editor against a viewport edge, as when clicking a partially visible field.
+                let rect = area.convert(area.bounds, to: scroll.documentView!)
+                let bottom = max(0, scroll.documentView!.bounds.height - scroll.contentView.bounds.height)
+                let offset = min(bottom, max(0, rect.maxY - scroll.contentView.bounds.height))
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: offset))
+                scroll.reflectScrolledClipView(scroll.contentView)
+                precondition(window.makeFirstResponder(area.textView))
+                root.layoutSubtreeIfNeeded()
+                let focusRect = area.convert(area.bounds.insetBy(dx: -4, dy: -4), to: scroll.contentView)
+                precondition(scroll.contentView.bounds.contains(focusRect),
+                             "Focused input and its complete ring must be visible: \(area.textView.accessibilityLabel() ?? ""), rect=\(focusRect), viewport=\(scroll.contentView.bounds)")
+            }
+        }
+        window.makeFirstResponder(nil)
+        scroll.contentView.scroll(to: .zero); scroll.reflectScrolledClipView(scroll.contentView)
+    }
+
+    static func checkScriptPresentation() {
+        checkScriptTrial()
+        let model = WorkspaceModel(); model.addProject(); model.addStep(.script, response: false)
+        let inspector = StepInspectorViewController(model: model)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 800), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentViewController = inspector
+        defer { window.close() }
+        inspector.refresh(); window.contentView?.layoutSubtreeIfNeeded()
+        func snapshot(_ view: NSView, _ name: String) {
+            guard let directory = ProcessInfo.processInfo.environment["REQUESTMAN_SCRIPT_SNAPSHOTS"],
+                  let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: directory).appendingPathComponent(name + ".png"))
+        }
+        snapshot(inspector.view, "script")
+        let note = descendants(inspector.view).compactMap { $0 as? NSTextField }.first { $0.placeholderString == "步骤备注" }!
+        let remove = descendants(inspector.view).compactMap { $0 as? NSButton }.first { $0.title == "删除" }!
+        func pixels(_ view: NSView, matching predicate: (NSColor) -> Bool) -> Int {
+            let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            return (0..<bitmap.pixelsHigh).reduce(0) { count, y in
+                count + (0..<bitmap.pixelsWide).filter { x in
+                    guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return false }
+                    return color.alphaComponent > 0.9 && predicate(color)
+                }.count
+            }
+        }
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            window.appearance = NSAppearance(named: appearance)
+            window.contentView?.layoutSubtreeIfNeeded()
+            snapshot(note, "note-\(appearance.rawValue)")
+            let whitePixels = pixels(note) { $0.redComponent > 0.95 && $0.greenComponent > 0.95 && $0.blueComponent > 0.95 }
+            precondition(whitePixels > 1000,
+                         "The note field must actually render a white background in either appearance")
+            precondition(pixels(remove) { $0.redComponent > 0.7 && $0.greenComponent < 0.5 && $0.blueComponent < 0.5 } > 40,
+                         "The shared step deletion button must actually render red content")
+        }
+        var sample = ScriptPreviewInput()
+        sample.url += "?query=" + String(repeating: "long-value", count: 50)
+        for response in [false, true] {
+            let input = ScriptPreviewInputViewController(input: sample, response: response) { _ in }
+            let sheet = ScriptFocusCheckWindow(contentViewController: input); sheet.isReleasedWhenClosed = false
+            sheet.contentView?.layoutSubtreeIfNeeded()
+            print("Input response=\(response): frame=\(input.view.frame), fitting=\(input.view.fittingSize)")
+            snapshot(input.view, response ? "input-response" : "input-request")
+            precondition(abs(input.view.bounds.width - 600) < 1 && abs(input.view.bounds.height - 540) < 1,
+                         "Sample sheets must retain their intended size with long input")
+            let scroll = descendants(input.view).compactMap { $0 as? NSScrollView }.first { !($0 is RulesTextArea) }!
+            precondition(scroll.contentView.bounds.height > 300)
+            let document = scroll.documentView!
+            precondition(abs(document.frame.width - scroll.contentView.bounds.width) < 1 && abs(document.frame.minX) < 1)
+            for area in descendants(input.view).compactMap({ $0 as? RulesTextArea }) {
+                precondition(area.bounds.height >= 64 && area.bounds.width > 500)
+            }
+            checkInputFocusVisibility(input.view, window: sheet)
+            sheet.close()
+        }
+        let preview = WorkflowPreviewViewController(workflow: model.workflow!, environment: nil)
+        let sheet = NSWindow(contentViewController: preview); sheet.isReleasedWhenClosed = false
+        sheet.contentView?.layoutSubtreeIfNeeded()
+        print("Preview: frame=\(preview.view.frame), fitting=\(preview.view.fittingSize)")
+        snapshot(preview.view, "preview")
+        precondition(abs(preview.view.bounds.width - 680) < 1 && abs(preview.view.bounds.height - 500) < 1)
+        let result = descendants(preview.view).compactMap { $0 as? RulesTextArea }.first!
+        precondition(result.bounds.height > 300 && result.bounds.width > 600)
+        sheet.close()
+    }
+
+    static func checkMatchTesting() {
+        var workflow = RequestWorkflow(name: "订单接口")
+        workflow.method = "GET"; workflow.matchRule = .regex; workflow.matchPattern = "/v1/orders/[0-9]+$"
+        workflow.matchHeaderEnabled = true; workflow.matchHeaderName = "X-Environment"; workflow.matchHeaderPattern = "staging"
+        let controller = WorkflowMatchTestViewController(workflow: workflow)
+        let window = NSWindow(contentViewController: controller)
+        window.appearance = NSAppearance(named: .aqua)
+        controller.view.wantsLayer = true
+        controller.view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView?.layoutSubtreeIfNeeded()
+        func field(_ id: String) -> NSTextField { descendants(controller.view).first { $0.identifier?.rawValue == id } as! NSTextField }
+        let url = field("matchTest.url") as! ActionTextField
+        let header = field("matchTest.headerValue") as! ActionTextField
+        let run = descendants(controller.view).first { $0.identifier?.rawValue == "matchTest.run" } as! ActionButton
+        let status = field("matchTest.status")
+        let initialHeight = controller.view.bounds.height
+        let done = descendants(controller.view).first { $0.identifier?.rawValue == "matchTest.done" } as! NSButton
+        if #available(macOS 26.0, *) { precondition(done.bezelStyle == .glass && done.borderShape == .capsule) }
+        precondition(!run.isEnabled)
+        url.stringValue = "https://api.example.com/v1/orders/123"; url.onChange(url.stringValue)
+        header.stringValue = "production"; header.onChange(header.stringValue)
+        func runTest() {
+            run.performClick(nil)
+            let deadline = Date().addingTimeInterval(3)
+            while run.title == "测试中…" && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+            precondition(run.title == "测试")
+            window.contentView?.layoutSubtreeIfNeeded()
+        }
+        runTest()
+        precondition(status.stringValue.hasPrefix("未匹配"))
+        precondition(controller.view.bounds.height > initialHeight, "Results expand the sheet to fit content")
+        let details = descendants(controller.view).compactMap { $0 as? NSTextField }
+        precondition(details.contains { $0.stringValue.contains("实际：production") })
+        let headerDetail = details.first { $0.stringValue.contains("实际：production") }!
+        precondition(!descendants(controller.view).contains { $0 is NSScrollView }, "The dialog body must not scroll")
+        let detailRect = headerDetail.convert(headerDetail.bounds, to: controller.view)
+        precondition(controller.view.bounds.contains(detailRect), "Default result must be fully visible")
+        precondition(url.bounds.width > 400 && header.bounds.width > 150)
+        if let directory = ProcessInfo.processInfo.environment["REQUESTMAN_MATCH_SNAPSHOTS"],
+           let bitmap = controller.view.bitmapImageRepForCachingDisplay(in: controller.view.bounds) {
+            controller.view.cacheDisplay(in: controller.view.bounds, to: bitmap)
+            try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: directory).appendingPathComponent("match-test.png"))
+        }
+        header.stringValue = "staging"; header.onChange(header.stringValue)
+        precondition(abs(controller.view.bounds.height - initialHeight) < 2, "Clearing results removes their unused space")
+        precondition(!status.stringValue.hasPrefix("未匹配"), "Editing clears stale results")
+        url.selectText(nil)
+        let editor = url.currentEditor() as! NSTextView
+        editor.setMarkedText("中", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: 0, length: 0))
+        precondition(!url.control(url, textView: editor, doCommandBy: #selector(NSResponder.insertNewline(_:))),
+                     "Return confirms marked text without starting a test")
+        editor.unmarkText()
+        editor.string = "https://api.example.com/v1/orders/123"
+        precondition(url.control(url, textView: editor, doCommandBy: #selector(NSResponder.insertNewline(_:))))
+        let returnDeadline = Date().addingTimeInterval(3)
+        while run.title == "测试中…" && Date() < returnDeadline { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+        precondition(status.stringValue.hasPrefix("匹配成功"), "Return in the URL field commits its latest text and runs matching")
+        // Editing while a result is in flight must not restore an obsolete result.
+        run.performClick(nil)
+        url.stringValue = "bad URL"; url.onChange(url.stringValue)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        precondition(status.stringValue.contains("输入示例请求"))
+        runTest(); precondition(status.stringValue.hasPrefix("无法测试"))
+        workflow.matchPattern = "["
+        let invalid = WorkflowMatchTestViewController(workflow: workflow)
+        _ = invalid.view
+        let invalidRun = descendants(invalid.view).first { $0.identifier?.rawValue == "matchTest.run" } as! NSButton
+        precondition(!invalidRun.isEnabled)
+        precondition(descendants(invalid.view).compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains("正则表达式无效") })
+        var simpleWorkflow = workflow
+        simpleWorkflow.matchHeaderEnabled = false; simpleWorkflow.matchPattern = "/v1/orders/[0-9]+$"
+        let simple = WorkflowMatchTestViewController(workflow: simpleWorkflow)
+        let simpleWindow = NSWindow(contentViewController: simple); simpleWindow.isReleasedWhenClosed = false
+        simpleWindow.contentView?.layoutSubtreeIfNeeded()
+        let simpleURL = descendants(simple.view).first { $0.identifier?.rawValue == "matchTest.url" } as! ActionTextField
+        simpleURL.stringValue = "https://api.example.com/v1/orders/123"; simpleURL.onChange(simpleURL.stringValue)
+        let simpleRun = descendants(simple.view).first { $0.identifier?.rawValue == "matchTest.run" } as! NSButton
+        simpleRun.performClick(nil)
+        let deadline = Date().addingTimeInterval(3)
+        while simpleRun.title == "测试中…" && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+        precondition(!descendants(simple.view).contains { $0 is NSScrollView }, "The no-Header dialog must not scroll")
+        precondition(simple.view.bounds.height < 600, "No-Header result must not retain the fixed 700 pt height")
+        let simpleStack = simple.view.subviews.first as! NSStackView
+        precondition(abs(simple.view.bounds.height - simpleStack.fittingSize.height - 44) < 3,
+                     "No large empty region below the results")
+        print("Match sheet heights: initial Header=\(initialHeight), no-Header result=\(simple.view.bounds.height)")
+        simpleWindow.close()
+        let model = WorkspaceModel(); model.addProject()
+        let flow = FlowEditorViewController(model: model)
+        let host = NSWindow(contentViewController: flow); host.isReleasedWhenClosed = false
+        host.contentView?.layoutSubtreeIfNeeded()
+        let button = descendants(flow.view).first { $0.identifier?.rawValue == "rules.testMatch" }!
+        precondition(button.superview?.identifier?.rawValue == "rules.matchMethodRow")
+        (button as! NSButton).performClick(nil)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        let sheet = flow.presentedViewControllers?.first as? WorkflowMatchTestViewController
+        precondition(sheet != nil, "Test button must present the native match sheet")
+        sheet?.dismiss(nil)
+        host.close()
+        print("Match testing: native layout, success, Header mismatch, invalid pattern/input and stale-result checks passed")
+    }
+
     static func main() {
         NSApplication.shared.setActivationPolicy(.prohibited)
+        checkMatchTesting()
+        if ProcessInfo.processInfo.environment["REQUESTMAN_MATCH_ONLY"] == "1" { return }
+        if ProcessInfo.processInfo.environment["REQUESTMAN_SINGLE_LINE_BACKGROUNDS_ONLY"] == "1" {
+            checkSingleLineBackgrounds()
+            try! checkURLReplacementEditing()
+            checkQueryParameterEditing()
+            checkScriptPresentation()
+            return
+        }
+        if ProcessInfo.processInfo.environment["REQUESTMAN_SCRIPT_PRESENTATION_ONLY"] == "1" {
+            checkScriptPresentation()
+            print("Script inspector and preview sheet presentation checks passed")
+            return
+        }
+        if ProcessInfo.processInfo.environment["REQUESTMAN_HEADER_FORM_ONLY"] == "1" {
+            let model = WorkspaceModel(); model.addProject(); model.addStep(.setHeader, response: false)
+            model.addStep(.replaceBody, response: false)
+            model.selectedStepID = model.workflow?.requestSteps.first?.id
+            let inspector = StepInspectorViewController(model: model)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 850), styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false; window.contentViewController = inspector; inspector.refresh()
+            defer { window.close() }
+            checkHeaderEditing(inspector, model: model, window: window)
+            checkRemovalHeaderEditing()
+            model.addStep(.setHeader, response: false)
+            var workflow = model.workflow!
+            workflow.requestSteps[workflow.requestSteps.count - 1].headerEntries = [HeaderEntry(operation: .set, name: "X-Legacy", value: "old")]
+            model.updateWorkflow(workflow); inspector.refresh()
+            let legacy = descendants(inspector.view).compactMap { $0 as? ActionPopUpButton }.first { $0.accessibilityLabel() == "Header 修改方法" }!
+            precondition(legacy.titleOfSelectedItem == "添加或覆盖（旧配置）")
+            precondition(legacy.item(at: 0)?.isEnabled == false && model.selectedStep?.headerEntries.first?.operation == .set)
+            legacy.selectItem(at: 2); legacy.onChange(2); inspector.refresh()
+            precondition(legacy.itemTitles == ["添加", "修改", "删除"] && legacy.titleOfSelectedItem == "修改")
+            precondition(model.selectedStep?.headerEntries.first?.operation == .modify && model.selectedStep?.headerEntries.first?.value == "old")
+            let flow = FlowEditorViewController(model: model)
+            _ = flow.view; flow.refresh()
+            let menus = descendants(flow.view).compactMap { $0 as? NSPopUpButton }.filter { $0.identifier?.rawValue == "rules.addStep" }
+            precondition(menus.count == 2)
+            for menu in menus {
+                precondition(menu.itemTitles.filter { $0 == "修改 Header" }.count == 1)
+                precondition(!menu.itemTitles.contains("移除 Header") && !menu.itemTitles.contains("添加或覆盖 Header"))
+            }
+            print("Header form: mixed operations, value retention, legacy editing, menu and layout checks passed")
+            return
+        }
+        if ProcessInfo.processInfo.environment["REQUESTMAN_QUERY_FORM_ONLY"] == "1" {
+            checkQueryParameterEditing()
+            print("Query parameter form: editing, operations, persistence, layout and legacy checks passed")
+            return
+        }
+        if ProcessInfo.processInfo.environment["REQUESTMAN_URL_REPLACEMENT_FORM_ONLY"] == "1" {
+            try! checkURLReplacementEditing()
+            print("URL replacement form: multiple blocks, single-line editing, description, persistence and layout checks passed")
+            return
+        }
+        checkSingleLineBackgrounds()
+        try! checkURLReplacementEditing()
         checkBodyEditing()
+        checkDelayEditing()
         checkMatchFieldScrolling()
         checkStepActivation()
         checkTemplateCaret()
         checkTemplateValues()
+        checkScriptPresentation()
         let model = WorkspaceModel(); model.addProject(); model.addStep(.setHeader, response: false); model.addStep(.replaceBody, response: false)
         let sidebar = ProjectSidebarViewController(model: model)
         let rules = RulesViewController(model: model)
@@ -547,12 +1253,12 @@ import RequestmanCore
         let countFrame = count.frame
         let more = projectFields.first { $0.identifier?.rawValue == "rules.sidebarMore" } as! NSButton
         projectRow.setHovered(true, animated: true)
-        precondition(hoverLayer.opacity == 1 && !more.isHidden)
+        precondition(hoverLayer.opacity == 1 && !more.isHidden && count.isHidden)
         if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             precondition(abs(hoverLayer.animation(forKey: "sidebar.hoverOpacity")!.duration - 0.12) < 0.001)
         }
         projectRow.setHovered(false, animated: true)
-        precondition(hoverLayer.opacity == 0 && more.isHidden && count.frame == countFrame)
+        precondition(hoverLayer.opacity == 0 && more.isHidden && !count.isHidden && count.frame == countFrame)
         if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             precondition(abs(hoverLayer.animation(forKey: "sidebar.hoverOpacity")!.duration - 0.16) < 0.001)
         }
@@ -561,7 +1267,7 @@ import RequestmanCore
         sidebar.outline.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         precondition(hoverLayer.opacity == 0 && hoverLayer.animationKeys()?.isEmpty != false,
                      "Native selection takes priority over hover and cancels its animation")
-        precondition(!more.isHidden, "Keyboard-selected rows expose their native action button")
+        precondition(!more.isHidden && count.isHidden, "Keyboard-selected rows replace the count with their native action button")
         sidebar.outline.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
         projectRow.setHovered(false, animated: false)
         var projectMenu = sidebar.menu(forRow: 0)!
@@ -645,8 +1351,9 @@ import RequestmanCore
         precondition(addMenus.count == 2 && addMenus.allSatisfy { $0.pullsDown && $0.itemTitle(at: 0) == "添加步骤" && $0.numberOfItems > 1 }, "Add step must use a native pull-down menu")
         for menu in addMenus {
             let response = menu.accessibilityLabel() == "添加响应步骤"
-            let kinds = ModificationKind.allCases.filter { $0.supports(response: response) }
+            let kinds = ModificationKind.allCases.filter { $0 != .removeHeader && $0.supports(response: response) }
             let items = Array(menu.itemArray.dropFirst())
+            precondition(items.contains { $0.title == ModificationKind.delay.title } == response)
             precondition(items.map(\.title) == kinds.map(\.title))
             for item in items {
                 precondition(item.image != nil, "Every modification type must have a menu icon")
@@ -668,6 +1375,7 @@ import RequestmanCore
         precondition(descendants(inspector.view).contains { $0 === combo }, "Header editing must retain focus and selection")
         checkHeaderEditing(inspector, model: model, window: window)
         checkRemovalHeaderEditing()
+        checkQueryParameterEditing()
         sidebar.search = "does-not-match"; precondition(sidebar.outline.numberOfRows == 1)
         sidebar.addRequest(); sidebar.refresh(); precondition(sidebar.search.isEmpty && model.document.projects[0].workflows.count == 2)
         sidebar.outline.collapseItem(sidebar.outline.item(atRow: 0))
@@ -683,12 +1391,12 @@ import RequestmanCore
             precondition(!inspector.view.hasAmbiguousLayout, "Inspector layout should be determined for \(kind)")
             if [.setQueryParameter, .replaceURLString].contains(kind) {
                 let nameLabel = kind == .setQueryParameter ? "参数名称" : "查找字符串"
-                let field = descendants(inspector.view).compactMap { $0 as? RulesTextArea }.first { $0.textView.accessibilityLabel() == nameLabel }!
-                field.string = "test"; field.textDidChange(Notification(name: NSText.didChangeNotification, object: field.textView))
+                let field = descendants(inspector.view).compactMap { $0 as? ActionTextField }.first { $0.accessibilityLabel() == nameLabel }!
+                field.stringValue = "test"; field.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
                 inspector.refresh()
-                precondition(model.selectedStep?.name == "test" && descendants(inspector.view).contains { $0 === field })
+                precondition((kind == .setQueryParameter ? model.selectedStep?.queryParameterEntries.first?.name : model.selectedStep?.urlReplacementEntries.first?.search) == "test" && descendants(inspector.view).contains { $0 === field })
                 precondition(!kind.supports(response: true) && kind.supports(response: false))
-                let valueLabel = kind == .setQueryParameter ? "参数值 / 模板" : "替换为 / 模板"
+                let valueLabel = kind == .setQueryParameter ? "参数值" : "替换为"
                 precondition(descendants(inspector.view).compactMap { $0 as? NSTextView }.contains { $0.accessibilityLabel() == valueLabel })
             }
         }
@@ -753,6 +1461,15 @@ import RequestmanCore
                 RunLoop.main.run(until: Date().addingTimeInterval(0.03))
             }
             precondition(model.workflow!.matchHeaderEnabled == active && matchHeader.isHiddenOrHasHiddenAncestor == !active)
+            if !active {
+                let headerRow = descendants(narrow.view).first { $0.identifier?.rawValue == "rules.matchHeaderRow" }!
+                precondition(abs(headerRow.bounds.height - toggle.bounds.height) < 1,
+                             "Disabled Header matching must occupy only the checkbox height")
+                let box = descendants(narrow.view).compactMap { $0 as? NSBox }.first { toggle.isDescendant(of: $0) }!
+                let checkboxRect = toggle.convert(toggle.bounds, to: box)
+                precondition(abs(checkboxRect.minY - 12) < 1,
+                             "Matching box must keep only its bottom inset below the disabled Header checkbox")
+            }
             precondition(window.frame == windowFrame && abs(rules.view.bounds.width - rulesWidth) < 1 && narrow.view.bounds.width == narrowWidth,
                          "Toggling Header must preserve the window and split-pane widths")
             precondition(headerValue.stringValue == "prod")
@@ -958,13 +1675,19 @@ import RequestmanCore
             let secondRect = secondCount.convert(secondCount.bounds, to: sidebar.outline)
             precondition(abs(firstRect.maxX - secondRect.maxX) < 1, "Counts align between project groups")
             let secondRow = sidebar.outline.rowView(atRow: 3, makeIfNecessary: true) as! ProjectSidebarRowView
+            let titleFrame = field(secondCell, "rules.sidebarTitle").frame
+            precondition(!secondCount.isHidden)
             secondRow.setHovered(true, animated: false)
+            secondCell.layoutSubtreeIfNeeded()
             let more = field(secondCell, "rules.sidebarMore")
             let moreRect = more.convert(more.bounds, to: sidebar.outline)
-            precondition(moreRect.minX >= secondRect.maxX && moreRect.maxX <= sidebar.outline.bounds.width,
-                         "Hover actions and counts must fit at the narrow sidebar width")
+            precondition(abs(secondRect.midX - moreRect.midX) < 1 && moreRect.maxX <= sidebar.outline.bounds.width,
+                         "Single-digit counts and hover buttons share the trailing slot center")
+            precondition(secondCount.isHidden && !more.isHidden && field(secondCell, "rules.sidebarTitle").frame == titleFrame,
+                         "Hover replaces the count without shifting the title")
             precondition(!sidebar.outline.enclosingScrollView!.hasHorizontalScroller)
             secondRow.setHovered(false, animated: false)
+            precondition(!secondCount.isHidden && more.isHidden)
         }
         window.setContentSize(NSSize(width: 320, height: 540))
         sidebar.view.layoutSubtreeIfNeeded()
