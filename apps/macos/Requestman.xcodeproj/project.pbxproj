@@ -5,6 +5,10 @@
 	};
 	"objectVersion" = "60";
 	"objects" = {
+        "A10926D00000000000000003" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/ProjectIconMenu.swift"; "sourceTree" = "<group>"; };
+        "A10926D00000000000000004" = { "isa" = "PBXBuildFile"; "fileRef" = "A10926D00000000000000003"; };
+        "A10926D00000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/ProjectSidebarViews.swift"; "sourceTree" = "<group>"; };
+        "A10926D00000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10926D00000000000000001"; };
 		"A10926C00000000000000001" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "folder.iconcomposer.icon";
@@ -368,6 +372,8 @@
 				"66C777AADFDD9EF77AB46C95",
 				"A10D78910B42E56000000001",
                 "A10A99000000000000000001",
+                "A10926D00000000000000001",
+                "A10926D00000000000000003",
 				"20862586DEEC23D066F47C31",
 				"72B120E798F14A638AC32A01",
 				"72B120E798F14A638AC32A03",
@@ -433,6 +439,8 @@
 				"AA723CB28A14D53FFE8683CC",
 				"A10D78910B42E56000000002",
                 "A10A99000000000000000002",
+                "A10926D00000000000000002",
+                "A10926D00000000000000004",
 				"A2D34AF5EAF3073EA4E6CBE8",
 				"72B120E798F14A638AC32A02",
 				"72B120E798F14A638AC32A04",

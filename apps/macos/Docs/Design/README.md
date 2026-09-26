@@ -139,3 +139,7 @@ AppKit 环境列表按布局后的实际行位置计算高度，包含系统侧�
 ## 全 AppKit 实现（2026-09-26）
 
 当前应用入口、主窗口、规则编辑、请求日志、详情及设置已全部迁移为 AppKit。上文 SwiftUI 容器名称仅记录历史实现；当前使用 `NSApplication`、`NSWindowController`、`NSSplitViewController`、`NSOutlineView`、`NSTableView`、`NSGridView` 与系统原生控件，保留三栏布局、工具栏位置、双阶段编辑及设置尺寸。工程检查禁止重新引入 SwiftUI 或 Hosting 桥接。隐藏窗口布局和交互回归与真实 App 的视觉验收分别记录，见 [架构](../Architecture.md)。
+
+## 项目树侧栏修订（2026-09-26）
+
+采用方案 2 的分组留白、纯名称子项与固定更多操作栏，补充整行浅灰悬停和淡入淡出。见 [修订设计稿](project-sidebar-hover-v1.png)与[布局及动画契约](project-sidebar.md)。根据后续六项反馈，新增与搜索恢复底部，文件夹和规则统一为 30 pt 且名称竖向对齐；双击文件夹整行、原生箭头和左右键均支持展开过渡。图标菜单采用原生六列 palette 网格，仅展示 48 个图标预览。数量不随更多按钮出现而移动。初版静态图保留为历史方向参考，最新契约覆盖其顶部操作区和不同层级行高。

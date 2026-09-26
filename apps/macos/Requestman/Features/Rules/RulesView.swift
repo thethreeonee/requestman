@@ -19,6 +19,7 @@ import RequestmanCore
     private var displayedSearch = ""
     private var displayedSection: WorkspaceSection?
     private var displayedWorkflowID: UUID?
+    private lazy var addButton = ActionButton(title: "") { [weak self] in self?.showAddMenu() }
     var search: String = "" { didSet { if isViewLoaded && !synchronizing { refresh() } } }
     init(model: WorkspaceModel) { self.model = model; super.init() }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -27,12 +28,15 @@ import RequestmanCore
         let column = NSTableColumn(identifier: .init("project"))
         outline.addTableColumn(column); outline.outlineTableColumn = column
         outline.headerView = nil; outline.style = .sourceList; outline.rowSizeStyle = .custom
+        outline.indentationPerLevel = 20
+        outline.intercellSpacing = NSSize(width: 0, height: 2)
         outline.dataSource = self; outline.delegate = self
         outline.setAccessibilityLabel("项目与请求修改")
-        outline.projectClick = { [weak self] row in self?.toggleProject(at: row) ?? false }
         outline.contextMenu = { [weak self] row in self?.menu(forRow: row) }
+        outline.target = self; outline.doubleAction = #selector(doubleClickProject)
         let scroll = NSScrollView(); scroll.documentView = outline; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
-        let add = ActionButton(title: "") { [weak self] in self?.showAddMenu() }
+        scroll.hasHorizontalScroller = false
+        let add = addButton
         add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "添加")
         add.identifier = .init("rules.sidebarAdd")
         add.imagePosition = .imageOnly; add.controlSize = .large; add.toolTip = "添加"
@@ -45,17 +49,21 @@ import RequestmanCore
         let footer = NativeUI.stack([add, searchField], vertical: false, spacing: 10)
         for child in [scroll, footer] { child.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(child) }
         NSLayoutConstraint.activate([
-            scroll.topAnchor.constraint(equalTo: view.topAnchor), scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor), scroll.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -10),
-            footer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12), footer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            footer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -10), add.widthAnchor.constraint(equalTo: add.heightAnchor),
-            add.heightAnchor.constraint(equalTo: searchField.heightAnchor)
+            scroll.topAnchor.constraint(equalTo: view.topAnchor),
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -10),
+            footer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            footer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            footer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -10),
+            add.widthAnchor.constraint(equalTo: add.heightAnchor), add.heightAnchor.constraint(equalTo: searchField.heightAnchor)
         ])
     }
     override func refresh() {
         let focusedItemID = (outline.item(atRow: outline.selectedRow) as? Item)?.id
         synchronizing = true
-        defer { synchronizing = false }
+        outline.animatesDisclosure = false
+        defer { synchronizing = false; outline.animatesDisclosure = true }
         let projects = model.document.projects
         let selectionChanged = displayedWorkflowID != model.selectedWorkflowID || (model.selection == .rules && displayedSection != .rules)
         displayedSection = model.selection
@@ -85,6 +93,7 @@ import RequestmanCore
         }
         if searchField.stringValue != search { searchField.stringValue = search }
         searchField.isEnabled = model.loaded
+        addButton.isEnabled = model.loaded
         let selectionID = selectionChanged ? model.selectedWorkflowID : (focusedItemID ?? model.selectedWorkflowID)
         if let selected = (0..<outline.numberOfRows).first(where: { (outline.item(atRow: $0) as? Item)?.id == selectionID }) {
             outline.selectRowIndexes(IndexSet(integer: selected), byExtendingSelection: false)
@@ -95,7 +104,13 @@ import RequestmanCore
     func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any { if let item = item as? Item { return workflowItems[item.id]![index] }; return roots[index] }
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool { (item as? Item)?.isProject == true }
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool { model.loaded }
-    func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat { 40 }
+    func outlineView(_ outlineView: NSOutlineView, shouldExpandItem item: Any) -> Bool { model.loaded }
+    func outlineView(_ outlineView: NSOutlineView, shouldCollapseItem item: Any) -> Bool { model.loaded }
+    func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat { 30 }
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? { ProjectSidebarRowView() }
+    func outlineView(_ outlineView: NSOutlineView, didRemove rowView: NSTableRowView, forRow row: Int) {
+        (rowView as? ProjectSidebarRowView)?.setHovered(false, animated: false)
+    }
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         guard let item = item as? Item else { return nil }
         let cell = RulesSidebarCell(); configure(cell, item: item); return cell
@@ -107,13 +122,25 @@ import RequestmanCore
         } else if let workflow = project.workflows.first(where: { $0.id == item.id }) {
             cell.configure(title: workflow.name, symbol: nil, suffix: workflow.enabled ? "" : "⏸", enabled: project.enabled && workflow.enabled, project: false)
         }
+        cell.showMenu = { [weak self, weak cell] button in
+            guard let self, let cell, let row = cell.superview as? ProjectSidebarRowView,
+                  let menu = menu(forRow: outline.row(for: cell)) else { return }
+            row.isShowingMenu = true
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 3), in: button)
+            row.isShowingMenu = false
+            row.refreshHover()
+        }
     }
+
+    @objc private func doubleClickProject() { toggleProject(at: outline.clickedRow) }
+
     @discardableResult
     func toggleProject(at row: Int) -> Bool {
         guard model.loaded, let item = outline.item(atRow: row) as? Item, item.isProject else { return false }
-        if outline.isItemExpanded(item) { outline.collapseItem(item) } else { outline.expandItem(item) }
         outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         view.window?.makeFirstResponder(outline)
+        if outline.isItemExpanded(item) { outline.collapseItem(item) }
+        else { outline.expandItem(item) }
         return true
     }
 
@@ -174,18 +201,18 @@ import RequestmanCore
               let project = model.document.projects.first(where: { $0.id == item.projectID }) else { return nil }
         let menu = NSMenu()
         if item.isProject {
+            menu.addItem(RulesMenuItem("添加请求修改", symbol: "doc.badge.plus") { [weak self] in
+                guard let self else { return }
+                search = ""; collapsedProjects.remove(item.id); model.addWorkflow(projectID: item.id)
+            })
+            menu.addItem(.separator())
             menu.addItem(RulesMenuItem(project.enabled ? "禁用整个项目" : "启用整个项目") { [weak self] in
                 self?.perform(.toggleEnabled, item: item)
             })
             menu.addItem(RulesMenuItem("复制整个项目") { [weak self] in self?.perform(.duplicate, item: item) })
             menu.addItem(RulesMenuItem("重命名") { [weak self] in self?.perform(.rename, item: item) })
-            let icons = NSMenu()
-            for (title, symbol) in [("文件夹", "folder"), ("网络", "network"), ("地球", "globe"), ("服务器", "server.rack"),
-                                    ("终端", "terminal"), ("代码", "curlybraces"), ("工具", "wrench.and.screwdriver"),
-                                    ("星标", "star"), ("闪电", "bolt"), ("盒子", "shippingbox")] {
-                let choice = RulesMenuItem(title, symbol: symbol) { [weak self] in self?.updateProject(item.id) { $0.symbol = symbol } }
-                choice.state = project.symbol == symbol ? .on : .off
-                icons.addItem(choice)
+            let icons = ProjectIconMenu.make(selected: project.symbol) { [weak self] symbol in
+                self?.updateProject(item.id) { $0.symbol = symbol }
             }
             let iconItem = NSMenuItem(title: "修改图标", action: nil, keyEquivalent: ""); iconItem.submenu = icons; menu.addItem(iconItem)
             menu.addItem(RulesMenuItem("导出整组…") { [weak self] in
@@ -245,7 +272,7 @@ import RequestmanCore
         let menu = NSMenu()
         menu.addItem(RulesMenuItem("添加请求", symbol: "doc.badge.plus") { [weak self] in self?.addRequest() })
         menu.addItem(RulesMenuItem("添加项目", symbol: "folder.badge.plus") { [weak self] in self?.model.addProject() })
-        menu.popUp(positioning: nil, at: NSPoint(x: 12, y: 46), in: view)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: addButton.bounds.maxY + 3), in: addButton)
     }
     func addRequest() {
         guard model.loaded else { return }
@@ -256,49 +283,6 @@ import RequestmanCore
             ?? model.document.projects.first
         if let project { collapsedProjects.remove(project.id); model.addWorkflow(projectID: project.id) }
         else { model.addProject() }
-    }
-}
-
-/// Keep native outline keyboard navigation/disclosure accessibility; intercept only project clicks.
-@MainActor final class ProjectOutlineView: NSOutlineView {
-    var projectClick: (Int) -> Bool = { _ in false }
-    var contextMenu: (Int) -> NSMenu? = { _ in nil }
-    override func mouseDown(with event: NSEvent) {
-        if event.modifierFlags.contains(.control) { super.mouseDown(with: event); return }
-        let row = row(at: convert(event.locationInWindow, from: nil))
-        if !projectClick(row) { super.mouseDown(with: event) }
-    }
-    override func menu(for event: NSEvent) -> NSMenu? {
-        menu = contextMenu(row(at: convert(event.locationInWindow, from: nil)))
-        guard menu != nil else { return nil }
-        // AppKit tracks the clicked row and draws/clears its native contextual-menu outline
-        // without changing the selected workflow. Returning our menu directly bypasses it.
-        return super.menu(for: event)
-    }
-}
-
-@MainActor private final class RulesSidebarCell: NSTableCellView {
-    private let title = NativeUI.label("")
-    private let icon = NSImageView()
-    private let suffix = NativeUI.label("", size: 11, secondary: true)
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        textField = title
-        let row = NativeUI.stack([icon, title, suffix], vertical: false, spacing: 8)
-        NativeUI.pin(row, to: self, insets: NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 4))
-        icon.widthAnchor.constraint(equalToConstant: 18).isActive = true
-        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        suffix.setContentCompressionResistancePriority(.required, for: .horizontal)
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    func configure(title: String, symbol: String?, suffix: String, enabled: Bool, project: Bool) {
-        self.title.stringValue = title; self.title.toolTip = title
-        self.title.font = .systemFont(ofSize: 13, weight: project ? .semibold : .regular)
-        icon.image = symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }
-        if project && icon.image == nil { icon.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil) }
-        icon.isHidden = symbol == nil; icon.contentTintColor = .controlAccentColor
-        self.suffix.stringValue = suffix; alphaValue = enabled ? 1 : 0.55
     }
 }
 
@@ -316,6 +300,7 @@ import RequestmanCore
     override func refresh() {
         let current = model.workflow
         if lastID != current?.id || content.subviews.isEmpty {
+            editor?.stopObserving()
             editor?.removeFromParent(); editor = nil
             content.subviews.forEach { $0.removeFromSuperview() }
             lastID = current?.id

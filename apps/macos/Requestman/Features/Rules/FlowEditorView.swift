@@ -196,6 +196,9 @@ extension ModificationKind {
     let response: Bool
     let table = NSTableView()
     private var steps: [ModificationStep] = []
+    // Accessibility may request offscreen rows repeatedly. Keep the same cell for
+    // unchanged steps instead of rebuilding its NSBox view hierarchy each time.
+    private var stepCells: [UUID: (step: ModificationStep, cell: RulesStepCell)] = [:]
     private var updating = false
     private var tableHeight: NSLayoutConstraint!
     private let addButton = NSPopUpButton(frame: .zero, pullsDown: true)
@@ -241,7 +244,12 @@ extension ModificationKind {
     func refresh() {
         let current = response ? model.workflow?.responseSteps ?? [] : model.workflow?.requestSteps ?? []
         updating = true; defer { updating = false }
-        if current != steps { steps = current; table.reloadData() }
+        if current != steps {
+            steps = current
+            let currentSteps = Dictionary(uniqueKeysWithValues: current.map { ($0.id, $0) })
+            stepCells = stepCells.filter { currentSteps[$0.key] == $0.value.step }
+            table.reloadData()
+        }
         let rowCount = max(model.workflow?.requestSteps.count ?? 0, model.workflow?.responseSteps.count ?? 0, 1)
         tableHeight.constant = min(CGFloat(rowCount) * 64, 400)
         if model.editingResponse == response, let row = steps.firstIndex(where: { $0.id == model.selectedStepID }) { table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
@@ -255,7 +263,14 @@ extension ModificationKind {
     }
     func numberOfRows(in tableView: NSTableView) -> Int { steps.count }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let cell = RulesStepCell(step: steps[row], number: row + 1)
+        guard steps.indices.contains(row) else { return nil }
+        let step = steps[row]
+        let cell: RulesStepCell
+        if let cached = stepCells[step.id], cached.cell.number == row + 1 { cell = cached.cell }
+        else {
+            cell = RulesStepCell(step: step, number: row + 1)
+            stepCells[step.id] = (step, cell)
+        }
         cell.setSelected(model.editingResponse == response && steps[row].id == model.selectedStepID)
         return cell
     }
@@ -309,17 +324,20 @@ extension ModificationKind {
 @MainActor private final class RulesStepCell: NSTableCellView {
     private let card = NSBox()
     private let accent = NSBox()
+    let number: Int
+    private var selected: Bool?
     init(step: ModificationStep, number: Int) {
+        self.number = number
         super.init(frame: .zero)
         card.identifier = .init("rules.stepCard")
         card.boxType = .custom; card.titlePosition = .noTitle
-        card.borderWidth = 1; card.cornerRadius = 8; card.contentViewMargins = .zero; card.contentView = NSView()
+        card.borderWidth = 1; card.cornerRadius = 8; card.contentViewMargins = .zero
         card.wantsLayer = true; card.layer?.cornerRadius = card.cornerRadius; card.layer?.masksToBounds = true
         NativeUI.pin(card, to: self, insets: NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0))
         let badge = NSBox(); badge.identifier = .init("rules.stepNumber")
         badge.boxType = .custom; badge.titlePosition = .noTitle; badge.borderWidth = 0; badge.borderColor = .clear
         badge.fillColor = NSColor.labelColor.withAlphaComponent(0.045); badge.cornerRadius = 6
-        badge.contentViewMargins = .zero; badge.contentView = NSView()
+        badge.contentViewMargins = .zero
         let numberLabel = NativeUI.label(String(number)); numberLabel.alignment = .center
         numberLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
         badge.contentView!.addSubview(numberLabel); numberLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -361,6 +379,8 @@ extension ModificationKind {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func setSelected(_ selected: Bool) {
+        guard self.selected != selected else { return }
+        self.selected = selected
         card.fillColor = selected ? NSColor.systemBlue.withAlphaComponent(0.12) : NSColor.labelColor.withAlphaComponent(0.045)
         card.borderColor = selected ? NSColor.systemBlue.withAlphaComponent(0.55) : .clear
         accent.isHidden = !selected
