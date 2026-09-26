@@ -2,10 +2,24 @@ import Foundation
 import RequestmanCore
 
 func runPayloadPresentationChecks() throws {
-    precondition(RequestDetailTab.allCases.map(\.title) == ["请求头", "请求体", "响应头", "响应体"])
+    precondition(RequestDetailTab.allCases.map(\.title) == ["请求头", "查询参数", "请求体", "响应头", "响应体"])
     precondition(InspectionVersion.allCases.map(\.title) == ["修改前", "修改后", "修改对比"])
     precondition(RequestDetailTab.requestHeaders.isRequest && !RequestDetailTab.requestHeaders.isBody)
     precondition(RequestDetailTab.responseBody.isBody && !RequestDetailTab.responseBody.isRequest)
+
+    var query = CaptureRecord(method: "GET", url: "https://example.test/?key=one&key=two&Key=upper&flag&empty=&encoded=%E4%B8%AD%E6%96%87")
+    query.finalURL = "https://example.test/?key=one&key=changed&Key=upper&flag=&encoded=%E4%B8%AD%E6%96%87&new=yes"
+    let originalQuery = RequestPayloadPresentation.make(record: query, tab: .queryParameters, version: .original)
+    precondition(originalQuery.nodes.map(\.name) == ["key", "key", "Key", "flag", "empty", "encoded"])
+    precondition(Set(originalQuery.nodes.map(\.id)).count == 6)
+    precondition(originalQuery.copyText.contains("encoded=中文") && originalQuery.copyText.contains("flag\nempty="))
+    let diffQuery = RequestPayloadPresentation.make(record: query, tab: .queryParameters, version: .difference)
+    precondition(diffQuery.nodes.map(\.change) == [.unchanged, .modified, .unchanged, .modified, .removed, .unchanged, .added])
+    precondition(diffQuery.nodes[1].originalValue == "two")
+    query.finalURLWasTruncated = true
+    let partialQuery = RequestPayloadPresentation.make(record: query, tab: .queryParameters, version: .difference)
+    precondition(!partialQuery.canCompare && partialQuery.copyText.isEmpty && partialQuery.notice != nil)
+    precondition(partialQuery.nodes.allSatisfy { $0.change == .unchanged })
 
     var noUpstream = CaptureRecord(method: "POST", url: "https://example.test/items")
     noUpstream.requestHeaders = [HTTPField("X-Original", "yes")]

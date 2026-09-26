@@ -17,7 +17,9 @@ import RequestmanCore
     private var collapsedProjects: Set<UUID> = []
     private var synchronizing = false
     private var displayedSearch = ""
-    var search: String = "" { didSet { if isViewLoaded { refresh() } } }
+    private var displayedSection: WorkspaceSection?
+    private var displayedWorkflowID: UUID?
+    var search: String = "" { didSet { if isViewLoaded && !synchronizing { refresh() } } }
     init(model: WorkspaceModel) { self.model = model; super.init() }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func loadView() {
@@ -49,11 +51,21 @@ import RequestmanCore
         ])
     }
     override func refresh() {
-        let projects = model.document.projects
-        let filtered = projects.map { project in (project, project.workflows.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || $0.matchPattern.localizedCaseInsensitiveContains(search) }) }
-        let ids = filtered.flatMap { [$0.0.id] + $0.1.map(\.id) }
         synchronizing = true
         defer { synchronizing = false }
+        let projects = model.document.projects
+        let selectionChanged = displayedWorkflowID != model.selectedWorkflowID || (model.selection == .rules && displayedSection != .rules)
+        displayedSection = model.selection
+        displayedWorkflowID = model.selectedWorkflowID
+        if selectionChanged, let workflow = model.workflow {
+            if !search.isEmpty && !workflow.name.localizedCaseInsensitiveContains(search)
+                && !workflow.matchPattern.localizedCaseInsensitiveContains(search) { search = "" }
+            if let project = projects.first(where: { $0.workflows.contains { $0.id == workflow.id } }) {
+                collapsedProjects.remove(project.id)
+            }
+        }
+        let filtered = projects.map { project in (project, project.workflows.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || $0.matchPattern.localizedCaseInsensitiveContains(search) }) }
+        let ids = filtered.flatMap { [$0.0.id] + $0.1.map(\.id) }
         if structure != ids || displayedSearch != search {
             structure = ids; displayedSearch = search
             roots = filtered.map { Item(id: $0.0.id, projectID: $0.0.id, isProject: true) }
@@ -61,6 +73,9 @@ import RequestmanCore
             outline.reloadData()
             for root in roots where !collapsedProjects.contains(root.id) { outline.expandItem(root) }
         }
+        if selectionChanged, let root = roots.first(where: { root in
+            workflowItems[root.id]?.contains { $0.id == model.selectedWorkflowID } == true
+        }) { outline.expandItem(root) }
         for row in 0..<outline.numberOfRows {
             guard let item = outline.item(atRow: row) as? Item, let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? RulesSidebarCell else { continue }
             configure(cell, item: item)
@@ -69,6 +84,7 @@ import RequestmanCore
         searchField.isEnabled = model.loaded
         if let selected = (0..<outline.numberOfRows).first(where: { (outline.item(atRow: $0) as? Item)?.id == model.selectedWorkflowID }) {
             outline.selectRowIndexes(IndexSet(integer: selected), byExtendingSelection: false)
+            if selectionChanged { outline.scrollRowToVisible(selected) }
         } else { outline.deselectAll(nil) }
     }
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int { (item as? Item).map { workflowItems[$0.id]?.count ?? 0 } ?? roots.count }

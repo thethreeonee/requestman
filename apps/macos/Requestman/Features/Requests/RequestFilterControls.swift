@@ -11,14 +11,13 @@ final class RequestFilterControls: NSView {
     private let pause = RequestFilterActionButton(symbol: "pause", label: "暂停记录")
     private let clearButton = RequestFilterActionButton(symbol: "trash", label: "清空")
     private let separator = NSBox()
-    private let primary = NSSegmentedControl(labels: ["全部", "JSON", "文档", "CSS", "JS", "图片"], trackingMode: .selectOne, target: nil, action: nil)
-    private let more = NSPopUpButton()
-    private let compact = NSPopUpButton()
-    private let filterButton = NSButton(title: "筛选", target: nil, action: nil)
+    private let primary = NSSegmentedControl(labels: CaptureResourceType.allCases.map(\.rawValue), trackingMode: .selectOne, target: nil, action: nil)
+    private let filterButton = RequestFilterActionButton(symbol: "line.3.horizontal.decrease", label: "筛选")
     private var popover: NSPopover?
     private var panel: RequestFilterPanel?
-    private let primaryTypes: [CaptureResourceType] = [.all, .json, .document, .css, .script, .image]
-    private let extraTypes: [CaptureResourceType] = [.font, .media, .other]
+    private let primaryTypes = CaptureResourceType.allCases
+    private var heightConstraint: NSLayoutConstraint!
+    private var usesSecondRow = false
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -28,20 +27,54 @@ final class RequestFilterControls: NSView {
         primary.target = self; primary.action = #selector(selectPrimary)
         for (index, type) in primaryTypes.enumerated() { primary.setLabel(type.rawValue, forSegment: index) }
         primary.setAccessibilityLabel("资源类型")
-        more.addItems(withTitles: ["更多"] + extraTypes.map(\.rawValue))
-        more.target = self; more.action = #selector(selectMore)
-        compact.addItems(withTitles: CaptureResourceType.allCases.map(\.rawValue))
-        compact.target = self; compact.action = #selector(selectCompact)
-        compact.setAccessibilityLabel("资源类型")
-        filterButton.bezelStyle = .rounded
-        filterButton.target = self; filterButton.action = #selector(showFilters)
-        filterButton.toolTip = "筛选项目、环境、结果、方法和请求 Header"
-        for child in [pause, clearButton, separator, primary, more, compact, filterButton] { addSubview(child) }
+        primary.segmentStyle = .automatic
+        primary.segmentDistribution = .fit
+        primary.controlSize = .large
+        let font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        primary.font = font
+        for (index, type) in primaryTypes.enumerated() {
+            let labelWidth = (type.rawValue as NSString).size(withAttributes: [.font: font]).width
+            primary.setWidth(ceil(labelWidth) + 16, forSegment: index)
+        }
+        if #available(macOS 26.0, *) {
+            primary.controlSize = .extraLarge
+            primary.borderShape = .capsule
+        }
+        if #available(macOS 27.0, *) { primary.role = .tabs }
+        filterButton.handler = { [weak self] in self?.showFilters() }
+        filterButton.toolTip = "筛选状态码、URL、域名、请求方法、环境和请求 Header"
+        for child in [pause, clearButton, separator, primary, filterButton] { addSubview(child) }
+        translatesAutoresizingMaskIntoConstraints = false
+        heightConstraint = heightAnchor.constraint(equalToConstant: toolbarHeight)
+        heightConstraint.isActive = true
         setAccessibilityLabel("请求日志筛选")
     }
     convenience init() { self.init(frame: .zero) }
     required init?(coder: NSCoder) { nil }
-    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 48) }
+    private var controlHeight: CGFloat { primary.intrinsicContentSize.height }
+    private var toolbarHeight: CGFloat { usesSecondRow ? controlHeight * 2 + 24 : controlHeight + 16 }
+    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: toolbarHeight) }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        updateRowPlacement()
+    }
+
+    private func updateRowPlacement() {
+        guard heightConstraint != nil, bounds.width > 0 else { return }
+        let nextUsesSecondRow = bounds.width < primary.intrinsicContentSize.width + controlHeight * 3 + 63
+        guard usesSecondRow != nextUsesSecondRow else { return }
+        usesSecondRow = nextUsesSecondRow
+        // Width arrives during the parent's layout pass. Resize the arranged view
+        // after that pass so NSStackView does not reuse its previous height.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            heightConstraint.constant = toolbarHeight
+            invalidateIntrinsicContentSize()
+            superview?.needsLayout = true
+            needsLayout = true
+        }
+    }
 
     func update(filter: CaptureRecordFilter, records: [CaptureRecord], paused: Bool) {
         self.filter = filter; self.records = records
@@ -51,30 +84,30 @@ final class RequestFilterControls: NSView {
         clearButton.isEnabled = !records.isEmpty
         clearButton.toolTip = "清空全部请求日志"
         primary.selectedSegment = primaryTypes.firstIndex(of: filter.resource) ?? -1
-        more.selectItem(at: extraTypes.firstIndex(of: filter.resource).map { $0 + 1 } ?? 0)
-        compact.selectItem(at: CaptureResourceType.allCases.firstIndex(of: filter.resource) ?? 0)
-        filterButton.title = filter.activeConditionCount == 0 ? "筛选 ⌄" : "筛选 \(filter.activeConditionCount) ⌄"
+        let count = filter.activeConditionCount
+        filterButton.bezelColor = count == 0 ? nil : .systemBlue
+        if #available(macOS 26.0, *) {
+            filterButton.tintProminence = count == 0 ? .automatic : .primary
+        }
+        filterButton.setAccessibilityValue(count == 0 ? "无筛选条件" : "\(count) 个筛选条件")
+        filterButton.toolTip = count == 0 ? "筛选状态码、URL、域名、请求方法、环境和请求 Header" : "筛选（\(count) 个条件）"
         panel?.update(filter: filter, records: records)
         needsLayout = true
     }
     override func layout() {
         super.layout()
-        pause.frame = NSRect(x: 12, y: 8, width: 32, height: 32)
-        clearButton.frame = NSRect(x: 54, y: 8, width: 32, height: 32)
-        separator.frame = NSRect(x: 96, y: 14, width: 1, height: 20)
-        let filterWidth = max(64, filterButton.intrinsicContentSize.width)
-        filterButton.frame = NSRect(x: bounds.width - 12 - filterWidth, y: (48 - filterButton.intrinsicContentSize.height) / 2,
-                                    width: filterWidth, height: filterButton.intrinsicContentSize.height)
-        let available = max(0, filterButton.frame.minX - 117)
-        let primaryWidth = primary.intrinsicContentSize.width
-        let moreWidth = more.intrinsicContentSize.width
-        let expanded = available >= primaryWidth + moreWidth + 6
-        primary.isHidden = !expanded; more.isHidden = !expanded; compact.isHidden = expanded
-        for (control, x, width) in [(primary as NSControl, CGFloat(107), primaryWidth),
-                                    (more, 113 + primaryWidth, moreWidth), (compact, 107, min(96, available))] {
-            let height = control.intrinsicContentSize.height
-            control.frame = NSRect(x: x, y: (48 - height) / 2, width: width, height: height)
-        }
+        updateRowPlacement()
+        let size = primary.intrinsicContentSize
+        let height = size.height
+        let actionY: CGFloat = usesSecondRow ? height + 16 : 8
+        pause.frame = NSRect(x: 12, y: actionY, width: height, height: height)
+        clearButton.frame = NSRect(x: 22 + height, y: actionY, width: height, height: height)
+        separator.isHidden = usesSecondRow
+        separator.frame = NSRect(x: 32 + height * 2, y: 8 + (height - 20) / 2, width: 1, height: 20)
+        filterButton.frame = NSRect(x: bounds.width - 12 - height, y: actionY, width: height, height: height)
+        let origin: CGFloat = usesSecondRow ? 10 : 43 + height * 2
+        // Keep the native drawing scale so labels and the bezel retain their proportions.
+        primary.frame = NSRect(origin: NSPoint(x: origin, y: 8), size: size)
     }
     private func changeResource(_ resource: CaptureResourceType) {
         filter.resource = resource; onFilterChange(filter)
@@ -83,11 +116,6 @@ final class RequestFilterControls: NSView {
         guard primaryTypes.indices.contains(primary.selectedSegment) else { return }
         changeResource(primaryTypes[primary.selectedSegment])
     }
-    @objc private func selectMore() {
-        guard more.indexOfSelectedItem > 0 else { return }
-        changeResource(extraTypes[more.indexOfSelectedItem - 1])
-    }
-    @objc private func selectCompact() { changeResource(CaptureResourceType.allCases[compact.indexOfSelectedItem]) }
     @objc private func showFilters() {
         if let popover, popover.isShown { popover.close(); return }
         let panel = RequestFilterPanel(filter: filter, records: records) { [weak self] in self?.onFilterChange($0) }
@@ -100,11 +128,12 @@ final class RequestFilterControls: NSView {
 }
 
 @MainActor
-final class RequestFilterPanel: NSViewController {
+final class RequestFilterPanel: NSViewController, NSTextFieldDelegate, NSComboBoxDelegate {
     private var filter: CaptureRecordFilter
     private var records: [CaptureRecord]
     private let onChange: (CaptureRecordFilter) -> Void
     private let projects = NSPopUpButton(), environments = NSPopUpButton(), outcomes = NSPopUpButton(), methods = NSPopUpButton()
+    private let statuses = NSPopUpButton(), domains = NSComboBox(), url = NSTextField()
     private let sources = NSPopUpButton(), combinations = NSPopUpButton()
     private let inverse = NSButton(checkboxWithTitle: "反向匹配", target: nil, action: nil)
     private let reset = NSButton(title: "重置", target: nil, action: nil)
@@ -118,18 +147,29 @@ final class RequestFilterPanel: NSViewController {
     init(filter: CaptureRecordFilter, records: [CaptureRecord], onChange: @escaping (CaptureRecordFilter) -> Void) {
         self.filter = filter; self.records = records; self.onChange = onChange
         super.init(nibName: nil, bundle: nil)
-        preferredContentSize = NSSize(width: 560, height: 360)
+        preferredContentSize = NSSize(width: 560, height: 390)
     }
     required init?(coder: NSCoder) { nil }
     override func loadView() {
-        view = FlippedView(frame: NSRect(x: 0, y: 0, width: 560, height: 360))
-        for control in [projects, environments, outcomes, methods, sources, combinations] {
+        view = FlippedView(frame: NSRect(x: 0, y: 0, width: 560, height: 390))
+        for control in [projects, environments, outcomes, methods, statuses, sources, combinations] {
             control.target = self; control.action = #selector(selectionChanged(_:))
         }
-        let grid = NSGridView(views: [[NativeUI.label("项目"), projects, NativeUI.label("环境"), environments],
-                                    [NativeUI.label("结果"), outcomes, NativeUI.label("方法"), methods]])
+        for (control, label) in [(projects, "项目"), (environments, "环境"), (outcomes, "结果"),
+                                 (methods, "请求方法"), (statuses, "状态码")] { control.setAccessibilityLabel(label) }
+        domains.placeholderString = "全部域名"; domains.setAccessibilityLabel("域名")
+        domains.completes = true; domains.numberOfVisibleItems = 8; domains.delegate = self
+        domains.toolTip = "按原始 URL 的域名精确匹配，忽略大小写"
+        url.placeholderString = "URL 包含"; url.setAccessibilityLabel("URL")
+        url.bezelStyle = .roundedBezel; url.delegate = self
+        url.toolTip = "按原始 URL 包含匹配，忽略大小写"
+        for control in [domains, url] { control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal) }
+        let grid = NSGridView(views: [[NativeUI.label("状态码"), statuses, NativeUI.label("请求方法"), methods],
+                                    [NativeUI.label("环境"), environments, NativeUI.label("项目"), projects],
+                                    [NativeUI.label("结果"), outcomes, NativeUI.label("域名"), domains]])
         grid.columnSpacing = 14; grid.rowSpacing = 12
-        grid.column(at: 1).width = 190; grid.column(at: 3).width = 190
+        grid.column(at: 1).width = 184; grid.column(at: 3).width = 184
+        let urlRow = NativeUI.stack([NativeUI.label("URL"), url], vertical: false, spacing: 14)
         rowsScroll.drawsBackground = false; rowsScroll.hasVerticalScroller = true; rowsScroll.autohidesScrollers = true
         rowsScroll.documentView = rowsView
         rowsScroll.translatesAutoresizingMaskIntoConstraints = false
@@ -140,12 +180,12 @@ final class RequestFilterPanel: NSViewController {
         add.target = self; add.action = #selector(addCondition); add.bezelStyle = .rounded
         add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil); add.imagePosition = .imageLeading
         let bottom = NativeUI.stack([inverse, NSView(), reset], vertical: false)
-        stack = NativeUI.stack([NativeUI.label("筛选", weight: .semibold), grid, divider(),
+        stack = NativeUI.stack([NativeUI.label("筛选", weight: .semibold), grid, urlRow, divider(),
             NativeUI.label("请求 Header", weight: .semibold), NativeUI.stack([sources, combinations], vertical: false),
             rowsScroll, add, divider(), bottom], spacing: 14)
         stack.alignment = .leading
         NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20))
-        for child in [grid, rowsScroll, bottom] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        for child in [grid, urlRow, rowsScroll, bottom] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         refreshControls()
     }
     override func viewDidLayout() {
@@ -166,6 +206,15 @@ final class RequestFilterPanel: NSViewController {
         options(projects, values: ["全部项目"] + Array(Set(records.map(\.project)).union(filter.project.isEmpty ? [] : [filter.project])).sorted(), selected: filter.project.isEmpty ? "全部项目" : filter.project)
         options(environments, values: ["全部环境"] + Array(Set(records.map(\.environment)).union(filter.environment.isEmpty ? [] : [filter.environment])).sorted(), selected: filter.environment.isEmpty ? "全部环境" : filter.environment)
         options(methods, values: ["全部方法"] + Array(Set(records.map(\.method)).union(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]).union(filter.method.isEmpty ? [] : [filter.method])).sorted(), selected: filter.method.isEmpty ? "全部方法" : filter.method)
+        let codes = Set(records.compactMap(\.status)).union([200, 201, 204, 301, 302, 304, 400, 401, 403, 404, 429, 500, 502, 503, 504])
+            .union(filter.statusCode.map { [$0] } ?? []).sorted()
+        options(statuses, values: ["全部状态码"] + codes.map(String.init), selected: filter.statusCode.map(String.init) ?? "全部状态码")
+        let domainNames = Array(Set(records.compactMap { URL(string: $0.url)?.host?.lowercased() })).sorted()
+        if domains.objectValues.compactMap({ $0 as? String }) != domainNames {
+            domains.removeAllItems(); domains.addItems(withObjectValues: domainNames)
+        }
+        if domains.stringValue != filter.domain { domains.stringValue = filter.domain }
+        if url.stringValue != filter.urlContains { url.stringValue = filter.urlContains }
         options(outcomes, values: ["全部结果"] + CaptureRecord.Outcome.allCases.map(\.rawValue), selected: filter.outcome?.rawValue ?? "全部结果")
         options(sources, values: CaptureHeaderSource.allCases.map(\.rawValue), selected: filter.headerSource.rawValue)
         options(combinations, values: CaptureHeaderCombination.allCases.map(\.rawValue), selected: filter.headerCombination.rawValue)
@@ -186,7 +235,7 @@ final class RequestFilterPanel: NSViewController {
         for (row, condition) in zip(rows, filter.headers) { row.update(condition, suggestions: names) }
         rowsHeight.constant = rows.isEmpty ? 0 : min(240, CGFloat(rows.count) * 40 + 16)
         rowsScroll.isHidden = rows.isEmpty
-        preferredContentSize = NSSize(width: 560, height: 310 + rowsHeight.constant)
+        preferredContentSize = NSSize(width: 560, height: 390 + rowsHeight.constant)
         view.needsLayout = true
     }
     private func changed() { onChange(filter); refreshControls() }
@@ -195,11 +244,24 @@ final class RequestFilterPanel: NSViewController {
         case projects: filter.project = sender.indexOfSelectedItem == 0 ? "" : sender.titleOfSelectedItem ?? ""
         case environments: filter.environment = sender.indexOfSelectedItem == 0 ? "" : sender.titleOfSelectedItem ?? ""
         case methods: filter.method = sender.indexOfSelectedItem == 0 ? "" : sender.titleOfSelectedItem ?? ""
+        case statuses: filter.statusCode = Int(sender.titleOfSelectedItem ?? "")
         case outcomes: filter.outcome = CaptureRecord.Outcome(rawValue: sender.titleOfSelectedItem ?? "")
         case sources: filter.headerSource = CaptureHeaderSource.allCases[sender.indexOfSelectedItem]
         case combinations: filter.headerCombination = CaptureHeaderCombination.allCases[sender.indexOfSelectedItem]
         default: break
         }
+        changed()
+    }
+    func controlTextDidChange(_ notification: Notification) {
+        if notification.object as? NSControl === url { filter.urlContains = url.stringValue }
+        else if notification.object as? NSControl === domains { filter.domain = domains.stringValue }
+        else { return }
+        changed()
+    }
+    func comboBoxSelectionDidChange(_ notification: Notification) {
+        guard notification.object as? NSComboBox === domains,
+              let domain = domains.objectValueOfSelectedItem as? String else { return }
+        filter.domain = domain
         changed()
     }
     @objc private func invert() { filter.inverted = inverse.state == .on; changed() }
@@ -261,6 +323,7 @@ private final class RequestFilterActionButton: NSButton {
     var handler: () -> Void = {}
     init(symbol: String, label: String) {
         super.init(frame: .zero)
+        title = ""
         image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); imagePosition = .imageOnly
         setAccessibilityLabel(label); controlSize = .regular
         if #available(macOS 26.0, *) { bezelStyle = .glass; borderShape = .circle } else { bezelStyle = .circular }

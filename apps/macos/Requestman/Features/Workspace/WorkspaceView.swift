@@ -55,6 +55,16 @@ final class WorkspaceInspectorController: WorkspacePaneController {
         steps = StepInspectorViewController(model: model)
         requests = RequestInspectorViewController(history: model.history, mode: mode)
         super.init()
+        requests.workflowExists = { [weak model] id in
+            model?.document.projects.contains { $0.workflows.contains { $0.id == id } } ?? false
+        }
+        requests.openWorkflow = { [weak model] id in
+            guard let model, model.document.projects.contains(where: { $0.workflows.contains { $0.id == id } }) else { return }
+            model.selectedWorkflowID = id
+            model.selectedStepID = nil
+            model.editingResponse = false
+            model.selection = .rules
+        }
     }
     required init?(coder: NSCoder) { nil }
     func update(section: WorkspaceSection, isPresented: Bool) {

@@ -16,6 +16,7 @@ final class RequestsViewController: ObservedViewController {
         filters.toggleRecording = { [weak model] in guard let model else { return }; model.setRecordingPaused(!model.history.paused) }
         filters.clear = { [weak model] in model?.clearHistory() }
         table.onSelectionChange = { [weak model] in model?.history.selectedID = $0 }
+        table.onModifyRequest = { [weak model] in model?.addWorkflow(matchingURL: $0) }
         let separator = NSBox(); separator.boxType = .separator
         let tableContainer = NSView()
         NativeUI.pin(table, to: tableContainer)
@@ -26,7 +27,6 @@ final class RequestsViewController: ObservedViewController {
         let stack = NativeUI.stack([filters, status, separator, tableContainer], spacing: 0)
         NativeUI.pin(stack, to: view)
         for child in [filters, separator, tableContainer] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
-        filters.heightAnchor.constraint(equalToConstant: 48).isActive = true
         tableContainer.setContentHuggingPriority(.defaultLow, for: .vertical)
     }
     override func viewWillAppear() { super.viewWillAppear(); model.history.selectedID = nil }

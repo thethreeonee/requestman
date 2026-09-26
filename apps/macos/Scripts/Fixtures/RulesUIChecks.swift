@@ -3,6 +3,7 @@ import Observation
 import RequestmanCore
 
 @MainActor @Observable final class WorkspaceModel {
+    var selection: WorkspaceSection = .rules
     var document = WorkspaceDocument()
     var loaded = true
     var selectedWorkflowID: UUID?
@@ -107,6 +108,13 @@ import RequestmanCore
         precondition(descendants(inspector.view).contains { $0 === combo }, "Header editing must retain focus and selection")
         sidebar.search = "does-not-match"; precondition(sidebar.outline.numberOfRows == 1)
         sidebar.addRequest(); sidebar.refresh(); precondition(sidebar.search.isEmpty && model.document.projects[0].workflows.count == 2)
+        sidebar.outline.collapseItem(sidebar.outline.item(atRow: 0))
+        sidebar.search = "does-not-match"
+        model.addWorkflow(projectID: model.document.projects[0].id)
+        sidebar.refresh()
+        precondition(sidebar.search.isEmpty && sidebar.searchField.stringValue.isEmpty)
+        precondition(sidebar.outline.numberOfRows == 4 && sidebar.outline.selectedRow == 3,
+                     "A newly selected workflow must reveal its collapsed project and clear a hiding search")
         for kind in ModificationKind.allCases {
             model.addStep(kind, response: kind == .setStatus); inspector.refresh(); window.contentView?.layoutSubtreeIfNeeded()
             precondition(!inspector.view.hasAmbiguousLayout, "Inspector layout should be determined for \(kind)")

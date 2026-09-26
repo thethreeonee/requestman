@@ -142,6 +142,13 @@ final class RequestPayloadViewController: NSViewController, NSSearchFieldDelegat
     }
     func controlTextDidChange(_ notification: Notification) { search = searchField.stringValue; refreshContent() }
     private var direction: String {
+        if tab == .queryParameters {
+            switch version {
+            case .original: return "原始 URL"
+            case .final: return "最终 URL"
+            case .difference: return "原始 URL → 最终 URL"
+            }
+        }
         if version == .difference { return tab.isRequest ? "客户端原始 → 发往服务器" : "服务器原始 → 发往客户端" }
         if tab.isRequest { return version == .original ? "客户端原始请求" : "发往服务器" }
         let status = version == .original ? record.originalStatus : record.status

@@ -5,6 +5,7 @@ import RequestmanCore
 final class RequestRecordsTable: NSView {
     static let columnWidthsKey = "requestLog.columnWidths.v1"
     var onSelectionChange: (UUID?) -> Void = { _ in }
+    var onModifyRequest: (String) -> Void = { _ in }
     private let coordinator: Coordinator
     private let scrollView: NSScrollView
 
@@ -13,6 +14,7 @@ final class RequestRecordsTable: NSView {
         scrollView = RecordsScrollView()
         super.init(frame: .zero)
         coordinator.onSelectionChange = { [weak self] in self?.onSelectionChange($0) }
+        coordinator.onModifyRequest = { [weak self] in self?.onModifyRequest($0) }
         configure()
     }
     required init?(coder: NSCoder) { nil }
@@ -24,7 +26,8 @@ final class RequestRecordsTable: NSView {
         scrollView.horizontalScrollElasticity = .none
         scrollView.borderType = .noBorder
 
-        let table = NSTableView()
+        let table = RecordsTableView()
+        table.menuForRow = { [weak coordinator = coordinator] in coordinator?.menu(forRow: $0) }
         table.rowHeight = 56
         table.intercellSpacing = .zero
         table.usesAlternatingRowBackgroundColors = true
@@ -71,12 +74,15 @@ final class RequestRecordsTable: NSView {
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         var selection: UUID?
         var onSelectionChange: (UUID?) -> Void = { _ in }
+        var onModifyRequest: (String) -> Void = { _ in }
         weak var table: NSTableView?
         private var rows: [RecordRow] = []
         private var updating = false
         private let defaults: UserDefaults
         private var preferredWidths: [CGFloat]?
         private var availableWidth: CGFloat = 0
+        private var requiredRequestWidth: CGFloat = 0
+        private var fittedRequestWidth: CGFloat = -1
         private var applyingWidths = false
         private let timeFormatter: DateFormatter = {
             let formatter = DateFormatter()
@@ -101,6 +107,7 @@ final class RequestRecordsTable: NSView {
         func update(records: [CaptureRecord]) {
             guard let table else { return }
             let nextRows = records.map { RecordRow(record: $0, timeFormatter: timeFormatter) }
+            requiredRequestWidth = (Set(records.map(\.method)).map { RequestMethodTag.requiredWidth(for: $0) }.max() ?? 0) + 24
             updating = true
             defer { updating = false }
 
@@ -140,8 +147,10 @@ final class RequestRecordsTable: NSView {
         }
 
         func fitColumns(to width: CGFloat) {
-            guard table != nil, width > 0, abs(width - availableWidth) > 0.1 else { return }
+            guard table != nil, width > 0,
+                  abs(width - availableWidth) > 0.1 || requiredRequestWidth != fittedRequestWidth else { return }
             availableWidth = width
+            fittedRequestWidth = requiredRequestWidth
             // Record updates never overwrite a manual resize. Only viewport changes
             // adapt the saved proportions, without persisting the temporary layout.
             let compactScale = min(1, width / 900)
@@ -174,7 +183,9 @@ final class RequestRecordsTable: NSView {
         private var minimumWidths: [CGFloat] {
             let widths: [CGFloat] = [60, 48, 120, 80, 60, 48, 64]
             let scale = min(1, availableWidth / (widths.reduce(0, +) * 1.5))
-            return widths.map { $0 * scale }
+            return widths.enumerated().map { index, width in
+                index == 2 ? max(width * scale, requiredRequestWidth) : width * scale
+            }
         }
 
         private func apply(_ widths: [CGFloat]) {
@@ -222,6 +233,22 @@ final class RequestRecordsTable: NSView {
 
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
+        func menu(forRow row: Int) -> NSMenu? {
+            guard rows.indices.contains(row) else { return nil }
+            let menu = NSMenu()
+            let item = NSMenuItem(title: "修改请求", action: #selector(modifyRequest(_:)), keyEquivalent: "")
+            item.target = self
+            // Keep the clicked URL stable while new records are inserted or the list is cleared.
+            item.representedObject = rows[row].url
+            menu.addItem(item)
+            return menu
+        }
+
+        @objc private func modifyRequest(_ sender: NSMenuItem) {
+            guard let url = sender.representedObject as? String else { return }
+            onModifyRequest(url)
+        }
+
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard rows.indices.contains(row), let identifier = tableColumn?.identifier,
                   let column = RecordColumn(rawValue: identifier.rawValue) else { return nil }
@@ -236,6 +263,16 @@ final class RequestRecordsTable: NSView {
             let selected = rows.indices.contains(table.selectedRow) ? rows[table.selectedRow].id : nil
             if selection != selected { selection = selected; onSelectionChange(selected) }
         }
+    }
+}
+
+@MainActor
+private final class RecordsTableView: NSTableView {
+    var menuForRow: (Int) -> NSMenu? = { _ in nil }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let clickedRow = row(at: convert(event.locationInWindow, from: nil))
+        return menuForRow(clickedRow)
     }
 }
 
@@ -274,7 +311,7 @@ private struct RecordRow: Equatable {
     let method: String
     let url: String
     let project: String
-    let rules: [String]
+    let rules: [CaptureMatchedRule]
     let environment: String
     let status: Int?
     let duration: String
@@ -287,7 +324,7 @@ private struct RecordRow: Equatable {
         method = record.method
         url = record.url
         project = record.project
-        rules = record.matchedRules.map(\.summary)
+        rules = record.matchedRules
         environment = record.environment
         status = record.status
         let seconds = max(0, record.duration)
@@ -336,7 +373,7 @@ private final class RecordCell: NSTableCellView {
             addSubview(label)
         }
         primary.font = .systemFont(ofSize: 13)
-        secondary.font = .systemFont(ofSize: 12)
+        secondary.font = .systemFont(ofSize: column == .rules ? 13 : 12)
         secondary.isHidden = column != .request && column != .rules
         if column == .request {
             primary.lineBreakMode = .byTruncatingMiddle
@@ -354,6 +391,7 @@ private final class RecordCell: NSTableCellView {
         if column == .time || column == .status || column == .duration {
             primary.font = .monospacedDigitSystemFont(ofSize: 13, weight: column == .status ? .medium : .regular)
         }
+        if column == .status { primary.font = RequestStatusStyle.font }
         textField = primary
     }
 
@@ -373,7 +411,7 @@ private final class RecordCell: NSTableCellView {
             primaryColor = .secondaryLabelColor
         case .status:
             primary.stringValue = row.status.map(String.init) ?? "—"
-            primaryColor = Self.statusColor(row.status)
+            primaryColor = RequestStatusStyle.color(row.status)
         case .request:
             primary.stringValue = row.url
             secondary.stringValue = row.failure ?? ""
@@ -381,13 +419,16 @@ private final class RecordCell: NSTableCellView {
             secondaryColor = .systemRed
             methodTag.setMethod(row.method)
         case .rules:
-            if ruleSummaries != row.rules { rulesPopover?.close() }
-            ruleSummaries = row.rules
-            primary.stringValue = row.rules.first ?? "—"
-            secondary.stringValue = row.rules.dropFirst().first ?? ""
-            secondary.isHidden = row.rules.count < 2
-            moreRules.isHidden = row.rules.count <= 2
-            moreRules.title = "+\(max(0, row.rules.count - 2))"
+            let summaries = row.rules.map(\.summary)
+            if ruleSummaries != summaries { rulesPopover?.close() }
+            ruleSummaries = summaries
+            primary.stringValue = row.rules.first?.typeName ?? "—"
+            secondary.stringValue = row.rules.first?.name ?? ""
+            primaryColor = .secondaryLabelColor
+            secondaryColor = .labelColor
+            secondary.isHidden = row.rules.isEmpty
+            moreRules.isHidden = row.rules.count <= 1
+            moreRules.title = "+\(max(0, row.rules.count - 1))"
         case .project:
             primary.stringValue = row.project
         case .environment:
@@ -402,7 +443,7 @@ private final class RecordCell: NSTableCellView {
             ? "\(row.method) \(row.url)\n\(row.result)"
             : (secondary.isHidden ? primary.stringValue : "\(primary.stringValue)\n\(secondary.stringValue)")
         if column == .rules {
-            toolTip = row.rules.isEmpty ? "未命中规则" : row.rules.joined(separator: "\n")
+            toolTip = row.rules.isEmpty ? "未命中规则" : ruleSummaries.joined(separator: "\n")
             setAccessibilityLabel("命中的规则")
             setAccessibilityValue(toolTip)
         }
@@ -416,7 +457,7 @@ private final class RecordCell: NSTableCellView {
         let width = max(0, bounds.width - inset * 2)
         let lineHeight: CGFloat = 20
         if column == .request {
-            let tagWidth = min(methodTag.intrinsicContentSize.width, width * 0.45)
+            let tagWidth = methodTag.intrinsicContentSize.width
             let gap = min(10, max(0, width - tagWidth))
             let top = secondary.isHidden ? (bounds.height - 24) / 2 : 6
             methodTag.frame = NSRect(x: inset, y: top, width: tagWidth, height: 24)
@@ -465,27 +506,14 @@ private final class RecordCell: NSTableCellView {
         primary.textColor = selected ? .alternateSelectedControlTextColor : primaryColor
         secondary.textColor = selected ? .alternateSelectedControlTextColor : secondaryColor
         methodTag.selected = selected
-        if column == .rules {
-            for label in [primary, secondary] {
-                let paragraph = NSMutableParagraphStyle()
-                paragraph.lineBreakMode = .byTruncatingTail
-                let value = NSMutableAttributedString(string: label.stringValue, attributes: [
-                    .font: NSFont.systemFont(ofSize: 13),
-                    .foregroundColor: selected ? NSColor.alternateSelectedControlTextColor : NSColor.labelColor,
-                    .paragraphStyle: paragraph
-                ])
-                if let separator = label.stringValue.range(of: " · ") {
-                    let range = NSRange(label.stringValue.startIndex..<separator.upperBound, in: label.stringValue)
-                    value.addAttribute(.foregroundColor,
-                        value: selected ? NSColor.alternateSelectedControlTextColor : NSColor.secondaryLabelColor,
-                        range: range)
-                }
-                label.attributedStringValue = value
-            }
-        }
     }
 
-    private static func statusColor(_ status: Int?) -> NSColor {
+}
+
+@MainActor
+enum RequestStatusStyle {
+    static let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+    static func color(_ status: Int?) -> NSColor {
         switch status {
         case .some(100..<200): .systemBlue
         case .some(200..<300): .systemGreen
@@ -497,7 +525,17 @@ private final class RecordCell: NSTableCellView {
 }
 
 @MainActor
-private final class RequestMethodTag: NSView {
+final class RequestMethodTag: NSView {
+    private static let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+
+    static func requiredWidth(for method: String) -> CGFloat {
+        let cell = NSTextFieldCell(textCell: method)
+        cell.font = font
+        cell.isBordered = false
+        cell.usesSingleLineMode = true
+        return ceil(cell.cellSize.width) + 12
+    }
+
     private let label = NSTextField(labelWithString: "")
     private var tint = NSColor.systemBlue
     var selected = false {
@@ -506,7 +544,7 @@ private final class RequestMethodTag: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        label.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
+        label.font = Self.font
         label.alignment = .center
         label.maximumNumberOfLines = 1
         label.lineBreakMode = .byTruncatingTail
@@ -532,7 +570,7 @@ private final class RequestMethodTag: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: min(90, max(72, label.intrinsicContentSize.width + 18)), height: 24)
+        NSSize(width: ceil(label.intrinsicContentSize.width) + 12, height: 24)
     }
 
     override func layout() {

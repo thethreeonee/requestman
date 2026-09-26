@@ -7,6 +7,8 @@ import Darwin
 @MainActor @Observable
 final class WorkspaceModel {
     var settingsSection: WorkspaceSettingsSection = .general
+    var selectedWorkflowID: UUID?
+    var editingResponse = false
     var selectedStepID: UUID?
     var selectedStep: ModificationStep?
     var selection: WorkspaceSection = .rules
@@ -26,6 +28,7 @@ final class WorkspaceModel {
     func toggleCapture() async { isCapturing.toggle() }
     func setRecordingPaused(_ value: Bool) { history.paused = value }
     func clearHistory() { history.clear() }
+    func addWorkflow(matchingURL url: String) { selection = .rules }
 }
 
 @MainActor @Observable
@@ -56,9 +59,17 @@ struct InspectorPerformanceChecks {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let model = WorkspaceModel()
         model.selection = .requests
+        let workflow = RequestWorkflow(name: "命中规则")
+        var project = WorkflowProject(name: "测试项目")
+        project.workflows = [workflow]
+        model.document.projects = [project]
         for index in 0..<75 {
-            var record = CaptureRecord(method: "POST", url: "https://example.invalid/api/\(index)")
-            record.status = 200
+            var record = CaptureRecord(method: "POST", url: "https://example.invalid/api/\(index)?page=before")
+            record.finalURL = "https://example.invalid/api/\(index)?page=after"
+            record.status = index == 0 ? 302 : 200
+            record.matchedWorkflowID = workflow.id
+            record.workflow = workflow.name
+            record.project = project.name
             record.requestHeaders = (0..<18).map { HTTPField("X-Field-\($0)", String(repeating: "value", count: 40)) }
             record.sentHeaders = record.requestHeaders
             record.sentHeaders[0] = HTTPField("X-Field-0", "after-\(index)")
@@ -99,6 +110,23 @@ struct InspectorPerformanceChecks {
             precondition(inspector.isCollapsed)
             assertIdle(controller, label: "closed-\(index)")
         }
+        model.history.selectedID = model.history.records[0].id
+        settle(controller)
+        let details = inspector.viewController as! WorkspaceInspectorController
+        let link = views(NSButton.self, in: details.requests.view).first { $0.accessibilityLabel() == "命中的规则与项目" }!
+        precondition(link.isEnabled && link.font!.pointSize == 14)
+        let method = views(RequestMethodTag.self, in: details.requests.view).first!
+        precondition(method.bounds.width == method.intrinsicContentSize.width && method.bounds.height == 24)
+        let status = views(NSTextField.self, in: details.requests.view).first { $0.stringValue == "302" }!
+        precondition(status.textColor == NSColor.systemOrange && status.font == RequestStatusStyle.font)
+        link.performClick(nil)
+        settle(controller)
+        precondition(model.selection == .rules && model.selectedWorkflowID == workflow.id && model.selectedStepID == nil)
+        model.selection = .requests
+        model.document.projects = []
+        settle(controller)
+        precondition(!link.isEnabled, "Deleted workflows must not navigate to a stale selection")
+        print("Summary checks passed: shared method/status styles, direct matched-workflow navigation and deleted-target disabling")
         controller.tearDown()
         window.contentViewController = nil
         window.close()
@@ -108,8 +136,9 @@ struct InspectorPerformanceChecks {
     static func checkDisplayMode(_ controller: WorkspaceSplitController, window: NSWindow) {
         let inspector = controller.splitViewItems[2].viewController.view
         let mode = window.toolbar!.items.first { $0.itemIdentifier.rawValue == "workspace.inspectorMode" }!.view as! NSSegmentedControl
-        let tabs = views(NSSegmentedControl.self, in: inspector).first { $0.segmentCount == 4 }!
+        let tabs = views(NSSegmentedControl.self, in: inspector).first { $0.segmentCount == 5 }!
         let originalHeader = String(repeating: "value", count: 40)
+        precondition((0..<tabs.segmentCount).map { tabs.label(forSegment: $0)! } == ["请求头", "查询参数", "请求体", "响应头", "响应体"])
 
         func select(_ control: NSSegmentedControl, _ index: Int) {
             control.selectedSegment = index
@@ -136,6 +165,7 @@ struct InspectorPerformanceChecks {
         for width: CGFloat in [400, 520, 760] {
             controller.splitView.setPosition(controller.splitView.bounds.maxX - width - controller.splitView.dividerThickness, ofDividerAt: 1)
             settle(controller)
+            precondition(abs(inspector.bounds.width - width) <= 2, "Data tabs must preserve the 400 pt inspector minimum")
             let tabFrame = tabs.convert(tabs.bounds, to: inspector)
             let button = copyButton()!
             let buttonFrame = button.convert(button.bounds, to: inspector)
@@ -146,7 +176,7 @@ struct InspectorPerformanceChecks {
                          "Tabs must retain their native height")
             precondition(abs(buttonFrame.height - button.intrinsicContentSize.height) <= 1,
                          "Copy button must not stretch the entire tab row vertically")
-            precondition(tabs.segmentDistribution == .fillEqually)
+            precondition(tabs.segmentDistribution == .fillProportionally)
             precondition(tabFrame.minX >= 0 && buttonFrame.maxX <= inspector.bounds.width)
             precondition(abs(buttonFrame.maxX - (inspector.bounds.width - 16)) <= 1,
                          "Content tabs must expand across the inspector, keeping the copy action at the trailing inset")
@@ -160,9 +190,17 @@ struct InspectorPerformanceChecks {
         }
         controller.splitView.setPosition(controller.splitView.bounds.maxX - initialWidth - controller.splitView.dividerThickness, ofDividerAt: 1)
         settle(controller)
+        select(tabs, 1)
+        waitFor(controller) { headerValue() == "after" && copyButton()?.isEnabled == true }
+        precondition(copyButton()?.accessibilityLabel() == "复制当前查询参数")
+        select(mode, 0)
+        waitFor(controller) { headerValue() == "before" }
+        select(mode, 2)
+        waitFor(controller) { headerValue() == "最终  after" }
+        select(tabs, 0)
         select(mode, 0)
         waitFor(controller) { headerValue() == originalHeader }
-        select(tabs, 1)
+        select(tabs, 2)
         waitFor(controller) {
             views(NSButton.self, in: inspector).contains { !$0.isHiddenOrHasHiddenAncestor && $0.title == "原始数据" && $0.isEnabled }
         }
@@ -177,7 +215,7 @@ struct InspectorPerformanceChecks {
         waitFor(controller) { headerValue() == "after-0" }
         select(mode, 2)
         waitFor(controller) { headerValue() == "最终  after-0" }
-        select(tabs, 1)
+        select(tabs, 2)
         waitFor(controller) {
             guard let source = sourceValue() else { return false }
             return source.contains("[1,2,3]") && source.contains("[4,5]")
@@ -187,13 +225,13 @@ struct InspectorPerformanceChecks {
         waitFor(controller) { headerValue() == "after-0" }
         precondition(!views(NSButton.self, in: inspector).contains { ["修改前", "修改后", "修改对比"].contains($0.title) },
                      "The inspector footer must not retain a duplicate display-mode button")
-        select(tabs, 3)
+        select(tabs, 4)
         waitFor(controller) { copyButton()?.isEnabled == false }
         precondition(copyButton()?.accessibilityLabel() == "复制当前响应体")
         select(tabs, 0)
         waitFor(controller) { headerValue() == "after-0" && copyButton()?.isEnabled == true }
         print("Display-mode integration passed: toolbar actions update real Header/source data across content tabs; source format survives tab changes; no footer mode button")
-        print("Data tabs/copy layout passed at 400/520/760 pt: native full-size evenly filled tabs, one trailing copy action, active-tab labels and unavailable-data disabling; pasteboard untouched")
+        print("Data tabs/copy layout passed at 400/520/760 pt: native full-size proportionally filled tabs, one trailing copy action, active-tab labels and unavailable-data disabling; pasteboard untouched")
     }
 
     static func views<T: NSView>(_ type: T.Type, in root: NSView) -> [T] {

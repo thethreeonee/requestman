@@ -19,8 +19,45 @@ struct RequestPayloadPresentation: Sendable {
         if record.outcome == .tunnel {
             return Self(emptyTitle: "加密隧道", emptyDescription: "此连接未解密，无法查看内部请求与响应。")
         }
+        if tab == .queryParameters { return query(record: record, version: version) }
         if !tab.isBody { return headers(record: record, tab: tab, version: version) }
         return body(record: record, tab: tab, version: version)
+    }
+
+    private static func query(record: CaptureRecord, version: InspectionVersion) -> Self {
+        struct Item {
+            let id: String
+            let item: URLQueryItem
+        }
+        func items(_ url: String) -> [Item] {
+            var counts: [String: Int] = [:]
+            return (URLComponents(string: url)?.queryItems ?? []).map { item in
+                let index = counts[item.name, default: 0]
+                counts[item.name] = index + 1
+                return Item(id: "query:\(item.name):\(index)", item: item)
+            }
+        }
+        let original = items(record.url), final = items(record.finalURL)
+        let before = Dictionary(uniqueKeysWithValues: original.map { ($0.id, $0.item) })
+        let after = Dictionary(uniqueKeysWithValues: final.map { ($0.id, $0.item) })
+        let canCompare = !record.urlWasTruncated && !record.finalURLWasTruncated
+        let order = version == .original ? original : (version == .final ? final : original + final.filter { before[$0.id] == nil })
+        let nodes = order.map { entry -> RequestDataNode in
+            let old = before[entry.id], new = after[entry.id]
+            let item = version == .original ? old! : (new ?? old)!
+            let change: RequestDataChange = !canCompare || old == new ? .unchanged :
+                (old == nil ? .added : (new == nil ? .removed : .modified))
+            return RequestDataNode(id: entry.id, name: item.name, value: item.value ?? "（无值）",
+                                   copyValue: item.value ?? "", change: change,
+                                   originalValue: version == .difference && change == .modified ? (old?.value ?? "（无值）") : nil,
+                                   jsonStringValue: item.value)
+        }
+        let selected = version == .original ? original : final
+        let truncated = version == .original ? record.urlWasTruncated : record.finalURLWasTruncated
+        return Self(nodes: nodes,
+                    copyText: truncated ? "" : selected.map { $0.item.name + ($0.item.value.map { "=" + $0 } ?? "") }.joined(separator: "\n"),
+                    summary: "\(nodes.count) 项", notice: canCompare ? nil : "URL 记录不完整，查询参数可能缺失，无法计算差异。",
+                    emptyTitle: nodes.isEmpty ? "无查询参数" : nil, canCompare: canCompare)
     }
 
     private static func headers(record: CaptureRecord, tab: RequestDetailTab, version: InspectionVersion) -> Self {

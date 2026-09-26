@@ -279,7 +279,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         toolbar.displayMode = .iconOnly
         toolbar.allowsUserCustomization = false
         toolbar.autosavesConfiguration = false
-        toolbar.centeredItemIdentifiers = [Item.environment]
+        toolbar.centeredItemIdentifiers = [Item.capture, Item.environment]
         sectionControl.target = self
         sectionControl.action = #selector(selectSection(_:))
         sectionControl.segmentStyle = .automatic
@@ -353,9 +353,8 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
     private var toolbarIdentifiers: [NSToolbarItem.Identifier] {
         var identifiers: [NSToolbarItem.Identifier] = []
         if state.section == .rules { identifiers += [Item.toggleSidebar, .sidebarTrackingSeparator] }
-        identifiers += [Item.section, .flexibleSpace, Item.environment, .flexibleSpace]
+        identifiers += [Item.section, .flexibleSpace, Item.capture, Item.environment, .flexibleSpace]
         if state.section == .requests { identifiers.append(Item.search) }
-        identifiers.append(Item.capture)
         identifiers.append(.inspectorTrackingSeparator)
         if !inspectorItem.isCollapsed { identifiers.append(Item.inspectorTitle) }
         identifiers.append(.flexibleSpace)

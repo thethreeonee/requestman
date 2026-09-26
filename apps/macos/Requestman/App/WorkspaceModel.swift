@@ -288,6 +288,21 @@ final class WorkspaceModel {
         let workflow = RequestWorkflow(); document.projects[i].workflows.append(workflow)
         selectedWorkflowID = workflow.id; selectedStepID = nil
     }
+    func addWorkflow(matchingURL url: String) {
+        guard loaded else { return }
+        if document.projects.isEmpty { document.projects.append(WorkflowProject()) }
+        let index = document.projects.firstIndex { $0.workflows.contains { $0.id == selectedWorkflowID } } ?? 0
+        var workflow = RequestWorkflow()
+        workflow.matchTarget = .url
+        workflow.matchRule = .equals
+        workflow.matchPattern = url
+        document.projects[index].workflows.append(workflow)
+        selectedWorkflowID = workflow.id
+        selectedStepID = nil
+        editingResponse = false
+        history.selectedID = nil
+        selection = .rules
+    }
     func deleteWorkflow(_ id: UUID) {
         for i in document.projects.indices { document.projects[i].workflows.removeAll { $0.id == id } }
         if selectedWorkflowID == id { selectedWorkflowID = nil; selectedStepID = nil }

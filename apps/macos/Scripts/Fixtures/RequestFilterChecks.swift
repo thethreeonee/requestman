@@ -8,7 +8,7 @@ private final class FilterFixture {
     var selectedID: UUID?
     var paused = false
     var records: [CaptureRecord] = (0..<8).map { index in
-        let methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "GET"]
+        let methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT"]
         let statuses: [Int?] = [101, 200, 302, 404, 500, nil, 204, 200]
         var record = CaptureRecord(method: methods[index], url: "https://example.test/very/long/path/\(index)")
         record.project = "商城项目"; record.environment = "dev"; record.status = statuses[index]
@@ -40,7 +40,6 @@ private final class FilterFixtureView: ObservedViewController {
         table.onSelectionChange = { [weak model] in model?.selectedID = $0 }
         let stack = NativeUI.stack([controls, table], spacing: 0)
         NativeUI.pin(stack, to: view)
-        controls.heightAnchor.constraint(equalToConstant: 48).isActive = true
         for child in [controls, table] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         table.setContentHuggingPriority(.defaultLow, for: .vertical)
     }
@@ -61,7 +60,7 @@ private enum RequestFilterChecks {
         let host = FilterFixtureView(model: model, defaults: defaults)
         let window = makeWindow(host)
         defer { window.close() }
-        for width in [1440.0, 820, 600, 420] {
+        for width in [1440.0, 820, 600, 569, 567, 420, 600] {
             window.setContentSize(NSSize(width: width, height: 620))
             settle(host.view)
             precondition(abs(host.view.bounds.width - width) < 2, "Content must remain at requested width \(width), got \(host.view.bounds.width)")
@@ -72,14 +71,43 @@ private enum RequestFilterChecks {
             precondition(!scroll.hasHorizontalScroller)
             precondition(abs(table.tableColumns.reduce(0) { $0 + $1.width } - scroll.contentSize.width) < 2)
             precondition(table.numberOfRows == 8)
+            checkMethodLabels(table)
             precondition(!views.contains { $0 is NSSearchField }, "Log search must live only in the window toolbar")
             let actions = views.compactMap { $0 as? NSButton }
                 .filter { $0.action == NSSelectorFromString("performAction:") }
-            precondition(actions.count == 2)
+            precondition(actions.count == 3)
+            let types = views.compactMap { $0 as? NSSegmentedControl }.first!
+            precondition(types.segmentCount == CaptureResourceType.allCases.count && !types.isHidden)
+            precondition((0..<types.segmentCount).map { types.label(forSegment: $0)! } == CaptureResourceType.allCases.map(\.rawValue))
+            precondition(!descendants(host.controls).contains { $0 is NSPopUpButton }, "All resource types stay inline")
+            if #available(macOS 26.0, *) { precondition(types.controlSize == .extraLarge) }
+            else { precondition(types.controlSize == .large) }
+            let nativeHeight = types.intrinsicContentSize.height
+            precondition(types.frame.width > 0 && types.frame.height == nativeHeight)
+            precondition(types.bounds.size == types.frame.size, "Native text must never be stretched by a bounds/frame scale")
+            precondition(types.frame.width >= types.intrinsicContentSize.width,
+                         "All nine resource labels must fit at \(width) pt: frame=\(types.frame), natural=\(types.intrinsicContentSize), segments=\((0..<types.segmentCount).map { types.width(forSegment: $0) })")
+            if #available(macOS 26.0, *) { precondition(types.borderShape == .capsule) }
+            let filterButton = actions.first { $0.accessibilityLabel() == "筛选" }!
+            precondition(filterButton.title.isEmpty && filterButton.image != nil)
+            precondition(types.frame.height == filterButton.frame.height)
+            precondition(host.controls.bounds.contains(types.frame))
+            for index in 0..<types.segmentCount {
+                let textWidth = (types.label(forSegment: index)! as NSString).size(withAttributes: [.font: types.font!]).width
+                precondition(types.width(forSegment: index) >= ceil(textWidth) + 16,
+                             "Every resource segment must retain its wider horizontal padding")
+            }
+            if width < types.intrinsicContentSize.width + nativeHeight * 3 + 63 {
+                precondition(host.controls.bounds.height == nativeHeight * 2 + 24 && types.frame.maxY < filterButton.frame.minY,
+                             "Narrow layouts move all nine full-width segments onto their own row: width=\(width), controls=\(host.controls.bounds), frame=\(host.controls.frame), heights=\(host.controls.constraints.filter { $0.firstAttribute == .height }.map { $0.constant }), segments=\(types.frame), filter=\(filterButton.frame)")
+            } else {
+                precondition(host.controls.bounds.height == nativeHeight + 16 && types.frame.maxX < filterButton.frame.minX)
+                precondition(types.frame.midY == filterButton.frame.midY)
+            }
             let rect = actions[0].convert(actions[0].bounds, to: host.view)
             for button in actions {
                 let buttonFrame = button.convert(button.bounds, to: host.view)
-                precondition(button.bounds.size == NSSize(width: 32, height: 32),
+                precondition(button.bounds.size == NSSize(width: nativeHeight, height: nativeHeight),
                              "Pause and clear must have identical native control sizes at every viewport width")
                 precondition(abs(buttonFrame.midY - rect.midY) < 1)
                 if #available(macOS 26.0, *) {
@@ -94,6 +122,9 @@ private enum RequestFilterChecks {
                 }
             }
             precondition(!window.isVisible)
+            checkResourceSegmentPaint(host.controls, segments: types)
+            try! saveSnapshot(host.controls, name: "request-filters-\(Int(width))")
+            print("Resource segments at \(Int(width)) pt: frame=\(types.frame), natural=\(types.intrinsicContentSize)")
         }
         let actions = descendants(host.view).compactMap { $0 as? NSButton }
             .filter { $0.action == NSSelectorFromString("performAction:") }
@@ -101,7 +132,7 @@ private enum RequestFilterChecks {
         pause.performClick(nil)
         settle(host.view)
         precondition(model.paused && pause.accessibilityLabel() == "继续记录")
-        precondition(pause.bounds.size == NSSize(width: 32, height: 32))
+        precondition(pause.bounds.size == pause.frame.size && pause.bounds.width == pause.bounds.height)
         pause.performClick(nil)
         settle(host.view)
         precondition(!model.paused)
@@ -122,8 +153,18 @@ private enum RequestFilterChecks {
         model.filter = CaptureRecordFilter()
         settle(host.view)
         precondition(table.numberOfRows == 8)
+        let types = descendants(host.controls).compactMap { $0 as? NSSegmentedControl }.first!
+        for (index, type) in CaptureResourceType.allCases.enumerated() {
+            types.selectedSegment = index
+            precondition(NSApp.sendAction(types.action!, to: types.target, from: types))
+            settle(host.view)
+            precondition(model.filter.resource == type)
+        }
+        model.filter = CaptureRecordFilter()
+        settle(host.view)
         window.setContentSize(NSSize(width: 1440, height: 620))
         settle(host.view)
+        checkRequestMenu(table, host: host, model: model)
         checkRowPresentation(table)
         for appearance in [NSAppearance.Name.aqua, .darkAqua] {
             window.appearance = NSAppearance(named: appearance)
@@ -144,9 +185,9 @@ private enum RequestFilterChecks {
         model.filter.headers = [.init(name: "Content-Type", value: "json")]
         let panel = RequestFilterPanel(filter: model.filter, records: model.records) { model.filter = $0 }
         let panelWindow = makeWindow(panel)
-        panelWindow.setContentSize(NSSize(width: 560, height: 370))
+        panelWindow.setContentSize(panel.preferredContentSize)
         settle(panel.view)
-        let combo = descendants(panel.view).compactMap { $0 as? NSComboBox }.first!
+        let combo = descendants(panel.view).compactMap { $0 as? NSComboBox }.first { $0.accessibilityLabel() == "Header 名称" }!
         precondition(combo.stringValue == "Content-Type" && combo.numberOfItems > 0)
         combo.stringValue = "Accept"
         combo.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: combo))
@@ -171,10 +212,78 @@ private enum RequestFilterChecks {
         remove.performClick(nil)
         settle(panel.view)
         precondition(model.filter.headers.isEmpty, "Native remove action must remove its bound condition")
+        checkMetadataFilters(panel, window: panelWindow, model: model)
         precondition(!panelWindow.isVisible)
         panelWindow.close()
         print("Request filter CLI checks passed: 420–1440 pt layout, seven columns, status colors and selection restoration, single-line request/reuse, no horizontal scrolling, filter model search/reset, table selection, Header suggestions and editing. Hidden component windows only; no App or visual acceptance.")
     }
+    private static func checkResourceSegmentPaint(_ controls: NSView, segments: NSSegmentedControl) {
+        guard #available(macOS 26.0, *) else { return }
+        let appearance = controls.appearance
+        controls.appearance = NSAppearance(named: .aqua)
+        controls.wantsLayer = true
+        let background = controls.layer?.backgroundColor
+        controls.layer?.backgroundColor = NSColor.white.cgColor
+        defer { controls.appearance = appearance; controls.layer?.backgroundColor = background }
+        controls.displayIfNeeded()
+        let bitmap = controls.bitmapImageRepForCachingDisplay(in: controls.bounds)!
+        controls.cacheDisplay(in: controls.bounds, to: bitmap)
+        let scale = CGFloat(bitmap.pixelsHigh) / controls.bounds.height
+        let x = Int(segments.frame.midX * scale)
+        let rows = (0..<bitmap.pixelsHigh).filter { y in
+            guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return false }
+            return color.redComponent < 0.98 && color.greenComponent < 0.98 && color.blueComponent < 0.98
+        }
+        guard let first = rows.first, let last = rows.last else { preconditionFailure("Resource bezel did not render") }
+        let paintedHeight = CGFloat(last - first + 1) / scale
+        precondition(abs(paintedHeight - segments.intrinsicContentSize.height) <= 1,
+                     "The native bezel itself must render at button height, not merely its frame: \(paintedHeight) pt")
+        print("Resource segment painted height: \(paintedHeight) pt")
+    }
+
+    private static func checkMetadataFilters(_ panel: RequestFilterPanel, window: NSWindow, model: FilterFixture) {
+        let views = descendants(panel.view)
+        func popup(_ label: String) -> NSPopUpButton {
+            views.compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == label }!
+        }
+        func select(_ label: String, _ value: String) {
+            let control = popup(label)
+            control.selectItem(withTitle: value)
+            precondition(NSApp.sendAction(control.action!, to: control.target, from: control))
+        }
+        let domain = views.compactMap { $0 as? NSComboBox }.first { $0.accessibilityLabel() == "域名" }!
+        let url = views.compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "URL" }!
+        precondition(domain.objectValues.compactMap { $0 as? String }.contains("example.test"))
+        select("状态码", "200"); select("请求方法", "POST"); select("环境", "dev")
+        url.stringValue = "/long/path"
+        url.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: url))
+        domain.stringValue = "example.test"
+        domain.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: domain))
+        precondition(model.filter.statusCode == 200 && model.filter.method == "POST" && model.filter.environment == "dev")
+        precondition(model.filter.urlContains == "/long/path" && model.filter.domain == "example.test")
+        precondition(model.filter.activeConditionCount == 5)
+        precondition(model.records.filter { model.filter.matches($0) }.map(\.id) == [model.records[1].id])
+        domain.selectItem(at: 0)
+        panel.comboBoxSelectionDidChange(Notification(name: NSComboBox.selectionDidChangeNotification, object: domain))
+        precondition(model.filter.domain == "example.test")
+        panel.update(filter: model.filter, records: [])
+        precondition(domain.stringValue == "example.test" && popup("状态码").titleOfSelectedItem == "200")
+        var retained = model.filter; retained.statusCode = 418
+        panel.update(filter: retained, records: [])
+        precondition(popup("状态码").titleOfSelectedItem == "418")
+        window.setContentSize(panel.preferredContentSize)
+        settle(panel.view)
+        for control in [popup("状态码"), popup("请求方法"), popup("环境"), domain, url] as [NSControl] {
+            let frame = control.convert(control.bounds, to: panel.view)
+            precondition(panel.view.bounds.contains(frame) && frame.width >= 80 && frame.height >= 20,
+                         "Metadata controls must remain visible and usable: \(frame)")
+        }
+        let reset = views.compactMap { $0 as? NSButton }.first { $0.title == "重置" }!
+        reset.performClick(nil)
+        precondition(model.filter == CaptureRecordFilter())
+        precondition(domain.stringValue.isEmpty && url.stringValue.isEmpty && popup("状态码").indexOfSelectedItem == 0)
+    }
+
     private static func checkColumnWidths(_ table: NSTableView, host: NSViewController,
                                           window: NSWindow, model: FilterFixture, defaults: UserDefaults) {
         let key = RequestRecordsTable.columnWidthsKey
@@ -267,6 +376,50 @@ private enum RequestFilterChecks {
         let duration = table.view(atColumn: 6, row: 4, makeIfNecessary: true) as! NSTableCellView
         precondition(duration.textField?.stringValue == "3.2 s" && duration.textField?.alignment == .right)
     }
+    private static func checkMethodLabels(_ table: NSTableView) {
+        for row in 0..<table.numberOfRows {
+            let cell = table.view(atColumn: 2, row: row, makeIfNecessary: true)!
+            cell.layoutSubtreeIfNeeded()
+            let method = descendants(cell).compactMap { $0 as? NSTextField }.first {
+                $0.superview !== cell
+            }!
+            let tag = method.superview!
+            precondition(method.bounds.width >= ceil(method.intrinsicContentSize.width),
+                         "Method text must fit completely: \(method.stringValue), available=\(method.bounds.width), needed=\(method.intrinsicContentSize.width)")
+            precondition(tag.frame.maxX <= cell.bounds.width,
+                         "The request column must reserve the full method tag width")
+        }
+    }
+    private static func checkRequestMenu(_ table: NSTableView, host: FilterFixtureView, model: FilterFixture) {
+        var requestedURL: String?
+        host.table.onModifyRequest = { requestedURL = $0 }
+        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        func menu(at point: NSPoint) -> NSMenu? {
+            let location = table.convert(point, to: nil)
+            let event = NSEvent.mouseEvent(with: .rightMouseDown, location: location, modifierFlags: [],
+                timestamp: 0, windowNumber: table.window!.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+            return table.menu(for: event)
+        }
+        let row = table.rect(ofRow: 2)
+        let clickedMenu = menu(at: NSPoint(x: row.midX, y: row.midY))!
+        precondition(clickedMenu.items.map(\.title) == ["修改请求"])
+        let item = clickedMenu.items[0]
+        let original = model.records
+        let clickedURL = original[2].url
+        model.records.insert(CaptureRecord(method: "GET", url: "https://new.test"), at: 0)
+        settle(host.view)
+        precondition(NSApp.sendAction(item.action!, to: item.target, from: item))
+        precondition(requestedURL == clickedURL, "The context action uses the clicked row even after a new log arrives")
+        model.records.removeAll()
+        settle(host.view)
+        precondition(NSApp.sendAction(item.action!, to: item.target, from: item))
+        precondition(requestedURL == clickedURL)
+        precondition(menu(at: NSPoint(x: 20, y: 20)) == nil, "Empty space has no request menu")
+        model.records = original
+        model.selectedID = nil
+        settle(host.view)
+    }
+
     private static func saveSnapshot(_ view: NSView, name: String) throws {
         guard let directory = ProcessInfo.processInfo.environment["REQUESTMAN_FILTER_SNAPSHOT_DIR"] else { return }
         let destination = URL(fileURLWithPath: directory, isDirectory: true)

@@ -3,17 +3,18 @@ import Foundation
 import RequestmanCore
 
 enum RequestDetailTab: String, CaseIterable, Identifiable, Sendable {
-    case requestHeaders, requestBody, responseHeaders, responseBody
+    case requestHeaders, queryParameters, requestBody, responseHeaders, responseBody
     var id: Self { self }
     var title: String {
         switch self {
         case .requestHeaders: "请求头"
+        case .queryParameters: "查询参数"
         case .requestBody: "请求体"
         case .responseHeaders: "响应头"
         case .responseBody: "响应体"
         }
     }
-    var isRequest: Bool { self == .requestHeaders || self == .requestBody }
+    var isRequest: Bool { self == .requestHeaders || self == .queryParameters || self == .requestBody }
     var isBody: Bool { self == .requestBody || self == .responseBody }
 }
 

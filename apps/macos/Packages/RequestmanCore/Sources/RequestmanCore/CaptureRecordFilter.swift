@@ -73,6 +73,9 @@ public struct CaptureRecordFilter: Equatable, Sendable {
     public var environment = ""
     public var outcome: CaptureRecord.Outcome?
     public var method = ""
+    public var statusCode: Int?
+    public var urlContains = ""
+    public var domain = ""
     public var headerSource: CaptureHeaderSource = .original
     public var headerCombination: CaptureHeaderCombination = .all
     public var headers: [CaptureHeaderCondition] = []
@@ -80,7 +83,8 @@ public struct CaptureRecordFilter: Equatable, Sendable {
     public init() {}
 
     public var activeConditionCount: Int {
-        [!project.isEmpty, !environment.isEmpty, outcome != nil, !method.isEmpty, inverted].filter { $0 }.count
+        [!project.isEmpty, !environment.isEmpty, outcome != nil, !method.isEmpty,
+         statusCode != nil, !urlQuery.isEmpty, !domainQuery.isEmpty, inverted].filter { $0 }.count
             + headers.filter(\.isActive).count
     }
     public var hasCriteria: Bool {
@@ -96,10 +100,15 @@ public struct CaptureRecordFilter: Equatable, Sendable {
             && (environment.isEmpty || record.environment == environment)
             && (outcome == nil || record.outcome == outcome)
             && (method.isEmpty || record.method.caseInsensitiveCompare(method) == .orderedSame)
+            && (statusCode == nil || record.status == statusCode)
+            && (urlQuery.isEmpty || record.url.localizedCaseInsensitiveContains(urlQuery))
+            && (domainQuery.isEmpty || URL(string: record.url)?.host?.lowercased() == domainQuery)
         if !metadataMatches { return inverted }
         guard let headerMatches = matchesHeaders(record) else { return false }
         return inverted ? !headerMatches : headerMatches
     }
+    private var urlQuery: String { urlContains.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var domainQuery: String { domain.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
     private func matchesHeaders(_ record: CaptureRecord) -> Bool? {
         let conditions = headers.filter(\.isActive)
         guard !conditions.isEmpty else { return true }

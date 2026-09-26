@@ -3,6 +3,55 @@ import Testing
 @testable import RequestmanCore
 
 struct CaptureRecordFilterTests {
+    @Test func responseStatusURLDomainMethodAndEnvironmentCombineWithHeaders() {
+        var record = record()
+        record.status = 201
+        record.originalStatus = 500
+        record.finalURL = "https://rewritten.test/other"
+        var filter = CaptureRecordFilter()
+        filter.statusCode = 201
+        filter.urlContains = " /ORDERS "
+        filter.domain = " EXAMPLE.TEST "
+        filter.method = "post"
+        filter.environment = "dev"
+        filter.headers = [.init(name: "content-type", value: "json")]
+        #expect(filter.activeConditionCount == 6)
+        #expect(filter.matches(record))
+        for mismatch in 0..<6 {
+            var copy = record
+            switch mismatch {
+            case 0: copy.status = 500
+            case 1: copy.url = "https://example.test/other"
+            case 2: copy.url = "https://other.test/orders"
+            case 3: copy.method = "GET"
+            case 4: copy.environment = "prod"
+            default: copy.requestHeaders = []
+            }
+            #expect(!filter.matches(copy))
+            var inverted = filter; inverted.inverted = true
+            #expect(inverted.matches(copy))
+        }
+        record.status = nil
+        #expect(!filter.matches(record))
+    }
+
+    @Test func domainUsesOnlyTheOriginalHostWithoutPortOrPath() {
+        var filter = CaptureRecordFilter()
+        filter.domain = "example.test"
+        for url in ["https://EXAMPLE.TEST:8443/orders", "https://example.test/orders?target=other.test"] {
+            #expect(filter.matches(CaptureRecord(method: "GET", url: url)))
+        }
+        for url in ["https://example.test.evil.test/orders", "https://api.example.test/orders",
+                    "https://other.test/example.test", "not a URL"] {
+            #expect(!filter.matches(CaptureRecord(method: "GET", url: url)))
+        }
+        var rewritten = record(); rewritten.url = "https://other.test/orders"; rewritten.finalURL = "https://example.test/orders"
+        #expect(!filter.matches(rewritten))
+        filter.domain = " \n"; filter.urlContains = " \t"
+        #expect(filter.activeConditionCount == 0 && !filter.hasCriteria)
+        #expect(filter.matches(record()))
+    }
+
     private func record() -> CaptureRecord {
         var record = CaptureRecord(method: "POST", url: "https://example.test/orders")
         record.requestHeaders = [HTTPField("Content-Type", "application/json"), HTTPField("X-Tag", "Alpha"), HTTPField("X-Tag", "Beta")]

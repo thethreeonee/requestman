@@ -17,6 +17,7 @@ try:
     binary = temporary / "check"
     subprocess.run(["swiftc", *flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore",
                     str(root / "Requestman/Features/Workspace/AppKitSupport.swift"),
+                    str(root / "Requestman/Features/Workspace/WorkspaceSection.swift"),
                     *map(str, sorted((root / "Requestman/Features/Rules").glob("*.swift"))),
                     str(root / "Scripts/Fixtures/RulesUIChecks.swift"), "-o", str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=45)

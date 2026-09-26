@@ -15,6 +15,8 @@ enum RequestClipboard {
 @MainActor @Observable
 final class WorkspaceModel {
     var settingsSection: WorkspaceSettingsSection = .general
+    var selectedWorkflowID: UUID?
+    var editingResponse = false
     var selectedStepID: UUID?
     var selectedStep: ModificationStep?
     var selection: WorkspaceSection = .rules
@@ -67,6 +69,8 @@ enum WorkspaceSettingsSection { case general, environments }
     override func loadView() { view = NSView() }
 }
 @MainActor final class RequestInspectorViewController: ObservedViewController {
+    var openWorkflow: ((UUID) -> Void)?
+    var workflowExists: (UUID) -> Bool = { _ in false }
     let history: SidebarHistoryFixture
     let mode: RequestInspectionMode
     var isPresented = false
@@ -437,7 +441,7 @@ struct WorkspaceSidebarChecks {
         expectToolbar(window, inspectorVisible: false, requests: true)
         model.history.filter = CaptureRecordFilter()
         waitFor(host) { field.stringValue.isEmpty }
-        log("Toolbar search passed: capture-left placement, tab visibility, filtering, clear/reset and retained query")
+        log("Toolbar search passed: trailing placement, tab visibility, filtering, clear/reset and retained query")
     }
 
     private static func checkHostedBodyAction<T: NSView>(_ host: NSViewController, window: NSWindow,
@@ -717,8 +721,8 @@ struct WorkspaceSidebarChecks {
         precondition(searches.count == (requests ? 1 : 0), "Search appears only on the request log tab")
         if requests {
             let searchIndex = items.firstIndex { $0 is NSSearchToolbarItem }!
-            precondition(items[searchIndex + 1].itemIdentifier.rawValue == "workspace.capture",
-                         "Search must be immediately left of capture")
+            precondition(items[searchIndex + 1].itemIdentifier == .inspectorTrackingSeparator,
+                         "Search must remain at the trailing edge of the main toolbar")
         }
         precondition(items.filter { $0.itemIdentifier == inspectorToggleIdentifier }.count == 1)
         precondition(items.filter { $0.itemIdentifier == sidebarToggleIdentifier }.count == (requests ? 0 : 1))
