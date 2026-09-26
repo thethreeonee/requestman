@@ -7,6 +7,7 @@ struct WorkspaceToolbarSnapshot: Equatable {
     let section: WorkspaceSection
     let selectedRequestID: UUID?
     let selectedStepID: UUID?
+    let stepAnnotation: String?
     let hasSelectedStep: Bool
     let hasSelectedRequest: Bool
     let environmentName: String
@@ -21,6 +22,10 @@ struct WorkspaceToolbarSnapshot: Equatable {
         section = model.selection
         selectedStepID = model.selectedStepID
         hasSelectedStep = model.selectedStep != nil
+        if section == .rules, let workflow = model.document.projects.flatMap(\.workflows).first(where: { $0.id == model.selectedWorkflowID }),
+           let index = (model.editingResponse ? workflow.responseSteps : workflow.requestSteps).firstIndex(where: { $0.id == model.selectedStepID }) {
+            stepAnnotation = "\(model.editingResponse ? "响应" : "请求")阶段 · 第 \(index + 1) 步"
+        } else { stepAnnotation = nil }
         selectedRequestID = model.history.selectedID
         hasSelectedRequest = model.history.selected != nil
         environmentName = model.document.environment?.name ?? "无环境"
@@ -43,6 +48,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         static let capture = NSToolbarItem.Identifier("workspace.capture")
         static let inspectorTitle = NSToolbarItem.Identifier("workspace.inspectorTitle")
         static let inspectorMode = NSToolbarItem.Identifier("workspace.inspectorMode")
+        static let templateInfo = NSToolbarItem.Identifier("workspace.templateInfo")
         static let inspectorMore = NSToolbarItem.Identifier("workspace.inspectorMore")
         static let toggleSidebar = NSToolbarItem.Identifier("workspace.toggleSidebar")
         static let toggleInspector = NSToolbarItem.Identifier("workspace.toggleInspector")
@@ -70,6 +76,9 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
     private var isTearingDown = false
 
     private let toolbar = NSToolbar(identifier: "Requestman.Workspace")
+    private let inspectorTitleLabel = NativeUI.label("", size: NSFont.preferredFont(forTextStyle: .title2).pointSize, weight: .semibold)
+    private let inspectorAnnotationLabel = NativeUI.label("", size: 11, secondary: true)
+    private lazy var inspectorHeading = NativeUI.stack([inspectorTitleLabel, inspectorAnnotationLabel], spacing: 1)
     private weak var installedWindow: NSWindow?
     private var previousToolbar: NSToolbar?
     private var previousTitleVisibility: NSWindow.TitleVisibility = .visible
@@ -84,6 +93,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
     )
     private let requestSearchItem = NSSearchToolbarItem(itemIdentifier: Item.search)
     private let captureButton = NSButton(title: "", target: nil, action: nil)
+    private var templatePopover: NSPopover?
     private var environmentPopover: NSPopover?
     private weak var environmentPreviousFocus: NSResponder?
 
@@ -183,6 +193,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         let sectionChanged = state.section != next.section
         let requestChanged = state.selectedRequestID != next.selectedRequestID
         let stepChanged = state.selectedStepID != next.selectedStepID
+        if sectionChanged || stepChanged { templatePopover?.close() }
         if sectionChanged, state.section == .rules { rulesSidebarCollapsed = sidebarItem.isCollapsed }
         state = next
         mainHost.update(section: next.section)
@@ -239,6 +250,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
 
     private func updateInspectorContentVisibility() {
         let isPresented = hasInspectorSelection && !inspectorItem.isCollapsed
+        if !isPresented || state.section != .rules { templatePopover?.close() }
         guard inspectorContentIsPresented != isPresented || inspectorContentSection != state.section else { return }
         inspectorContentIsPresented = isPresented
         inspectorContentSection = state.section
@@ -287,6 +299,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
             return hasInspectorSelection
         }
         if item.action == #selector(toggleSidebar(_:)) { return state.section == .rules }
+        if item.action == #selector(showTemplateValues(_:)) { return state.section == .rules && !inspectorItem.isCollapsed }
         return super.validateUserInterfaceItem(item)
     }
 
@@ -459,6 +472,10 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         if !inspectorItem.isCollapsed { identifiers.append(Item.inspectorTitle) }
         identifiers.append(.flexibleSpace)
         if state.section == .requests, !inspectorItem.isCollapsed { identifiers += [Item.inspectorMode, Item.inspectorMore] }
+        if state.section == .rules, !inspectorItem.isCollapsed {
+            // A native spacer separates the toolbar's automatic glass groups.
+            identifiers += [Item.templateInfo, .space]
+        }
         identifiers.append(Item.toggleInspector)
         return identifiers
     }
@@ -496,6 +513,13 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         updateToggleItems()
     }
 
+    private func updateInspectorHeading() {
+        inspectorTitleLabel.stringValue = inspectorTitle
+        inspectorAnnotationLabel.stringValue = state.stepAnnotation ?? ""
+        inspectorAnnotationLabel.isHidden = state.stepAnnotation == nil
+        inspectorAnnotationLabel.identifier = .init("workspace.stepAnnotation")
+    }
+
     private func updateToggleItems() {
         for item in toolbar.items {
             if item.itemIdentifier == Item.toggleInspector {
@@ -503,7 +527,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
                 item.label = inspectorTitle
                 item.toolTip = (inspectorItem.isCollapsed ? "展开" : "收起") + inspectorTitle + "（⌘⌥I）"
             } else if item.itemIdentifier == Item.inspectorTitle {
-                (item.view as? NSTextField)?.stringValue = inspectorTitle
+                updateInspectorHeading()
                 item.label = inspectorTitle
             } else if item.itemIdentifier == Item.toggleSidebar {
                 item.isEnabled = state.section == .rules
@@ -516,8 +540,8 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [Item.toggleSidebar, .sidebarTrackingSeparator, Item.section, Item.environment,
-         Item.search, Item.capture, .inspectorTrackingSeparator, Item.inspectorTitle, Item.inspectorMode, Item.inspectorMore,
-         .flexibleSpace, Item.toggleInspector]
+         Item.search, Item.capture, .inspectorTrackingSeparator, Item.inspectorTitle, Item.inspectorMode, Item.inspectorMore, Item.templateInfo,
+         .space, .flexibleSpace, Item.toggleInspector]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier,
@@ -569,13 +593,19 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
             item.view = captureButton
             item.label = "捕获"
         case Item.inspectorTitle:
-            let label = NSTextField(labelWithString: inspectorTitle)
-            label.font = .systemFont(ofSize: NSFont.preferredFont(forTextStyle: .title2).pointSize, weight: .semibold)
-            label.textColor = .labelColor
-            label.alignment = .left
-            item.view = label
+            updateInspectorHeading()
+            item.view = inspectorHeading
             item.label = inspectorTitle
             item.isBordered = false
+        case Item.templateInfo:
+            // Match the inspector toggle's native toolbar button and keep its own glass group.
+            item.image = NSImage(systemSymbolName: "info", accessibilityDescription: "动态值")
+            item.label = "动态值"
+            item.toolTip = "动态值"
+            item.target = self
+            item.action = #selector(showTemplateValues(_:))
+            item.isBordered = true
+            item.visibilityPriority = .high
         case Item.inspectorMode:
             item.view = inspectorModeControl
             item.label = "显示模式"
@@ -585,6 +615,16 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
             return nil // AppKit creates its standard spacer items.
         }
         return item
+    }
+
+    @objc private func showTemplateValues(_ sender: NSToolbarItem) {
+        guard state.section == .rules, !inspectorItem.isCollapsed else { return }
+        if templatePopover?.isShown == true { templatePopover?.close(); return }
+        let popover = NSPopover(); popover.behavior = .transient
+        popover.contentViewController = TemplateValuesViewController(response: model.editingResponse,
+            environment: model.document.environment?.variables ?? [])
+        templatePopover = popover
+        popover.show(relativeTo: sender)
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -676,6 +716,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         environmentPopover = nil
         inspectorHost.update(section: state.section, isPresented: false)
         restoreWindow()
+        templatePopover?.close(); templatePopover = nil
         toolbar.delegate = nil
         requestSearchItem.searchField.delegate = nil
         requestSearchItem.searchField.target = nil

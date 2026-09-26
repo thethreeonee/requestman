@@ -343,11 +343,33 @@ struct WorkspaceSidebarChecks {
 
         // Rules use the same window-level Inspector and native toggle, with a distinct title.
         let step = ModificationStep(kind: .script)
+        var annotationWorkflow = RequestWorkflow()
+        annotationWorkflow.requestSteps = [ModificationStep(kind: .setHeader), step]
+        annotationWorkflow.responseSteps = [step]
+        var annotationProject = WorkflowProject(); annotationProject.workflows = [annotationWorkflow]
+        model.document.projects.append(annotationProject); model.selectedWorkflowID = annotationWorkflow.id
         model.selectedStep = step; model.selectedStepID = step.id
         update(controller, model: model)
         settle(controller) { !inspector.isCollapsed }
         expectToolbar(window, inspectorVisible: true, requests: false)
-        precondition(window.toolbar!.items.contains { ($0.view as? NSTextField)?.stringValue == "步骤详情" })
+        if let path = ProcessInfo.processInfo.environment["REQUESTMAN_TOOLBAR_SNAPSHOT"],
+           let frameView = window.contentView?.superview,
+           let bitmap = frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds) {
+            frameView.cacheDisplay(in: frameView.bounds, to: bitmap)
+            try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
+        }
+        let heading = window.toolbar!.items.first { $0.itemIdentifier == inspectorTitleIdentifier }!.view as! NSStackView
+        let title = heading.arrangedSubviews[0] as! NSTextField
+        let annotation = heading.arrangedSubviews[1] as! NSTextField
+        precondition(title.stringValue == "步骤详情" && annotation.stringValue == "请求阶段 · 第 2 步")
+        precondition(annotation.font!.pointSize < title.font!.pointSize && annotation.textColor == .secondaryLabelColor)
+        precondition(heading.orientation == .vertical && heading.alignment == .leading && heading.spacing == 1)
+        model.document.projects[model.document.projects.count - 1].workflows[0].requestSteps.swapAt(0, 1)
+        update(controller, model: model)
+        precondition(annotation.stringValue == "请求阶段 · 第 1 步", "Reordering the same selected step must refresh its annotation")
+        model.editingResponse = true; update(controller, model: model)
+        precondition(annotation.stringValue == "响应阶段 · 第 1 步")
+        model.editingResponse = false; update(controller, model: model)
         checkGeometry(controller, window: window, inspector: inspector, windowWidth: window.frame.width)
         invoke(toggleItem(window))
         settle(controller) { inspector.isCollapsed }
@@ -384,6 +406,8 @@ struct WorkspaceSidebarChecks {
         precondition(nativeToggle.isEnabled && nativeToggle.action == #selector(NSSplitViewController.toggleInspector(_:)))
         precondition(nativeToggle.target === controller && nativeToggle.view == nil,
                      "AppKit must create the native toolbar button with an explicit split-controller target")
+        let requestHeading = window.toolbar!.items.first { $0.itemIdentifier == inspectorTitleIdentifier }!.view as! NSStackView
+        precondition(requestHeading.arrangedSubviews[1].isHidden, "Request-log inspector must not retain a step annotation")
         checkGeometry(controller, window: window, inspector: inspector, windowWidth: windowWidth)
         checkInitialInspectorWidth(inspector, scenario: "first selection after no selection")
         let root = inspector.viewController as! WorkspaceInspectorController
@@ -885,6 +909,19 @@ struct WorkspaceSidebarChecks {
         precondition(items.filter { $0.itemIdentifier == inspectorTitleIdentifier }.count == (inspectorVisible ? 1 : 0))
         precondition(items.filter { $0.itemIdentifier == inspectorModeIdentifier }.count == (inspectorVisible && requests ? 1 : 0))
         precondition(items.filter { $0.itemIdentifier == inspectorMoreIdentifier }.count == (inspectorVisible && requests ? 1 : 0))
+        let infoIdentifier = NSToolbarItem.Identifier("workspace.templateInfo")
+        precondition(items.filter { $0.itemIdentifier == infoIdentifier }.count == (inspectorVisible && !requests ? 1 : 0))
+        if inspectorVisible && !requests {
+            let index = items.firstIndex { $0.itemIdentifier == infoIdentifier }!
+            precondition(items[index + 1].itemIdentifier == .space && items[index + 2].itemIdentifier == inspectorToggleIdentifier,
+                         "Info and inspector toggle must occupy separate native glass groups")
+            let info = items[index]
+            precondition(info.label == "动态值" && info.image != nil)
+            precondition(info.view == nil && info.isBordered && items[index + 2].isBordered,
+                         "Info and collapse must both retain their native bordered toolbar appearance")
+            precondition(info.target != nil && info.action != nil && info.isEnabled,
+                         "The native info button must remain actionable")
+        }
         if inspectorVisible && requests {
             let moreIndex = items.firstIndex { $0.itemIdentifier == inspectorMoreIdentifier }!
             precondition(items[moreIndex - 1].itemIdentifier == inspectorModeIdentifier,

@@ -40,8 +40,190 @@ import RequestmanCore
 }
 
 @main @MainActor struct RulesUIChecks {
+    static func checkHeaderEditing(_ inspector: StepInspectorViewController, model: WorkspaceModel, window: NSWindow) {
+        func button(_ title: String) -> NSButton {
+            descendants(inspector.view).compactMap { $0 as? NSButton }.first { $0.title == title }!
+        }
+        button("添加 Header").performClick(nil); inspector.refresh()
+        precondition(model.selectedStep?.headerEntries.count == 2)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let boxes = descendants(inspector.view).compactMap { $0 as? NSBox }.filter { $0.identifier?.rawValue == "rules.headerEntry" }
+        precondition(boxes.count == 2 && boxes.allSatisfy { descendants($0).compactMap { $0 as? HeaderNameField }.count == 1 })
+        precondition(boxes.allSatisfy { !button("添加 Header").isDescendant(of: $0) })
+        let hint = descendants(inspector.view).first { $0.identifier?.rawValue == "rules.stepDescription" }!
+        precondition(boxes.allSatisfy { !hint.isDescendant(of: $0) })
+        precondition(hint.superview === button("删除").superview?.superview, "The type description belongs to the heading stack")
+        let fields = descendants(inspector.view).compactMap { $0 as? HeaderNameField }
+        fields[1].stringValue = "X-Token"; fields[1].controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: fields[1]))
+        let area = descendants(inspector.view).compactMap { $0 as? RulesTextArea }[1]
+        window.makeFirstResponder(area.textView)
+        let original = "pre{{$env.api}}post\n{{$uuid}}end / {{unfinished"
+        area.textView.insertText(original, replacementRange: NSRange(location: 0, length: 0))
+        inspector.refresh()
+        precondition(model.selectedStep?.headerEntries[1].value == original)
+        let layout = area.textView.layoutManager as! TemplateLayoutManager
+        precondition(layout.tokenRanges.count == 2 && area.layer?.cornerRadius == 8)
+        precondition((original as NSString).substring(with: layout.tokenRanges[0]) == "{{$env.api}}")
+        window.contentView?.layoutSubtreeIfNeeded()
+        var previousMark: NSRect?
+        for token in layout.tokenRanges {
+            let glyphs = layout.glyphRange(forCharacterRange: token, actualCharacterRange: nil)
+            let line = layout.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+            let mark = layout.backgroundRects(forCharacterRange: token).first!
+            precondition(mark.height >= 19.9, "Consecutive marks must retain their padded height: \(mark), line: \(line)")
+            let visible = layout.visibleTextBounds(forGlyphRange: glyphs, in: area.textView.textContainer!)
+            precondition(abs(mark.midY - visible.midY) < 0.01, "Text must be optically centered inside its mark")
+            if let previousMark {
+                precondition(mark.minY - previousMark.maxY >= 4, "Consecutive template lines must retain a visible gap")
+            }
+            let following = layout.glyphRange(forCharacterRange: NSRange(location: NSMaxRange(token), length: 1), actualCharacterRange: nil)
+            let nextText = layout.visibleTextBounds(forGlyphRange: following, in: area.textView.textContainer!)
+            precondition(nextText.minX - mark.maxX >= 3.5, "Following ordinary text must clear the token background")
+            if token.location > 0 && original.utf16[original.utf16.index(original.utf16.startIndex, offsetBy: token.location - 1)] != 10 {
+                let previous = layout.glyphRange(forCharacterRange: NSRange(location: token.location - 1, length: 1), actualCharacterRange: nil)
+                let previousText = layout.visibleTextBounds(forGlyphRange: previous, in: area.textView.textContainer!)
+                precondition(mark.minX - previousText.maxX >= 3.5, "Leading ordinary text must clear the token background")
+            }
+            previousMark = mark
+            let displayed = mark.offsetBy(dx: area.textView.textContainerOrigin.x, dy: area.textView.textContainerOrigin.y)
+            precondition(area.contentView.bounds.contains(displayed), "Both template lines must fit without clipping")
+            precondition(mark.width >= visible.width + 7.9 && mark.minY >= line.minY && mark.maxY <= line.maxY,
+                         "Token padding must be visible and stay inside the line height")
+        }
+        if let path = ProcessInfo.processInfo.environment["REQUESTMAN_TEMPLATE_SNAPSHOT"],
+           let bitmap = inspector.view.bitmapImageRepForCachingDisplay(in: inspector.view.bounds) {
+            inspector.view.cacheDisplay(in: inspector.view.bounds, to: bitmap)
+            try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
+        }
+        area.textView.setSelectedRange(layout.tokenRanges[0])
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        let wrote = area.textView.writeSelection(to: pasteboard, types: area.textView.writablePasteboardTypes)
+        precondition(wrote, "Clipboard export failed: selection=\(area.textView.selectedRange()), types=\(area.textView.writablePasteboardTypes)")
+        precondition(pasteboard.string(forType: .string) == "{{$env.api}}")
+        area.textView.undoManager?.undo()
+        precondition(area.string.isEmpty && model.selectedStep?.headerEntries[1].value == "")
+        area.textView.undoManager?.redo()
+        precondition(area.string == original && layout.tokenRanges.count == 2)
+        let removeHeader = descendants(inspector.view).compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "删除 Header" }!
+        removeHeader.performClick(nil); inspector.refresh()
+        precondition(model.selectedStep?.headerEntries.count == 1 && model.selectedStep?.headerEntries[0].name == "X-Token")
+        for _ in 0..<10 { button("添加 Header").performClick(nil); inspector.refresh() }
+        window.contentView?.layoutSubtreeIfNeeded()
+        let scrolling = descendants(inspector.view).compactMap { $0 as? NSScrollView }.first { !($0 is RulesTextArea) }!
+        precondition(scrolling.documentView!.frame.height > scrolling.contentSize.height, "Many Header rows must scroll without growing the inspector")
+        let editors = descendants(inspector.view).compactMap { $0 as? HeaderNameField }
+        precondition(editors.count == 11 && editors.allSatisfy { $0.frame.width > 100 })
+        let step = model.selectedStep!
+        let remove = button("删除")
+        precondition(remove.contentTintColor == .systemRed)
+        remove.performClick(nil)
+        precondition(model.selectedStep?.id == step.id, "Opening confirmation must not delete")
+        let cancel = descendants(inspector.deletion.contentViewController!.view).compactMap { $0 as? NSButton }.first { $0.title == "取消" }!
+        cancel.performClick(nil)
+        precondition(model.selectedStep?.id == step.id)
+        remove.performClick(nil)
+        let confirm = descendants(inspector.deletion.contentViewController!.view).compactMap { $0 as? NSButton }.first { $0.title == "删除步骤" }!
+        model.selectedStepID = model.workflow?.requestSteps.last?.id; inspector.refresh()
+        confirm.performClick(nil)
+        precondition(model.workflow?.requestSteps.contains { $0.id == step.id } == true, "An old confirmation cannot delete a newly selected step")
+        model.selectedStepID = step.id; inspector.refresh(); button("删除").performClick(nil)
+        descendants(inspector.deletion.contentViewController!.view).compactMap { $0 as? NSButton }.first { $0.title == "删除步骤" }!.performClick(nil)
+        inspector.refresh()
+        precondition(model.selectedStepID == nil && model.workflow?.requestSteps.contains { $0.id == step.id } == false)
+    }
+
+    static func checkTemplateCaret() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 120), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let area = RulesTextArea(template: true)
+        window.contentView = area
+        defer { window.close() }
+        let text = area.textView
+        let layout = text.layoutManager as! TemplateLayoutManager
+        func caret(_ index: Int) -> NSRect {
+            text.firstRect(forCharacterRange: NSRange(location: index, length: 0), actualRange: nil)
+        }
+        for prefix in ["pre", "普通文字", "e\u{301}", "👨‍👩‍👧‍👦", "pre "] {
+            area.string = prefix + "post"
+            text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+            window.contentView?.layoutSubtreeIfNeeded()
+            let boundary = (prefix as NSString).length
+            let ordinaryCaret = caret(boundary)
+            area.string = prefix + "{{$env.api}}post"
+            text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+            let tokenCaret = caret(boundary)
+            precondition(abs(tokenCaret.minX - ordinaryCaret.minX) < 0.01,
+                         "The caret must stay at the ordinary text advance, excluding decoration padding: \(prefix) \(ordinaryCaret) \(tokenCaret)")
+            let local = text.convert(window.convertFromScreen(tokenCaret), from: nil)
+            let line = layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: boundary), effectiveRange: nil)
+            precondition(line.height >= 24 && tokenCaret.height <= ceil(text.font!.ascender - text.font!.descender),
+                         "The caret must use the font height while preserving the padded line height")
+            precondition(abs(local.midY - (line.midY + text.textContainerOrigin.y)) < 0.01,
+                         "The shorter caret must remain vertically centered in its line")
+            for offset: CGFloat in [0, 2, 6] {
+                precondition(text.characterIndexForInsertion(at: NSPoint(x: local.minX + offset, y: local.midY)) == boundary,
+                             "Clicks at the caret or in the decorative gap must insert before the token")
+            }
+            window.makeFirstResponder(text)
+            text.setSelectedRange(NSRange(location: boundary, length: 0))
+            text.moveRight(nil)
+            precondition(text.selectedRange().location == boundary + 1)
+            text.moveLeft(nil)
+            text.insertText("x", replacementRange: text.selectedRange())
+            precondition(area.string == prefix + "x{{$env.api}}post")
+            precondition(text.selectedRange().location == boundary + 1)
+        }
+        area.string = "{{$uuid}}{{$env.api}}\n{{$timestamp}}"
+        for token in layout.tokenRanges { precondition(layout.leadingPadding(at: token.location) == 0) }
+        area.string = "12345678{{$uuid}}"
+        text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        text.textContainer!.widthTracksTextView = false
+        text.textContainer!.containerSize = NSSize(width: 80, height: CGFloat.greatestFiniteMagnitude)
+        layout.ensureLayout(for: text.textContainer!)
+        let token = layout.tokenRanges[0]
+        let before = layout.glyphIndexForCharacter(at: token.location - 1)
+        let after = layout.glyphIndexForCharacter(at: token.location)
+        precondition(layout.lineFragmentRect(forGlyphAt: before, effectiveRange: nil).minY != layout.lineFragmentRect(forGlyphAt: after, effectiveRange: nil).minY)
+        precondition(layout.leadingPadding(at: token.location) == 0, "Wrapped line starts must retain their native caret")
+        area.string = "pre{{$env.api}}"
+        text.textContainer!.widthTracksTextView = true
+        text.textContainer!.containerSize = NSSize(width: 380, height: CGFloat.greatestFiniteMagnitude)
+        window.contentView?.layoutSubtreeIfNeeded()
+        text.setSelectedRange(NSRange(location: 3, length: 0))
+        text.setMarkedText("拼", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: 3, length: 0))
+        precondition(text.hasMarkedText() && area.string == "pre拼{{$env.api}}")
+        text.insertText("拼音", replacementRange: text.markedRange())
+        precondition(!text.hasMarkedText() && area.string == "pre拼音{{$env.api}}")
+    }
+
+    static func checkTemplateValues() {
+        var copied: String?
+        let controller = TemplateValuesViewController(response: true, environment: [NamedValue(name: "api", value: "secret")]) { copied = $0 }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 550), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentViewController = controller
+        window.setContentSize(controller.preferredContentSize)
+        window.contentView?.layoutSubtreeIfNeeded()
+        defer { window.close() }
+        precondition(controller.rows.map(\.template).contains("{{$env.api}}"))
+        precondition(controller.rows.map(\.template).contains("{{$response.status}}"))
+        precondition(controller.rows.allSatisfy { $0.frame.height >= 22 })
+        let row = controller.rows[0]
+        row.setHovered(true); RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        precondition(row.copyButton.alphaValue == 1)
+        row.copyButton.performClick(nil); precondition(copied == row.template)
+        row.setHovered(false); RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        precondition(row.copyButton.alphaValue == 0)
+        precondition(window.makeFirstResponder(row.copyButton))
+        precondition(row.copyButton.hasKeyboardFocus && row.copyButton.alphaValue == 1)
+        let request = TemplateValuesViewController(response: false, environment: [])
+        precondition(!request.rows.map(\.template).contains("{{$response.status}}"))
+    }
+
     static func main() {
         NSApplication.shared.setActivationPolicy(.prohibited)
+        checkTemplateCaret()
+        checkTemplateValues()
         let model = WorkspaceModel(); model.addProject(); model.addStep(.setHeader, response: false); model.addStep(.replaceBody, response: false)
         let sidebar = ProjectSidebarViewController(model: model)
         let rules = RulesViewController(model: model)
@@ -248,13 +430,13 @@ import RequestmanCore
             root.cacheDisplay(in: root.bounds, to: bitmap)
             try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
         }
-        let selected = model.selectedStepID!; inspector.move(-1); inspector.refresh()
-        precondition(model.workflow?.requestSteps.first?.id == selected)
-        model.selectedStepID = model.workflow?.requestSteps.last?.id; inspector.refresh()
+        precondition(!descendants(inspector.view).compactMap { $0 as? NSButton }.contains { ["上移", "下移"].contains($0.title) })
+        model.selectedStepID = model.workflow?.requestSteps.first?.id; inspector.refresh()
         let combo = descendants(inspector.view).compactMap { $0 as? HeaderNameField }.first!
         combo.stringValue = "X-Custom"; combo.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: combo)); inspector.refresh()
-        precondition(model.selectedStep?.name == "X-Custom")
+        precondition(model.selectedStep?.headerEntries.first?.name == "X-Custom")
         precondition(descendants(inspector.view).contains { $0 === combo }, "Header editing must retain focus and selection")
+        checkHeaderEditing(inspector, model: model, window: window)
         sidebar.search = "does-not-match"; precondition(sidebar.outline.numberOfRows == 1)
         sidebar.addRequest(); sidebar.refresh(); precondition(sidebar.search.isEmpty && model.document.projects[0].workflows.count == 2)
         sidebar.outline.collapseItem(sidebar.outline.item(atRow: 0))
@@ -266,11 +448,12 @@ import RequestmanCore
                      "A newly selected workflow must reveal its collapsed project and clear a hiding search")
         for kind in ModificationKind.allCases {
             model.addStep(kind, response: kind == .setStatus); inspector.refresh(); window.contentView?.layoutSubtreeIfNeeded()
+            precondition(!descendants(inspector.view).compactMap { $0 as? NSBox }.contains { $0.title == "动态值" })
             precondition(!inspector.view.hasAmbiguousLayout, "Inspector layout should be determined for \(kind)")
             if [.setQueryParameter, .replaceURLString].contains(kind) {
                 let nameLabel = kind == .setQueryParameter ? "参数名称" : "查找字符串"
-                let field = descendants(inspector.view).compactMap { $0 as? ActionTextField }.first { $0.accessibilityLabel() == nameLabel }!
-                field.stringValue = "test"; field.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
+                let field = descendants(inspector.view).compactMap { $0 as? RulesTextArea }.first { $0.textView.accessibilityLabel() == nameLabel }!
+                field.string = "test"; field.textDidChange(Notification(name: NSText.didChangeNotification, object: field.textView))
                 inspector.refresh()
                 precondition(model.selectedStep?.name == "test" && descendants(inspector.view).contains { $0 === field })
                 precondition(!kind.supports(response: true) && kind.supports(response: false))
@@ -405,7 +588,7 @@ import RequestmanCore
         precondition(model.workflow!.responseSteps.count == responseCount - 1 && model.workflow!.requestSteps.count == requestCount)
         checkRapidSidebarDisclosure()
         checkSidebarWidths()
-        print("Rules UI checks passed: native sidebar, live field identity, both lanes, step ordering, all inspector kinds and preview inputs. Hidden CLI window only; no App built or run.")
+        print("Rules UI checks passed: native sidebar, live field identity, both lanes, multiple headers, template marks and clipboard/undo, deletion confirmation, all inspector kinds and preview inputs. Hidden CLI window only; no App built or run.")
     }
     private static func checkDisclosureAnimations(_ outline: ProjectOutlineView, expanding: Bool) {
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }

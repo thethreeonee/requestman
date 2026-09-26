@@ -25,6 +25,39 @@ struct WorkflowEngineTests {
         #expect(value == "{{env.secret}}/\(id)/123")
         #expect(throws: WorkflowError.self) { try WorkflowEngine.resolve("{{env.missing}}", environment: [:], id: id, date: date) }
     }
+    @Test func prefixedEnvironmentAndLegacySyntax() throws {
+        let id = UUID(), date = Date(timeIntervalSince1970: 123)
+        #expect(try WorkflowEngine.resolve("{{$env.api}}/{{env.api}}", environment: ["api": "{{$uuid}}"], id: id, date: date) == "{{$uuid}}/{{$uuid}}")
+        for text in ["{{$env.missing}}", "{{$unknown}}", "{{$env.api"] {
+            #expect(throws: WorkflowError.self) { try WorkflowEngine.resolve(text, environment: [:], id: id, date: date) }
+        }
+    }
+    @Test func multipleHeadersRoundTripAndLegacy() throws {
+        var step = ModificationStep(kind: .setHeader); step.name = "X-Legacy"; step.value = "old"
+        let legacy = try JSONDecoder().decode(ModificationStep.self, from: JSONEncoder().encode(step))
+        #expect(legacy.headers == nil && legacy.headerEntries[0].name == "X-Legacy")
+        step.headerEntries = [NamedValue(name: "X-Key", value: "{{$env.api}}"), NamedValue(name: "X-Trace", value: "{{$uuid}}"), NamedValue(name: "x-key", value: "last")]
+        #expect(try JSONDecoder().decode(ModificationStep.self, from: JSONEncoder().encode(step)) == step)
+        let id = UUID()
+        for response in [false, true] {
+            var draft = HTTPMessageDraft(method: "GET", url: "http://localhost/", headers: [HTTPField("X-Key", "old"), HTTPField("x-key", "duplicate"), HTTPField("Other", "keep")])
+            _ = try WorkflowEngine.apply([step], response: response, to: &draft, environment: ["api": "new"], id: id, date: Date())
+            #expect(draft.headers == [HTTPField("Other", "keep"), HTTPField("X-Trace", id.uuidString), HTTPField("x-key", "last")])
+        }
+        step.headerEntries = []
+        var empty = HTTPMessageDraft(method: "GET", url: "http://localhost/")
+        _ = try WorkflowEngine.apply([step], response: false, to: &empty, environment: [:], id: id, date: Date())
+        #expect(empty.headers.isEmpty)
+    }
+    @Test func invalidHeaderBatchDoesNotPartiallyApply() {
+        for entry in [NamedValue(name: "Host", value: "bad"), NamedValue(name: "Bad Name", value: "bad"), NamedValue(name: "X-Bad", value: "\r\nInjected: yes"), NamedValue(name: "X-Missing", value: "{{$env.missing}}") ] {
+            var step = ModificationStep(kind: .setHeader)
+            step.headerEntries = [NamedValue(name: "X-First", value: "changed"), entry]
+            var draft = HTTPMessageDraft(method: "GET", url: "http://localhost/", headers: [HTTPField("X-First", "original")])
+            #expect(throws: WorkflowError.self) { try WorkflowEngine.apply([step], response: false, to: &draft, environment: [:], id: UUID(), date: Date()) }
+            #expect(draft.headers == [HTTPField("X-First", "original")])
+        }
+    }
     @Test func invalidHeadersAndFramingAreRejected() {
         for (name, value) in [("Bad Name", "value"), ("X-Key", "value\r\nInjected: yes"), ("Content-Length", "99")] {
             var step = ModificationStep(kind: .setHeader); step.name = name; step.value = value

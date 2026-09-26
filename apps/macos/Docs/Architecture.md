@@ -179,3 +179,11 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 `WorkspaceCommand` 定义固定映射，由 `WorkspaceAppDelegate` 安装到原生菜单，由 App delegate 转交 `WorkspaceSplitController`（即使没有文本或列表焦点也能使用）。菜单校验与执行共用 `canPerform`，检查当前 key window、sheet、加载状态、捕获过渡状态、页面、选中记录完整性和列表焦点；不安装全局键盘监听。启停捕获复用 `WorkspaceModel.toggleCapture`，暂停记录和清空复用既有 history 接口。侧栏上下文菜单和快捷键共用项目 / 规则动作，步骤动作按实际聚焦的阶段列表定位，文本编辑器保留原生编辑按键。
 
 项目行支持原生键盘选择，刷新时保留项目选择与现有流程上下文；新请求优先放入侧栏所选项目。环境弹层的搜索框和列表分别处理方向键、回车和 Escape，候选移动不立即切换环境，关闭后恢复工作区焦点。`check-workspace-sidebar.py` 验证原生菜单派发和窗口 / 状态限制，`check-rules-ui.py` 验证焦点与删除边界；这些隐藏组件窗口检查不等同于完整 App 的真实键盘验收。
+
+## 多 Header 与动态模板编辑（2026-09-26）
+
+`ModificationStep.headers` 保存可增删的 Header 条目，缺省时 `headerEntries` 读取旧 `name/value`；显式空数组表示不操作。`WorkflowEngine` 在整组解析与校验通过后才应用 Header，保证后续条目失败不会留下半组修改。`$env.` 是新的环境引用前缀，旧 `env.` 保持兼容，单次替换语义不变。
+
+步骤 Inspector 的多行 Header 表单可滚动；底部移除排序按钮，红色删除按钮使用 transient `NSPopover` 确认，并检查原步骤、工作流和阶段仍匹配。模板文本继续使用原生 `NSTextView` 的纯文本编辑、撤销和复制；`TemplateLayoutManager` 只绘制完整表达式的浅蓝圆角背景和文字颜色，值编辑器裁切为 8 pt 圆角。脚本编辑器不启用模板标记。内置变量与格式见[内置变量](Design/request-modification.md#内置变量)。`WorkflowTemplateContext` 在代理匹配原始请求后生成时间、随机值和原始请求快照，流式执行与脚本后台执行显式传递同一 Sendable 值；本地预览同样共享上下文。响应状态码在响应流程入口固定，Mock 使用本地生成状态码。模板标记按 Core Text 的实际字形轮廓垂直居中，左右扩展 4 pt，背景围绕文字中心对称限制在实际行高内；排版基线居中，24 pt 行高为相邻 20 pt 标记保留至少 4 pt 间隔，短值编辑器可完整显示两行。
+
+步骤类型说明位于 Inspector 标题下方；每个 Header 使用独立 `NSBox`，添加按钮置于列表外。`WorkspaceSplitController` 在步骤 Inspector 的收起按钮左侧提供独立原生玻璃 info 按钮，由 `TemplateValuesViewController` 在 Popover 内展示内置变量和当前环境变量名称。原生复制按钮按行悬停淡入淡出，键盘焦点与减少动态效果均有替代行为。`TemplateLayoutManager` 用仅影响排版的字距属性为变量与普通文本保留实际空隙，不修改底层字符串。

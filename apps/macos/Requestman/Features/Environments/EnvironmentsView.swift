@@ -215,7 +215,7 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
         editorControls += [add, delete]
         let sections = [
             SettingsUI.section("环境", rows: [SettingsUI.row("名称", name), nameError, useRow]),
-            SettingsUI.section("变量", rows: rows, footer: "使用 {{env.变量名}} 引用。切换环境仅影响新请求；进行中的请求保留原环境快照。"),
+            SettingsUI.section("变量", rows: rows, footer: "使用 {{$env.变量名}} 引用。切换环境仅影响新请求；进行中的请求保留原环境快照。"),
             NativeUI.stack([delete, NSView()], vertical: false)
         ]
         let content = NativeUI.stack(sections, spacing: 20)

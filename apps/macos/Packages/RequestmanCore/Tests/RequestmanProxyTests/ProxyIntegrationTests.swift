@@ -10,6 +10,36 @@ import RequestmanCore
 
 @Suite(.serialized)
 struct ProxyIntegrationTests {
+    @Test func templateSnapshotSpansStreamingAndScriptStages() async throws {
+        for scripted in [false, true] {
+            try await withHarness { h in
+                var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+                var rewrite = ModificationStep(kind: .rewriteURL); rewrite.value = h.originURL + "after"
+                var header = ModificationStep(kind: .setHeader); header.name = "X-Key"; header.value = "{{$randomHex}}"
+                var responseHeader = ModificationStep(kind: .setHeader)
+                responseHeader.headerEntries = [NamedValue(name: "X-Random", value: "{{$randomHex}}"),
+                    NamedValue(name: "X-Original", value: "{{$request.url}}"),
+                    NamedValue(name: "X-Status", value: "{{$response.status}}")]
+                var status = ModificationStep(kind: .setStatus); status.status = 202
+                workflow.requestSteps = [rewrite, header]; workflow.responseSteps = [status, responseHeader]
+                if scripted {
+                    var requestScript = ModificationStep(kind: .script); requestScript.value = "return request;"
+                    var responseScript = ModificationStep(kind: .script); responseScript.value = "return response;"
+                    workflow.requestSteps.insert(requestScript, at: 0); workflow.responseSteps.insert(responseScript, at: 0)
+                }
+                try await h.start(workflow: workflow)
+                let original = h.originURL + "before"
+                let reply = try await h.exchange("GET \(original) HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                #expect(reply.contains("202 Accepted"))
+                #expect(reply.contains("X-Original: \(original)"))
+                #expect(reply.contains("X-Status: 200"))
+                let random = h.observation.withLock { $0.header }
+                #expect(reply.contains("X-Random: \(random)"))
+                #expect(random.count == 32)
+                #expect(h.observation.withLock { $0.uri } == "/after")
+            }
+        }
+    }
     @Test func upstreamChangesApplyWithoutRestartingListener() async throws {
         try await withHarness { h in
             try await h.start()

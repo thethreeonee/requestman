@@ -46,6 +46,16 @@ public struct ModificationStep: Codable, Equatable, Identifiable, Sendable {
     public var name = ""
     public var value = ""
     public var status = 200
+    /// nil reads the legacy single name/value pair; an empty array is an empty step.
+    public var headers: [NamedValue]?
+    public var headerEntries: [NamedValue] {
+        get {
+            if let headers { return headers }
+            var entry = NamedValue(name: name, value: value); entry.id = id
+            return [entry]
+        }
+        set { headers = newValue }
+    }
     public var scriptOptions: ScriptOptions?
     public init(kind: ModificationKind) {
         self.kind = kind

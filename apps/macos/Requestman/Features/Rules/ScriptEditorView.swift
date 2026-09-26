@@ -106,7 +106,7 @@ import RequestmanCore
     private static let text = """
     脚本 API
 
-    脚本是一段同步 JavaScript 函数体。请求阶段 return request；响应阶段 return response。不会展开 {{env.*}}，请直接读取 env。
+    脚本是一段同步 JavaScript 函数体。请求阶段 return request；响应阶段 return response。不会展开 {{$env.*}}，请直接读取 env。
 
     type Header = { name: string; value: string };
     type Request = {

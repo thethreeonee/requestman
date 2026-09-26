@@ -43,9 +43,10 @@ import RequestmanCore
                     var request = try input.request()
                     guard workflow.matches(method: request.method, url: request.url, headers: request.headers) else { return "此输入未命中匹配条件。" }
                     let id = UUID(), date = Date()
-                    var trace = try WorkflowEngine.apply(workflow.requestSteps, response: false, to: &request, environment: environment?.values ?? [:], id: id, date: date, control: control)
+                    let context = WorkflowTemplateContext(id: id, date: date, request: request)
+                    var trace = try WorkflowEngine.apply(workflow.requestSteps, response: false, to: &request, environment: environment?.values ?? [:], id: id, date: date, control: control, templateContext: context)
                     var response = request.isMock ? request : try input.response()
-                    trace += try WorkflowEngine.apply(workflow.responseSteps, response: true, to: &response, environment: environment?.values ?? [:], id: id, date: date, request: request, control: control)
+                    trace += try WorkflowEngine.apply(workflow.responseSteps, response: true, to: &response, environment: environment?.values ?? [:], id: id, date: date, request: request, control: control, templateContext: context)
                     let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
                     return trace.joined(separator: " → ") + "\n\n请求\n" + String(decoding: try encoder.encode(ScriptMessage(request, response: false)), as: UTF8.self)
                         + "\n\n响应\n" + String(decoding: try encoder.encode(ScriptMessage(response, response: true)), as: UTF8.self)

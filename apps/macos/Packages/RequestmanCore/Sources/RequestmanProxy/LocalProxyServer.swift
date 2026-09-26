@@ -115,6 +115,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     private var timer: Scheduled<Void>?
     private var certificateTask: Task<Void, Never>?
     private var record: CaptureRecord?
+    private var templateContext: WorkflowTemplateContext?
     private var started = ContinuousClock.now
     private var match: WorkflowMatch?
     private var request: HTTPMessageDraft?
@@ -279,6 +280,9 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             record?.environment = document.environment?.name ?? "无环境"
             var draft = HTTPMessageDraft(method: originalMethod, url: head.uri, headers: fields(head.headers))
             if let match {
+                if let record {
+                    templateContext = WorkflowTemplateContext(id: record.id, date: record.startedAt, request: draft)
+                }
                 self.record?.project = match.project; self.record?.workflow = match.workflow.name
                 self.record?.matchedWorkflowID = match.workflow.id
                 if match.workflow.requestSteps.contains(where: { $0.enabled && $0.kind == .script }) {
@@ -541,7 +545,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             upstream = nil; upstreamTarget = nil
             closeProxyChannel(previous)
         }
-        record = nil; match = nil; request = nil; response = nil
+        record = nil; match = nil; request = nil; response = nil; templateContext = nil
         scriptLease?.control.cancel()
         scriptLease = nil; scriptRequestHead = nil; scriptRequestDraft = nil; scriptResponseDraft = nil
         scriptRequestBytes = Data(); scriptResponseBytes = Data()
@@ -620,7 +624,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                                     to draft: inout HTTPMessageDraft) throws {
         guard let match, let snapshot = record else { return }
         _ = try WorkflowEngine.apply(steps, response: response, to: &draft,
-            environment: match.environment?.values ?? [:], id: snapshot.id, date: snapshot.startedAt, request: request) { kind in
+            environment: match.environment?.values ?? [:], id: snapshot.id, date: snapshot.startedAt, request: request, templateContext: templateContext) { kind in
                 self.record?.steps.append(kind.title)
                 self.record?.matchedRules.append(CaptureMatchedRule(
                     kind: kind, name: match.workflow.name, response: response
@@ -646,6 +650,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         }
         if snapshot.hasSentRequestHeaders { requestSnapshot?.headers = snapshot.sentHeaders }
         let inputRequest = requestSnapshot
+        let inputTemplateContext = templateContext
         DispatchQueue.global(qos: .userInitiated).async { [self, lease] in
             _ = lease // Keep the admission slot until the worker actually exits, even after a client cancellation.
             var output = draft
@@ -661,7 +666,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                 }
                 _ = try WorkflowEngine.apply(steps, response: isResponse, to: &output,
                     environment: match.environment?.values ?? [:], id: snapshot.id, date: snapshot.startedAt,
-                    request: preparedRequest, control: lease.control, onApplied: { kinds.append($0) })
+                    request: preparedRequest, control: lease.control, templateContext: inputTemplateContext, onApplied: { kinds.append($0) })
                 result = .success(output)
             } catch { result = .failure(error) }
             let appliedKinds = kinds

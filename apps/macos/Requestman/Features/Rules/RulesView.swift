@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import RequestmanCore
 
 @MainActor final class ProjectSidebarViewController: ObservedViewController, NSOutlineViewDataSource, NSOutlineViewDelegate, NSSearchFieldDelegate {
@@ -340,10 +341,19 @@ import RequestmanCore
 }
 
 @MainActor final class RulesTextArea: NSScrollView, NSTextViewDelegate {
-    let textView = NSTextView()
+    let textView: NSTextView
+    private let templateLayout: TemplateLayoutManager?
     var onChange: (String) -> Void
-    init(editable: Bool = true, onChange: @escaping (String) -> Void = { _ in }) {
-        self.onChange = onChange; super.init(frame: .zero)
+    init(editable: Bool = true, template: Bool = false, onChange: @escaping (String) -> Void = { _ in }) {
+        self.onChange = onChange
+        if template {
+            let storage = NSTextStorage()
+            let layout = TemplateLayoutManager()
+            let container = NSTextContainer(containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+            storage.addLayoutManager(layout); layout.addTextContainer(container)
+            textView = TemplateTextView(frame: .zero, textContainer: container); templateLayout = layout
+        } else { textView = NSTextView(); templateLayout = nil }
+        super.init(frame: .zero)
         hasVerticalScroller = true; borderType = .bezelBorder; documentView = textView
         textView.isRichText = false; textView.isEditable = editable; textView.isSelectable = true
         textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
@@ -352,8 +362,184 @@ import RequestmanCore
         textView.isHorizontallyResizable = false; textView.isVerticallyResizable = true
         textView.autoresizingMask = [.width]; textView.textContainer?.widthTracksTextView = true
         textView.textContainerInset = NSSize(width: 6, height: 8); textView.delegate = self
+        textView.allowsUndo = true
+        if template {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.minimumLineHeight = 24
+            textView.defaultParagraphStyle = paragraph
+            textView.typingAttributes[.paragraphStyle] = paragraph
+            wantsLayer = true; layer?.cornerRadius = 8; layer?.masksToBounds = true
+        }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    var string: String { get { textView.string } set { if textView.string != newValue { textView.string = newValue } } }
-    func textDidChange(_ notification: Notification) { onChange(textView.string) }
+    var string: String {
+        get { textView.string }
+        set { if textView.string != newValue { textView.string = newValue; refreshTokens() } }
+    }
+    private func refreshTokens() {
+        templateLayout?.updateTokens(excluding: textView.markedRange())
+        if templateLayout != nil { textView.typingAttributes.removeValue(forKey: .kern) }
+        textView.needsDisplay = true
+    }
+    func textDidChange(_ notification: Notification) { refreshTokens(); onChange(textView.string) }
+}
+
+/// Keep decoration spacing out of the caret position after ordinary text.
+final class TemplateTextView: NSTextView {
+    private func leadingPadding(at index: Int) -> CGFloat {
+        (layoutManager as? TemplateLayoutManager)?.leadingPadding(at: index) ?? 0
+    }
+
+    private func insertionPointRect(_ rect: NSRect, at index: Int) -> NSRect {
+        let textFont = (typingAttributes[.font] as? NSFont) ?? font ?? .monospacedSystemFont(ofSize: 12, weight: .regular)
+        // Keep the text's line spacing, but give the native caret only the font's height.
+        let height = min(rect.height, ceil(textFont.ascender - textFont.descender))
+        return NSRect(x: rect.minX - leadingPadding(at: index), y: rect.midY - height / 2,
+                      width: rect.width, height: height)
+    }
+
+    override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
+        var caret = insertionPointRect(rect, at: selectedRange().location)
+        caret.size.width = 2
+        super.drawInsertionPoint(in: caret, color: color, turnedOn: flag)
+    }
+
+    override func setNeedsDisplay(_ invalidRect: NSRect) {
+        // Cover both the shifted position and the wider caret when it blinks or moves.
+        super.setNeedsDisplay(invalidRect.union(invalidRect.offsetBy(dx: -8, dy: 0)).insetBy(dx: -2, dy: 0))
+    }
+
+    override func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        let rect = super.firstRect(forCharacterRange: range, actualRange: actualRange)
+        return range.length == 0 ? insertionPointRect(rect, at: range.location) : rect
+    }
+
+    override func characterIndexForInsertion(at point: NSPoint) -> Int {
+        let index = super.characterIndexForInsertion(at: point)
+        guard let window, let layout = layoutManager as? TemplateLayoutManager else { return index }
+        let source = string as NSString
+        for token in layout.tokenRanges where token.location > 0 {
+            let previous = source.rangeOfComposedCharacterSequence(at: token.location - 1)
+            guard index == previous.location || index == token.location else { continue }
+            let padding = leadingPadding(at: token.location)
+            guard padding > 0 else { continue }
+            let screenRect = super.firstRect(forCharacterRange: NSRange(location: token.location, length: 0), actualRange: nil)
+            let caret = convert(window.convertFromScreen(screenRect), from: nil)
+            let previousScreenRect = super.firstRect(forCharacterRange: NSRange(location: previous.location, length: 0), actualRange: nil)
+            let previousCaret = convert(window.convertFromScreen(previousScreenRect), from: nil)
+            if point.y >= caret.minY && point.y < caret.maxY,
+               point.x >= (previousCaret.minX + caret.minX - padding) / 2 && point.x <= caret.minX {
+                return token.location
+            }
+        }
+        return index
+    }
+}
+
+/// Presentation-only marks: the backing string, undo history and clipboard stay plain text.
+final class TemplateLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
+    override init() { super.init(); delegate = self }
+    required init?(coder: NSCoder) { super.init(coder: coder); delegate = self }
+
+    func layoutManager(_ layoutManager: NSLayoutManager, shouldSetLineFragmentRect lineFragmentRect: UnsafeMutablePointer<NSRect>,
+                       lineFragmentUsedRect: UnsafeMutablePointer<NSRect>, baselineOffset: UnsafeMutablePointer<CGFloat>,
+                       in textContainer: NSTextContainer, forGlyphRange glyphRange: NSRange) -> Bool {
+        guard let textStorage else { return false }
+        let range = characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        let text = textStorage.attributedSubstring(from: range)
+        let outlines = CTLineGetBoundsWithOptions(CTLineCreateWithAttributedString(text), .useGlyphPathBounds)
+        guard !outlines.isEmpty else { return false }
+        // A 20 pt mark gets a dedicated 24 pt row, including 2 pt clear space on either side.
+        let height = max(lineFragmentRect.pointee.height, outlines.height + 8, 24)
+        lineFragmentRect.pointee.size.height = height
+        lineFragmentUsedRect.pointee.size.height = height
+        baselineOffset.pointee = height / 2 + outlines.midY
+        return true
+    }
+
+    private(set) var tokenRanges: [NSRange] = []
+    private static let expression = try! NSRegularExpression(pattern: #"\{\{[^{}\r\n]+\}\}"#)
+    func updateTokens(excluding markedRange: NSRange = NSRange(location: NSNotFound, length: 0)) {
+        guard let textStorage else { return }
+        let range = NSRange(location: 0, length: textStorage.length)
+        removeTemporaryAttribute(.foregroundColor, forCharacterRange: range)
+        tokenRanges = Self.expression.matches(in: textStorage.string, range: range).map(\.range).filter {
+            markedRange.location == NSNotFound || NSIntersectionRange($0, markedRange).length == 0
+        }
+        // Reserve real layout space at token boundaries without inserting characters.
+        let source = textStorage.string as NSString
+        var spacing: [Int: CGFloat] = [:]
+        for token in tokenRanges {
+            if token.location > 0 {
+                let previous = source.rangeOfComposedCharacterSequence(at: token.location - 1)
+                if source.substring(with: previous).rangeOfCharacter(from: .newlines) == nil {
+                    spacing[previous.location, default: 0] += 8
+                }
+            }
+            spacing[NSMaxRange(token) - 1, default: 0] += 8
+        }
+        textStorage.beginEditing()
+        textStorage.removeAttribute(.kern, range: range)
+        for (position, padding) in spacing {
+            textStorage.addAttribute(.kern, value: padding, range: source.rangeOfComposedCharacterSequence(at: position))
+        }
+        textStorage.endEditing()
+        for token in tokenRanges { addTemporaryAttribute(.foregroundColor, value: NSColor.systemBlue, forCharacterRange: token) }
+    }
+    func leadingPadding(at index: Int) -> CGFloat {
+        guard let textStorage, index > 0, index < textStorage.length,
+              tokenRanges.contains(where: { $0.location == index }),
+              !tokenRanges.contains(where: { NSMaxRange($0) == index }) else { return 0 }
+        let previous = (textStorage.string as NSString).rangeOfComposedCharacterSequence(at: index - 1)
+        guard let padding = textStorage.attribute(.kern, at: previous.location, effectiveRange: nil) as? CGFloat else { return 0 }
+        let before = glyphIndexForCharacter(at: previous.location)
+        let after = glyphIndexForCharacter(at: index)
+        // A wrapped token starts a new line; RTL boundaries keep native positioning.
+        guard lineFragmentRect(forGlyphAt: before, effectiveRange: nil) == lineFragmentRect(forGlyphAt: after, effectiveRange: nil),
+              location(forGlyphAt: after).x > location(forGlyphAt: before).x else { return 0 }
+        return padding
+    }
+
+    func backgroundRects(forCharacterRange range: NSRange) -> [NSRect] {
+        guard NSMaxRange(range) <= (textStorage?.length ?? 0) else { return [] }
+        let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var result: [NSRect] = []
+        enumerateLineFragments(forGlyphRange: glyphs) { line, _, container, lineGlyphs, _ in
+            let fragment = NSIntersectionRange(glyphs, lineGlyphs)
+            guard fragment.length > 0 else { return }
+            let text = self.visibleTextBounds(forGlyphRange: fragment, in: container)
+            // Center on the drawn glyphs, not the line box (which includes leading).
+            // Clamp both sides equally so clipping cannot shift the optical center.
+            let halfHeight = min(max(20, text.height + 4) / 2, text.midY - line.minY, line.maxY - text.midY)
+            let mark = NSRect(x: text.minX - 4, y: text.midY - halfHeight,
+                              width: text.width + 8, height: halfHeight * 2)
+            let bounds = NSRect(x: 0, y: line.minY, width: container.containerSize.width, height: line.height)
+            result.append(mark.intersection(bounds))
+        }
+        return result
+    }
+    func visibleTextBounds(forGlyphRange glyphs: NSRange, in container: NSTextContainer) -> NSRect {
+        let typographic = boundingRect(forGlyphRange: glyphs, in: container)
+        guard let textStorage else { return typographic }
+        let characters = characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+        let text = textStorage.attributedSubstring(from: characters)
+        // Core Text includes fallback fonts and measures the actual outlines, including braces.
+        let outlines = CTLineGetBoundsWithOptions(CTLineCreateWithAttributedString(text), .useGlyphPathBounds)
+        guard !outlines.isEmpty else { return typographic }
+        let line = lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+        let baseline = line.minY + location(forGlyphAt: glyphs.location).y
+        return NSRect(x: line.minX + location(forGlyphAt: glyphs.location).x + outlines.minX, y: baseline - outlines.maxY,
+                      width: outlines.width, height: outlines.height)
+    }
+    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        NSColor.systemBlue.withAlphaComponent(0.20).setFill()
+        for token in tokenRanges {
+            guard NSMaxRange(token) <= (textStorage?.length ?? 0),
+                  NSIntersectionRange(glyphRange(forCharacterRange: token, actualCharacterRange: nil), glyphsToShow).length > 0 else { continue }
+            for rect in backgroundRects(forCharacterRange: token) {
+                NSBezierPath(roundedRect: rect.offsetBy(dx: origin.x, dy: origin.y), xRadius: 5, yRadius: 5).fill()
+            }
+        }
+        super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+    }
 }

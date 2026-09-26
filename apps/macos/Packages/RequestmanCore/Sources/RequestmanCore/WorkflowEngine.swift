@@ -44,6 +44,11 @@ public enum WorkflowEngine {
     }
 
     public static func resolve(_ template: String, environment: [String: String], id: UUID, date: Date) throws -> String {
+        try resolve(template, environment: environment, context: WorkflowTemplateContext(id: id, date: date))
+    }
+
+    public static func resolve(_ template: String, environment: [String: String], context: WorkflowTemplateContext,
+                               responseStatus: Int? = nil) throws -> String {
         // Single pass: values cannot inject a second template expansion.
         var output = ""
         var remaining = template[...]
@@ -53,14 +58,14 @@ public enum WorkflowEngine {
                 throw WorkflowError.invalid("动态值缺少 }}")
             }
             let key = remaining[start.upperBound..<end.lowerBound].trimmingCharacters(in: .whitespaces)
-            switch key {
-            case "$uuid": output += id.uuidString
-            case "$timestamp": output += String(Int(date.timeIntervalSince1970))
-            default:
-                guard key.hasPrefix("env."), let value = environment[String(key.dropFirst(4))] else {
+            if key.hasPrefix("$env.") || key.hasPrefix("env.") {
+                let prefix = key.hasPrefix("$env.") ? "$env." : "env."
+                guard let value = environment[String(key.dropFirst(prefix.count))] else {
                     throw WorkflowError.invalid("未找到变量：\(key)")
                 }
                 output += value
+            } else {
+                output += try context.value(for: key, responseStatus: responseStatus)
             }
             remaining = remaining[end.upperBound...]
         }
@@ -68,28 +73,46 @@ public enum WorkflowEngine {
         return output
     }
 
+    private static func validateHeader(_ name: String, value: String) throws {
+        guard isToken(name), !value.utf8.contains(where: { $0 < 32 && $0 != 9 || $0 == 127 }) else {
+            throw WorkflowError.invalid("Header 名称或值无效")
+        }
+        guard !managedHeaders.contains(name.lowercased()) else {
+            throw WorkflowError.invalid("\(name) 由代理根据目标和 Body 自动维护")
+        }
+    }
+
     public static func apply(_ steps: [ModificationStep], response: Bool, to draft: inout HTTPMessageDraft,
                              environment: [String: String], id: UUID, date: Date,
                              request: HTTPMessageDraft? = nil, control: ScriptExecutionControl? = nil,
+                             templateContext: WorkflowTemplateContext? = nil,
                              onApplied: ((ModificationKind) -> Void)? = nil) throws -> [String] {
         guard steps.count <= 64 else { throw WorkflowError.invalid("每个方向最多执行 64 个步骤") }
+        let context = templateContext ?? WorkflowTemplateContext(id: id, date: date, request: response ? request : draft)
+        let responseStatus = response ? draft.status : nil
+        func resolveValue(_ text: String) throws -> String {
+            try resolve(text, environment: environment, context: context, responseStatus: responseStatus)
+        }
         var trace: [String] = []
         for step in steps where step.enabled {
             try control?.check()
             guard step.kind.supports(response: response) else { throw WorkflowError.invalid("步骤不适用于当前方向") }
-            let value = step.kind == .script ? step.value : try resolve(step.value, environment: environment, id: id, date: date)
+            let value = [.script, .setHeader].contains(step.kind) ? step.value : try resolveValue(step.value)
             switch step.kind {
             case .script:
                 draft = try WorkflowScript.run(source: value, draft: draft, response: response, request: request,
                     environment: environment, timeoutMilliseconds: (step.scriptOptions ?? ScriptOptions()).timeoutMilliseconds, control: control)
-            case .setHeader, .removeHeader:
-                guard isToken(step.name), !value.utf8.contains(where: { $0 < 32 && $0 != 9 || $0 == 127 }) else {
-                    throw WorkflowError.invalid("Header 名称或值无效")
+            case .setHeader:
+                // Validate the complete step before changing the draft.
+                let headers = try step.headerEntries.map { entry -> HTTPField in
+                    let value = try resolveValue(entry.value)
+                    try validateHeader(entry.name, value: value)
+                    return HTTPField(entry.name, value)
                 }
-                guard !managedHeaders.contains(step.name.lowercased()) else {
-                    throw WorkflowError.invalid("\(step.name) 由代理根据目标和 Body 自动维护")
-                }
-                draft.setHeader(step.name, step.kind == .removeHeader ? nil : value)
+                for header in headers { draft.setHeader(header.name, header.value) }
+            case .removeHeader:
+                try validateHeader(step.name, value: "")
+                draft.setHeader(step.name, nil)
             case .replaceBody: draft.replacementBody = value; clearBodyEncoding(&draft)
             case .rewriteURL:
                 guard let url = URL(string: value), ["http", "https"].contains(url.scheme ?? ""), url.host != nil, url.user == nil, url.fragment == nil else {
@@ -97,7 +120,7 @@ public enum WorkflowEngine {
                 }
                 draft.url = value
             case .setQueryParameter:
-                let name = try resolve(step.name, environment: environment, id: id, date: date)
+                let name = try resolveValue(step.name)
                 guard !name.isEmpty, var components = URLComponents(string: draft.url) else {
                     throw WorkflowError.invalid("查询参数名称或 URL 无效")
                 }
@@ -119,7 +142,7 @@ public enum WorkflowEngine {
                 try validateEditedURL(url)
                 draft.url = url
             case .replaceURLString:
-                let search = try resolve(step.name, environment: environment, id: id, date: date)
+                let search = try resolveValue(step.name)
                 guard !search.isEmpty else { throw WorkflowError.invalid("查找字符串不能为空") }
                 let url = draft.url.replacingOccurrences(of: search, with: value, options: .literal)
                 try validateEditedURL(url)
