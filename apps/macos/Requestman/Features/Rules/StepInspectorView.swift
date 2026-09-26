@@ -171,6 +171,14 @@ import RequestmanCore
             hint.maximumNumberOfLines = 0; hint.lineBreakMode = .byWordWrapping
             sections.append(hint)
         }
+        if [.rewriteURL, .redirect].contains(selected.kind) {
+            let hint = NativeUI.label(selected.kind == .rewriteURL
+                ? "修改代理实际访问的地址，保留请求方法和 Body。"
+                : "返回 3xx 状态码和目标地址，由客户端发起新请求。", size: 11, secondary: true)
+            hint.identifier = .init("rules.stepDescription")
+            hint.maximumNumberOfLines = 0; hint.lineBreakMode = .byWordWrapping
+            sections.append(hint)
+        }
         let stack = NativeUI.stack(sections + [content, divider, footer], spacing: 16)
         for section in sections.dropFirst() { section.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20))

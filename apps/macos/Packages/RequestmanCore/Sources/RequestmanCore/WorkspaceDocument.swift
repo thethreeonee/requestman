@@ -24,13 +24,13 @@ public enum ModificationKind: String, Codable, CaseIterable, Sendable {
         case .setHeader: "添加或覆盖 Header"
         case .removeHeader: "移除 Header"
         case .replaceBody: "替换 Body"
-        case .rewriteURL: "切换目标地址"
+        case .rewriteURL: "改写请求 URL"
         case .setQueryParameter: "修改查询参数"
         case .replaceURLString: "替换 URL 字符串"
         case .setMethod: "修改请求方法"
         case .setStatus: "修改状态码"
         case .mock: "返回静态数据"
-        case .redirect: "重定向"
+        case .redirect: "返回重定向"
         case .script: "执行脚本"
         }
     }
