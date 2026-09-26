@@ -1,6 +1,24 @@
 import AppKit
 import RequestmanCore
 
+extension ModificationKind {
+    var symbolName: String {
+        switch self {
+        case .setHeader: "text.badge.plus"
+        case .removeHeader: "text.badge.minus"
+        case .replaceBody: "doc.text"
+        case .rewriteURL: "link"
+        case .setQueryParameter: "slider.horizontal.3"
+        case .replaceURLString: "arrow.triangle.2.circlepath"
+        case .setMethod: "arrow.left.arrow.right"
+        case .setStatus: "number.circle"
+        case .mock: "doc.on.doc"
+        case .redirect: "arrow.turn.up.right"
+        case .script: "chevron.left.forwardslash.chevron.right"
+        }
+    }
+}
+
 @MainActor final class FlowEditorViewController: ObservedViewController {
     let model: WorkspaceModel
     private let project = NativeUI.label("", size: 12, secondary: true)
@@ -200,9 +218,12 @@ import RequestmanCore
         addButton.item(at: 0)?.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
         addButton.setAccessibilityLabel(response ? "添加响应步骤" : "添加请求步骤")
         for kind in ModificationKind.allCases where kind.supports(response: response) {
-            addButton.menu?.addItem(RulesMenuItem(kind.title) { [weak self] in
+            let item = RulesMenuItem(kind.title, symbol: kind.symbolName) { [weak self] in
                 guard let self, self.model.loaded else { return }; self.model.addStep(kind, response: self.response)
-            })
+            }
+            // macOS 27 hides menu images by default, even when an image is assigned.
+            if #available(macOS 27.0, *) { item.preferredImageVisibility = .visible }
+            addButton.menu?.addItem(item)
         }
         let contents = NativeUI.stack([scroll, addButton], spacing: 10)
         scroll.widthAnchor.constraint(equalTo: contents.widthAnchor).isActive = true
@@ -305,13 +326,22 @@ import RequestmanCore
         NSLayoutConstraint.activate([badge.widthAnchor.constraint(equalToConstant: 26), badge.heightAnchor.constraint(equalToConstant: 28),
             numberLabel.centerXAnchor.constraint(equalTo: badge.contentView!.centerXAnchor), numberLabel.centerYAnchor.constraint(equalTo: badge.contentView!.centerYAnchor)])
         let title = NativeUI.label(step.kind.title); title.toolTip = step.kind.title
+        let icon = NSImageView()
+        icon.image = NSImage(systemSymbolName: step.kind.symbolName, accessibilityDescription: nil)
+        icon.symbolConfiguration = .init(pointSize: 13, weight: .regular)
+        icon.contentTintColor = step.enabled ? .labelColor : .secondaryLabelColor
+        icon.setAccessibilityElement(false)
+        NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: 16), icon.heightAnchor.constraint(equalToConstant: 16)])
+        let heading = NativeUI.stack([icon, title], vertical: false, spacing: 6)
         var summary = step.kind == .script ? (step.name.isEmpty ? "JavaScript" : step.name) : step.kind == .setStatus ? String(step.status) : (step.name.isEmpty ? (step.value.isEmpty ? "点击配置" : step.value) : step.name)
         if !step.name.isEmpty {
             if step.kind == .setQueryParameter { summary = "\(step.name) = \(step.value)" }
             if step.kind == .replaceURLString { summary = "\(step.name) → \(step.value.isEmpty ? "（空）" : step.value)" }
         }
         let detail = NativeUI.label(summary, size: 11, secondary: true); detail.toolTip = summary
-        let texts = NativeUI.stack([title, detail], spacing: 5)
+        let texts = NativeUI.stack([heading, detail], spacing: 5)
+        heading.widthAnchor.constraint(equalTo: texts.widthAnchor).isActive = true
+        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
         texts.setContentHuggingPriority(.defaultLow, for: .horizontal)
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

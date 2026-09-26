@@ -7,6 +7,7 @@ import RequestmanCore
     private var stepID: UUID?
     private let stage = NativeUI.label("", size: 12, secondary: true)
     private let titleLabel = NativeUI.label("", size: 18, weight: .bold)
+    private let typeIcon = NSImageView()
     private lazy var enabled = RulesSwitch { [weak self] value in self?.modify { $0.enabled = value } }
     private var header: HeaderNameField?
     private var name: ActionTextField?
@@ -27,6 +28,7 @@ import RequestmanCore
         let index = steps.firstIndex { $0.id == selected.id } ?? 0
         stage.stringValue = "\(model.editingResponse ? "响应" : "请求")阶段 · 第 \(index + 1) 步"
         titleLabel.stringValue = selected.kind.title; enabled.state = selected.enabled ? .on : .off
+        typeIcon.image = NSImage(systemSymbolName: selected.kind.symbolName, accessibilityDescription: nil)
         if header?.stringValue != selected.name { header?.stringValue = selected.name }
         if name?.stringValue != selected.name { name?.stringValue = selected.name }
         if status?.integerValue != selected.status { status?.integerValue = selected.status }
@@ -48,7 +50,10 @@ import RequestmanCore
             return
         }
         let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let heading = NativeUI.stack([titleLabel, spacer, NativeUI.label("启用"), enabled], vertical: false)
+        typeIcon.symbolConfiguration = .init(pointSize: 18, weight: .semibold)
+        typeIcon.contentTintColor = .labelColor
+        typeIcon.setAccessibilityElement(false)
+        let heading = NativeUI.stack([typeIcon, titleLabel, spacer, NativeUI.label("启用"), enabled], vertical: false)
         let content: NSView
         if selected.kind == .script {
             let controller = ScriptEditorViewController(step: selected, response: model.editingResponse, environment: model.document.environment?.values ?? [:]) { [weak self] step in self?.replace(step) }

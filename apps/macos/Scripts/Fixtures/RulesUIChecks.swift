@@ -149,6 +149,18 @@ import RequestmanCore
         }, "Selection accents must span the card height and clip to its rounded corners")
         let addMenus = pickers.filter { $0.identifier?.rawValue == "rules.addStep" }
         precondition(addMenus.count == 2 && addMenus.allSatisfy { $0.pullsDown && $0.itemTitle(at: 0) == "添加步骤" && $0.numberOfItems > 1 }, "Add step must use a native pull-down menu")
+        for menu in addMenus {
+            let response = menu.accessibilityLabel() == "添加响应步骤"
+            let kinds = ModificationKind.allCases.filter { $0.supports(response: response) }
+            let items = Array(menu.itemArray.dropFirst())
+            precondition(items.map(\.title) == kinds.map(\.title))
+            for item in items {
+                precondition(item.image != nil, "Every modification type must have a menu icon")
+                if #available(macOS 27.0, *) {
+                    precondition(item.preferredImageVisibility == .visible, "Step icons must remain visible when macOS hides menu images by default")
+                }
+            }
+        }
         if let path = ProcessInfo.processInfo.environment["REQUESTMAN_RULES_SNAPSHOT"],
            let root = window.contentView, let bitmap = root.bitmapImageRepForCachingDisplay(in: root.bounds) {
             root.cacheDisplay(in: root.bounds, to: bitmap)
