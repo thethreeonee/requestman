@@ -141,6 +141,47 @@ struct HTTPSIntegrationTests {
             #expect(records.count == 1 && records.first?.error == nil)
         }
     }
+
+    @Test(arguments: [false, true])
+    func stopDoesNotWaitForUnresponsiveTLSClientsAndReleasesPort(stallOrigin: Bool) async throws {
+        try await withHTTPSHarness { h in
+            try await h.start()
+            var clients: [Channel] = []
+            do {
+                for _ in 0..<3 {
+                    let client = try await h.openIdleConnection()
+                    clients.append(client)
+                    // A suspended browser no longer reads or replies to TLS close_notify.
+                    try await client.setOption(ChannelOptions.autoRead, value: false).get()
+                }
+                if stallOrigin {
+                    let origins = h.originConnections.withLock { $0 }
+                    #expect(origins.count == 3)
+                    clients.append(contentsOf: origins)
+                    for origin in origins { try await origin.setOption(ChannelOptions.autoRead, value: false).get() }
+                }
+                let started = ContinuousClock.now
+                await h.proxy.stop()
+                let elapsed = started.duration(to: .now)
+                print("Stop with 3 unresponsive TLS clients (stalled origin: \(stallOrigin)): \(elapsed)")
+                #expect(elapsed < .seconds(1))
+                let records = h.proxy.records.drain().records
+                #expect(records.count == 3)
+                #expect(records.allSatisfy { $0.error == nil })
+                var configuration = ExplicitProxyConfiguration()
+                configuration.port = h.proxyPort
+                let port = try await h.proxy.start(configuration: configuration, document: .init())
+                #expect(port == h.proxyPort)
+            } catch {
+                for client in clients { try? await client.setOption(ChannelOptions.autoRead, value: true).get() }
+                throw error
+            }
+            for client in clients {
+                try await client.setOption(ChannelOptions.autoRead, value: true).get()
+                try await client.closeFuture.get()
+            }
+        }
+    }
     @Test func decryptsHTTPSAndRecordsOriginalMethodURLAndHeaders() async throws {
         try await withHTTPSHarness { h in
             try await h.start()
@@ -363,6 +404,7 @@ private final class HTTPSHarness: @unchecked Sendable {
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
     let proxy: LocalProxyServer
     let observation = OSAllocatedUnfairLock(initialState: HTTPSOriginObservation())
+    let originConnections = OSAllocatedUnfairLock(initialState: [Channel]())
     let coalescedClientHello = OSAllocatedUnfairLock(initialState: false)
     let proxyAuthority: EphemeralTLSAuthority
     let originAuthority: EphemeralTLSAuthority
@@ -391,9 +433,10 @@ private final class HTTPSHarness: @unchecked Sendable {
         var configuration = TLSConfiguration.makeServerConfiguration(certificateChain: [.certificate(certificate)], privateKey: .privateKey(key))
         configuration.applicationProtocols = ["http/1.1"]
         let context = try NIOSSLContext(configuration: configuration)
-        let observation = observation
+        let observation = observation, originConnections = originConnections
         origin = try await ServerBootstrap(group: group).childChannelInitializer { channel in
             observation.withLock { $0.connections += 1 }
+            originConnections.withLock { $0.append(channel) }
             return channel.eventLoop.makeCompletedFuture {
                 try channel.pipeline.syncOperations.addHandler(NIOSSLServerHandler(context: context))
                 try channel.pipeline.syncOperations.configureHTTPServerPipeline()
@@ -452,13 +495,29 @@ private final class HTTPSHarness: @unchecked Sendable {
                                  method: method, headers: headers, body: body)
     }
 
-    func exchangeSequence(paths: [String], stopWhenIdle: Bool = false, abruptClose: Bool = false) async throws -> [HTTPSReply] {
+    func openIdleConnection() async throws -> Channel {
+        let (channel, promises) = try await openSequenceConnection(count: 1)
+        let timeout = channel.eventLoop.scheduleTask(in: .seconds(8)) { channel.close(promise: nil) }
+        defer { timeout.cancel() }
+        let headers = HTTPHeaders([("Host", authority), ("Content-Length", "0"), ("Connection", "keep-alive")])
+        do {
+            channel.write(HTTPClientRequestPart.head(HTTPRequestHead(version: .http1_1, method: .GET, uri: "/idle", headers: headers)), promise: nil)
+            try await channel.writeAndFlush(HTTPClientRequestPart.end(nil)).get()
+            _ = try await promises[0].futureResult.get()
+            return channel
+        } catch {
+            try? await channel.close().get()
+            throw error
+        }
+    }
+
+    private func openSequenceConnection(count: Int) async throws -> (Channel, [EventLoopPromise<HTTPSReply>]) {
         var configuration = TLSConfiguration.makeClientConfiguration()
         configuration.trustRoots = .certificates([try proxyAuthority.trustRoot()])
         configuration.applicationProtocols = ["http/1.1"]
         let context = try NIOSSLContext(configuration: configuration)
         let loop = group.next()
-        let promises = paths.map { _ in loop.makePromise(of: HTTPSReply.self) }
+        let promises = (0..<count).map { _ in loop.makePromise(of: HTTPSReply.self) }
         let authority = authority, coalesced = coalescedClientHello
         let channel = try await ClientBootstrap(group: loop).channelInitializer { channel in
             channel.eventLoop.makeCompletedFuture {
@@ -468,6 +527,12 @@ private final class HTTPSHarness: @unchecked Sendable {
                 try channel.pipeline.syncOperations.addHandler(HTTPSSequenceCollector(results: promises))
             }
         }.connect(host: "127.0.0.1", port: proxyPort).get()
+        return (channel, promises)
+    }
+
+    func exchangeSequence(paths: [String], stopWhenIdle: Bool = false, abruptClose: Bool = false) async throws -> [HTTPSReply] {
+        let (channel, promises) = try await openSequenceConnection(count: paths.count)
+        let loop = channel.eventLoop
         let timeout = loop.scheduleTask(in: .seconds(8)) { channel.close(promise: nil) }
         do {
             var replies: [HTTPSReply] = []

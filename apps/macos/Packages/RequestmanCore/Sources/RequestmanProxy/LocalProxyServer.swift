@@ -36,6 +36,7 @@ public actor LocalProxyServer {
         shared.configuration.withLock { $0 = configuration }
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         self.group = group
+        shared.prepareForStart()
         let shared = shared, records = records
         do {
             let channel = try await ServerBootstrap(group: group)
@@ -53,7 +54,6 @@ public actor LocalProxyServer {
                         records.append(record)
                         return channel.close()
                     }
-                    channel.closeFuture.whenComplete { _ in shared.unregister(channel) }
                     return channel.eventLoop.makeCompletedFuture { () throws -> Void in
                         var encoder = HTTPResponseEncoder.Configuration()
                         encoder.automaticallySetFramingHeaders = false
@@ -75,8 +75,19 @@ public actor LocalProxyServer {
     public func stop() async {
         try? await listener?.close().get()
         listener = nil
-        // Close downstream channels first; their handlers cancel pending connects and close upstream peers.
-        for channel in shared.channels.withLock({ Array($0.values) }) { try? await closeProxyChannel(channel).get() }
+        // Stop is cancellation: close every transport without waiting for peer TLS close_notify.
+        // Initiate all closes before awaiting them, including upstreams still connecting or closing.
+        let closes = shared.beginShutdown().map { channel in
+            channel.eventLoop.flatSubmit {
+                if let tls = try? channel.pipeline.syncOperations.context(handlerType: NIOSSLHandler.self) {
+                    tls.close(promise: nil)
+                } else {
+                    channel.close(promise: nil)
+                }
+                return channel.closeFuture
+            }
+        }
+        for close in closes { try? await close.get() }
         try? await group?.shutdownGracefully()
         group = nil
     }
@@ -94,15 +105,40 @@ final class ProxySharedState: Sendable {
     }
     let configuration = OSAllocatedUnfairLock(initialState: ExplicitProxyConfiguration())
     let document = OSAllocatedUnfairLock(initialState: WorkspaceDocument())
-    let channels = OSAllocatedUnfairLock(initialState: [ObjectIdentifier: Channel]())
-    func register(_ channel: Channel) -> Bool {
-        channels.withLock { channels in
-            guard channels.count < Self.maximumConnections else { return false }
-            channels[ObjectIdentifier(channel)] = channel
-            return true
+    private struct Connections {
+        var accepting = true
+        var downstream: [ObjectIdentifier: Channel] = [:]
+        var upstream: [ObjectIdentifier: Channel] = [:]
+    }
+    private let connections = OSAllocatedUnfairLock(initialState: Connections())
+    func prepareForStart() { connections.withLock { $0.accepting = true } }
+    func beginShutdown() -> [Channel] {
+        connections.withLock {
+            $0.accepting = false
+            // Downstream cancellation records incomplete transactions before upstream teardown.
+            return Array($0.downstream.values) + Array($0.upstream.values)
         }
     }
-    func unregister(_ channel: Channel) { _ = channels.withLock { $0.removeValue(forKey: ObjectIdentifier(channel)) } }
+    func register(_ channel: Channel, downstream: Bool = true) -> Bool {
+        let registered = connections.withLock { connections in
+            guard connections.accepting else { return false }
+            if downstream {
+                guard connections.downstream.count < Self.maximumConnections else { return false }
+                connections.downstream[ObjectIdentifier(channel)] = channel
+            } else {
+                connections.upstream[ObjectIdentifier(channel)] = channel
+            }
+            return true
+        }
+        if registered { channel.closeFuture.whenComplete { [self] _ in unregister(channel) } }
+        return registered
+    }
+    private func unregister(_ channel: Channel) {
+        connections.withLock {
+            $0.downstream.removeValue(forKey: ObjectIdentifier(channel))
+            $0.upstream.removeValue(forKey: ObjectIdentifier(channel))
+        }
+    }
 }
 
 /// All access stays on one NIO EventLoop, including peer callbacks. No Task per packet or UI call here.
@@ -754,6 +790,10 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
               target.fragment == nil, (1...65535).contains(port), !isLoop(host, port: port) else {
             return fail("CONNECT 目标无效", status: 400)
         }
+            .channelInitializer { [shared] channel in
+                guard shared.register(channel, downstream: false) else { return channel.close() }
+                return channel.eventLoop.makeSucceededVoidFuture()
+            }
         guard head.headers["transfer-encoding"].isEmpty,
               head.headers["content-length"].allSatisfy({ $0 == "0" }) else { return fail("CONNECT 不接受 HTTP Body", status: 400) }
         if let provider = shared.certificateProvider {
