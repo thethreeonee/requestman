@@ -93,6 +93,13 @@ import RequestmanCore
         precondition(badges.allSatisfy { abs($0.frame.width - 26) < 1 && abs($0.frame.height - 28) < 1 && $0.cornerRadius == 6 })
         let accents = boxes.filter { $0.identifier?.rawValue == "rules.stepAccent" }
         precondition(accents.filter { !$0.isHidden }.count == 1 && accents.allSatisfy { abs($0.frame.width - 3) < 1 })
+        precondition(accents.allSatisfy { accent in
+            guard let card = cards.first(where: { accent.isDescendant(of: $0) }) else { return false }
+            let frame = accent.convert(accent.bounds, to: card)
+            return abs(frame.minY - card.bounds.minY) < 0.5
+                && abs(frame.maxY - card.bounds.maxY) < 0.5
+                && card.layer?.masksToBounds == true && card.layer?.cornerRadius == card.cornerRadius
+        }, "Selection accents must span the card height and clip to its rounded corners")
         let addMenus = pickers.filter { $0.identifier?.rawValue == "rules.addStep" }
         precondition(addMenus.count == 2 && addMenus.allSatisfy { $0.pullsDown && $0.itemTitle(at: 0) == "添加步骤" && $0.numberOfItems > 1 }, "Add step must use a native pull-down menu")
         if let path = ProcessInfo.processInfo.environment["REQUESTMAN_RULES_SNAPSHOT"],

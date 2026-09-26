@@ -273,6 +273,7 @@ import RequestmanCore
         card.identifier = .init("rules.stepCard")
         card.boxType = .custom; card.titlePosition = .noTitle
         card.borderWidth = 1; card.cornerRadius = 8; card.contentViewMargins = .zero; card.contentView = NSView()
+        card.wantsLayer = true; card.layer?.cornerRadius = card.cornerRadius; card.layer?.masksToBounds = true
         NativeUI.pin(card, to: self, insets: NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0))
         let badge = NSBox(); badge.identifier = .init("rules.stepNumber")
         badge.boxType = .custom; badge.titlePosition = .noTitle; badge.borderWidth = 0; badge.borderColor = .clear
@@ -305,7 +306,7 @@ import RequestmanCore
         accent.fillColor = .systemBlue; accent.cornerRadius = 2
         accent.translatesAutoresizingMaskIntoConstraints = false; card.addSubview(accent)
         NSLayoutConstraint.activate([accent.leadingAnchor.constraint(equalTo: card.leadingAnchor), accent.widthAnchor.constraint(equalToConstant: 3),
-            accent.topAnchor.constraint(equalTo: card.topAnchor, constant: 8), accent.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -8)])
+            accent.topAnchor.constraint(equalTo: card.topAnchor), accent.bottomAnchor.constraint(equalTo: card.bottomAnchor)])
         setAccessibilityElement(true); setAccessibilityLabel("第 \(number) 步，\(step.kind.title)，\(summary)")
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
