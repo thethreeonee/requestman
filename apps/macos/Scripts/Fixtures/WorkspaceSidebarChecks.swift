@@ -49,11 +49,14 @@ final class WorkspaceModel {
     func toggleCapture() async { isCapturing.toggle() }
     func setRecordingPaused(_ paused: Bool) { history.paused = paused }
     func clearHistory() { history.clear() }
+    func addWorkflow(matchingURL: String) {}
 }
 
 @MainActor @Observable
 final class SidebarHistoryFixture {
     var paused = false
+    var dropped = 0
+    var filtered: [CaptureRecord] { records.filter { filter.matches($0) } }
     var records: [CaptureRecord] = []
     var selectedID: UUID?
     var filter = CaptureRecordFilter()
@@ -82,12 +85,8 @@ enum WorkspaceSettingsSection { case general, environments }
     required init?(coder: NSCoder) { nil }
     override func loadView() { view = NSView() }
 }
-@MainActor final class RequestsViewController: NSViewController {
-    func showFilters() {}
-    func focusList() {}
-    init(model: WorkspaceModel) { super.init(nibName: nil, bundle: nil) }
-    required init?(coder: NSCoder) { nil }
-    override func loadView() { view = NSView() }
+@MainActor final class RequestEmptyStateView: NSView {
+    func update(title: String, description: String, symbol: String) {}
 }
 @MainActor final class StepInspectorViewController: NSViewController {
     var isPresented = false
@@ -129,6 +128,8 @@ struct WorkspaceSidebarChecks {
     static func main() {
         let application = NSApplication.shared
         application.setActivationPolicy(.prohibited)
+        checkRequestScrollChrome()
+        if ProcessInfo.processInfo.environment["REQUESTMAN_SCROLL_CHROME_ONLY"] == "1" { return }
         checkKeyboardCommands()
         checkEnvironmentSelection()
         checkObservationIntegration()
@@ -137,6 +138,77 @@ struct WorkspaceSidebarChecks {
         precondition(toolbarGeometryFailures.isEmpty, toolbarGeometryFailures.joined(separator: "; "))
         print("Workspace sidebar CLI checks passed: native item roles, unique toolbar toggle and display-mode control, mode actions and persistence, 400/520 pt toolbar geometry, title visibility, selection/clear/page changes, fixed window width, safe-area geometry and teardown")
         print("Actual WorkspaceSplitView.swift executed with model/content fixtures in hidden NSWindows; no user App built/launched, window shown, network request or configuration write. Visual appearance remains unverified.")
+    }
+
+    private static func checkRequestScrollChrome() {
+        guard #available(macOS 26.0, *) else { return }
+        let model = WorkspaceModel()
+        model.selection = .requests
+        model.history.records = (0..<80).map { CaptureRecord(method: "GET", url: "https://example.test/requests/\($0)") }
+        let controller = WorkspaceSplitController(model: model, snapshot: WorkspaceToolbarSnapshot(model: model), openSettings: {})
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 800),
+                              styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentViewController = controller
+        defer { controller.tearDown(); window.close() }
+        controller.viewDidAppear()
+        let item = controller.splitViewItems[1]
+        let host = item.viewController as! WorkspaceMainController
+        let accessory = item.topAlignedAccessoryViewControllers.first!
+        let filters = findView(RequestFilterControls.self, in: accessory.view)!
+        let table = findView(NSTableView.self, in: host.requests.view)!
+        let scroll = table.enclosingScrollView!
+        func settle() {
+            window.contentView?.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.12))
+            window.contentView?.layoutSubtreeIfNeeded()
+        }
+        for width: CGFloat in [1440, 600, 420, 1440] {
+            window.setContentSize(NSSize(width: width, height: 800)); settle()
+            host.requests.refresh(); settle()
+            precondition(item.allowsFullHeightLayout && !accessory.isHidden)
+            precondition(scroll.automaticallyAdjustsContentInsets)
+            precondition(abs(filters.bounds.height - filters.intrinsicContentSize.height) < 1)
+            let frame = scroll.convert(scroll.bounds, to: host.view)
+            precondition(abs(frame.minY - host.view.bounds.minY) < 1, "List must extend behind the toolbar and filter accessory")
+            let controlsFrame = filters.convert(filters.bounds, to: host.view)
+            let headerFrame = table.headerView!.convert(table.headerView!.bounds, to: host.view)
+            print("Scroll chrome width=\(width): filters=\(controlsFrame), header=\(headerFrame), insets=\(scroll.contentInsets), safe=\(host.view.safeAreaInsets)")
+            precondition(headerFrame.minY >= controlsFrame.maxY - 1, "Table headings must remain below filter controls")
+            if width == 1440 && scroll.contentView.bounds.minY < 0 {
+                let firstRow = table.convert(table.rect(ofRow: 0), to: host.view)
+                precondition(firstRow.minY >= headerFrame.maxY - 1, "Initial request row must not be hidden behind the column headings")
+            }
+            precondition(scroll.contentInsets.top >= controlsFrame.maxY - 1, "Native scroll insets must include both top bars")
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: 300)); scroll.reflectScrolledClipView(scroll.contentView)
+            settle()
+            precondition(abs(filters.convert(filters.bounds, to: host.view).minY - controlsFrame.minY) < 1,
+                         "Filters stay fixed while records scroll underneath")
+        }
+        let normalHeight = accessory.view.bounds.height
+        model.history.paused = true; host.requests.refresh(); settle()
+        precondition(accessory.view.bounds.height > normalHeight, "Paused status must expand the native accessory")
+        model.history.paused = false; host.requests.refresh(); settle()
+        precondition(abs(accessory.view.bounds.height - normalHeight) < 1)
+        if let directory = ProcessInfo.processInfo.environment["REQUESTMAN_SCROLL_CHROME_SNAPSHOTS"] {
+            window.center(); window.orderFrontRegardless(); settle()
+            for (name, offset) in [("top", -scroll.contentInsets.top - table.headerView!.bounds.height), ("scrolled", CGFloat(300))] {
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: offset)); scroll.reflectScrolledClipView(scroll.contentView)
+                settle()
+                let capture = Process()
+                capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                capture.arguments = ["-x", "-o", "-l", String(window.windowNumber), directory + "/" + name + ".png"]
+                try! capture.run(); capture.waitUntilExit()
+                precondition(capture.terminationStatus == 0)
+            }
+            window.orderOut(nil)
+        }
+        model.selection = .rules
+        controller.update(snapshot: WorkspaceToolbarSnapshot(model: model), openSettings: {}); settle()
+        precondition(accessory.isHidden)
+        model.selection = .requests
+        controller.update(snapshot: WorkspaceToolbarSnapshot(model: model), openSettings: {}); settle()
+        precondition(!accessory.isHidden && item.topAlignedAccessoryViewControllers.count == 1)
+        print("Request scroll chrome: native full-height content, safe table headings, responsive filter accessory and page switching passed")
     }
 
     private static func checkKeyboardCommands() {

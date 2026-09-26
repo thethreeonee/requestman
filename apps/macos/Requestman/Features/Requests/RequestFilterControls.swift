@@ -148,11 +148,11 @@ final class RequestFilterPanel: NSViewController, NSTextFieldDelegate, NSComboBo
     init(filter: CaptureRecordFilter, records: [CaptureRecord], onChange: @escaping (CaptureRecordFilter) -> Void) {
         self.filter = filter; self.records = records; self.onChange = onChange
         super.init(nibName: nil, bundle: nil)
-        preferredContentSize = NSSize(width: 560, height: 390)
+        preferredContentSize = NSSize(width: 560, height: 360)
     }
     required init?(coder: NSCoder) { nil }
     override func loadView() {
-        view = FlippedView(frame: NSRect(x: 0, y: 0, width: 560, height: 390))
+        view = FlippedView(frame: NSRect(x: 0, y: 0, width: 560, height: 360))
         for control in [projects, environments, outcomes, methods, statuses, sources, combinations] {
             control.target = self; control.action = #selector(selectionChanged(_:))
         }
@@ -180,13 +180,21 @@ final class RequestFilterPanel: NSViewController, NSTextFieldDelegate, NSComboBo
         reset.target = self; reset.action = #selector(resetFilter); reset.bezelStyle = .rounded
         add.target = self; add.action = #selector(addCondition); add.bezelStyle = .rounded
         add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil); add.imagePosition = .imageLeading
+        let headerSpacer = NSView()
+        headerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let headerRow = NativeUI.stack([NativeUI.label("请求 Header", weight: .semibold), headerSpacer,
+                                       sources, combinations], vertical: false)
+        for control in [sources, combinations] {
+            control.setContentHuggingPriority(.required, for: .horizontal)
+            control.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
         let bottom = NativeUI.stack([inverse, NSView(), reset], vertical: false)
         stack = NativeUI.stack([NativeUI.label("筛选", weight: .semibold), grid, urlRow, divider(),
-            NativeUI.label("请求 Header", weight: .semibold), NativeUI.stack([sources, combinations], vertical: false),
+            headerRow,
             rowsScroll, add, divider(), bottom], spacing: 14)
         stack.alignment = .leading
         NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20))
-        for child in [grid, urlRow, rowsScroll, bottom] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        for child in [grid, urlRow, headerRow, rowsScroll, bottom] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         refreshControls()
     }
     override func viewDidAppear() {
@@ -240,7 +248,7 @@ final class RequestFilterPanel: NSViewController, NSTextFieldDelegate, NSComboBo
         for (row, condition) in zip(rows, filter.headers) { row.update(condition, suggestions: names) }
         rowsHeight.constant = rows.isEmpty ? 0 : min(240, CGFloat(rows.count) * 40 + 16)
         rowsScroll.isHidden = rows.isEmpty
-        preferredContentSize = NSSize(width: 560, height: 390 + rowsHeight.constant)
+        preferredContentSize = NSSize(width: 560, height: 360 + rowsHeight.constant)
         view.needsLayout = true
     }
     private func changed() { onChange(filter); refreshControls() }

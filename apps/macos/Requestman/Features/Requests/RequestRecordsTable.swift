@@ -66,9 +66,9 @@ final class RequestRecordsTable: NSView {
         addSubview(scrollView)
     }
 
-    func update(records: [CaptureRecord], selectedID: UUID?) {
+    func update(records: [CaptureRecord], selectedID: UUID?, workflowNames: [UUID: String] = [:]) {
         coordinator.selection = selectedID
-        coordinator.update(records: records)
+        coordinator.update(records: records, workflowNames: workflowNames)
         coordinator.fitColumns(to: scrollView.contentView.bounds.width)
     }
 
@@ -121,9 +121,12 @@ final class RequestRecordsTable: NSView {
             }
         }
 
-        func update(records: [CaptureRecord]) {
+        func update(records: [CaptureRecord], workflowNames: [UUID: String]) {
             guard let table else { return }
-            let nextRows = records.map { RecordRow(record: $0, timeFormatter: timeFormatter) }
+            let nextRows = records.map {
+                RecordRow(record: $0, timeFormatter: timeFormatter,
+                          workflowName: $0.matchedWorkflowID.flatMap { workflowNames[$0] })
+            }
             requiredRequestWidth = (Set(records.map(\.method)).map { RequestMethodTag.requiredWidth(for: $0) }.max() ?? 0) + 24
             updating = true
             defer { updating = false }
@@ -175,8 +178,8 @@ final class RequestRecordsTable: NSView {
             let status: CGFloat = max(48, 76 * compactScale)
             let duration: CGFloat = max(64, 92 * compactScale)
             let flexible = max(0, width - time - status - duration)
-            let initial = [time, status, flexible * 0.40, flexible * 0.30,
-                           flexible * 0.18, flexible * 0.12, duration]
+            let initial = [time, status, flexible * 0.52, flexible * 0.36,
+                           flexible * 0.12, duration]
             let weights = preferredWidths ?? initial
             let minimums = minimumWidths
             var widths = Array(repeating: CGFloat.zero, count: weights.count)
@@ -198,7 +201,7 @@ final class RequestRecordsTable: NSView {
         }
 
         private var minimumWidths: [CGFloat] {
-            let widths: [CGFloat] = [60, 48, 120, 80, 60, 48, 64]
+            let widths: [CGFloat] = [60, 48, 120, 80, 48, 64]
             let scale = min(1, availableWidth / (widths.reduce(0, +) * 1.5))
             return widths.enumerated().map { index, width in
                 index == 2 ? max(width * scale, requiredRequestWidth) : width * scale
@@ -307,7 +310,7 @@ private final class RecordsTableColumn: NSTableColumn {
 }
 
 private enum RecordColumn: String, CaseIterable {
-    case time, status, request, rules, project, environment, duration
+    case time, status, request, rules, environment, duration
     var identifier: NSUserInterfaceItemIdentifier { .init(rawValue) }
     var title: String {
         switch self {
@@ -315,7 +318,6 @@ private enum RecordColumn: String, CaseIterable {
         case .status: "状态码"
         case .request: "请求"
         case .rules: "命中的规则"
-        case .project: "项目"
         case .environment: "环境"
         case .duration: "耗时"
         }
@@ -328,20 +330,22 @@ private struct RecordRow: Equatable {
     let method: String
     let url: String
     let project: String
-    let rules: [CaptureMatchedRule]
+    let workflow: String?
     let environment: String
     let status: Int?
     let duration: String
     let result: String
     let failure: String?
 
-    init(record: CaptureRecord, timeFormatter: DateFormatter) {
+    init(record: CaptureRecord, timeFormatter: DateFormatter, workflowName: String?) {
         id = record.id
         time = timeFormatter.string(from: record.startedAt)
         method = record.method
         url = record.url
         project = record.project
-        rules = record.matchedRules
+        workflow = record.matchedWorkflowID != nil
+            ? (workflowName ?? record.workflow)
+            : record.matchedRules.first?.name
         environment = record.environment
         status = record.status
         let seconds = max(0, record.duration)
@@ -372,9 +376,6 @@ private final class RecordCell: NSTableCellView {
     private let primary = NSTextField(labelWithString: "")
     private let secondary = NSTextField(labelWithString: "")
     private let methodTag = RequestMethodTag()
-    private let moreRules = NSButton(title: "", target: nil, action: nil)
-    private var ruleSummaries: [String] = []
-    private var rulesPopover: NSPopover?
     private var primaryColor = NSColor.labelColor
     private var secondaryColor = NSColor.secondaryLabelColor
 
@@ -395,14 +396,6 @@ private final class RecordCell: NSTableCellView {
         if column == .request {
             primary.lineBreakMode = .byTruncatingMiddle
             addSubview(methodTag)
-        }
-        if column == .rules {
-            moreRules.bezelStyle = .inline
-            moreRules.target = self
-            moreRules.action = #selector(showRules(_:))
-            moreRules.isHidden = true
-            moreRules.setAccessibilityLabel("查看全部命中规则")
-            addSubview(moreRules)
         }
         if column == .duration { primary.alignment = .right }
         if column == .time || column == .status || column == .duration {
@@ -436,18 +429,11 @@ private final class RecordCell: NSTableCellView {
             secondaryColor = .systemRed
             methodTag.setMethod(row.method)
         case .rules:
-            let summaries = row.rules.map(\.summary)
-            if ruleSummaries != summaries { rulesPopover?.close() }
-            ruleSummaries = summaries
-            primary.stringValue = row.rules.first?.typeName ?? "—"
-            secondary.stringValue = row.rules.first?.name ?? ""
+            primary.stringValue = row.project
+            secondary.stringValue = row.workflow ?? ""
             primaryColor = .secondaryLabelColor
             secondaryColor = .labelColor
-            secondary.isHidden = row.rules.isEmpty
-            moreRules.isHidden = row.rules.count <= 1
-            moreRules.title = "+\(max(0, row.rules.count - 1))"
-        case .project:
-            primary.stringValue = row.project
+            secondary.isHidden = row.workflow == nil
         case .environment:
             primary.stringValue = row.environment
         case .duration:
@@ -460,7 +446,7 @@ private final class RecordCell: NSTableCellView {
             ? "\(row.method) \(row.url)\n\(row.result)"
             : (secondary.isHidden ? primary.stringValue : "\(primary.stringValue)\n\(secondary.stringValue)")
         if column == .rules {
-            toolTip = row.rules.isEmpty ? "未命中规则" : ruleSummaries.joined(separator: "\n")
+            toolTip = [row.project, row.workflow ?? "未命中规则"].joined(separator: "\n")
             setAccessibilityLabel("命中的规则")
             setAccessibilityValue(toolTip)
         }
@@ -483,39 +469,11 @@ private final class RecordCell: NSTableCellView {
             primary.frame = NSRect(x: textX, y: top + 2, width: textWidth, height: lineHeight)
             secondary.frame = NSRect(x: textX, y: 32, width: textWidth, height: 18)
         } else if column == .rules && !secondary.isHidden {
-            let moreWidth: CGFloat = moreRules.isHidden ? 0 : min(34, width)
             primary.frame = NSRect(x: inset, y: 7, width: width, height: lineHeight)
-            secondary.frame = NSRect(x: inset, y: 30, width: max(0, width - moreWidth), height: lineHeight)
-            moreRules.frame = NSRect(x: bounds.width - inset - moreWidth, y: 29, width: moreWidth, height: 22)
+            secondary.frame = NSRect(x: inset, y: 30, width: width, height: lineHeight)
         } else {
             primary.frame = NSRect(x: inset, y: (bounds.height - lineHeight) / 2, width: width, height: lineHeight)
         }
-    }
-
-    @objc private func showRules(_ sender: NSButton) {
-        let popover = NSPopover()
-        popover.behavior = .transient
-        let controller = NSViewController()
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.drawsBackground = false
-        let text = NSTextView()
-        text.isEditable = false
-        text.isRichText = false
-        text.drawsBackground = false
-        text.font = .systemFont(ofSize: 13)
-        text.textContainerInset = NSSize(width: 16, height: 16)
-        text.string = (["命中的规则"] + ruleSummaries).joined(separator: "\n\n")
-        text.isVerticallyResizable = true
-        text.autoresizingMask = [.width]
-        text.textContainer?.widthTracksTextView = true
-        scroll.documentView = text
-        controller.view = scroll
-        popover.contentViewController = controller
-        popover.contentSize = NSSize(width: 360, height: min(360, CGFloat(ruleSummaries.count) * 32 + 60))
-        rulesPopover = popover
-        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
     }
 
     private func updateColors() {
@@ -550,6 +508,8 @@ final class RequestMethodTag: NSView {
         cell.font = font
         cell.isBordered = false
         cell.usesSingleLineMode = true
+        cell.alignment = .center
+        cell.lineBreakMode = .byTruncatingTail
         return ceil(cell.cellSize.width) + 12
     }
 
@@ -587,7 +547,8 @@ final class RequestMethodTag: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: ceil(label.intrinsicContentSize.width) + 12, height: 24)
+        // Match the drawing cell: NSTextField's intrinsic width can omit truncation padding.
+        NSSize(width: Self.requiredWidth(for: label.stringValue), height: 24)
     }
 
     override func layout() {

@@ -1,7 +1,7 @@
 import AppKit
 import RequestmanCore
 
-/// AppKit owns the outer frame; each pane's controls occupy its system safe area.
+/// Controls use the safe area; scrolling pages can extend behind native top accessories.
 @MainActor
 class WorkspacePaneController: NSViewController {
     private var content: NSViewController?
@@ -9,7 +9,7 @@ class WorkspacePaneController: NSViewController {
     required init?(coder: NSCoder) { nil }
     override func loadView() { view = FlippedView() }
 
-    func show(_ controller: NSViewController) {
+    func show(_ controller: NSViewController, extendsUnderTitlebar: Bool = false) {
         guard content !== controller else { return }
         if let content { content.view.removeFromSuperview(); content.removeFromParent() }
         content = controller
@@ -20,7 +20,7 @@ class WorkspacePaneController: NSViewController {
         NSLayoutConstraint.activate([
             child.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
             child.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-            child.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            child.topAnchor.constraint(equalTo: extendsUnderTitlebar ? view.topAnchor : view.safeAreaLayoutGuide.topAnchor),
             child.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
         ])
     }
@@ -44,7 +44,14 @@ final class WorkspaceMainController: WorkspacePaneController {
         update(section: model.selection)
     }
     required init?(coder: NSCoder) { nil }
-    func update(section: WorkspaceSection) { show(section == .rules ? rules : requests) }
+    func update(section: WorkspaceSection) {
+        requests.setFilterAccessoryVisible(section == .requests)
+        if #available(macOS 26.0, *), section == .requests {
+            show(requests, extendsUnderTitlebar: true)
+        } else {
+            show(section == .rules ? rules : requests)
+        }
+    }
 }
 
 @MainActor

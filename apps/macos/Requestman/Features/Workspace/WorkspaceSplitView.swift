@@ -138,6 +138,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
 
         let contentItem = NSSplitViewItem(viewController: mainHost)
         contentItem.minimumThickness = 420
+        if #available(macOS 26.0, *) { contentItem.allowsFullHeightLayout = true }
         inspectorItem = NSSplitViewItem(inspectorWithViewController: inspectorHost)
         inspectorItem.minimumThickness = 400
         inspectorItem.maximumThickness = 760
@@ -147,6 +148,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         addSplitViewItem(sidebarItem)
         addSplitViewItem(contentItem)
         addSplitViewItem(inspectorItem)
+        mainHost.requests.installFilterAccessory(on: contentItem, visible: state.section == .requests)
 
         sidebarObservation = sidebarItem.observe(\.isCollapsed, options: [.new]) { [weak self] _, _ in
             Task { @MainActor [weak self] in self?.splitItemStateDidChange() }

@@ -174,13 +174,14 @@ struct InspectorPerformanceChecks {
         model.history.selectedID = model.history.records[0].id
         settle(controller)
         let details = inspector.viewController as! WorkspaceInspectorController
-        let link = views(NSButton.self, in: details.requests.view).first { $0.accessibilityLabel() == "命中的规则与项目" }!
+        let link = views(NSPathControl.self, in: details.requests.view).first { $0.accessibilityLabel() == "命中的规则与项目" }!
         precondition(link.isEnabled && link.font!.pointSize == 14)
+        precondition(link.pathItems.map(\.title) == [project.name, workflow.name] && !link.isEditable)
         let method = views(RequestMethodTag.self, in: details.requests.view).first!
         precondition(method.bounds.width == method.intrinsicContentSize.width && method.bounds.height == 24)
         let status = views(NSTextField.self, in: details.requests.view).first { $0.stringValue == "302" }!
         precondition(status.textColor == NSColor.systemOrange && status.font == RequestStatusStyle.font)
-        link.performClick(nil)
+        precondition(link.sendAction(link.action, to: link.target))
         settle(controller)
         precondition(model.selection == .rules && model.selectedWorkflowID == workflow.id && model.selectedStepID == nil)
         model.selection = .requests
