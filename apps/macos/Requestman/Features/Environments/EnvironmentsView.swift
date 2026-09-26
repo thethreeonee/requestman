@@ -14,6 +14,8 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
     private var editorID: UUID?
     private var variableIDs: [UUID] = []
     private var nameField: ActionTextField?
+    private var nameDraft: String?
+    private let nameError = SettingsUI.note("环境名称已存在")
     private var variableFields: [UUID: (name: ActionTextField, value: ActionTextField)] = [:]
     private var useButton: ActionButton?
     private var editorControls: [NSControl] = []
@@ -103,6 +105,7 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
                 variableFields = [:]
                 editorControls = []
                 nameField = nil
+                nameDraft = nil
                 useButton = nil
             }
             return
@@ -110,7 +113,8 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
         if editorID != environment.id || variableIDs != environment.variables.map(\.id) {
             rebuildEditor(environment)
         }
-        if let nameField { SettingsUI.sync(nameField, environment.name) }
+        if let nameField { SettingsUI.sync(nameField, nameDraft ?? environment.name) }
+        nameError.isHidden = !hasDuplicateName(nameDraft ?? environment.name, excluding: environment.id)
         for variable in environment.variables {
             guard let fields = variableFields[variable.id] else { continue }
             SettingsUI.sync(fields.name, variable.name)
@@ -145,15 +149,22 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
 
     private func rebuildEditor(_ environment: WorkspaceEnvironment) {
         editor.view.subviews.forEach { $0.removeFromSuperview() }
+        if editorID != environment.id { nameDraft = nil }
         editorID = environment.id
         variableIDs = environment.variables.map(\.id)
         variableFields = [:]
         editorControls = []
         let environmentID = environment.id
-        let name = ActionTextField(environment.name, placeholder: "名称") { [weak self] value in
+        let name = ActionTextField(nameDraft ?? environment.name, placeholder: "名称") { [weak self] value in
             guard let self, let index = self.index(of: environmentID) else { return }
+            let duplicate = self.hasDuplicateName(value, excluding: environmentID)
+            self.nameError.isHidden = !duplicate
+            self.nameDraft = duplicate ? value : nil
+            guard !duplicate else { return }
             self.model.document.environments[index].name = value
         }
+        nameError.textColor = .systemRed
+        nameError.isHidden = !hasDuplicateName(nameDraft ?? environment.name, excluding: environmentID)
         name.setAccessibilityLabel("环境名称")
         name.widthAnchor.constraint(equalToConstant: 260).isActive = true
         nameField = name
@@ -203,9 +214,9 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
         delete.hasDestructiveAction = true
         editorControls += [add, delete]
         let sections = [
-            SettingsUI.section("环境", rows: [SettingsUI.row("名称", name), useRow]),
+            SettingsUI.section("环境", rows: [SettingsUI.row("名称", name), nameError, useRow]),
             SettingsUI.section("变量", rows: rows, footer: "使用 {{env.变量名}} 引用。切换环境仅影响新请求；进行中的请求保留原环境快照。"),
-            SettingsUI.section("", rows: [NativeUI.stack([delete, NSView()], vertical: false)], footer: "环境保存在本机工作区文件中。变量名称应唯一；同名时使用最后一个值。")
+            NativeUI.stack([delete, NSView()], vertical: false)
         ]
         let content = NativeUI.stack(sections, spacing: 20)
         content.alignment = .leading
@@ -221,6 +232,13 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
     }
 
     private func index(of id: UUID) -> Int? { model.document.environments.firstIndex { $0.id == id } }
+
+    private func hasDuplicateName(_ name: String, excluding id: UUID) -> Bool {
+        let candidate = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return model.document.environments.contains {
+            $0.id != id && $0.name.trimmingCharacters(in: .whitespacesAndNewlines) == candidate
+        }
+    }
 
     private func makeEmptyState(_ title: String, detail: String, action: NSButton? = nil) -> NSView {
         let container = NSView()
