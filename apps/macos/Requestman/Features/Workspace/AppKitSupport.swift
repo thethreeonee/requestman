@@ -12,6 +12,7 @@ class ObservedViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        NativeTextEditing.install()
         observeModel()
     }
 
@@ -30,6 +31,37 @@ class ObservedViewController: NSViewController {
     }
 
     func stopObserving() { observing = false; observationGeneration += 1 }
+}
+
+/// Finish editing before a click elsewhere is delivered to its original target.
+@MainActor
+enum NativeTextEditing {
+    private static var mouseMonitor: Any?
+
+    static func install() {
+        guard mouseMonitor == nil else { return }
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+            MainActor.assumeIsolated { finishEditingOutside(event) }
+            return event
+        }
+    }
+
+    static func finishEditingOutside(_ event: NSEvent) {
+        guard let window = event.window, let root = window.contentView,
+              let editor = window.firstResponder as? NSTextView, editor.isEditable else { return }
+        let owner: NSView
+        if editor.isFieldEditor, let field = editor.delegate as? NSTextField {
+            owner = field
+        } else {
+            owner = editor.enclosingScrollView ?? editor
+        }
+        let point = root.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow
+        if let hit = root.hitTest(point),
+           hit === owner || hit.isDescendant(of: owner) || hit === editor || hit.isDescendant(of: editor) {
+            return
+        }
+        window.makeFirstResponder(nil)
+    }
 }
 
 final class FlippedView: NSView {
@@ -99,6 +131,11 @@ final class ActionTextField: NSTextField, NSTextFieldDelegate {
     }
     required init?(coder: NSCoder) { nil }
     func controlTextDidChange(_ notification: Notification) { onChange(stringValue) }
+    func controlTextDidEndEditing(_ notification: Notification) { onChange(stringValue) }
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard commandSelector == #selector(NSResponder.insertNewline(_:)), !textView.hasMarkedText() else { return false }
+        return window?.makeFirstResponder(nil) == true
+    }
 }
 
 @MainActor

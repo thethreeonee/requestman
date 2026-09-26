@@ -62,7 +62,12 @@ import RequestmanCore
         precondition(abs(addRect.height - searchRect.height) < 1 && abs(addRect.midY - searchRect.midY) < 1, "Sidebar add and search controls must retain equal heights and vertical centers")
         precondition(abs(addRect.minX - 12) < 1 && abs(searchRect.minX - addRect.maxX - 10) < 1, "Sidebar footer retains 12pt margin and 10pt control spacing")
         let titleField = descendants(rules.view).compactMap { $0 as? ActionTextField }.first { $0.placeholderString == "请求修改名称" }!
-        titleField.stringValue = "Changed flow"; titleField.onChange(titleField.stringValue); rules.refresh()
+        titleField.selectText(nil)
+        let titleEditor = titleField.currentEditor() as! NSTextView
+        titleEditor.insertText("Changed flow", replacementRange: NSRange(location: 0, length: titleEditor.string.utf16.count))
+        titleEditor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        precondition(titleField.currentEditor() == nil, "Return must remove focus from the workflow title")
+        rules.refresh()
         precondition(model.workflow?.name == "Changed flow")
         model.document.projects[0].workflows[0].name = "Externally updated"
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))

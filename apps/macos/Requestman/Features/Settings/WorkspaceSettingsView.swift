@@ -113,22 +113,34 @@ enum SettingsUI {
     static func section(_ title: String, rows: [NSView], footer: String? = nil) -> NSView {
         let box = NSBox()
         box.title = title
+        box.titlePosition = .noTitle
         box.boxType = .primary
-        box.contentViewMargins = NSSize(width: 12, height: 12)
+        box.contentViewMargins = .zero
         let content = NativeUI.stack(rows, spacing: 12)
         content.alignment = .leading
         for row in rows { row.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true }
-        // NSBox manages its content view's frame; pin the form inside it so its
-        // fitting height participates in the surrounding stack's Auto Layout.
+        // Connect the content all the way to the box, including after rows hide.
+        // NSBox's autoresizing content view does not propagate that fitting height.
         box.contentView = NSView()
+        NativeUI.pin(box.contentView!, to: box,
+                     insets: NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12))
         NativeUI.pin(content, to: box.contentView!)
-        if let footer {
-            let stack = NativeUI.stack([box, note(footer)], spacing: 6)
-            stack.alignment = .leading
-            stack.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
-            return stack
+        var parts: [NSView] = []
+        if !title.isEmpty {
+            let heading = NativeUI.label(title, size: NSFont.smallSystemFontSize, weight: .medium)
+            heading.setContentCompressionResistancePriority(.required, for: .vertical)
+            let header = NSView()
+            NativeUI.pin(heading, to: header,
+                         insets: NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 12))
+            parts.append(header)
         }
-        return box
+        parts.append(box)
+        if let footer { parts.append(note(footer)) }
+        let stack = NativeUI.stack(parts, spacing: 8)
+        stack.alignment = .leading
+        stack.setCustomSpacing(6, after: box)
+        parts.forEach { $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        return stack
     }
 
     static func scroll(_ document: NSView, into parent: NSView, inset: CGFloat = 20) {

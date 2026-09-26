@@ -34,7 +34,11 @@ final class WorkspaceModel {
 
 private struct ReadOnlyCertificateFixture: CertificateService {
     var configured = false
-    func status() async throws -> CertificateStatus { configured ? CertificateStatus(generated: true, installed: true, trusted: true) : .missing }
+    var fails = false
+    func status() async throws -> CertificateStatus {
+        if fails { throw LocalCertificateError.missingPrivateKey }
+        return configured ? CertificateStatus(generated: true, installed: true, trusted: true) : .missing
+    }
     func migrateAuthorization(allowingUI: Bool) async throws -> CertificateStatus { preconditionFailure("Unexpected migration") }
     func generate() async throws -> CertificateStatus { preconditionFailure("Unexpected certificate generation") }
     func regenerate() async throws -> CertificateStatus { preconditionFailure("Unexpected regeneration") }
@@ -76,6 +80,15 @@ struct SettingsUIChecks {
         general.refresh()
         checkFormGeometry(in: general.view)
         try snapshotForm(in: general.view, name: "general")
+        for fixture in [ReadOnlyCertificateFixture(), ReadOnlyCertificateFixture(fails: true),
+                        ReadOnlyCertificateFixture(configured: true)] {
+            model.certificateSetup = CertificateSetupModel(service: fixture)
+            await model.certificateSetup.refreshStatus()
+            general.refresh()
+            checkFormGeometry(in: general.view)
+            let setup = button("设置证书…", in: general.view)
+            precondition(setup.isHidden == fixture.configured)
+        }
         model.document.proxy.upstream = .httpProxy(ProxyEndpoint(host: "127.0.0.1", port: 6152))
         model.proxyConfigurationError = String(repeating: "上游代理连接失败，请检查地址与端口。", count: 8)
         general.refresh()
@@ -103,8 +116,20 @@ struct SettingsUIChecks {
         precondition(model.document.environments[0].name == "staging")
         button("添加变量", in: environments.view).performClick(nil)
         environments.refresh()
-        field("变量名称", in: environments.view).onChange("apiKey")
-        field("变量值", in: environments.view).onChange("secret-value")
+        window.contentView?.layoutSubtreeIfNeeded()
+        let variableName = field("变量名称", in: environments.view)
+        let variableValue = field("变量值", in: environments.view)
+        variableName.selectText(nil)
+        let nameEditor = variableName.currentEditor() as! NSTextView
+        nameEditor.insertText("apiKey", replacementRange: NSRange(location: 0, length: nameEditor.string.utf16.count))
+        nameEditor.doCommand(by: #selector(NSResponder.insertTab(_:)))
+        precondition(variableValue.currentEditor() != nil, "Tab must move from a variable name to its value")
+        let valueEditor = variableValue.currentEditor() as! NSTextView
+        valueEditor.insertText("secret-value", replacementRange: NSRange(location: 0, length: valueEditor.string.utf16.count))
+        valueEditor.doCommand(by: #selector(NSResponder.insertBacktab(_:)))
+        precondition(variableName.currentEditor() != nil, "Shift-Tab must return to the variable name")
+        (variableName.currentEditor() as! NSTextView).doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        precondition(variableName.currentEditor() == nil, "Return must finish single-line editing")
         environments.refresh()
         precondition(model.document.environments[0].values["apiKey"] == "secret-value")
         precondition(field("变量值", in: environments.view).stringValue == "secret-value")
@@ -141,7 +166,70 @@ struct SettingsUIChecks {
         certificate.refresh()
         precondition(certificate.view.fittingSize.width == 480)
         precondition(!model.certificateSetup.isRunning)
+        checkOutsideClickEditing()
         print("Settings AppKit checks OK: form containment and non-overlap, browser/certificate states, upstream expansion and wrapped errors, scrolling, window, toolbar, proxy binding, environment editing/switch/delete, split geometry, read-only state and certificate construction (no App or certificate changes)")
+    }
+
+    private static func checkOutsideClickEditing() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let root = window.contentView!
+        var saved = ""
+        let field = ActionTextField { saved = $0 }
+        field.frame = NSRect(x: 20, y: 120, width: 180, height: 24)
+        root.addSubview(field)
+        field.selectText(nil)
+        let editor = field.currentEditor() as! NSTextView
+        editor.insertText("latest value", replacementRange: NSRange(location: 0, length: 0))
+        func click(_ point: NSPoint) -> NSEvent {
+            NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0,
+                               windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        NativeTextEditing.finishEditingOutside(click(NSPoint(x: 40, y: 130)))
+        precondition(field.currentEditor() != nil, "Clicking inside the field must retain its editor")
+        NSApplication.shared.sendEvent(click(NSPoint(x: 350, y: 30)))
+        precondition(field.currentEditor() == nil && saved == "latest value",
+                     "A background click must commit the value and remove focus")
+
+        var receivedClick = false
+        let target = ActionButton(title: "提交检查") {
+            precondition(field.currentEditor() == nil && saved == "before action",
+                         "Editing must finish before the clicked view handles its action")
+            receivedClick = true
+        }
+        target.frame = NSRect(x: 250, y: 110, width: 100, height: 50)
+        root.addSubview(target)
+        field.selectText(nil)
+        let nextEditor = field.currentEditor() as! NSTextView
+        nextEditor.insertText("before action", replacementRange: NSRange(location: 0, length: nextEditor.string.utf16.count))
+        let actionEvent = click(NSPoint(x: 280, y: 130))
+        // Hidden windows do not dispatch control tracking. Observe the unchanged
+        // event, then exercise the native action after all local monitors finish.
+        // AppKit does not promise registration order for those monitors.
+        var forwardedEvent: NSEvent?
+        let monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+            MainActor.assumeIsolated {
+                if event === actionEvent { forwardedEvent = event }
+            }
+            return event
+        }!
+        NSApplication.shared.sendEvent(actionEvent)
+        NSEvent.removeMonitor(monitor)
+        precondition(forwardedEvent === actionEvent, "Editing must preserve the original mouse event")
+        target.performClick(nil)
+        precondition(receivedClick, "Ending editing must not swallow the original mouse event")
+
+        let multiline = NSTextView(frame: NSRect(x: 20, y: 20, width: 200, height: 80))
+        root.addSubview(multiline)
+        window.makeFirstResponder(multiline)
+        multiline.insertText("first", replacementRange: NSRange(location: 0, length: 0))
+        multiline.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        precondition(multiline.string == "first\n" && window.firstResponder === multiline,
+                     "Return must keep its normal newline behavior in multiline editors")
+        NSApplication.shared.sendEvent(click(NSPoint(x: 350, y: 30)))
+        precondition(window.firstResponder !== multiline, "A background click must also end multiline editing")
     }
 
     private static func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
@@ -170,10 +258,24 @@ struct SettingsUIChecks {
         precondition(!boxes.isEmpty)
         for box in boxes {
             let content = box.contentView!
+            let contentFrame = content.convert(content.bounds, to: box)
+            precondition(contentFrame.minY >= 11.5 && box.bounds.maxY - contentFrame.maxY >= 11.5,
+                         "Settings group \(box.title) must keep vertical content padding after rows hide")
+            if !box.title.isEmpty {
+                let section = box.superview as! NSStackView
+                let header = section.arrangedSubviews.first!
+                precondition(header !== box, "Group headings must be outside the box")
+                let headingFrame = header.convert(header.bounds, to: section)
+                let boxFrame = box.convert(box.bounds, to: section)
+                let gap = max(headingFrame.minY - boxFrame.maxY, boxFrame.minY - headingFrame.maxY)
+                precondition(gap >= 7.5, "Settings group \(box.title) must have space below its heading")
+            }
             precondition(content.bounds.height + 0.5 >= content.fittingSize.height,
                          "Settings group \(box.title) clips its content: \(content.bounds.height) < \(content.fittingSize.height)")
             for control in descendants(content).compactMap({ $0 as? NSControl }) where !control.isHiddenOrHasHiddenAncestor {
                 let frame = control.convert(control.bounds, to: box)
+                precondition(frame.height + 0.5 >= max(0, control.intrinsicContentSize.height),
+                             "Settings group \(box.title) compresses a visible control")
                 precondition(box.bounds.insetBy(dx: -0.5, dy: -0.5).contains(frame), "Settings group \(box.title) must contain its controls")
                 precondition(!frame.intersects(box.titleRect), "Settings group \(box.title) overlaps its title")
             }

@@ -211,6 +211,13 @@ final class EnvironmentsViewController: ObservedViewController, NSTableViewDataS
         content.alignment = .leading
         sections.forEach { $0.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true }
         SettingsUI.scroll(content, into: editor.view)
+        // This form is created after the window's initial key-view loop. Keep
+        // each variable's name and value adjacent, including newly added rows.
+        editor.view.layoutSubtreeIfNeeded()
+        view.window?.recalculateKeyViewLoop()
+        for (current, next) in zip(editorControls, editorControls.dropFirst()) {
+            current.nextKeyView = next
+        }
     }
 
     private func index(of id: UUID) -> Int? { model.document.environments.firstIndex { $0.id == id } }
