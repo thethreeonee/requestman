@@ -20,14 +20,21 @@ final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVal
     private var workspaceWindow: WorkspaceWindowController?
     private var settingsWindow: WorkspaceSettingsWindowController?
     private var recordsTask: Task<Void, Never>?
+    private var ruleHitNotifications: SystemRuleHitNotifications?
+    private var notificationsTask: Task<Void, Never>?
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        ruleHitNotifications = SystemRuleHitNotifications()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        model = WorkspaceModel()
+        model = WorkspaceModel(ruleHitNotifications: ruleHitNotifications)
         installMenus()
         let controller = WorkspaceWindowController(model: model) { [weak self] in self?.showSettings(nil) }
         workspaceWindow = controller
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+        notificationsTask = Task { [weak self] in await self?.model.collectRuleHitNotifications() }
         recordsTask = Task { [weak self] in
             guard let self else { return }
             await model.certificateSetup.prepareForStartup()
@@ -52,7 +59,7 @@ final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVal
         guard let model else { return .terminateNow }
         Task {
             let saved = await model.prepareToQuit()
-            if saved { recordsTask?.cancel() }
+            if saved { recordsTask?.cancel(); notificationsTask?.cancel() }
             sender.reply(toApplicationShouldTerminate: saved)
         }
         return .terminateLater

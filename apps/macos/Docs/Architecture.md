@@ -82,6 +82,14 @@ HTTP/1.1 顺序请求复用下游连接，每条下游最多保留一个同目�
 
 `RequestmanCore` 已提供 `FlowExecutionRuntime`：不可变计划/环境版本、按需 Body 读取、有界准入、可批量读取的元数据环形缓冲。它与 UI、数据库和代理框架无关，详细容量、取消与接入契约见 [性能与资源边界](Performance.md)。基础代理在 NIO 事件循环直接执行 metadata/static-body 动作，使用连接准入和写完成后的拉取背压；不把每个网络块转成 Swift Task，也没有把两套准入队列叠加。`FlowExecutionRuntime` 为后续需要完整 Body 的异步动作保留，尚未包裹 NIO 转发。
 
+## 规则命中通知
+
+捕获会话的规则命中通知通过独立的 `RuleHitNotificationBuffer` 传递。`LocalProxyServer` 在 `WorkflowEngine.match` 成功后、步骤执行与请求正文等待之前写入工作流 ID 和名称；它表示匹配成功，不表示后续步骤或网络请求成功。通知不依赖完成记录，因此慢请求、脚本等待、日志暂停和日志清空不会抑制命中提示。`LocalProxyCaptureService` 为全局接管和浏览器两种会话启用该缓冲，启动失败、停止或监听重启时重置，并通过会话 ID 阻止旧批次继续发送。
+
+聚合使用 `ContinuousClock` 单调时间，每轮固定为首次命中起的 `[0, 3s)`，新命中不续期。轮内以工作流 ID 去重，名称采用首次命中的快照；每轮独立 UUID 作为系统通知标识。缓冲合并尚未读取的同轮更新，最多保留 64 轮待发送快照；宿主独立于历史记录每 200 ms 串行消费，避免通知服务等待影响请求转发或日志读取。首条在下一次消费时提交，不等满 3 秒。达到边界后的命中新建标识；到期本身不触发动作，已送达通知不主动删除。
+
+`SystemRuleHitNotifications` 在 App 启动完成前注册 `UNUserNotificationCenterDelegate`，在用户启动任意捕获模式时检查并按需申请 `.alert` 权限。使用标题“规则命中”、逐行规则名称正文和空 trigger 提交无声本地通知；轮内复用标识更新，前台返回 `.banner` / `.list`。发送前重新检查授权与会话有效性，拒绝或发送失败不阻止捕获，错误写入系统日志。没有 APNs、网页注入或辅助功能权限依赖。`RuleHitNotificationTests` 覆盖固定边界、重复 ID、同名不同规则、积压合并及会话隔离；代理测试覆盖匹配时机与未命中；`check-rule-hit-notifications.py` 使用通知中心替身检查权限、正文和标识，不请求真实权限、不发送系统通知。真实横幅、权限弹窗和通知中心替换效果仍须完整 App 人工验收。
+
 ## 预期流量路径
 
 ```text

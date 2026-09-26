@@ -10,6 +10,46 @@ import RequestmanCore
 
 @Suite(.serialized)
 struct ProxyIntegrationTests {
+    @Test func notifiesAtMatchingBeforeRequestBodyAndIndependentlyOfPausedHistory() throws {
+        let shared = ProxySharedState(), records = CaptureRecordBuffer()
+        records.setPaused(true)
+        shared.ruleHitNotifications.startSession(enabled: true)
+        var workflow = RequestWorkflow()
+        workflow.name = "慢请求规则"
+        workflow.urlPrefix = "http://example.test/"
+        var script = ModificationStep(kind: .script)
+        script.value = "return request;"
+        workflow.requestSteps = [script]
+        var project = WorkflowProject(); project.workflows = [workflow]
+        var document = WorkspaceDocument(); document.projects = [project]
+        shared.document.withLock { [document] in $0 = document }
+        let channel = EmbeddedChannel(handler: ProxyConnection(configuration: .init(), shared: shared, records: records))
+        defer { _ = try? channel.finish() }
+        try channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 12345)).wait()
+        let head = HTTPRequestHead(version: .http1_1, method: .POST, uri: "http://example.test/slow",
+                                   headers: HTTPHeaders([("Host", "example.test"), ("Content-Length", "100")]))
+        _ = try channel.writeInbound(HTTPServerRequestPart.head(head))
+        #expect(shared.ruleHitNotifications.drain().first?.names == ["慢请求规则"])
+        #expect(records.drain().records.isEmpty)
+    }
+
+    @Test func onlyMatchedRequestsNotifyAndEachWorkflowAppearsOnce() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow()
+            workflow.name = "本地 Mock"
+            workflow.urlPrefix = h.originURL + "matched"
+            var mock = ModificationStep(kind: .mock); mock.value = "mock-body"
+            workflow.requestSteps = [mock]
+            try await h.start(workflow: workflow)
+            h.proxy.ruleHitNotifications.startSession(enabled: true)
+            _ = try await h.exchange("GET \(h.originURL)unmatched HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            #expect(h.proxy.ruleHitNotifications.drain().isEmpty)
+            let reply = try await h.exchange("GET \(h.originURL)matched HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            #expect(reply.contains("mock-body"))
+            #expect(h.proxy.ruleHitNotifications.drain().first?.names == ["本地 Mock"])
+        }
+    }
+
     @Test func templateSnapshotSpansStreamingAndScriptStages() async throws {
         for scripted in [false, true] {
             try await withHarness { h in

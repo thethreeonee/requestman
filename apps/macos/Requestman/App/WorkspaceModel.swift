@@ -76,6 +76,7 @@ final class WorkspaceModel {
     let history = ExecutionHistoryModel()
     let certificateSetup: CertificateSetupModel
     @ObservationIgnored private let captureService: any CaptureService
+    @ObservationIgnored private let ruleHitNotifications: (any RuleHitNotificationDelivering)?
     @ObservationIgnored private let documentStore: WorkspaceDocumentStore
     @ObservationIgnored private let browserLauncher = BrowserLauncher()
     @ObservationIgnored private var activeBrowser: ChromiumBrowser?
@@ -85,7 +86,9 @@ final class WorkspaceModel {
     @ObservationIgnored private var proxyConfigurationPending = false
     @ObservationIgnored private var revision = 0
 
-    init(captureService: (any CaptureService)? = nil) {
+    init(captureService: (any CaptureService)? = nil,
+         ruleHitNotifications: (any RuleHitNotificationDelivering)? = nil) {
+        self.ruleHitNotifications = ruleHitNotifications
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Requestman", isDirectory: true)
         documentStore = WorkspaceDocumentStore(url: directory.appendingPathComponent("workspace.json"))
@@ -115,6 +118,19 @@ final class WorkspaceModel {
     func collectRecords() async {
         while !Task.isCancelled {
             if let batch = captureService.recordBuffer?.drain() { history.append(batch.records, dropped: batch.dropped) }
+            do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+        }
+    }
+    func collectRuleHitNotifications() async {
+        while !Task.isCancelled {
+            if captureService.activePort != nil, let buffer = captureService.ruleHitNotificationBuffer {
+                for notification in buffer.drain() {
+                    guard !Task.isCancelled else { return }
+                    guard buffer.isCurrent(notification) else { continue }
+                    // One serial consumer prevents an older revision replacing a newer body.
+                    await ruleHitNotifications?.deliver(notification, from: buffer)
+                }
+            }
             do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
         }
     }
@@ -183,6 +199,7 @@ final class WorkspaceModel {
             return nil
         }
         if document.proxy != configuration { document.proxy = configuration }
+        await ruleHitNotifications?.prepareAuthorization()
         let port = try await captureService.start(configuration: configuration, document: document, mode: mode)
         listenPort = port
         isCapturing = true

@@ -23,6 +23,7 @@ public final class LocalProxyCaptureService: CaptureService {
 
     public var availability: CaptureAvailability { .available }
     public var recordBuffer: CaptureRecordBuffer? { server.records }
+    public var ruleHitNotificationBuffer: RuleHitNotificationBuffer? { server.ruleHitNotifications }
 
     public func checkUpstream(_ endpoint: ProxyEndpoint) async throws {
         try await UpstreamProxyProbe.check(endpoint)
@@ -41,10 +42,12 @@ public final class LocalProxyCaptureService: CaptureService {
             throw WorkflowError.invalid("需要先恢复上次的系统代理设置")
         }
         if mode == .systemProxy { try await recoverSystemProxy() }
+        server.ruleHitNotifications.startSession(enabled: true)
         let port: Int
         do { port = try await server.start(configuration: configuration, document: document) }
         catch {
             await server.stop()
+            server.ruleHitNotifications.stopSession()
             throw error
         }
         activePort = port
@@ -91,6 +94,7 @@ public final class LocalProxyCaptureService: CaptureService {
         // A global session must keep forwarding until the system no longer depends on it.
         if activeMode == .systemProxy || recoveryRequired { try await restoreSystemProxy() }
         await server.stop()
+        server.ruleHitNotifications.stopSession()
         activePort = nil
         activeMode = nil
         activeConfiguration = nil
@@ -109,6 +113,7 @@ public final class LocalProxyCaptureService: CaptureService {
 
 protocol LocalProxyServing: Sendable {
     var records: CaptureRecordBuffer { get }
+    var ruleHitNotifications: RuleHitNotificationBuffer { get }
     func start(configuration: ExplicitProxyConfiguration, document: WorkspaceDocument) async throws -> Int
     func update(_ document: WorkspaceDocument) async
     func updateConfiguration(_ configuration: ExplicitProxyConfiguration) async throws

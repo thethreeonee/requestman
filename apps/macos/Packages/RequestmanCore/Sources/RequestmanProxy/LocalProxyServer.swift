@@ -13,6 +13,7 @@ public actor LocalProxyServer {
     private var listener: Channel?
     private let shared: ProxySharedState
     public nonisolated let records = CaptureRecordBuffer()
+    public nonisolated var ruleHitNotifications: RuleHitNotificationBuffer { shared.ruleHitNotifications }
     public init(certificateProvider: (any TLSCertificateProviding)? = nil) {
         shared = ProxySharedState(certificateProvider: certificateProvider)
     }
@@ -83,6 +84,7 @@ public actor LocalProxyServer {
 
 final class ProxySharedState: Sendable {
     static let maximumConnections = 256
+    let ruleHitNotifications = RuleHitNotificationBuffer()
     let tlsContexts = ProxyTLSContexts()
     let certificateProvider: (any TLSCertificateProviding)?
     let upstreamTrustRoots: [NIOSSLCertificate]?
@@ -285,6 +287,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                 }
                 self.record?.project = match.project; self.record?.workflow = match.workflow.name
                 self.record?.matchedWorkflowID = match.workflow.id
+                shared.ruleHitNotifications.append(workflowID: match.workflow.id, name: match.workflow.name)
                 if match.workflow.requestSteps.contains(where: { $0.enabled && $0.kind == .script }) {
                     guard reserveScriptFlow() else { return }
                     scriptRequestHead = head; scriptRequestDraft = draft

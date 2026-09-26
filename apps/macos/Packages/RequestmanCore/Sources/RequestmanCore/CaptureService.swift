@@ -7,6 +7,7 @@ public protocol CaptureService {
     func update(document: WorkspaceDocument) async
     func reconfigure(configuration: ExplicitProxyConfiguration, document: WorkspaceDocument) async throws -> Int
     var recordBuffer: CaptureRecordBuffer? { get }
+    var ruleHitNotificationBuffer: RuleHitNotificationBuffer? { get }
     /// Retained if system settings could not be restored after a failed start/stop.
     var activePort: Int? { get }
     var activeMode: CaptureMode? { get }
@@ -44,6 +45,7 @@ public extension CaptureService {
         }
     }
     var recordBuffer: CaptureRecordBuffer? { nil }
+    var ruleHitNotificationBuffer: RuleHitNotificationBuffer? { nil }
     var activePort: Int? { nil }
     var activeMode: CaptureMode? { nil }
     func recoverSystemProxy() async throws {}

@@ -4,6 +4,32 @@ import RequestmanCore
 
 @MainActor
 struct CaptureLifecycleTests {
+    @Test(arguments: CaptureMode.allCases)
+    func ruleNotificationsFollowCaptureSessionAndResetOnStopAndFailedStart(mode: CaptureMode) async throws {
+        let fixture = CaptureFixture()
+        let buffer = fixture.server.ruleHitNotifications
+        _ = try await fixture.service.start(configuration: .init(), document: .init(), mode: mode)
+        buffer.append(workflowID: .init(), name: "规则命中")
+        let first = try #require(buffer.drain().first)
+        #expect(first.names == ["规则命中"])
+        buffer.append(workflowID: .init(), name: "待发送")
+        try await fixture.service.stop()
+        #expect(buffer.drain().isEmpty)
+        #expect(!buffer.isCurrent(first))
+        _ = try await fixture.service.start(configuration: .init(), document: .init(), mode: .systemProxy)
+        buffer.append(workflowID: .init(), name: "全局命中")
+        let next = try #require(buffer.drain().first)
+        #expect(next.names == ["全局命中"])
+        #expect(next.id != first.id && next.sessionID != first.sessionID)
+        try await fixture.service.stop()
+        fixture.server.failPorts = [9090]
+        await #expect(throws: WorkflowError.self) {
+            try await fixture.service.start(configuration: .init(), document: .init(), mode: mode)
+        }
+        buffer.append(workflowID: .init(), name: "启动失败")
+        #expect(buffer.drain().isEmpty)
+    }
+
     @Test func browserSessionNeverReadsOrWritesSystemProxy() async throws {
         let fixture = CaptureFixture()
         let service = fixture.service
@@ -197,6 +223,7 @@ private final class CaptureTrace {
 @MainActor
 private final class TestLocalProxyServer: LocalProxyServing {
     nonisolated let records = CaptureRecordBuffer()
+    nonisolated let ruleHitNotifications = RuleHitNotificationBuffer()
     let trace: CaptureTrace
     var configuration: ExplicitProxyConfiguration?
     var document: WorkspaceDocument?
