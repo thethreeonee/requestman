@@ -42,6 +42,9 @@ final class GeneralSettingsViewController: ObservedViewController {
         browser.target = self
         browser.action = #selector(selectBrowser)
         browser.autoenablesItems = false
+        if #available(macOS 26.0, *) {
+            browser.bezelStyle = .glass
+        }
         browser.imagePosition = .imageLeft
         browser.cell?.lineBreakMode = .byTruncatingMiddle
         browser.setAccessibilityLabel("浏览器")
