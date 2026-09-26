@@ -131,10 +131,25 @@ struct WorkspaceSidebarChecks {
         let controls = descendants(controller.view)
         let table = controls.compactMap { $0 as? NSTableView }.first!
         let search = controls.compactMap { $0 as? NSSearchField }.first!
+        let scroll = table.enclosingScrollView!
+        func checkListFits() {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.setContentSize(controller.preferredContentSize)
+            window.contentView?.layoutSubtreeIfNeeded()
+            precondition(table.frame.height <= scroll.contentSize.height + 0.5,
+                         "Up to seven environment rows must fit: rows=\(table.numberOfRows), table=\(table.frame), viewport=\(scroll.contentSize), last=\(table.rect(ofRow: max(0, table.numberOfRows - 1))), rowHeight=\(table.rowHeight), spacing=\(table.intercellSpacing)")
+            if table.numberOfRows > 0 {
+                let last = table.rect(ofRow: table.numberOfRows - 1)
+                precondition(scroll.documentVisibleRect.contains(last), "The final environment row must be fully visible")
+            }
+            precondition(!scroll.hasVerticalScroller && scroll.verticalScrollElasticity == .none)
+        }
+        checkListFits()
         precondition(table.numberOfRows == 3 && table.selectedRow == 1)
         search.stringValue = "prod"
         controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: search))
         precondition(table.numberOfRows == 1 && table.selectedRow == -1)
+        checkListFits()
         table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         precondition(NSApp.sendAction(table.action!, to: table.target, from: table))
         precondition(model.document.selectedEnvironmentID == prod.id && dismissals == 1)
@@ -143,15 +158,36 @@ struct WorkspaceSidebarChecks {
         search.stringValue = "does-not-exist"
         controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: search))
         precondition(table.numberOfRows == 0)
+        checkListFits()
         let empty = controls.compactMap { $0 as? NSTextField }.first { $0.stringValue == "没有匹配的环境" }!
         precondition(!empty.isHidden)
         search.stringValue = ""
         controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: search))
         precondition(table.numberOfRows == 3 && table.selectedRow == 2 && empty.isHidden)
+        checkListFits()
         let manage = controls.compactMap { $0 as? NSButton }.first { $0.title == "管理环境…" }!
         manage.performClick(nil)
         precondition(openedSettings && model.settingsSection == .environments && dismissals == 3)
-        print("Environment popover checks passed: current selection, filter/empty/reset, selection, cancel and settings routing")
+        model.document.environments = []
+        controller.observeModel()
+        precondition(table.numberOfRows == 1)
+        checkListFits()
+        model.document.environments = (1...6).map { WorkspaceEnvironment(name: "Environment \($0)") }
+        controller.observeModel()
+        precondition(table.numberOfRows == 7)
+        checkListFits()
+        model.document.environments.append(WorkspaceEnvironment(name: "Environment 7"))
+        controller.observeModel()
+        window.setContentSize(controller.preferredContentSize)
+        window.contentView?.layoutSubtreeIfNeeded()
+        precondition(table.numberOfRows == 8 && scroll.hasVerticalScroller)
+        precondition(table.frame.height > scroll.contentSize.height)
+        table.scrollRowToVisible(7)
+        precondition(scroll.documentVisibleRect.contains(table.rect(ofRow: 7)))
+        search.stringValue = "Environment 1"
+        controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: search))
+        checkListFits()
+        print("Environment popover checks passed: one/seven rows fit, eight rows scroll, filtering after scrolling, current selection, empty/reset, cancel and settings routing")
     }
 
     private static func checkDirectController() {

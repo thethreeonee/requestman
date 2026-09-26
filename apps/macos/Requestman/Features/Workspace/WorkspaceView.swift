@@ -81,6 +81,7 @@ final class EnvironmentSelectionPopover: ObservedViewController, NSTableViewData
     private let openSettings: () -> Void
     private let search = NSSearchField()
     private let table = NSTableView()
+    private let scroll = NSScrollView()
     private var environments: [(id: UUID?, name: String)] = []
     private let empty = NativeUI.label("没有匹配的环境", secondary: true)
     private var scrollHeight: NSLayoutConstraint!
@@ -100,7 +101,8 @@ final class EnvironmentSelectionPopover: ObservedViewController, NSTableViewData
         table.addTableColumn(NSTableColumn(identifier: .init("environment")))
         table.dataSource = self; table.delegate = self
         table.target = self; table.action = #selector(selectEnvironment(_:))
-        let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.drawsBackground = false
+        scroll.autohidesScrollers = true; scroll.drawsBackground = false
+        scroll.verticalScrollElasticity = .none; scroll.horizontalScrollElasticity = .none
         scroll.documentView = table
         scrollHeight = scroll.heightAnchor.constraint(equalToConstant: 180); scrollHeight.isActive = true
         let manage = ActionButton(title: "管理环境…") { [weak self] in
@@ -112,6 +114,10 @@ final class EnvironmentSelectionPopover: ObservedViewController, NSTableViewData
         for item in [search, scroll] as [NSView] { item.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
     }
     override func viewDidAppear() { super.viewDidAppear(); view.window?.makeFirstResponder(search) }
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        updateListHeight()
+    }
     override func refresh() {
         let query = search.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         environments = model.document.environments.filter { query.isEmpty || $0.name.localizedStandardContains(query) }.map { ($0.id, $0.name) }
@@ -123,8 +129,18 @@ final class EnvironmentSelectionPopover: ObservedViewController, NSTableViewData
         } else { table.deselectAll(nil) }
         updating = false
         empty.isHidden = !environments.isEmpty
-        scrollHeight.constant = CGFloat(max(1, min(environments.count, 7))) * 36
-        preferredContentSize = NSSize(width: 360, height: scrollHeight.constant + 124)
+        scroll.hasVerticalScroller = environments.count > 7
+        updateListHeight()
+    }
+    private func updateListHeight() {
+        // sourceList resolves its top inset during layout after joining a window.
+        let visibleRows = min(environments.count, 7)
+        let height: CGFloat = visibleRows > 0
+            ? ceil(table.rect(ofRow: visibleRows - 1).maxY)
+            : table.rowHeight + table.intercellSpacing.height
+        if scrollHeight.constant != height { scrollHeight.constant = height }
+        let size = NSSize(width: 360, height: height + 124)
+        if preferredContentSize != size { preferredContentSize = size }
     }
     func controlTextDidChange(_ obj: Notification) { observeModel() }
     func numberOfRows(in tableView: NSTableView) -> Int { environments.count }
