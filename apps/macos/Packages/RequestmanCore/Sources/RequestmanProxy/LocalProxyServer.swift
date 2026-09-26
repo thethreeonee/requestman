@@ -275,7 +275,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
               url.user == nil, url.fragment == nil else { return fail("需要 HTTP 或 HTTPS 绝对请求地址", status: 400) }
         do {
             let document = shared.document.withLock { $0 }
-            match = WorkflowEngine.match(document, method: originalMethod, url: head.uri)
+            match = WorkflowEngine.match(document, method: originalMethod, url: head.uri, headers: fields(head.headers))
             record?.environment = document.environment?.name ?? "无环境"
             var draft = HTTPMessageDraft(method: originalMethod, url: head.uri, headers: fields(head.headers))
             if let match {

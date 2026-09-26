@@ -117,3 +117,5 @@ python3 apps/macos/Scripts/check-browser-discovery.py
 ## AppKit 界面
 
 应用入口、主窗口、设置、环境、请求编辑、请求日志和全部弹层均由 AppKit 实现。保留现有三栏宽度、工具栏顺序、步骤卡片、分组设置及请求详情布局；Observation 仅用于模型变更追踪，不承载界面。窗口直接约束分栏和各页，避免跨框架尺寸协商。`python3 Scripts/check-native-sources.py --typecheck` 检查工程引用、纯 AppKit 约束和 Swift 6 类型；各 `check-*-ui.py` 与既有详情/分栏脚本运行隐藏窗口回归，不构建或启动完整 App。
+
+请求阶段支持“修改查询参数”（按名称添加或覆盖，自动 URL 编码）和“替换 URL 字符串”（区分大小写，替换全部原文匹配）。两项支持动态模板并按步骤顺序执行，详见[请求修改配置](Docs/Design/request-modification.md#url-修改步骤)。

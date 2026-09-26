@@ -1,6 +1,6 @@
 import AppKit
 
-/// Mirrored from ModifyHeadersRuleDetail.tsx / COMMON_HEADERS. Keep names and order identical.
+/// Mirrored from ModifyHeadersRuleDetail.tsx / COMMON_HEADERS. Keep the same names; display in alphabetical order.
 @MainActor final class HeaderNameField: NSComboBox, NSComboBoxDelegate {
     static let suggestions = [
         "Accept", "Accept-Encoding", "Accept-Language", "Authorization", "Cache-Control",
@@ -8,7 +8,7 @@ import AppKit
         "Operation-Type", "User-Agent", "X-Forwarded-For", "X-Requested-With", "ETag",
         "If-Modified-Since", "Last-Modified", "Location", "Set-Cookie", "Access-Control-Allow-Origin",
         "Access-Control-Allow-Headers", "Access-Control-Allow-Methods", "Access-Control-Expose-Headers",
-    ]
+    ].sorted { $0.caseInsensitiveCompare($1) == .orderedAscending }
     var onChange: (String) -> Void
     init(name: String = "", onChange: @escaping (String) -> Void) {
         self.onChange = onChange

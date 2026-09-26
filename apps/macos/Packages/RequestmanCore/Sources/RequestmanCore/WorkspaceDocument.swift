@@ -18,13 +18,15 @@ public struct WorkspaceEnvironment: Codable, Equatable, Identifiable, Sendable {
 }
 
 public enum ModificationKind: String, Codable, CaseIterable, Sendable {
-    case setHeader, removeHeader, replaceBody, rewriteURL, setMethod, setStatus, mock, redirect, script
+    case setHeader, removeHeader, replaceBody, rewriteURL, setQueryParameter, replaceURLString, setMethod, setStatus, mock, redirect, script
     public var title: String {
         switch self {
         case .setHeader: "添加或覆盖 Header"
         case .removeHeader: "移除 Header"
         case .replaceBody: "替换 Body"
         case .rewriteURL: "切换目标地址"
+        case .setQueryParameter: "修改查询参数"
+        case .replaceURLString: "替换 URL 字符串"
         case .setMethod: "修改请求方法"
         case .setStatus: "修改状态码"
         case .mock: "返回静态数据"
@@ -33,7 +35,7 @@ public enum ModificationKind: String, Codable, CaseIterable, Sendable {
         }
     }
     public func supports(response: Bool) -> Bool {
-        response ? ![.rewriteURL, .setMethod, .mock].contains(self) : self != .setStatus
+        response ? ![.rewriteURL, .setQueryParameter, .replaceURLString, .setMethod, .mock].contains(self) : self != .setStatus
     }
 }
 
@@ -59,6 +61,10 @@ public struct RequestWorkflow: Codable, Equatable, Identifiable, Sendable {
     public var method = "*"
     public var matchTarget: WorkflowMatchTarget = .url
     public var matchRule: WorkflowMatchRule = .wildcard
+    public var matchHeaderEnabled = false
+    public var matchHeaderName = ""
+    public var matchHeaderRule: WorkflowMatchRule = .equals
+    public var matchHeaderPattern = ""
     public var matchPattern = "http://localhost:3000/*"
     public var requestSteps: [ModificationStep] = []
     public var responseSteps: [ModificationStep] = []
@@ -72,12 +78,14 @@ public struct RequestWorkflow: Codable, Equatable, Identifiable, Sendable {
             matchPattern = newValue.isEmpty ? "" : "\\A" + NSRegularExpression.escapedPattern(for: newValue)
         }
     }
-    public func matches(method: String, url: String) -> Bool {
+    public func matches(method: String, url: String, headers: [HTTPField] = []) -> Bool {
         enabled && (self.method == "*" || self.method.caseInsensitiveCompare(method) == .orderedSame)
             && WorkflowMatcher.matches(target: matchTarget, rule: matchRule, pattern: matchPattern, url: url)
+            && (!matchHeaderEnabled || WorkflowMatcher.matchesHeader(name: matchHeaderName, rule: matchHeaderRule,
+                                                                      pattern: matchHeaderPattern, headers: headers))
     }
     private enum CodingKeys: String, CodingKey {
-        case id, name, enabled, method, matchTarget, matchRule, matchPattern, requestSteps, responseSteps
+        case id, name, enabled, method, matchTarget, matchRule, matchPattern, matchHeaderEnabled, matchHeaderName, matchHeaderRule, matchHeaderPattern, requestSteps, responseSteps
     }
     private enum LegacyKeys: String, CodingKey { case urlPrefix }
     public init(from decoder: any Decoder) throws {
@@ -88,7 +96,20 @@ public struct RequestWorkflow: Codable, Equatable, Identifiable, Sendable {
         method = try values.decode(String.self, forKey: .method)
         requestSteps = try values.decode([ModificationStep].self, forKey: .requestSteps)
         responseSteps = try values.decode([ModificationStep].self, forKey: .responseSteps)
+        matchHeaderEnabled = try values.decodeIfPresent(Bool.self, forKey: .matchHeaderEnabled) ?? false
+        matchHeaderRule = try values.decodeIfPresent(WorkflowMatchRule.self, forKey: .matchHeaderRule) ?? .equals
+        matchHeaderPattern = try values.decodeIfPresent(String.self, forKey: .matchHeaderPattern) ?? ""
+        matchHeaderName = try values.decodeIfPresent(String.self, forKey: .matchHeaderName) ?? ""
         if values.contains(.matchPattern) {
+            let target = try values.decode(String.self, forKey: .matchTarget)
+            if target == "header" {
+                // Preserve previously saved Header-only rules as an unrestricted URL plus Header condition.
+                matchTarget = .url; matchRule = .wildcard; matchPattern = "*"
+                matchHeaderEnabled = true
+                matchHeaderRule = try values.decode(WorkflowMatchRule.self, forKey: .matchRule)
+                matchHeaderPattern = try values.decode(String.self, forKey: .matchPattern)
+                return
+            }
             matchTarget = try values.decode(WorkflowMatchTarget.self, forKey: .matchTarget)
             matchRule = try values.decode(WorkflowMatchRule.self, forKey: .matchRule)
             matchPattern = try values.decode(String.self, forKey: .matchPattern)

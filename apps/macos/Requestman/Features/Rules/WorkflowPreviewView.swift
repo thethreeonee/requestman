@@ -40,8 +40,9 @@ import RequestmanCore
         Task { [weak self] in
             let output = await Task.detached(priority: .userInitiated) {
                 do {
-                    guard workflow.matches(method: input.method, url: input.url) else { return "此输入未命中匹配条件。" }
-                    var request = try input.request(); let id = UUID(), date = Date()
+                    var request = try input.request()
+                    guard workflow.matches(method: request.method, url: request.url, headers: request.headers) else { return "此输入未命中匹配条件。" }
+                    let id = UUID(), date = Date()
                     var trace = try WorkflowEngine.apply(workflow.requestSteps, response: false, to: &request, environment: environment?.values ?? [:], id: id, date: date, control: control)
                     var response = request.isMock ? request : try input.response()
                     trace += try WorkflowEngine.apply(workflow.responseSteps, response: true, to: &response, environment: environment?.values ?? [:], id: id, date: date, request: request, control: control)

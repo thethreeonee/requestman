@@ -11,6 +11,12 @@ import RequestmanCore
     private let methods = ["*", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
     private lazy var method = ActionPopUpButton(items: methods.map { $0 == "*" ? "全部" : $0 }) { [weak self] index in guard let self else { return }; modify { $0.method = methods[index] } }
     private lazy var pattern = ActionTextField(placeholder: "匹配值") { [weak self] value in self?.modify { $0.matchPattern = value } }
+    private lazy var headerName = HeaderNameField { [weak self] value in self?.modify { $0.matchHeaderName = value } }
+    private let headerEnabled = NSButton(checkboxWithTitle: "Header", target: nil, action: nil)
+    private lazy var headerRule = ActionPopUpButton(items: WorkflowMatchRule.allCases.map(\.title)) { [weak self] index in self?.modify { $0.matchHeaderRule = WorkflowMatchRule.allCases[index] } }
+    private lazy var headerPattern = ActionTextField(placeholder: "Header 匹配值") { [weak self] value in self?.modify { $0.matchHeaderPattern = value } }
+    private var headerFields: NSStackView!
+    private let headerExplanation = NativeUI.label("", size: 11, secondary: true)
     private let explanation = NativeUI.label("", size: 11, secondary: true)
     private lazy var requestLane = RulesStepLane(model: model, response: false)
     private lazy var responseLane = RulesStepLane(model: model, response: true)
@@ -22,20 +28,57 @@ import RequestmanCore
         name.isBezeled = false; name.drawsBackground = false; name.font = .systemFont(ofSize: 22, weight: .bold)
         name.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let title = NativeUI.stack([name, NativeUI.label("已启用"), enabled], vertical: false)
-        let methodRow = NativeUI.stack([NativeUI.label("方法"), method], vertical: false, spacing: 8)
-        let grid = NSGridView(views: [[NativeUI.label("匹配目标"), target, methodRow], [NativeUI.label("匹配规则"), rule, pattern]])
-        grid.columnSpacing = 12; grid.rowSpacing = 10
-        grid.column(at: 0).xPlacement = .trailing; grid.column(at: 0).width = 52
-        grid.column(at: 1).width = 130; grid.column(at: 1).xPlacement = .fill
-        target.widthAnchor.constraint(equalToConstant: 130).isActive = true
-        rule.widthAnchor.constraint(equalToConstant: 130).isActive = true
-        grid.column(at: 2).xPlacement = .fill
-        method.widthAnchor.constraint(equalToConstant: 105).isActive = true
-        pattern.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        method.setAccessibilityLabel("请求方法匹配")
+        target.setAccessibilityLabel("地址匹配目标")
+        rule.setAccessibilityLabel("地址匹配规则")
         pattern.setAccessibilityLabel("匹配值")
-        for picker in [target, rule] { picker.setContentHuggingPriority(.defaultLow, for: .horizontal) }
-        let matching = NativeUI.stack([grid, explanation], spacing: 10)
-        grid.widthAnchor.constraint(equalTo: matching.widthAnchor).isActive = true
+        headerName.setAccessibilityLabel("匹配 Header 名称")
+        headerName.placeholderString = "Header 名称"
+        headerEnabled.target = self; headerEnabled.action = #selector(toggleHeaderMatching)
+        headerEnabled.setAccessibilityLabel("同时匹配 Header")
+        headerRule.setAccessibilityLabel("Header 匹配规则")
+        headerPattern.setAccessibilityLabel("Header 匹配值")
+        for field in [pattern, headerPattern] {
+            field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        }
+        let targetWidth: CGFloat = 130
+        target.widthAnchor.constraint(equalToConstant: targetWidth).isActive = true
+        for picker in [rule, headerRule] { picker.widthAnchor.constraint(equalToConstant: 90).isActive = true }
+        method.widthAnchor.constraint(equalToConstant: 105).isActive = true
+        headerName.widthAnchor.constraint(equalToConstant: 240).isActive = true
+        headerEnabled.widthAnchor.constraint(equalToConstant: 90).isActive = true
+        let methodLabel = NativeUI.label("请求方法")
+        methodLabel.widthAnchor.constraint(equalToConstant: targetWidth).isActive = true
+        let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let methodRow = NativeUI.stack([methodLabel, method, spacer], vertical: false, spacing: 8)
+        methodRow.identifier = .init("rules.matchMethodRow")
+        let addressRow = NativeUI.stack([target, rule, pattern], vertical: false, spacing: 8)
+        addressRow.identifier = .init("rules.matchAddressRow")
+        let addressGroup = NativeUI.stack([addressRow, explanation], spacing: 6)
+        addressRow.widthAnchor.constraint(equalTo: addressGroup.widthAnchor).isActive = true
+        explanation.widthAnchor.constraint(equalTo: addressGroup.widthAnchor).isActive = true
+        let headerInputs = HeaderMatchInputRow(name: headerName, rule: headerRule, pattern: headerPattern)
+        headerFields = NativeUI.stack([headerInputs, headerExplanation], spacing: 6)
+        for child in [headerInputs, headerExplanation] { child.widthAnchor.constraint(equalTo: headerFields.widthAnchor).isActive = true }
+        let headerRow = NativeUI.stack([headerEnabled, headerFields], vertical: false, spacing: 8)
+        headerRow.identifier = .init("rules.matchHeaderRow")
+        headerRow.alignment = .top; headerRow.distribution = .fill
+        // Keep the hidden fields in layout so the fixed-width checkbox cannot shrink the row.
+        headerRow.detachesHiddenViews = false
+        headerFields.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        for note in [explanation, headerExplanation] {
+            note.maximumNumberOfLines = 0; note.lineBreakMode = .byWordWrapping
+            note.textColor = .systemRed
+        }
+        let conditionRows: [NSView] = [methodRow, NativeUI.separator(), addressGroup, NativeUI.separator(), headerRow]
+        let conditions = NativeUI.stack(conditionRows, spacing: 10)
+        conditions.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        for row in conditionRows { row.widthAnchor.constraint(equalTo: conditions.widthAnchor, constant: -24).isActive = true }
+        let box = NSBox(); box.titlePosition = .noTitle; box.contentViewMargins = .zero
+        box.contentView = NSView(); NativeUI.pin(conditions, to: box.contentView!)
+        let matching = NativeUI.stack([NativeUI.label("满足以下所有条件", weight: .medium), box], spacing: 8)
+        box.widthAnchor.constraint(equalTo: matching.widthAnchor).isActive = true
         let lanes = NativeUI.stack([requestLane, responseLane], vertical: false, spacing: 20)
         lanes.alignment = .top; lanes.distribution = .fillEqually
         let preview = ActionButton(title: "预览流程") { [weak self] in
@@ -58,14 +101,68 @@ import RequestmanCore
         rule.selectItem(at: WorkflowMatchRule.allCases.firstIndex(of: workflow.matchRule) ?? 0)
         method.selectItem(at: methods.firstIndex(of: workflow.method) ?? 0)
         if pattern.stringValue != workflow.matchPattern { pattern.stringValue = workflow.matchPattern }
-        pattern.placeholderString = workflow.matchTarget == .url ? "https://api.example.com/orders/*" : "*.example.com"
+        if headerName.stringValue != workflow.matchHeaderName { headerName.stringValue = workflow.matchHeaderName }
+        headerEnabled.state = workflow.matchHeaderEnabled ? .on : .off
+        headerFields.isHidden = !workflow.matchHeaderEnabled
+        headerRule.selectItem(at: WorkflowMatchRule.allCases.firstIndex(of: workflow.matchHeaderRule) ?? 0)
+        if headerPattern.stringValue != workflow.matchHeaderPattern { headerPattern.stringValue = workflow.matchHeaderPattern }
+        let headerError = WorkflowMatcher.headerValidationError(name: workflow.matchHeaderName, rule: workflow.matchHeaderRule,
+                                                               pattern: workflow.matchHeaderPattern)
+        headerExplanation.stringValue = headerError ?? ""
+        headerExplanation.isHidden = headerError == nil
+        headerEnabled.toolTip = "与地址和请求方法同时满足才命中"
+        headerName.toolTip = "Header 名称不区分大小写，值区分大小写；同名任一项满足即可"
+        let help: String
+        switch workflow.matchTarget {
+        case .url:
+            pattern.placeholderString = "https://api.example.com/orders/*"
+            help = "匹配完整 URL，区分大小写。"
+        case .host:
+            pattern.placeholderString = "*.example.com"
+            help = "仅匹配域名，不包含协议、端口和路径；不区分大小写。"
+        }
         let error = WorkflowMatcher.validationError(rule: workflow.matchRule, pattern: workflow.matchPattern)
-        explanation.stringValue = error ?? (workflow.matchTarget == .host ? "仅匹配域名，不包含协议、端口和路径；不区分大小写。" : "匹配完整 URL，区分大小写。")
-        explanation.textColor = error == nil ? .secondaryLabelColor : .systemRed
+        explanation.stringValue = error ?? ""
+        explanation.isHidden = error == nil
+        target.toolTip = help; pattern.toolTip = help
         requestLane.refresh(); responseLane.refresh()
-        for control in [name, enabled, target, rule, method, pattern] as [NSControl] { control.isEnabled = model.loaded }
+        for control in [name, enabled, target, rule, method, pattern, headerName, headerEnabled, headerRule, headerPattern] as [NSControl] { control.isEnabled = model.loaded }
     }
+    @objc private func toggleHeaderMatching() { modify { $0.matchHeaderEnabled = headerEnabled.state == .on } }
     private func modify(_ update: (inout RequestWorkflow) -> Void) { guard model.loaded, var workflow = model.workflow else { return }; update(&workflow); model.updateWorkflow(workflow) }
+}
+
+/// Only changes native control layout; fields retain their identity and editing state.
+@MainActor private final class HeaderMatchInputRow: NSStackView {
+    private let valueRow: NSStackView
+    private var valueWidth: NSLayoutConstraint!
+    private var isCompact = false
+
+    init(name: NSView, rule: NSView, pattern: NSView) {
+        valueRow = NativeUI.stack([rule, pattern], vertical: false, spacing: 8)
+        super.init(frame: .zero)
+        orientation = .horizontal; alignment = .centerY; spacing = 8; distribution = .fill
+        valueRow.distribution = .fill
+        addArrangedSubview(name); addArrangedSubview(valueRow)
+        valueRow.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        valueWidth = valueRow.widthAnchor.constraint(equalTo: widthAnchor)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+    required init?(coder: NSCoder) { nil }
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        let compact = newSize.width < 446
+        guard newSize.width > 0, compact != isCompact else { return }
+        isCompact = compact
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            valueWidth.isActive = false
+            orientation = isCompact ? .vertical : .horizontal
+            alignment = isCompact ? .leading : .centerY
+            valueWidth.isActive = isCompact
+            superview?.needsLayout = true
+        }
+    }
 }
 
 @MainActor private final class RulesStepLane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
@@ -187,7 +284,11 @@ import RequestmanCore
         NSLayoutConstraint.activate([badge.widthAnchor.constraint(equalToConstant: 26), badge.heightAnchor.constraint(equalToConstant: 28),
             numberLabel.centerXAnchor.constraint(equalTo: badge.contentView!.centerXAnchor), numberLabel.centerYAnchor.constraint(equalTo: badge.contentView!.centerYAnchor)])
         let title = NativeUI.label(step.kind.title); title.toolTip = step.kind.title
-        let summary = step.kind == .script ? (step.name.isEmpty ? "JavaScript" : step.name) : step.kind == .setStatus ? String(step.status) : (step.name.isEmpty ? (step.value.isEmpty ? "点击配置" : step.value) : step.name)
+        var summary = step.kind == .script ? (step.name.isEmpty ? "JavaScript" : step.name) : step.kind == .setStatus ? String(step.status) : (step.name.isEmpty ? (step.value.isEmpty ? "点击配置" : step.value) : step.name)
+        if !step.name.isEmpty {
+            if step.kind == .setQueryParameter { summary = "\(step.name) = \(step.value)" }
+            if step.kind == .replaceURLString { summary = "\(step.name) → \(step.value.isEmpty ? "（空）" : step.value)" }
+        }
         let detail = NativeUI.label(summary, size: 11, secondary: true); detail.toolTip = summary
         let texts = NativeUI.stack([title, detail], spacing: 5)
         texts.setContentHuggingPriority(.defaultLow, for: .horizontal)

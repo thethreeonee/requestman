@@ -34,9 +34,9 @@ public struct WorkflowMatch: Sendable {
 public enum WorkflowEngine {
     public static let managedHeaders = ["content-length", "transfer-encoding", "connection", "host", "upgrade", "trailer"]
     /// First enabled match in project order wins, keeping rule composition deterministic.
-    public static func match(_ document: WorkspaceDocument, method: String, url: String) -> WorkflowMatch? {
+    public static func match(_ document: WorkspaceDocument, method: String, url: String, headers: [HTTPField] = []) -> WorkflowMatch? {
         for project in document.projects {
-            if let workflow = project.workflows.first(where: { $0.matches(method: method, url: url) }) {
+            if let workflow = project.workflows.first(where: { $0.matches(method: method, url: url, headers: headers) }) {
                 return WorkflowMatch(project: project.name, workflow: workflow, environment: document.environment)
             }
         }
@@ -96,6 +96,34 @@ public enum WorkflowEngine {
                     throw WorkflowError.invalid("当前目标改写只支持完整的 http:// 或 https:// 地址")
                 }
                 draft.url = value
+            case .setQueryParameter:
+                let name = try resolve(step.name, environment: environment, id: id, date: date)
+                guard !name.isEmpty, var components = URLComponents(string: draft.url) else {
+                    throw WorkflowError.invalid("查询参数名称或 URL 无效")
+                }
+                // Encode only the edited pair. Keep unrelated query bytes, order and duplicates intact.
+                let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+                let pair = name.addingPercentEncoding(withAllowedCharacters: allowed)! + "=" + value.addingPercentEncoding(withAllowedCharacters: allowed)!
+                let parts = components.percentEncodedQuery.map { $0.isEmpty ? [] : $0.components(separatedBy: "&") } ?? []
+                var updated: [String] = []
+                var replaced = false
+                for part in parts {
+                    let key = String(part.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)[0])
+                    if key.removingPercentEncoding == name {
+                        if !replaced { updated.append(pair); replaced = true }
+                    } else { updated.append(part) }
+                }
+                if !replaced { updated.append(pair) }
+                components.percentEncodedQuery = updated.joined(separator: "&")
+                guard let url = components.string else { throw WorkflowError.invalid("查询参数修改后的 URL 无效") }
+                try validateEditedURL(url)
+                draft.url = url
+            case .replaceURLString:
+                let search = try resolve(step.name, environment: environment, id: id, date: date)
+                guard !search.isEmpty else { throw WorkflowError.invalid("查找字符串不能为空") }
+                let url = draft.url.replacingOccurrences(of: search, with: value, options: .literal)
+                try validateEditedURL(url)
+                draft.url = url
             case .setMethod:
                 guard isToken(value), !["CONNECT", "TRACE"].contains(value.uppercased()) else {
                     throw WorkflowError.invalid("不支持此请求方法")
@@ -122,6 +150,14 @@ public enum WorkflowEngine {
             if !response && draft.isMock { break }
         }
         return trace
+    }
+
+    private static func validateEditedURL(_ value: String) throws {
+        guard !value.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.contains($0) || CharacterSet.controlCharacters.contains($0) }),
+              let url = URL(string: value), ["http", "https"].contains(url.scheme ?? ""),
+              let host = url.host, !host.isEmpty, url.user == nil, url.password == nil, url.fragment == nil else {
+            throw WorkflowError.invalid("修改后的 URL 必须是完整的 http:// 或 https:// 地址，且不含空白、账号或片段")
+        }
     }
 
     static func clearBodyEncoding(_ draft: inout HTTPMessageDraft) {

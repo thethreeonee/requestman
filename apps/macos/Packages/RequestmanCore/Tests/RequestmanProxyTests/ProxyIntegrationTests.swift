@@ -68,6 +68,51 @@ struct ProxyIntegrationTests {
             #expect(record.matchedRules.allSatisfy { $0.name == workflow.name })
         }
     }
+    @Test func headerMatchingUsesOriginalRequestValues() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow()
+            workflow.matchTarget = .url; workflow.matchRule = .equals; workflow.matchPattern = "\(h.originURL)headers"
+            workflow.matchHeaderEnabled = true; workflow.matchHeaderName = "X-Environment"
+            workflow.matchHeaderRule = .equals; workflow.matchHeaderPattern = "staging"
+            var header = ModificationStep(kind: .setHeader); header.name = "X-Environment"; header.value = "changed"
+            var status = ModificationStep(kind: .setStatus); status.status = 202
+            workflow.requestSteps = [header]; workflow.responseSteps = [status]
+            try await h.start(workflow: workflow)
+            for (path, fields, matched) in [("headers", "", false), ("headers", "X-Environment: production\r\n", false),
+                                            ("other", "X-Environment: staging\r\n", false),
+                                            ("headers", "x-environment: other\r\nX-Environment: staging\r\n", true)] {
+                let reply = try await h.exchange("GET \(h.originURL)\(path) HTTP/1.1\r\nHost: localhost\r\n\(fields)\r\n")
+                #expect(reply.contains(matched ? "202 Accepted" : "200 OK"))
+                let record = try #require(h.proxy.records.drain().records.first)
+                #expect(record.matchedWorkflowID == (matched ? workflow.id : nil))
+                if matched {
+                    #expect(record.requestHeaders.contains { $0.name == "X-Environment" && $0.value == "staging" })
+                    #expect(record.sentHeaders.contains { $0.name == "X-Environment" && $0.value == "changed" })
+                }
+            }
+        }
+    }
+    @Test func queryAndURLReplacementReachOriginAndCaptureFinalURL() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var query = ModificationStep(kind: .setQueryParameter)
+            query.name = "q"; query.value = "中文 & value"
+            var replacement = ModificationStep(kind: .replaceURLString)
+            replacement.name = "/v1/"; replacement.value = "/v2/"
+            workflow.requestSteps = [query, replacement]
+            try await h.start(workflow: workflow)
+            let original = "\(h.originURL)v1/search?keep=%2f&q=old&q=duplicate"
+            let reply = try await h.exchange("GET \(original) HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            #expect(reply.contains("origin-body"))
+            let path = "/v2/search?keep=%2f&q=%E4%B8%AD%E6%96%87%20%26%20value"
+            #expect(h.observation.withLock { $0.uri } == path)
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(record.url == original)
+            #expect(record.finalURL == String(h.originURL.dropLast()) + path)
+            #expect(record.outcome == .modified)
+            #expect(record.matchedRules.map(\.kind) == [.setQueryParameter, .replaceURLString])
+        }
+    }
     @Test func scriptStepsModifyRealRequestAndResponseBodies() async throws {
         try await withHarness { h in
             var workflow = RequestWorkflow(); workflow.matchTarget = .host

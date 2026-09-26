@@ -9,6 +9,7 @@ import RequestmanCore
     private let titleLabel = NativeUI.label("", size: 18, weight: .bold)
     private lazy var enabled = RulesSwitch { [weak self] value in self?.modify { $0.enabled = value } }
     private var header: HeaderNameField?
+    private var name: ActionTextField?
     private var status: ActionTextField?
     private var value: RulesTextArea?
     private var managedWarning: NSTextField?
@@ -27,17 +28,18 @@ import RequestmanCore
         stage.stringValue = "\(model.editingResponse ? "响应" : "请求")阶段 · 第 \(index + 1) 步"
         titleLabel.stringValue = selected.kind.title; enabled.state = selected.enabled ? .on : .off
         if header?.stringValue != selected.name { header?.stringValue = selected.name }
+        if name?.stringValue != selected.name { name?.stringValue = selected.name }
         if status?.integerValue != selected.status { status?.integerValue = selected.status }
         value?.string = selected.value
         managedWarning?.isHidden = !WorkflowEngine.managedHeaders.contains(selected.name.lowercased())
         up.isEnabled = model.loaded && index > 0; down.isEnabled = model.loaded && index + 1 < steps.count
-        enabled.isEnabled = model.loaded; header?.isEnabled = model.loaded; status?.isEnabled = model.loaded
+        enabled.isEnabled = model.loaded; header?.isEnabled = model.loaded; name?.isEnabled = model.loaded; status?.isEnabled = model.loaded
         value?.textView.isEditable = model.loaded
         script?.update(step: selected, response: model.editingResponse, environment: model.document.environment?.values ?? [:])
     }
     private func rebuild(_ selected: ModificationStep?) {
         script?.isPresented = false; script?.removeFromParent(); script = nil
-        header = nil; status = nil; value = nil; managedWarning = nil
+        header = nil; name = nil; status = nil; value = nil; managedWarning = nil
         view.subviews.forEach { $0.removeFromSuperview() }; stepID = selected?.id
         guard let selected else {
             let empty = NativeUI.stack([NativeUI.label("选择一个步骤", size: 20, weight: .semibold), NativeUI.label("配置请求或响应的修改动作。", secondary: true)], spacing: 10)
@@ -67,6 +69,19 @@ import RequestmanCore
                 warning.textColor = .systemRed; warning.maximumNumberOfLines = 0; warning.lineBreakMode = .byWordWrapping
                 managedWarning = warning; fields.addArrangedSubview(warning)
             }
+            if [.setQueryParameter, .replaceURLString].contains(selected.kind) {
+                let label = selected.kind == .setQueryParameter ? "参数名称" : "查找字符串"
+                let control = ActionTextField(selected.name, placeholder: label) { [weak self] value in self?.modify { $0.name = value } }
+                name = control; control.setAccessibilityLabel(label)
+                let row = NativeUI.stack([NativeUI.label(label), control], vertical: false, spacing: 14)
+                control.setContentHuggingPriority(.defaultLow, for: .horizontal)
+                fields.addArrangedSubview(row); row.widthAnchor.constraint(equalTo: fields.widthAnchor).isActive = true
+                let detail = NativeUI.label(selected.kind == .setQueryParameter
+                    ? "不存在时添加；同名参数覆盖为一项。名称区分大小写，值自动编码。"
+                    : "区分大小写，按原文替换 URL 中的所有匹配；替换为空可删除字符串。", size: 11, secondary: true)
+                detail.maximumNumberOfLines = 0; detail.lineBreakMode = .byWordWrapping
+                fields.addArrangedSubview(detail)
+            }
             if [.mock, .setStatus, .redirect].contains(selected.kind) {
                 let field = ActionTextField(String(selected.status), placeholder: "状态码") { [weak self] value in if let number = Int(value) { self?.modify { $0.status = number } } }; status = field
                 let row = NativeUI.stack([NativeUI.label("状态码"), field], vertical: false)
@@ -74,9 +89,11 @@ import RequestmanCore
             }
             if ![.removeHeader, .setStatus].contains(selected.kind) {
                 let body = [.replaceBody, .mock].contains(selected.kind)
-                fields.addArrangedSubview(NativeUI.label(body ? "Body · 文本 / 模板" : "值 / 模板"))
+                let label = body ? "Body · 文本 / 模板" : (selected.kind == .setQueryParameter ? "参数值 / 模板" :
+                    (selected.kind == .replaceURLString ? "替换为 / 模板" : "值 / 模板"))
+                fields.addArrangedSubview(NativeUI.label(label))
                 let area = RulesTextArea { [weak self] text in self?.modify { $0.value = text } }; value = area
-                area.textView.setAccessibilityLabel(body ? "Body · 文本 / 模板" : "值 / 模板")
+                area.textView.setAccessibilityLabel(label)
                 fields.addArrangedSubview(area)
                 area.widthAnchor.constraint(equalTo: fields.widthAnchor).isActive = true
                 area.heightAnchor.constraint(equalToConstant: body ? 200 : 60).isActive = true
