@@ -1,5 +1,6 @@
 import AppKit
 import RequestmanCore
+import RequestmanEditor
 
 @MainActor final class ScriptEditorViewController: NSViewController {
     private var step: ModificationStep
@@ -12,7 +13,7 @@ import RequestmanCore
     private let help = NSPopover()
     var isPresented = true { didSet { if !isPresented { help.close(); trial?.cancelExecution() } } }
     private lazy var name = ActionTextField(placeholder: "步骤备注") { [weak self] text in self?.modify { $0.name = text } }
-    private lazy var source = RulesTextArea(javaScript: true) { [weak self] text in
+    private lazy var source = CodeEditorView(language: .javascript) { [weak self] text in
         guard let self else { return }; modify { $0.value = text }; updateRunButton()
     }
     private lazy var runButton = ActionButton(title: "试运行") { [weak self] in self?.showTrial() }

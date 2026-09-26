@@ -4,6 +4,8 @@ from pathlib import Path
 import platform
 import subprocess
 import tempfile
+import runpy
+import shutil
 
 root = Path(__file__).resolve().parents[1]
 core = root / "Packages/RequestmanCore"
@@ -11,6 +13,9 @@ temporary = Path(tempfile.mkdtemp(prefix="requestman-rules-check-"))
 flags = ["-swift-version", "6", "-parse-as-library", "-target", f"{platform.machine()}-apple-macosx14.0",
          "-module-cache-path", str(core / ".build/host-typecheck-cache")]
 try:
+    editor_flags, editor_products = runpy.run_path(str(root / "Scripts/editor-package.py"))["editor_flags"](root, link=True)
+    for bundle in editor_products.glob("*.bundle"):
+        shutil.copytree(bundle, temporary / bundle.name)
     subprocess.run(["swiftc", *flags, "-module-name", "RequestmanCore", "-emit-library", "-static", "-emit-module",
                     "-emit-module-path", str(temporary / "RequestmanCore.swiftmodule"), "-o", str(temporary / "libRequestmanCore.a"),
                     *map(str, sorted((core / "Sources/RequestmanCore").glob("*.swift")))], check=True)
@@ -19,7 +24,7 @@ try:
                     "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore",
                     str(core / "Sources/RequestmanScriptWorker/main.swift"),
                     "-o", str(temporary / "RequestmanScriptWorker")], check=True)
-    subprocess.run(["swiftc", *flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore",
+    subprocess.run(["swiftc", *flags, *editor_flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore",
                     str(root / "Requestman/Features/Workspace/AppKitSupport.swift"),
                     str(root / "Requestman/Features/Workspace/WorkspaceTransfer.swift"),
                     str(root / "Requestman/Features/Workspace/WorkspaceSection.swift"),

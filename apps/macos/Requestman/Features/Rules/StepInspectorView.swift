@@ -1,5 +1,6 @@
 import AppKit
 import RequestmanCore
+import RequestmanEditor
 
 @MainActor final class StepInspectorViewController: ObservedViewController {
     let model: WorkspaceModel
@@ -12,6 +13,7 @@ import RequestmanCore
     private var delay: ActionTextField?
     private var delayError: NSTextField?
     private var value: RulesTextArea?
+    private var bodyValue: CodeEditorView?
     private var method: ActionPopUpButton?
     // IANA HTTP Method Registry, checked 2026-09-26. Excludes CONNECT, TRACE and PRI.
     // Common methods appear first.
@@ -54,6 +56,7 @@ import RequestmanCore
         }
         if status?.integerValue != selected.status { status?.integerValue = selected.status }
         value?.string = selected.value
+        bodyValue?.string = selected.value
         if delay?.stringValue != selected.value { delay?.stringValue = selected.value }
         delay?.isEnabled = model.loaded
         delayError?.isHidden = (try? WorkflowEngine.delayMilliseconds(selected.value)) != nil
@@ -61,6 +64,7 @@ import RequestmanCore
         removeButton.isEnabled = model.loaded
         enabled.isEnabled = model.loaded; status?.isEnabled = model.loaded
         value?.textView.isEditable = model.loaded
+        bodyValue?.textView.isEditable = model.loaded
         formatBody?.isEnabled = model.loaded
         script?.update(step: selected, response: model.editingResponse, environment: model.document.environment?.values ?? [:], environmentTypes: model.document.environment?.valueTypes ?? [:])
     }
@@ -85,7 +89,7 @@ import RequestmanCore
         script?.isPresented = false; script?.removeFromParent(); script = nil
         deletion.close(); headerEditors = []; queryEditors = []; replacementEditors = []
         queryDescription = nil
-        status = nil; delay = nil; delayError = nil; value = nil; method = nil; formatBody = nil
+        status = nil; delay = nil; delayError = nil; value = nil; bodyValue = nil; method = nil; formatBody = nil
         view.subviews.forEach { $0.removeFromSuperview() }; stepID = selected?.id
         guard let selected else {
             let empty = NativeUI.stack([NativeUI.label("选择一个步骤", size: 20, weight: .semibold), NativeUI.label("配置请求或响应的修改动作。", secondary: true)], spacing: 10)
@@ -203,12 +207,18 @@ import RequestmanCore
                 let body = [.replaceBody, .mock].contains(selected.kind)
                 let label = body ? "Body · 文本" : (selected.kind == .rewriteURL ? "目标 URL" :
                     (selected.kind == .redirect ? "重定向目标" : "值"))
-                let area = RulesTextArea(template: true, bodyEditor: body) { [weak self] text in self?.modify { $0.value = text } }; value = area
+                let area: NSView
                 if body {
+                    let editor = CodeEditorView(language: .json)
+                    editor.annotationRanges = { source in
+                        TemplateLayoutManager.expression.matches(in: source, range: NSRange(location: 0, length: (source as NSString).length)).map(\.range)
+                    }
+                    editor.textView.setAccessibilityLabel(label)
+                    bodyValue = editor; area = editor
                     let message = NativeUI.label("", size: 11, secondary: true)
                     message.maximumNumberOfLines = 0; message.lineBreakMode = .byWordWrapping; message.isHidden = true
-                    let format = ActionButton(title: "格式化 JSON") { [weak area] in
-                        message.isHidden = area?.formatJSON() == true
+                    let format = ActionButton(title: "格式化 JSON") { [weak editor] in
+                        message.isHidden = editor?.formatJSON() == true
                         message.stringValue = message.isHidden ? "" : "无法格式化：请检查 JSON 语法。原文已保留。"
                     }
                     format.controlSize = .small; format.toolTip = "支持无引号 key 和末尾逗号；格式化为 JSON，保留字段顺序与变量，可撤销。"
@@ -217,9 +227,13 @@ import RequestmanCore
                     let row = NativeUI.stack([NativeUI.label(label), spacer, format], vertical: false)
                     fields.addArrangedSubview(row); row.widthAnchor.constraint(equalTo: fields.widthAnchor).isActive = true
                     fields.addArrangedSubview(message)
-                    area.onChange = { [weak self] text in message.isHidden = true; self?.modify { $0.value = text } }
-                } else { fields.addArrangedSubview(NativeUI.label(label)) }
-                area.textView.setAccessibilityLabel(label)
+                    editor.onChange = { [weak self] text in message.isHidden = true; self?.modify { $0.value = text } }
+                } else {
+                    let input = RulesTextArea(template: true) { [weak self] text in self?.modify { $0.value = text } }
+                    input.textView.setAccessibilityLabel(label)
+                    value = input; area = input
+                    fields.addArrangedSubview(NativeUI.label(label))
+                }
                 fields.addArrangedSubview(area)
                 area.widthAnchor.constraint(equalTo: fields.widthAnchor).isActive = true
                 if body {

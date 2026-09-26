@@ -1,0 +1,9 @@
+# RequestmanEditor
+
+AppKit-only editor component for Body and JavaScript inputs. `CodeEditorView` owns a `CodeEditTextView.TextView`, a native scroll view, and the adapted CodeEditSourceEditor gutter. HighlighterSwift computes syntax colors off the main actor. Package versions are pinned in Package.swift and Package.resolved.
+
+The gutter source is retained under `Sources/RequestmanEditor/Vendor`; its upstream revision and modifications are recorded in [ThirdPartyNotices.md](Sources/RequestmanEditor/ThirdPartyNotices.md). The notices are also bundled as a package resource. CodeEditTextView and HighlighterSwift use MIT; Highlight.js uses BSD-3-Clause; swift-collections uses Apache-2.0 with Swift exceptions. No GPL dependency is used.
+
+The wrapper handles data binding, debounced syntax colors, optional business annotation ranges, rounded clipping and wheel forwarding when the document fits. It does not implement text layout, a syntax parser, or line-number geometry. JSON formatting remains in the host's BodyJSONPresentation. Plain Header/query/URL template inputs continue using RulesTextArea.
+
+Verify with `python3 apps/macos/Scripts/check-rules-ui.py` and `python3 apps/macos/Scripts/check-native-sources.py --typecheck` from the repository root. These build the standalone package and exercise hidden AppKit windows, not the full App.

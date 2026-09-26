@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check project references; optionally typecheck host Swift sources without building an App."""
 import argparse
+import runpy
 import json
 import re
 from pathlib import Path
@@ -14,7 +15,7 @@ root = Path(__file__).resolve().parents[1]
 project = root / "Requestman.xcodeproj"
 objects = json.loads(subprocess.check_output(["plutil", "-convert", "json", "-o", "-", str(project / "project.pbxproj")]))["objects"]
 sources = set((root / "Requestman").rglob("*.swift"))
-ui_sources = sources | set((root / "Scripts/Fixtures").glob("*.swift"))
+ui_sources = set((root / "Packages/RequestmanEditor/Sources").rglob("*.swift")) | sources | set((root / "Scripts/Fixtures").glob("*.swift"))
 for source in ui_sources:
     assert not re.search(r"\bimport\s+SwiftUI\b|\bNSHosting(?:View|Controller)\b|\bNSView(?:Controller)?Representable\b|@(?:State|Binding|Bindable|Environment|FocusState)\b", source.read_text()), (
         f"AppKit-only UI contract violated: {source.relative_to(root)}"
@@ -42,7 +43,7 @@ for layer in icon_layers:
 print("Icon Composer document, layer assets and target resource reference OK")
 products = {value.get("productName") for value in objects.values() if value.get("isa") == "XCSwiftPackageProductDependency"}
 required_products = {"RequestmanCore", "RequestmanProxy", "RequestmanCertificates"}
-assert required_products <= products, "Missing local package products"
+assert required_products | {"RequestmanEditor"} <= products, "Missing local package products"
 project_object = next(value for value in objects.values() if value.get("isa") == "PBXProject")
 project_configs = {
     objects[key]["name"]: objects[key]["buildSettings"]
@@ -81,6 +82,8 @@ if args.typecheck:
             command += ["-Xcc", "-fmodule-map-file=" + str(module_map)]
     for module_map in (build / "checkouts").rglob("module.modulemap"):
         command += ["-I", str(module_map.parent)]
+    editor_flags, _ = runpy.run_path(str(root / "Scripts/editor-package.py"))["editor_flags"](root)
+    command += editor_flags
     command += list(map(str, sorted(sources)))
     subprocess.run(command, check=True)
     print("Host Swift 6 typecheck OK (no App built or run)")

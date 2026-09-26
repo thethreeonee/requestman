@@ -343,14 +343,10 @@ import RequestmanCore
 @MainActor final class RulesTextArea: NSScrollView, NSTextViewDelegate {
     let textView: NSTextView
     private let templateLayout: TemplateLayoutManager?
-    private let bodyEditor: Bool
-    private let javaScript: Bool
     private let roundedInput: Bool
     var onChange: (String) -> Void
-    init(editable: Bool = true, template: Bool = false, bodyEditor: Bool = false, roundedInput: Bool = false, javaScript: Bool = false, onChange: @escaping (String) -> Void = { _ in }) {
+    init(editable: Bool = true, template: Bool = false, roundedInput: Bool = false, onChange: @escaping (String) -> Void = { _ in }) {
         self.onChange = onChange
-        self.bodyEditor = bodyEditor
-        self.javaScript = javaScript
         self.roundedInput = roundedInput
         if template {
             let storage = NSTextStorage()
@@ -395,18 +391,7 @@ import RequestmanCore
             textView.typingAttributes[.paragraphStyle] = paragraph
             wantsLayer = true; layer?.cornerRadius = 8; layer?.masksToBounds = true
         }
-        if javaScript {
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.minimumLineHeight = 20; paragraph.maximumLineHeight = 20
-            textView.defaultParagraphStyle = paragraph
-            textView.typingAttributes[.paragraphStyle] = paragraph
-            textView.isContinuousSpellCheckingEnabled = false
-        }
-        if bodyEditor || javaScript {
-            verticalRulerView = BodyLineRuler(scrollView: self, orientation: .verticalRuler)
-            verticalRulerView?.clientView = textView
-            hasVerticalRuler = true; rulersVisible = true
-        }
+
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override var focusRingMaskBounds: NSRect { roundedInput ? bounds.insetBy(dx: 2, dy: 2) : super.focusRingMaskBounds }
@@ -437,25 +422,11 @@ import RequestmanCore
     }
     private func refreshTokens() {
         templateLayout?.updateTokens(excluding: textView.markedRange())
-        if bodyEditor {
-            JSONSyntax.highlight(textView, templateRanges: templateLayout?.tokenRanges ?? [])
-        }
-        if javaScript { JavaScriptSyntax.highlight(textView) }
-        if bodyEditor || javaScript { (verticalRulerView as? BodyLineRuler)?.updateLines() }
         if templateLayout != nil { textView.typingAttributes.removeValue(forKey: .kern) }
         textView.needsDisplay = true
     }
     func textDidChange(_ notification: Notification) { refreshTokens(); onChange(textView.string) }
-    @discardableResult func formatJSON() -> Bool {
-        guard textView.isEditable, !textView.hasMarkedText(), let formatted = BodyJSONPresentation.formatted(string) else { return false }
-        guard formatted != string else { return true }
-        let range = NSRange(location: 0, length: (string as NSString).length)
-        guard textView.shouldChangeText(in: range, replacementString: formatted) else { return false }
-        textView.textStorage?.replaceCharacters(in: range, with: formatted)
-        textView.didChangeText()
-        textView.undoManager?.setActionName("格式化 JSON")
-        return true
-    }
+
 }
 
 @MainActor private final class RulesInputTextView: NSTextView {
@@ -546,7 +517,7 @@ final class TemplateLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
     }
 
     private(set) var tokenRanges: [NSRange] = []
-    private static let expression = try! NSRegularExpression(pattern: #"\{\{[^{}\r\n]+\}\}"#)
+    static let expression = try! NSRegularExpression(pattern: #"\{\{[^{}\r\n]+\}\}"#)
     func updateTokens(excluding markedRange: NSRange = NSRange(location: NSNotFound, length: 0)) {
         guard let textStorage else { return }
         let range = NSRange(location: 0, length: textStorage.length)

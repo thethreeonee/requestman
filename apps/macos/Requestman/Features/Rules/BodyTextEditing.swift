@@ -1,4 +1,5 @@
 import AppKit
+import RequestmanEditor
 
 /// Tokens retain their original spelling; formatting never round-trips numbers through Foundation.
 enum BodyJSONPresentation {
@@ -48,65 +49,10 @@ enum BodyJSONPresentation {
 
 }
 
-/// Native ruler annotations follow logical lines, including wrapped lines and the final empty line.
-@MainActor final class BodyLineRuler: NSRulerView {
-    private(set) var lineStarts = [0]
-    override var isFlipped: Bool { true }
-
-    override init(scrollView: NSScrollView?, orientation: NSRulerView.Orientation) {
-        super.init(scrollView: scrollView, orientation: orientation)
-        ruleThickness = 38
-        reservedThicknessForMarkers = 0; reservedThicknessForAccessoryView = 0
-        setAccessibilityElement(false)
-        if let clip = scrollView?.contentView {
-            clip.postsBoundsChangedNotifications = true
-            NotificationCenter.default.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification, object: clip)
-        }
-    }
-    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    deinit { NotificationCenter.default.removeObserver(self) }
-    @objc private func scrolled() { needsDisplay = true }
-
-    func updateLines() {
-        guard let text = clientView as? NSTextView else { return }
-        let source = text.string as NSString
-        lineStarts = [0]
-        var position = 0
-        while position < source.length {
-            var end = 0, contentsEnd = 0
-            source.getLineStart(nil, end: &end, contentsEnd: &contentsEnd, for: NSRange(location: position, length: 0))
-            if end > contentsEnd { lineStarts.append(end) }
-            position = end
-        }
-        ruleThickness = max(38, CGFloat(String(lineStarts.count).count) * 8 + 18)
-        needsDisplay = true
-    }
-
-    override func drawHashMarksAndLabels(in rect: NSRect) {
-        guard let text = clientView as? NSTextView, let layout = text.layoutManager, let container = text.textContainer else { return }
-        let visible = text.visibleRect.offsetBy(dx: -text.textContainerOrigin.x, dy: -text.textContainerOrigin.y)
-        layout.ensureLayout(forBoundingRect: visible, in: container)
-        let visibleGlyphs = layout.glyphRange(forBoundingRect: visible, in: container)
-        let firstCharacter = layout.characterRange(forGlyphRange: visibleGlyphs, actualGlyphRange: nil).location
-        var lower = 0, upper = lineStarts.count
-        while lower < upper {
-            let middle = (lower + upper) / 2
-            if lineStarts[middle] <= firstCharacter { lower = middle + 1 } else { upper = middle }
-        }
-        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular), .foregroundColor: NSColor.secondaryLabelColor]
-        let count = (text.string as NSString).length
-        for index in max(0, lower - 1)..<lineStarts.count {
-            let start = lineStarts[index]
-            let line: NSRect
-            if start < count { line = layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: start), effectiveRange: nil) }
-            else { line = layout.extraLineFragmentRect }
-            let height = max(layout.defaultLineHeight(for: text.font ?? .monospacedSystemFont(ofSize: 12, weight: .regular)), line.height)
-            let point = convert(NSPoint(x: 0, y: text.textContainerOrigin.y + line.minY), from: text)
-            guard point.y + height >= rect.minY else { continue }
-            if point.y > rect.maxY { break }
-            let label = String(index + 1) as NSString
-            let size = label.size(withAttributes: attributes)
-            label.draw(at: NSPoint(x: ruleThickness - size.width - 9, y: point.y + (height - size.height) / 2), withAttributes: attributes)
-        }
+extension CodeEditorView {
+    @discardableResult func formatJSON() -> Bool {
+        guard textView.isEditable, !textView.hasMarkedText(), let formatted = BodyJSONPresentation.formatted(string) else { return false }
+        replaceText(with: formatted)
+        return true
     }
 }

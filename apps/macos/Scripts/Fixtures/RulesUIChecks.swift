@@ -1,4 +1,6 @@
 import AppKit
+import RequestmanEditor
+import CodeEditTextView
 import QuartzCore
 import Observation
 import RequestmanCore
@@ -48,7 +50,89 @@ import RequestmanCore
     override var isKeyWindow: Bool { true }
 }
 
+@MainActor private final class WheelCountingScrollView: NSScrollView {
+    var wheelCount = 0
+    override func scrollWheel(with event: NSEvent) { wheelCount += 1; super.scrollWheel(with: event) }
+}
+
 @main @MainActor struct RulesUIChecks {
+    static func settleEditor(_ editor: CodeEditorView) {
+        let until = Date().addingTimeInterval(0.35)
+        while Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        editor.layoutSubtreeIfNeeded()
+    }
+
+    static func checkCodeEditorBehavior() {
+        let outer = WheelCountingScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 360))
+        let document = FlippedView(frame: NSRect(x: 0, y: 0, width: 480, height: 1400))
+        outer.documentView = document; outer.hasVerticalScroller = true
+        let window = NSWindow(contentRect: outer.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = outer
+        defer { window.close() }
+        let area = CodeEditorView(language: .javascript)
+        area.frame = NSRect(x: 20, y: 20, width: 430, height: 140); document.addSubview(area)
+        for (source, forwards) in [("", true), ("return request;", true), (String(repeating: "let x = 1;\n", count: 150), false), ("short", true)] {
+            area.string = source; area.layoutSubtreeIfNeeded()
+            let previous = outer.wheelCount
+            let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -40, wheel2: 0, wheel3: 0)!
+            area.textView.scrollWheel(with: NSEvent(cgEvent: wheel)!)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+            precondition(outer.wheelCount == previous + (forwards ? 1 : 0), "Code editor wheel routing must track overflow")
+        }
+        area.string = "const value = '中文😀';"
+        window.makeFirstResponder(area.textView)
+        area.textView.selectionManager.setSelectedRange(NSRange(location: 6, length: 5))
+        area.appearance = NSAppearance(named: .aqua); settleEditor(area)
+        let light = area.textView.textStorage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as! NSColor
+        precondition(area.textView.selectedRange() == NSRange(location: 6, length: 5))
+        precondition(area.textView.undoManager?.canUndo == false, "Loading and syntax colors must not register undo")
+        area.appearance = NSAppearance(named: .darkAqua); settleEditor(area)
+        let dark = area.textView.textStorage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as! NSColor
+        precondition(light != dark && area.string == "const value = '中文😀';")
+        area.textView.setMarkedText("拼", selectedRange: NSRange(location: 1, length: 0), replacementRange: area.textView.selectedRange())
+        settleEditor(area)
+        precondition(area.textView.hasMarkedText(), "Highlighting must not commit marked text")
+        area.textView.insertText("拼音", replacementRange: area.textView.markedRange())
+        settleEditor(area)
+        precondition(area.string.contains("拼音"))
+        area.string = String(repeating: "const value = 123;\n", count: 1000)
+        area.string = "return request;"
+        settleEditor(area)
+        precondition(area.string == "return request;" && area.textView.textStorage.length == 15)
+        print("Code editor passed: wheel forwarding, appearance, selection, no highlight undo, IME composition and stale-result rejection")
+    }
+
+    static func checkNumberedEditorGeometry() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 420), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        for mode in 0..<3 {
+            let area = CodeEditorView(language: mode == 2 ? .javascript : .json)
+            window.contentView = area
+            for style in [NSScroller.Style.overlay, .legacy] {
+                area.scrollerStyle = style
+                for height: CGFloat in [180, 420] {
+                    window.setContentSize(NSSize(width: 480, height: height))
+                    for source in ["return request;", Array(repeating: "line", count: 100).joined(separator: "\n")] {
+                        area.string = source; area.layoutSubtreeIfNeeded()
+                        area.textView.scrollToRange(NSRange(location: (source as NSString).length, length: 0))
+                        area.layoutSubtreeIfNeeded()
+                        let ruler = descendants(area).compactMap { $0 as? GutterView }.first!
+                        let rulerFrame = ruler.convert(ruler.visibleRect, to: area)
+                        let textFrame = area.contentView.convert(area.contentView.bounds, to: area)
+                        precondition(abs(rulerFrame.minY - textFrame.minY) <= 0.5 && abs(rulerFrame.maxY - textFrame.maxY) <= 0.5,
+                                     "Numbered editor edges must align: mode=\(mode), ruler=\(rulerFrame), text=\(textFrame)")
+                        precondition(area.layer?.cornerRadius == 8 && area.layer?.masksToBounds == true && area.clipsToBounds,
+                                     "The whole editor, including the gutter, shares one rounded clip")
+                        let bitmap = area.bitmapImageRepForCachingDisplay(in: area.bounds)!
+                        area.cacheDisplay(in: area.bounds, to: bitmap)
+                    }
+                }
+            }
+        }
+        print("Numbered editors passed: template/literal Body and JavaScript, aligned ruler/text edges, rounded clipping, resizing and scrolling")
+    }
+
     static func checkSingleLineBackgrounds() {
         let model = WorkspaceModel(); model.addProject()
         let inspector = StepInspectorViewController(model: model)
@@ -337,7 +421,7 @@ import RequestmanCore
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 360), styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         var saved = ""
-        let area = RulesTextArea(template: true, bodyEditor: true) { saved = $0 }
+        let area = CodeEditorView(language: .json) { saved = $0 }
         window.contentView = area; defer { window.close() }
         area.string = original
         window.makeFirstResponder(area.textView)
@@ -348,24 +432,24 @@ import RequestmanCore
         precondition(!area.formatJSON() && area.string == "{invalid}")
         area.string = "{\r\n\"long\": \"" + String(repeating: "中文😀", count: 90) + "\"\r\n}\r\n"
         window.contentView?.layoutSubtreeIfNeeded()
-        let ruler = area.verticalRulerView as! BodyLineRuler
-        precondition(ruler.lineStarts.count == 4 && ruler.lineStarts.last == (area.string as NSString).length)
-        precondition(area.rulersVisible && ruler.clientView === area.textView)
+        precondition(area.textView.layoutManager.lineCount == 4)
         area.string = #"{"key":true,"id":"{{$uuid}}"}"#
-        let layout = area.textView.layoutManager!
-        precondition((layout.temporaryAttribute(.foregroundColor, atCharacterIndex: 2, effectiveRange: nil) as? NSColor) == .systemBlue)
-        precondition((layout.temporaryAttribute(.foregroundColor, atCharacterIndex: 7, effectiveRange: nil) as? NSColor) == .systemPurple)
-        precondition((layout as! TemplateLayoutManager).tokenRanges.count == 1)
+        area.annotationRanges = { source in
+            TemplateLayoutManager.expression.matches(in: source, range: NSRange(location: 0, length: (source as NSString).length)).map(\.range)
+        }
+        settleEditor(area)
+        precondition(area.textView.textStorage.attribute(.foregroundColor, at: 2, effectiveRange: nil) as? NSColor != .textColor)
+        precondition(area.textView.textStorage.attribute(.backgroundColor, at: 23, effectiveRange: nil) != nil)
         // Exercise native ruler drawing for empty text, wrapped lines and scrolling.
         for source in ["", formatted, "[\n" + Array(repeating: "  \"" + String(repeating: "long ", count: 30) + "\"", count: 40).joined(separator: ",\n") + "\n]\n"] {
             area.string = source
             window.contentView?.layoutSubtreeIfNeeded()
-            area.textView.scrollRangeToVisible(NSRange(location: (source as NSString).length, length: 0))
+            area.textView.scrollToRange(NSRange(location: (source as NSString).length, length: 0))
             guard let bitmap = area.bitmapImageRepForCachingDisplay(in: area.bounds) else { preconditionFailure("Missing editor rendering") }
             area.cacheDisplay(in: area.bounds, to: bitmap)
         }
         if let path = ProcessInfo.processInfo.environment["REQUESTMAN_BODY_EDITOR_PREVIEW"] {
-            area.string = formatted; area.textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
+            area.string = formatted; settleEditor(area); area.textView.scrollToRange(NSRange(location: 0, length: 0))
             window.contentView?.layoutSubtreeIfNeeded()
             let bitmap = area.bitmapImageRepForCachingDisplay(in: area.bounds)!
             area.cacheDisplay(in: area.bounds, to: bitmap)
@@ -378,9 +462,9 @@ import RequestmanCore
             let inspector = StepInspectorViewController(model: model)
             inspector.refresh(); window.contentViewController = inspector
             window.contentView?.layoutSubtreeIfNeeded()
-            let editor = descendants(inspector.view).compactMap { $0 as? RulesTextArea }.first!
+            let editor = descendants(inspector.view).compactMap { $0 as? CodeEditorView }.first!
             precondition(editor.frame.height == 360)
-            let form = descendants(inspector.view).compactMap { $0 as? NSScrollView }.first { !($0 is RulesTextArea) }!
+            let form = descendants(inspector.view).compactMap { $0 as? NSScrollView }.first { !($0 is CodeEditorView) }!
             window.setContentSize(NSSize(width: 480, height: 760))
             window.contentView?.layoutSubtreeIfNeeded()
             let expandedHeight = editor.frame.height
@@ -398,31 +482,22 @@ import RequestmanCore
             let longBody = "[\n" + Array(repeating: "  {\"name\": \"long body\"}", count: 300).joined(separator: ",\n") + "\n]"
             editor.string = longBody
             window.contentView?.layoutSubtreeIfNeeded()
-            let textLayout = editor.textView.layoutManager!
-            textLayout.ensureLayout(for: editor.textView.textContainer!)
-            let usedHeight = textLayout.usedRect(for: editor.textView.textContainer!).maxY + editor.textView.textContainerOrigin.y
-            precondition(editor.textView.frame.height >= usedHeight, "Long Body document is clipped: frame=\(editor.textView.frame), used=\(usedHeight), max=\(editor.textView.maxSize)")
-            editor.textView.scrollRangeToVisible(NSRange(location: (longBody as NSString).length - 1, length: 1))
-            precondition(editor.contentView.bounds.maxY >= usedHeight - 24, "The last Body line must be reachable: \(editor.contentView.bounds), used=\(usedHeight)")
-            editor.textView.scrollRangeToVisible(NSRange(location: 0, length: 1))
-            let beforeScroll = editor.contentView.bounds.minY
-            let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -180, wheel2: 0, wheel3: 0)!
-            editor.scrollWheel(with: NSEvent(cgEvent: wheel)!)
-            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-            precondition(editor.contentView.bounds.minY > beforeScroll, "Wheel scrolling must move the Body viewport")
+            editor.textView.scrollToRange(NSRange(location: (longBody as NSString).length - 1, length: 1))
+            window.contentView?.layoutSubtreeIfNeeded()
+            precondition(editor.contentView.bounds.minY > 0, "The last Body line must be reachable")
             precondition(editor.formatJSON())
             window.contentView?.layoutSubtreeIfNeeded()
-            textLayout.ensureLayout(for: editor.textView.textContainer!)
-            precondition(editor.textView.frame.height >= textLayout.usedRect(for: editor.textView.textContainer!).maxY, "Formatting must resize the document")
-            editor.string = loose; editor.textDidChange(Notification(name: NSText.didChangeNotification))
+            precondition(editor.textView.layoutManager.lineCount > 300)
+            editor.string = loose; editor.onChange(editor.string)
             descendants(inspector.view).compactMap { $0 as? NSButton }.first { $0.title == "格式化 JSON" }!.performClick(nil)
             precondition(model.selectedStep?.value == normalized, "Object literal input must save as formatted JSON in both directions")
-            editor.string = original; editor.textDidChange(Notification(name: NSText.didChangeNotification))
+            editor.string = original; editor.onChange(editor.string)
             descendants(inspector.view).compactMap { $0 as? NSButton }.first { $0.title == "格式化 JSON" }!.performClick(nil)
             precondition(model.selectedStep?.value == formatted, "Formatting must persist in both directions")
             editor.string = ""
             window.contentView?.layoutSubtreeIfNeeded()
             precondition(editor.textView.frame.height >= editor.contentSize.height, "An empty editor must remain clickable throughout its viewport")
+
         }
     }
     static func checkHeaderEditing(_ inspector: StepInspectorViewController, model: WorkspaceModel, window: NSWindow) {
@@ -758,34 +833,31 @@ import RequestmanCore
         window.isReleasedWhenClosed = false; window.contentViewController = editor
         window.contentView?.layoutSubtreeIfNeeded()
         defer { window.close() }
-        let area = descendants(editor.view).compactMap { $0 as? RulesTextArea }.first!
-        let text = area.textView, layout = text.layoutManager!, ruler = area.verticalRulerView as! BodyLineRuler
-        precondition(area.rulersVisible && ruler.lineStarts.count == 9)
+        let area = descendants(editor.view).compactMap { $0 as? CodeEditorView }.first!
+        let text = area.textView
+        settleEditor(area)
+        precondition(text.layoutManager.lineCount == 9)
         func color(_ fragment: String) -> NSColor? {
             let range = (text.string as NSString).range(of: fragment)
-            return layout.temporaryAttribute(.foregroundColor, atCharacterIndex: range.location, effectiveRange: nil) as? NSColor
+            return text.textStorage.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor
         }
-        precondition(color("// const") == .secondaryLabelColor && color("/* return") == .secondaryLabelColor)
-        precondition(color("const data") == .systemPurple && color("true;") == .systemPurple)
-        precondition(color("JSON.parse") == .systemTeal && color("parse(") == .systemBlue)
-        precondition(color("`中文😀`") == .systemGreen && color("0xff") == .systemOrange && color("2.5e2") == .systemOrange)
-        precondition(text.string == code && text.textStorage?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor != .secondaryLabelColor,
-                     "Highlighting must not modify the stored source or persist syntax attributes")
+        precondition(color("// const") != color("const data") && color("true;") != color("0xff"))
+        precondition(text.string == code, "Highlighting must preserve source")
         window.makeFirstResponder(text)
-        text.setSelectedRange(NSRange(location: 0, length: 0))
+        text.selectionManager.setSelectedRange(NSRange(location: 0, length: 0))
         text.insertText("let changed = 42;\n", replacementRange: text.selectedRange())
-        precondition(saved.value == text.string && color("let") == .systemPurple && ruler.lineStarts.count == 10)
-        text.breakUndoCoalescing(); text.undoManager?.undo()
-        precondition(saved.value == code && text.string == code && ruler.lineStarts.count == 9)
-        text.setSelectedRange(NSRange(location: 0, length: 0))
+        precondition(saved.value == text.string && text.layoutManager.lineCount == 10)
+        text.undoManager?.undo()
+        precondition(saved.value == code && text.string == code && text.layoutManager.lineCount == 9)
+        text.selectionManager.setSelectedRange(NSRange(location: 0, length: 0))
         text.setMarkedText("拼", selectedRange: NSRange(location: 1, length: 0), replacementRange: text.selectedRange())
         precondition(text.hasMarkedText())
         text.insertText("拼音", replacementRange: text.markedRange())
         precondition(text.string.hasPrefix("拼音") && saved.value == text.string)
         for (value, lineCount) in [("", 1), ("\n", 2), ("const text = 'unterminated", 1), ("/* open\ncomment", 2), ("const s = `a\\`b`;", 1), ("// comment\r\nreturn request;\r\n", 3), ("const long = '" + String(repeating: "中文😀", count: 160) + "';\n", 2)] {
             area.string = value; window.contentView?.layoutSubtreeIfNeeded()
-            precondition(area.string == value && ruler.lineStarts.count == lineCount)
-            text.scrollRangeToVisible(NSRange(location: (value as NSString).length, length: 0))
+            precondition(area.string == value && text.layoutManager.lineCount == lineCount)
+            text.scrollToRange(NSRange(location: (value as NSString).length, length: 0))
             let bitmap = area.bitmapImageRepForCachingDisplay(in: area.bounds)!
             area.cacheDisplay(in: area.bounds, to: bitmap)
         }
@@ -805,7 +877,7 @@ import RequestmanCore
             var saved = ScriptPreviewInput()
             let editor = ScriptEditorViewController(step: step, response: response, environment: [:]) { _ in }
             precondition(!descendants(editor.view).compactMap { $0 as? NSButton }.contains { $0.title == "示例输入…" })
-            precondition(descendants(editor.view).compactMap { $0 as? RulesTextArea }.count == 1)
+            precondition(descendants(editor.view).compactMap { $0 as? CodeEditorView }.count == 1)
             let controller = ScriptPreviewInputViewController(input: saved, response: response, step: step, environment: ["marker": "trial-"]) { saved = $0 }
             let window = ScriptFocusCheckWindow(contentViewController: controller); window.isReleasedWhenClosed = false
             window.contentView?.layoutSubtreeIfNeeded()
@@ -1096,6 +1168,10 @@ import RequestmanCore
 
     static func main() {
         NSApplication.shared.setActivationPolicy(.prohibited)
+        if ProcessInfo.processInfo.environment["REQUESTMAN_NUMBERED_EDITORS_ONLY"] == "1" {
+            checkNumberedEditorGeometry(); checkCodeEditorBehavior(); checkBodyEditing(); checkScriptEditing(); print("Body and script editing passed"); return
+        }
+        checkCodeEditorBehavior()
         checkMatchTesting()
         if ProcessInfo.processInfo.environment["REQUESTMAN_MATCH_ONLY"] == "1" { return }
         if ProcessInfo.processInfo.environment["REQUESTMAN_SINGLE_LINE_BACKGROUNDS_ONLY"] == "1" {

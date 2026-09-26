@@ -198,8 +198,14 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 `ModificationStep.headers` 为统一“修改 Header”步骤保存可增删条目及各自的 `add` / `modify` / `remove` 操作，同一步可按顺序添加、修改及删除。添加始终追加，修改只更新已有同名项的值并保留其名称、数量和顺序；没有匹配时跳过。旧 `set` 保留添加或覆盖行为，显式选择方法后才切换语义；Header 条目下方不展示操作说明或旧配置兼容说明。旧条目缺少操作时按 `setHeader` / `removeHeader` 类型读取，缺省数组时读取旧 `name/value`；显式空数组表示不操作。`WorkflowEngine` 在整组解析与校验通过后才应用，保证后续条目失败不会留下半组修改。删除只校验名称；删除和未匹配的修改忽略保存的值。编辑器逐条提供原生修改方法下拉框，删除时隐藏值、切回保留值；添加菜单仅保留统一入口。区块显式约束内容边距，滚动文档固定顶部与水平起点。`$env.` 是新的环境引用前缀，旧 `env.` 保持兼容，单次替换语义不变。
 
-步骤 Inspector 的多行 Header 表单可滚动；底部移除排序按钮，红色删除按钮使用 transient `NSPopover` 确认，并检查原步骤、工作流和阶段仍匹配。模板文本继续使用原生 `NSTextView` 的纯文本编辑、撤销和复制；`TemplateLayoutManager` 只绘制完整表达式的浅蓝圆角背景和文字颜色，值编辑器裁切为 8 pt 圆角。脚本编辑器不启用模板标记。内置变量与格式见[内置变量](Design/request-modification.md#内置变量)。`WorkflowTemplateContext` 在代理匹配原始请求后生成时间、随机值和原始请求快照，流式执行与脚本后台执行显式传递同一 Sendable 值；本地预览同样共享上下文。响应状态码在响应流程入口固定，Mock 使用本地生成状态码。模板标记按 Core Text 的实际字形轮廓垂直居中，左右扩展 4 pt，背景围绕文字中心对称限制在实际行高内；排版基线居中，24 pt 行高为相邻 20 pt 标记保留至少 4 pt 间隔，短值编辑器可完整显示两行。
+步骤 Inspector 的多行 Header 表单可滚动；底部移除排序按钮，红色删除按钮使用 transient `NSPopover` 确认，并检查原步骤、工作流和阶段仍匹配。Header、查询参数与 URL 模板文本继续使用原生 `NSTextView` 的纯文本编辑、撤销和复制；`TemplateLayoutManager` 只绘制完整表达式的浅蓝圆角背景和文字颜色，值编辑器裁切为 8 pt 圆角。脚本编辑器不启用模板标记。内置变量与格式见[内置变量](Design/request-modification.md#内置变量)。`WorkflowTemplateContext` 在代理匹配原始请求后生成时间、随机值和原始请求快照，流式执行与脚本后台执行显式传递同一 Sendable 值；本地预览同样共享上下文。响应状态码在响应流程入口固定，Mock 使用本地生成状态码。模板标记按 Core Text 的实际字形轮廓垂直居中，左右扩展 4 pt，背景围绕文字中心对称限制在实际行高内；排版基线居中，24 pt 行高为相邻 20 pt 标记保留至少 4 pt 间隔，短值编辑器可完整显示两行。
 
 步骤类型说明位于 Inspector 标题下方；每个 Header 使用独立 `NSBox`，添加按钮置于列表外。Header、查询参数操作与 URL 字符串替换配置区块右上角的移除按钮统一使用 24 pt 原生圆形减号按钮，保留删除提示与辅助功能名称。`WorkspaceSplitController` 在步骤 Inspector 的收起按钮左侧提供独立原生玻璃 info 按钮，由 `TemplateValuesViewController` 在 Popover 内展示内置变量和当前环境变量名称。原生复制按钮按行悬停淡入淡出，键盘焦点与减少动态效果均有替代行为。`TemplateLayoutManager` 用仅影响排版的字距属性为变量与普通文本保留实际空隙，不修改底层字符串。
 
 环境管理首组使用“名称”标题和单个输入框，环境切换保留在主窗口。变量行提供字符串、数值、布尔、数组、对象类型；`NamedValue.type` 持久化类型，旧配置缺少类型时默认为字符串。非字符串值按 JSON 格式校验，无效编辑保留为当前表单草稿并显示错误，合法后才保存。模板按文本插入变量值；代理、流程预览和脚本试运行传递同一环境快照的类型，脚本 `env` 将非字符串解析为对应 JavaScript 值并递归冻结。
+
+## 独立代码编辑器
+
+`Packages/RequestmanEditor` 由 Body 与 JavaScript 表单共用。文本编辑、布局和撤销使用 CodeEditTextView 0.12.1；语法颜色由 HighlighterSwift 3.1.0 在独立 actor 中计算，80 ms 合并输入，回到主线程前检查文本和版本，忽略过时结果与输入法组字期。仅更新颜色属性，不重写正文、选择或撤销记录；明暗主题使用 atom-one-light / atom-one-dark。行号复用 CodeEditSourceEditor 0.15.2 的 MIT GutterView，移除折叠和控制器依赖，直接使用同一个 TextLayoutManager 的行几何；不引入其 SwiftUI 界面。正文与行号共用 8 pt 外层裁切。短文本把滚轮传给外层表单，长文本保留内部滚动。
+
+Body 中完整的模板表达式用浅色背景标识。格式化继续使用 BodyJSONPresentation 保留数值原始拼写和模板，通过编辑器的替换接口形成可撤销操作。Header 等普通模板字段仍用 RulesTextArea；移除旧 BodyLineRuler 与 JavaScriptSyntax。依赖许可证随编辑器资源包提供，来源与改动见 [编辑器说明](../Packages/RequestmanEditor/README.md)。

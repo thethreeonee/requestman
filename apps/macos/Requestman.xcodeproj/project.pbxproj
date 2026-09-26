@@ -5,8 +5,9 @@
 	};
 	"objectVersion" = "60";
 	"objects" = {
-        "A10926AB0000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/JavaScriptSyntax.swift"; "sourceTree" = "<group>"; };
-        "A10926AB0000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10926AB0000000000000001"; };
+        "A10927ED0000000000000001" = { "isa" = "XCLocalSwiftPackageReference"; "relativePath" = "Packages/RequestmanEditor"; };
+        "A10927ED0000000000000002" = { "isa" = "XCSwiftPackageProductDependency"; "package" = "A10927ED0000000000000001"; "productName" = "RequestmanEditor"; };
+        "A10927ED0000000000000003" = { "isa" = "PBXBuildFile"; "productRef" = "A10927ED0000000000000002"; };
         "A10926E01000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Infrastructure/Capture/SystemRuleHitNotifications.swift"; "sourceTree" = "<group>"; };
         "A10926E01000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10926E01000000000000001"; };
         "A10926C01000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Workspace/JSONSyntax.swift"; "sourceTree" = "<group>"; };
@@ -407,7 +408,6 @@
                 "BEB4E525F48603DE12666E8E",
                 "F38B4ECE2819FC9E4240EE95",
                 "A10926B0D000000000000001",
-                "A10926AB0000000000000001",
                 "A10926C01000000000000001",
                 "1ADC8B696AE5EE9F146362A5",
                 "43FA72838C312E5A373171D3",
@@ -480,7 +480,6 @@
                 "3FE625F0ED4E4732804874D9",
                 "22372EBFC3A8E041A25BF830",
                 "A10926B0D000000000000002",
-                "A10926AB0000000000000002",
                 "A10926C01000000000000002",
                 "9AE475B59ADF0ADC61AB8C9E",
                 "D05FACDD10ACF1C575F2521E",
@@ -499,6 +498,7 @@
 				"3378E8C5B9087F2189A82B77",
 				"D9F82689E8F760ECED47CA3E",
 				"BA694F9319384A679527F804",
+                "A10927ED0000000000000003",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 		};
@@ -564,6 +564,7 @@
 			);
 			"name" = "Requestman";
 			"packageProductDependencies" = (
+                "A10927ED0000000000000002",
 				"769C1826843E971C2F135B82",
 				"94A0426E8D3203DA5468CCF0",
 				"BA694F9319384A679527F803",
@@ -618,6 +619,7 @@
 			);
 			"mainGroup" = "B28B7AF69320201D1CF206EB";
 			"packageReferences" = (
+                "A10927ED0000000000000001",
 				"582681C2EAE02B3F3D399C0C",
 			);
 			"productRefGroup" = "FBDC4F23F93125BBEEAE800C";
