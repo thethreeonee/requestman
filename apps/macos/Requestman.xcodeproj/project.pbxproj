@@ -5,6 +5,10 @@
 	};
 	"objectVersion" = "60";
 	"objects" = {
+        "A10926C01000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Workspace/JSONSyntax.swift"; "sourceTree" = "<group>"; };
+        "A10926C01000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10926C01000000000000001"; };
+        "A10926B0D000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/BodyTextEditing.swift"; "sourceTree" = "<group>"; };
+        "A10926B0D000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10926B0D000000000000001"; };
         "A10A99000000000000000051" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/TemplateValuesView.swift"; "sourceTree" = "<group>"; };
         "A10A99000000000000000052" = { "isa" = "PBXBuildFile"; "fileRef" = "A10A99000000000000000051"; };
         "A10926D00000000000000003" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/ProjectIconMenu.swift"; "sourceTree" = "<group>"; };
@@ -394,6 +398,8 @@
 				"A8CE98D3D53D32C769A516B8",
                 "BEB4E525F48603DE12666E8E",
                 "F38B4ECE2819FC9E4240EE95",
+                "A10926B0D000000000000001",
+                "A10926C01000000000000001",
                 "1ADC8B696AE5EE9F146362A5",
                 "43FA72838C312E5A373171D3",
                 "6DEF4499A370158C3E868307",
@@ -462,6 +468,8 @@
 				"977963FF90440603C012F5DC",
                 "3FE625F0ED4E4732804874D9",
                 "22372EBFC3A8E041A25BF830",
+                "A10926B0D000000000000002",
+                "A10926C01000000000000002",
                 "9AE475B59ADF0ADC61AB8C9E",
                 "D05FACDD10ACF1C575F2521E",
                 "81833207DF5631BF81282D3A",

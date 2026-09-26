@@ -46,6 +46,13 @@ final class ExecutionHistoryModel {
 
 enum WorkspaceSettingsSection { case general, environments }
 @MainActor class ProjectSidebarViewController: NSViewController {
+    let outline = NSOutlineView()
+    let searchField = NSSearchField()
+    func canPerform(_ command: WorkspaceCommand) -> Bool { false }
+    func perform(_ command: WorkspaceCommand) { preconditionFailure("Unexpected rules command in inspector check") }
+    func createProject() { preconditionFailure("Unexpected project creation") }
+    func addRequest() { preconditionFailure("Unexpected request creation") }
+    func focusName() { preconditionFailure("Unexpected rules focus") }
     init(model: WorkspaceModel) { super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { nil }
     override func loadView() { view = NSView() }
@@ -55,8 +62,62 @@ enum WorkspaceSettingsSection { case general, environments }
 
 @main @MainActor
 struct InspectorPerformanceChecks {
+    static func checkJSONColors() {
+        let json = #"{"name":"value","count":42,"enabled":true,"nothing":null}"#
+        let cases: [(String, String, RequestDataValueKind, JSONSyntax.Role)] = [
+            ("name", "\"value\"", .string, .string), ("count", "42", .number, .number),
+            ("enabled", "true", .boolean, .boolean), ("nothing", "null", .null, .null)
+        ]
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; defer { window.close() }
+        let source = RequestSourceView()
+        window.contentView = source
+        let text = views(NSTextView.self, in: source).first!
+        source.update(text: json, search: "", stateKey: "request", isVisible: true, isJSON: true)
+        func tint(at range: NSRange) -> NSColor? {
+            text.layoutManager?.temporaryAttribute(.foregroundColor, atCharacterIndex: range.location, effectiveRange: nil) as? NSColor
+        }
+        for (key, value, _, role) in cases {
+            precondition(tint(at: (json as NSString).range(of: "\"" + key + "\"")) == JSONSyntax.color(.key))
+            precondition(tint(at: (json as NSString).range(of: value)) == JSONSyntax.color(role))
+        }
+        let selected = NSRange(location: 1, length: 6)
+        text.setSelectedRange(selected)
+        source.update(text: json, search: "value", stateKey: "request", isVisible: true, isJSON: true)
+        let valueRange = (json as NSString).range(of: "value")
+        precondition(text.string == json && text.selectedRange() == selected, "Highlighting must preserve source and selection")
+        precondition(tint(at: valueRange) == JSONSyntax.color(.string))
+        precondition(text.textStorage?.attribute(.backgroundColor, at: valueRange.location, effectiveRange: nil) != nil)
+        source.update(text: json, search: "", stateKey: "request", isVisible: true, isJSON: false)
+        precondition(tint(at: valueRange) == nil, "A plain-text payload must clear old syntax colors")
+        source.update(text: json, search: "", stateKey: "response", isVisible: false, isJSON: true)
+        source.update(text: json, search: "", stateKey: "response", isVisible: true, isJSON: true)
+        precondition(tint(at: valueRange) == JSONSyntax.color(.string), "Retained source panes must recolor when shown")
+        precondition(text.textStorage?.attribute(.backgroundColor, at: valueRange.location, effectiveRange: nil) == nil)
+
+        let outline = RequestDataOutline(); window.contentView = outline
+        let nodes = cases.map { key, value, kind, _ in RequestDataNode(id: key, name: key, value: value, copyValue: value, valueKind: kind) }
+        outline.update(nodes: nodes, showsTypes: true, isVisible: true)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let table = views(NSOutlineView.self, in: outline).first!
+        for (index, item) in cases.enumerated() {
+            let key = table.view(atColumn: 0, row: index, makeIfNecessary: true) as! NSTableCellView
+            let value = table.view(atColumn: 1, row: index, makeIfNecessary: true) as! NSTableCellView
+            precondition(key.textField?.textColor == JSONSyntax.color(.key))
+            precondition(value.textField?.textColor == JSONSyntax.color(item.3), "JSON tree and source must share value colors")
+            value.backgroundStyle = .emphasized
+            precondition(value.textField?.textColor == .alternateSelectedControlTextColor)
+            value.backgroundStyle = .normal
+            precondition(value.textField?.textColor == JSONSyntax.color(item.3))
+        }
+        outline.update(nodes: nodes, showsTypes: false, isVisible: true)
+        let headerKey = table.view(atColumn: 0, row: 0, makeIfNecessary: true) as! NSTableCellView
+        precondition(headerKey.textField?.textColor == .labelColor, "Header names keep their native text color")
+        print("Shared JSON colors passed: source/tree, all value types, search, selection, plain-text reset and retained panes")
+    }
     static func main() {
         NSApplication.shared.setActivationPolicy(.prohibited)
+        checkJSONColors()
         let model = WorkspaceModel()
         model.selection = .requests
         let workflow = RequestWorkflow(name: "命中规则")

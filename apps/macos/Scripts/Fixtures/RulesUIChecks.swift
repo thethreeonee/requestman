@@ -45,6 +45,115 @@ import RequestmanCore
 }
 
 @main @MainActor struct RulesUIChecks {
+    static func checkBodyEditing() {
+        let original = #"{"z":900719925474099312345,"a":[true,null,1.2300e+04],"name":"中文😀","id":"{{$uuid}}","count":{{$env.count}},"empty":{}}"#
+        let formatted = BodyJSONPresentation.formatted(original)!
+        precondition(formatted.contains("900719925474099312345") && formatted.contains("1.2300e+04"))
+        precondition(formatted.hasPrefix("{\n  \"z\":"), "Formatting preserves field order")
+        precondition(formatted.contains("{{$env.count}}") && formatted.contains("{{$uuid}}") && formatted.contains("\"empty\": {}"))
+        precondition(BodyJSONPresentation.formatted(formatted) == formatted)
+        let loose = #"{name:"张三",nested:{enabled:true,},items:[1,2,],$token:"{{$uuid}}",数量:{{$env.count}},large:900719925474099312345,}"#
+        let normalized = BodyJSONPresentation.formatted(loose)!
+        precondition(normalized.contains("\"name\": \"张三\"") && normalized.contains("\"enabled\": true"))
+        precondition(normalized.contains("\"数量\": {{$env.count}}") && normalized.contains("900719925474099312345"))
+        precondition(BodyJSONPresentation.formatted(normalized) == normalized)
+        let plainObject = BodyJSONPresentation.formatted(#"{a:[1,2,],nested:{b:true,},trueKey:"{unquoted:1,}",}"#)!
+        precondition((try? JSONSerialization.jsonObject(with: Data(plainObject.utf8))) != nil)
+        precondition(plainObject.contains(#""{unquoted:1,}""#), "Formatting must not alter punctuation inside strings")
+        for invalid in ["plain text", "[1 2]", "{", "", "{a:1,,}", "[,]", "{a:,}", "{a:unknown}", "{a: (() => 1)()}"] {
+            precondition(BodyJSONPresentation.formatted(invalid) == nil, "Invalid JSON was accepted: \(invalid)")
+        }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 360), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        var saved = ""
+        let area = RulesTextArea(template: true, bodyEditor: true) { saved = $0 }
+        window.contentView = area; defer { window.close() }
+        area.string = original
+        window.makeFirstResponder(area.textView)
+        precondition(area.formatJSON() && saved == formatted)
+        area.textView.undoManager?.undo()
+        precondition(area.string == original && saved == original, "Formatting is one undoable plain text edit")
+        area.string = "{invalid}"
+        precondition(!area.formatJSON() && area.string == "{invalid}")
+        area.string = "{\r\n\"long\": \"" + String(repeating: "中文😀", count: 90) + "\"\r\n}\r\n"
+        window.contentView?.layoutSubtreeIfNeeded()
+        let ruler = area.verticalRulerView as! BodyLineRuler
+        precondition(ruler.lineStarts.count == 4 && ruler.lineStarts.last == (area.string as NSString).length)
+        precondition(area.rulersVisible && ruler.clientView === area.textView)
+        area.string = #"{"key":true,"id":"{{$uuid}}"}"#
+        let layout = area.textView.layoutManager!
+        precondition((layout.temporaryAttribute(.foregroundColor, atCharacterIndex: 2, effectiveRange: nil) as? NSColor) == .systemBlue)
+        precondition((layout.temporaryAttribute(.foregroundColor, atCharacterIndex: 7, effectiveRange: nil) as? NSColor) == .systemPurple)
+        precondition((layout as! TemplateLayoutManager).tokenRanges.count == 1)
+        // Exercise native ruler drawing for empty text, wrapped lines and scrolling.
+        for source in ["", formatted, "[\n" + Array(repeating: "  \"" + String(repeating: "long ", count: 30) + "\"", count: 40).joined(separator: ",\n") + "\n]\n"] {
+            area.string = source
+            window.contentView?.layoutSubtreeIfNeeded()
+            area.textView.scrollRangeToVisible(NSRange(location: (source as NSString).length, length: 0))
+            guard let bitmap = area.bitmapImageRepForCachingDisplay(in: area.bounds) else { preconditionFailure("Missing editor rendering") }
+            area.cacheDisplay(in: area.bounds, to: bitmap)
+        }
+        if let path = ProcessInfo.processInfo.environment["REQUESTMAN_BODY_EDITOR_PREVIEW"] {
+            area.string = formatted; area.textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
+            window.contentView?.layoutSubtreeIfNeeded()
+            let bitmap = area.bitmapImageRepForCachingDisplay(in: area.bounds)!
+            area.cacheDisplay(in: area.bounds, to: bitmap)
+            try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
+        }
+        let model = WorkspaceModel(); model.addProject()
+        let bodyCases: [(Bool, ModificationKind)] = [(false, .replaceBody), (true, .replaceBody), (false, .mock)]
+        for (response, kind) in bodyCases {
+            model.addStep(kind, response: response)
+            let inspector = StepInspectorViewController(model: model)
+            inspector.refresh(); window.contentViewController = inspector
+            window.contentView?.layoutSubtreeIfNeeded()
+            let editor = descendants(inspector.view).compactMap { $0 as? RulesTextArea }.first!
+            precondition(editor.frame.height == 360)
+            let form = descendants(inspector.view).compactMap { $0 as? NSScrollView }.first { !($0 is RulesTextArea) }!
+            window.setContentSize(NSSize(width: 480, height: 760))
+            window.contentView?.layoutSubtreeIfNeeded()
+            let expandedHeight = editor.frame.height
+            precondition(expandedHeight > 360 && abs(form.documentView!.frame.height - form.contentSize.height) < 1,
+                         "Body must fill the remaining viewport: editor=\(editor.frame), form=\(form.frame), document=\(form.documentView!.frame)")
+            window.setContentSize(NSSize(width: 480, height: 960))
+            window.contentView?.layoutSubtreeIfNeeded()
+            precondition(abs(editor.frame.height - expandedHeight - 200) < 1, "Only the editor should absorb extra window height")
+            window.setContentSize(NSSize(width: 480, height: 360))
+            window.contentView?.layoutSubtreeIfNeeded()
+            precondition(abs(editor.frame.height - 360) < 1 && form.documentView!.frame.height > form.contentSize.height,
+                         "Small windows must keep a 360 pt editor and scroll the outer form: editor=\(editor.frame), form=\(form.frame), document=\(form.documentView!.frame), window=\(window.contentView!.frame)")
+            form.documentView!.scroll(NSPoint(x: 0, y: form.documentView!.bounds.maxY))
+            precondition(form.contentView.bounds.minY > 0, "The outer form must remain scrollable at minimum editor height")
+            let longBody = "[\n" + Array(repeating: "  {\"name\": \"long body\"}", count: 300).joined(separator: ",\n") + "\n]"
+            editor.string = longBody
+            window.contentView?.layoutSubtreeIfNeeded()
+            let textLayout = editor.textView.layoutManager!
+            textLayout.ensureLayout(for: editor.textView.textContainer!)
+            let usedHeight = textLayout.usedRect(for: editor.textView.textContainer!).maxY + editor.textView.textContainerOrigin.y
+            precondition(editor.textView.frame.height >= usedHeight, "Long Body document is clipped: frame=\(editor.textView.frame), used=\(usedHeight), max=\(editor.textView.maxSize)")
+            editor.textView.scrollRangeToVisible(NSRange(location: (longBody as NSString).length - 1, length: 1))
+            precondition(editor.contentView.bounds.maxY >= usedHeight - 24, "The last Body line must be reachable: \(editor.contentView.bounds), used=\(usedHeight)")
+            editor.textView.scrollRangeToVisible(NSRange(location: 0, length: 1))
+            let beforeScroll = editor.contentView.bounds.minY
+            let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -180, wheel2: 0, wheel3: 0)!
+            editor.scrollWheel(with: NSEvent(cgEvent: wheel)!)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            precondition(editor.contentView.bounds.minY > beforeScroll, "Wheel scrolling must move the Body viewport")
+            precondition(editor.formatJSON())
+            window.contentView?.layoutSubtreeIfNeeded()
+            textLayout.ensureLayout(for: editor.textView.textContainer!)
+            precondition(editor.textView.frame.height >= textLayout.usedRect(for: editor.textView.textContainer!).maxY, "Formatting must resize the document")
+            editor.string = loose; editor.textDidChange(Notification(name: NSText.didChangeNotification))
+            descendants(inspector.view).compactMap { $0 as? NSButton }.first { $0.title == "格式化 JSON" }!.performClick(nil)
+            precondition(model.selectedStep?.value == normalized, "Object literal input must save as formatted JSON in both directions")
+            editor.string = original; editor.textDidChange(Notification(name: NSText.didChangeNotification))
+            descendants(inspector.view).compactMap { $0 as? NSButton }.first { $0.title == "格式化 JSON" }!.performClick(nil)
+            precondition(model.selectedStep?.value == formatted, "Formatting must persist in both directions")
+            editor.string = ""
+            window.contentView?.layoutSubtreeIfNeeded()
+            precondition(editor.textView.frame.height >= editor.contentSize.height, "An empty editor must remain clickable throughout its viewport")
+        }
+    }
     static func checkHeaderEditing(_ inspector: StepInspectorViewController, model: WorkspaceModel, window: NSWindow) {
         func button(_ title: String) -> NSButton {
             descendants(inspector.view).compactMap { $0 as? NSButton }.first { $0.title == title }!
@@ -340,6 +449,7 @@ import RequestmanCore
 
     static func main() {
         NSApplication.shared.setActivationPolicy(.prohibited)
+        checkBodyEditing()
         checkMatchFieldScrolling()
         checkStepActivation()
         checkTemplateCaret()
@@ -709,7 +819,7 @@ import RequestmanCore
         precondition(model.workflow!.responseSteps.count == responseCount - 1 && model.workflow!.requestSteps.count == requestCount)
         checkRapidSidebarDisclosure()
         checkSidebarWidths()
-        print("Rules UI checks passed: native sidebar, live field identity, both lanes, multiple headers, template marks and clipboard/undo, deletion confirmation, all inspector kinds and preview inputs. Hidden CLI window only; no App built or run.")
+        print("Rules UI checks passed: Body JSON formatting/save/undo, syntax colors and ruler rendering, native sidebar, live field identity, both lanes, multiple headers, template marks and clipboard/undo, deletion confirmation, all inspector kinds and preview inputs. Hidden CLI window only; no App built or run.")
     }
     private static func checkDisclosureAnimations(_ outline: ProjectOutlineView, expanding: Bool) {
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }

@@ -20,6 +20,7 @@ try:
                     str(root / "Requestman/Features/Workspace/WorkspaceTransfer.swift"),
                     str(root / "Requestman/Features/Workspace/WorkspaceSection.swift"),
                     *map(str, sorted((root / "Requestman/Features/Rules").glob("*.swift"))),
+                    str(root / "Requestman/Features/Workspace/JSONSyntax.swift"),
                     str(root / "Scripts/Fixtures/RulesUIChecks.swift"), "-o", str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=45)
 finally:

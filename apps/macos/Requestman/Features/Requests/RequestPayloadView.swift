@@ -118,7 +118,8 @@ final class RequestPayloadViewController: NSViewController, NSSearchFieldDelegat
         outline.update(nodes: nodes, showsTypes: tab.isBody, isVisible: showsContent && !usesSource,
                        stateKey: "\(version.rawValue)-\(search.isEmpty ? "all" : "search")-\(onlyChanges)", expandsMatches: !search.isEmpty || onlyChanges)
         outline.isHidden = usesSource || isLoading || presentation?.emptyTitle != nil
-        source.update(text: presentation?.source ?? "", search: usesSource ? search : "", stateKey: version.rawValue, isVisible: showsContent && usesSource)
+        source.update(text: presentation?.source ?? "", search: usesSource ? search : "", stateKey: version.rawValue,
+                      isVisible: showsContent && usesSource, isJSON: presentation?.isJSON == true)
         source.isHidden = !usesSource || isLoading || presentation?.emptyTitle != nil
         let title = presentation?.emptyTitle ?? ((!usesSource && nodes.isEmpty) ? (onlyChanges ? "没有符合条件的变更" : "没有匹配字段") : "")
         empty.update(title: title, description: presentation?.emptyDescription ?? "调整搜索或筛选条件。", symbol: presentation?.emptyTitle == nil ? "magnifyingglass" : "doc.text")
@@ -200,7 +201,7 @@ final class RequestSourceView: NSView {
 
     func setFont(_ font: NSFont) { (scroll.documentView as? NSTextView)?.font = font }
 
-    func update(text: String, search: String, stateKey: String, isVisible: Bool) {
+    func update(text: String, search: String, stateKey: String, isVisible: Bool, isJSON: Bool = false) {
         guard let view = scroll.documentView as? NSTextView else { return }
         // Keep the view alive for scroll state, but hide it natively as well
         // so its I-beam cursor regions cannot cover the visible field table.
@@ -220,6 +221,14 @@ final class RequestSourceView: NSView {
             view.layoutManager?.ensureLayout(for: view.textContainer!)
             scroll.contentView.scroll(to: coordinator.positions[stateKey] ?? .zero)
             scroll.reflectScrolledClipView(scroll.contentView)
+        }
+        if changed || coordinator.isJSON != isJSON {
+            coordinator.isJSON = isJSON
+            coordinator.needsSyntaxUpdate = true
+        }
+        if isVisible && coordinator.needsSyntaxUpdate {
+            JSONSyntax.highlight(view, enabled: isJSON)
+            coordinator.needsSyntaxUpdate = false
         }
         if changed || coordinator.search != search {
             coordinator.search = search
@@ -242,6 +251,8 @@ final class RequestSourceView: NSView {
     @MainActor final class Coordinator {
         var text = ""
         var search = ""
+        var isJSON = false
+        var needsSyntaxUpdate = true
         var stateKey = ""
         var positions: [String: NSPoint] = [:]
     }

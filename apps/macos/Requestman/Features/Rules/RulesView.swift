@@ -343,9 +343,11 @@ import RequestmanCore
 @MainActor final class RulesTextArea: NSScrollView, NSTextViewDelegate {
     let textView: NSTextView
     private let templateLayout: TemplateLayoutManager?
+    private let bodyEditor: Bool
     var onChange: (String) -> Void
-    init(editable: Bool = true, template: Bool = false, onChange: @escaping (String) -> Void = { _ in }) {
+    init(editable: Bool = true, template: Bool = false, bodyEditor: Bool = false, onChange: @escaping (String) -> Void = { _ in }) {
         self.onChange = onChange
+        self.bodyEditor = bodyEditor
         if template {
             let storage = NSTextStorage()
             let layout = TemplateLayoutManager()
@@ -360,6 +362,9 @@ import RequestmanCore
         textView.isAutomaticQuoteSubstitutionEnabled = false; textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false; textView.isAutomaticSpellingCorrectionEnabled = false
         textView.isHorizontallyResizable = false; textView.isVerticallyResizable = true
+        // A zero-frame NSTextView otherwise inherits the viewport as its maximum height.
+        textView.minSize = .zero
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.autoresizingMask = [.width]; textView.textContainer?.widthTracksTextView = true
         textView.textContainerInset = NSSize(width: 6, height: 8); textView.delegate = self
         textView.allowsUndo = true
@@ -370,18 +375,42 @@ import RequestmanCore
             textView.typingAttributes[.paragraphStyle] = paragraph
             wantsLayer = true; layer?.cornerRadius = 8; layer?.masksToBounds = true
         }
+        if bodyEditor {
+            verticalRulerView = BodyLineRuler(scrollView: self, orientation: .verticalRuler)
+            verticalRulerView?.clientView = textView
+            hasVerticalRuler = true; rulersVisible = true
+        }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func layout() {
+        super.layout()
+        let minimum = NSSize(width: 0, height: max(0, contentSize.height))
+        if textView.minSize != minimum { textView.minSize = minimum }
+    }
     var string: String {
         get { textView.string }
         set { if textView.string != newValue { textView.string = newValue; refreshTokens() } }
     }
     private func refreshTokens() {
         templateLayout?.updateTokens(excluding: textView.markedRange())
+        if bodyEditor {
+            JSONSyntax.highlight(textView, templateRanges: templateLayout?.tokenRanges ?? [])
+            (verticalRulerView as? BodyLineRuler)?.updateLines()
+        }
         if templateLayout != nil { textView.typingAttributes.removeValue(forKey: .kern) }
         textView.needsDisplay = true
     }
     func textDidChange(_ notification: Notification) { refreshTokens(); onChange(textView.string) }
+    @discardableResult func formatJSON() -> Bool {
+        guard textView.isEditable, !textView.hasMarkedText(), let formatted = BodyJSONPresentation.formatted(string) else { return false }
+        guard formatted != string else { return true }
+        let range = NSRange(location: 0, length: (string as NSString).length)
+        guard textView.shouldChangeText(in: range, replacementString: formatted) else { return false }
+        textView.textStorage?.replaceCharacters(in: range, with: formatted)
+        textView.didChangeText()
+        textView.undoManager?.setActionName("格式化 JSON")
+        return true
+    }
 }
 
 /// Keep decoration spacing out of the caret position after ordinary text.

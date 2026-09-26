@@ -27,6 +27,7 @@ try:
         str(sources / "RequestInspectionMode.swift"),
         str(sources / "RequestBodyDecoding.swift"), str(sources / "RequestPayloadPresentation.swift"),
         str(sources / "RequestCURL.swift"),
+        str(root / "Requestman/Features/Workspace/JSONSyntax.swift"),
         str(root / "Scripts/Fixtures/RequestInspectionChecks.swift"),
         str(root / "Scripts/Fixtures/RequestBodyDecodingChecks.swift"),
         str(root / "Scripts/Fixtures/RequestPayloadPresentationChecks.swift"),

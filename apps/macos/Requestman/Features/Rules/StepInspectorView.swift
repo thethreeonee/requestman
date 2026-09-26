@@ -11,6 +11,7 @@ import RequestmanCore
     private var name: RulesTextArea?
     private var status: ActionTextField?
     private var value: RulesTextArea?
+    private var formatBody: NSButton?
     private var script: ScriptEditorViewController?
     let deletion = NSPopover()
     private var headerEditors: [HeaderEntryEditor] = []
@@ -32,12 +33,13 @@ import RequestmanCore
         removeButton.isEnabled = model.loaded
         enabled.isEnabled = model.loaded; name?.textView.isEditable = model.loaded; status?.isEnabled = model.loaded
         value?.textView.isEditable = model.loaded
+        formatBody?.isEnabled = model.loaded
         script?.update(step: selected, response: model.editingResponse, environment: model.document.environment?.values ?? [:])
     }
     private func rebuild(_ selected: ModificationStep?) {
         script?.isPresented = false; script?.removeFromParent(); script = nil
         deletion.close(); headerEditors = []
-        name = nil; status = nil; value = nil
+        name = nil; status = nil; value = nil; formatBody = nil
         view.subviews.forEach { $0.removeFromSuperview() }; stepID = selected?.id
         guard let selected else {
             let empty = NativeUI.stack([NativeUI.label("选择一个步骤", size: 20, weight: .semibold), NativeUI.label("配置请求或响应的修改动作。", secondary: true)], spacing: 10)
@@ -102,12 +104,30 @@ import RequestmanCore
                 let body = [.replaceBody, .mock].contains(selected.kind)
                 let label = body ? "Body · 文本 / 模板" : (selected.kind == .setQueryParameter ? "参数值 / 模板" :
                     (selected.kind == .replaceURLString ? "替换为 / 模板" : "值 / 模板"))
-                fields.addArrangedSubview(NativeUI.label(label))
-                let area = RulesTextArea(template: true) { [weak self] text in self?.modify { $0.value = text } }; value = area
+                let area = RulesTextArea(template: true, bodyEditor: body) { [weak self] text in self?.modify { $0.value = text } }; value = area
+                if body {
+                    let message = NativeUI.label("", size: 11, secondary: true)
+                    message.maximumNumberOfLines = 0; message.lineBreakMode = .byWordWrapping; message.isHidden = true
+                    let format = ActionButton(title: "格式化 JSON") { [weak area] in
+                        message.isHidden = area?.formatJSON() == true
+                        message.stringValue = message.isHidden ? "" : "无法格式化：请检查 JSON 语法。原文已保留。"
+                    }
+                    format.controlSize = .small; format.toolTip = "支持无引号 key 和末尾逗号；格式化为 JSON，保留字段顺序与模板变量，可撤销。"
+                    formatBody = format
+                    let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+                    let row = NativeUI.stack([NativeUI.label(label), spacer, format], vertical: false)
+                    fields.addArrangedSubview(row); row.widthAnchor.constraint(equalTo: fields.widthAnchor).isActive = true
+                    fields.addArrangedSubview(message)
+                    area.onChange = { [weak self] text in message.isHidden = true; self?.modify { $0.value = text } }
+                } else { fields.addArrangedSubview(NativeUI.label(label)) }
                 area.textView.setAccessibilityLabel(label)
                 fields.addArrangedSubview(area)
                 area.widthAnchor.constraint(equalTo: fields.widthAnchor).isActive = true
-                area.heightAnchor.constraint(equalToConstant: body ? 200 : 72).isActive = true
+                if body {
+                    area.heightAnchor.constraint(greaterThanOrEqualToConstant: 360).isActive = true
+                    area.setContentHuggingPriority(.init(1), for: .vertical)
+                    fields.setHuggingPriority(.init(1), for: .vertical)
+                } else { area.heightAnchor.constraint(equalToConstant: 72).isActive = true }
             }
             let stack: NSStackView
             if [.setHeader, .removeHeader].contains(selected.kind) { stack = fields }
@@ -125,6 +145,15 @@ import RequestmanCore
                 document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
                 document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor)
             ])
+            if [.replaceBody, .mock].contains(selected.kind) {
+                stack.setHuggingPriority(.init(1), for: .vertical)
+                let fill = document.heightAnchor.constraint(equalTo: scroll.contentView.heightAnchor)
+                fill.priority = .init(249)
+                // Fill the viewport when possible; the 360 pt editor minimum can make the form scroll.
+                NSLayoutConstraint.activate([
+                    document.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor), fill
+                ])
+            }
             content = scroll
         }
         let footerSpacer = NSView(); footerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)

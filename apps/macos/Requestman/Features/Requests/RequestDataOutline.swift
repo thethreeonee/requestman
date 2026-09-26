@@ -257,7 +257,7 @@ final class RequestDataOutline: NSView {
             guard column != .action else { return nil }
             let cell = (outlineView.makeView(withIdentifier: identifier, owner: nil) as? RequestDataCell)
                 ?? RequestDataCell(column: column)
-            cell.configure(item.node)
+            cell.configure(item.node, isJSON: showsTypes)
             return cell
         }
 
@@ -742,13 +742,14 @@ private final class RequestDataCell: NSTableCellView {
         didSet { updateColors() }
     }
 
-    func configure(_ node: RequestDataNode) {
+    func configure(_ node: RequestDataNode, isJSON: Bool) {
         original.isHidden = true
         original.stringValue = ""
         primaryColor = .labelColor
         switch column {
         case .name:
             primary.stringValue = node.name
+            primaryColor = isJSON ? JSONSyntax.color(.key) : .labelColor
             primary.font = .monospacedSystemFont(ofSize: 11, weight: node.children.isEmpty ? .regular : .bold)
         case .value:
             primary.stringValue = node.value
@@ -791,11 +792,11 @@ private final class RequestDataCell: NSTableCellView {
 
     private static func valueColor(_ kind: RequestDataValueKind) -> NSColor {
         switch kind {
-        case .plain: .labelColor
-        case .string: .systemTeal
-        case .number: .systemBlue
-        case .boolean: .systemPurple
-        case .null: .secondaryLabelColor
+        case .plain: JSONSyntax.color(.plain)
+        case .string: JSONSyntax.color(.string)
+        case .number: JSONSyntax.color(.number)
+        case .boolean: JSONSyntax.color(.boolean)
+        case .null: JSONSyntax.color(.null)
         }
     }
 }
