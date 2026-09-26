@@ -14,7 +14,7 @@
 
 | 组件 | 职责 | 当前状态 |
 | --- | --- | --- |
-| Requestman 宿主 App | 项目、双向流程、全局记录、环境与连接配置 | AppKit 窗口壳、SwiftUI 内容及配置持久化已接入；运行效果待人工验收 |
+| Requestman 宿主 App | 项目、双向流程、全局记录、环境与连接配置 | 纯 AppKit 窗口、页面与配置持久化已接入；运行效果待人工验收 |
 | RequestmanCore | 工作区模型、模板与动作、捕获契约、资源边界 | 已实现基础动作与测试 |
 | LocalCaptureService / LocalProxyCaptureService | 宿主捕获边界与代理生命周期 | 宿主提供恢复记录路径，包内服务持有会话模式；不放宽透明捕获的空选择校验 |
 | SystemProxyController | 系统 HTTP/HTTPS 代理接管、原配置保存与恢复 | SystemConfiguration + Authorization Services；设置策略与失败恢复已有替身测试，系统授权待人工验收 |
@@ -24,7 +24,7 @@
 | 存储 | 工作区持久化、全局记录 | JSON 配置保存及有界内存记录已实现；数据库待实现 |
 | RequestmanCertificates | 本机 CA、钥匙串安装、SSL 信任与校验 | 原生引导和可重试流程已实现；系统授权与浏览器实测待验收 |
 
-证书配置入口位于设置 → 通用的“HTTPS 证书”分组，本地代理、上游代理和协议支持也统一放在通用页。证书引导由 `WorkspaceModel.certificateSetup` 持有 `CertificateSetupModel`，经 `CertificateService` 访问独立的 `LocalCertificateService` actor；SwiftUI 不直接读写 Security。只在用户点击“设置证书…”后串行检查、生成、安装、授权和复核，已完成步骤可复用，取消不会自动重弹授权。私钥使用不可导出的文件型钥匙串键，由登录钥匙串锁和 ACL 保护；此选择兼容当前无专用 Keychain entitlement 的 macOS 宿主，公开 CA 安装到浏览器读取的默认钥匙串。证书编码和签名使用 [Apple swift-certificates](https://github.com/apple/swift-certificates)，不手写 X.509 或把私钥写到磁盘。当前用户信任只指定 SSL policy，授权由 `SecTrustSettingsSetTrustSettings` 系统面板执行；验证使用短期内存测试叶证书、主机名及系统 SSL 信任链，不设置自定义 anchors、不关闭证书校验。过期、损坏或密钥不匹配时报告错误并保留原材料，不静默轮换。证书与捕获服务共享同一个 actor。新 CONNECT 连接经 `TLSCertificateProviding` 获取短期站点证书；未完成信任时保持透传，已信任时升级到 NIOSSL 服务端并复用 HTTP 流程，按 CONNECT authority 校验内层 Host 与目标。CA 密钥不导出，P-256 站点密钥仅在内存中使用；SAN 支持 DNS/IPv4/IPv6，证书最多有效 7 天、不超过 CA 到期，缓存上限 128 个。已有透传连接需重建，历史记录不回填。
+证书配置入口位于设置 → 通用的“HTTPS 证书”分组，本地代理、上游代理和协议支持也统一放在通用页。证书引导由 `WorkspaceModel.certificateSetup` 持有 `CertificateSetupModel`，经 `CertificateService` 访问独立的 `LocalCertificateService` actor；界面控制器不直接读写 Security。只在用户点击“设置证书…”后串行检查、生成、安装、授权和复核，已完成步骤可复用，取消不会自动重弹授权。私钥使用不可导出的文件型钥匙串键，由登录钥匙串锁和 ACL 保护；此选择兼容当前无专用 Keychain entitlement 的 macOS 宿主，公开 CA 安装到浏览器读取的默认钥匙串。证书编码和签名使用 [Apple swift-certificates](https://github.com/apple/swift-certificates)，不手写 X.509 或把私钥写到磁盘。当前用户信任只指定 SSL policy，授权由 `SecTrustSettingsSetTrustSettings` 系统面板执行；验证使用短期内存测试叶证书、主机名及系统 SSL 信任链，不设置自定义 anchors、不关闭证书校验。过期、损坏或密钥不匹配时报告错误并保留原材料，不静默轮换。证书与捕获服务共享同一个 actor。新 CONNECT 连接经 `TLSCertificateProviding` 获取短期站点证书；未完成信任时保持透传，已信任时升级到 NIOSSL 服务端并复用 HTTP 流程，按 CONNECT authority 校验内层 Host 与目标。CA 密钥不导出，P-256 站点密钥仅在内存中使用；SAN 支持 DNS/IPv4/IPv6，证书最多有效 7 天、不超过 CA 到期，缓存上限 128 个。已有透传连接需重建，历史记录不回填。
 
 `ProxyTLS` 使用 Apple NIOSSL 处理 TLS，出站验证异步交给 macOS `SecTrust`，同时检查真实目标的主机名和系统/用户信任；关闭网络证书补取避免系统代理递归，不关闭证书校验。仅 internal 测试构造器允许内存测试锚点。CONNECT 建立、升级后等待内层请求、每个 HTTP 事务分别限时 30 秒，上游 TLS 握手计入该 HTTP 事务；升级时先安装 TLS 处理器，再释放 CONNECT decoder 缓冲的首包数据。解密记录完整保留 URL、方法、双向 Header 和旁路采集的 Body；网络线程不等待完整内容、不解压。回环测试不安装或信任本机 CA。
 
@@ -38,21 +38,21 @@ CA 材料和实际信任结果使用最多 5 秒的固定期限缓存，命中�
 
 HTTP/1.1 顺序请求复用下游连接，每条下游最多保留一个同目标、同出口的上游连接，HTTPS 同时复用 TLS 会话。上游主动关闭后，下次请求重新建连；不重试已发送请求。每个事务完成后清空规则匹配、Body 采集器和内存租约，保留独立记录；闲置 30 秒关闭且不生成虚假失败记录，停止监听关闭在用和闲置连接。仍限制最多 256 个下游连接，不支持流水线和跨客户端连接池。 浏览器预连接或请求完成后的空闲 TLS 连接收到 `uncleanShutdown`（未发送 `close_notify`）时只关闭连接，不新增失败 CONNECT；真实握手中断和进行中的请求仍记录失败与不完整 Body。TLS 错误保留 NIOSSL 枚举及底层 BoringSSL 原因，避免 NSError 桥接只显示数字错误码。
 
-主窗口由 `WorkspaceSplitView` 桥接一个 AppKit `NSSplitViewController`，持久保留项目侧栏、主内容、请求详情三个 `NSHostingController`。`WorkspaceSplitView.sizeThatFits` 对有限的窗口布局提议直接采用其宽高，避免分隔线拖动更新 AppKit fitting size 后，让整个分栏缩窄并居中留白；未指定或无限尺寸的测量仍交给系统。两侧分别使用 `NSSplitViewItem(sidebarWithViewController:)` 与 `NSSplitViewItem(inspectorWithViewController:)`，启用 `allowsFullHeightLayout`，窗口采用 `.fullSizeContentView`，由系统提供贯穿窗口高度的侧栏材质。主内容最小宽度为 420 pt；右栏范围 400–760 pt，首次展开建议宽度为 520 pt，完成布局后由分栏保存用户调整的宽度。`WorkspaceView` 保留场景生命周期、错误提示和设置入口，在 `body` 中读取模型生成 `WorkspaceToolbarSnapshot`，使 Observation 变化进入桥接更新。三个内容宿主关闭场景桥接，避免 SwiftUI 再安装窗口工具栏；原生控制器拆卸时释放观察者并恢复其接管的窗口配置。
+主窗口由 `WorkspaceWindowController` 创建 `NSWindow`，直接将 `WorkspaceSplitController` 作为 contentViewController；窗口与分栏尺寸全部由 AppKit 管理。项目侧栏、主内容和 Inspector 使用保留的 `NSViewController`，内容约束到各栏的系统 safe area。两侧分别使用 `NSSplitViewItem(sidebarWithViewController:)` 与 `NSSplitViewItem(inspectorWithViewController:)`，启用 `allowsFullHeightLayout` 与窗口 `.fullSizeContentView`，由系统提供贯穿窗口高度的侧栏材质。左栏范围 260–400 pt，初始 320 pt；主内容最小 420 pt；右栏范围 400–760 pt，初始 520 pt。之后由分栏保留用户宽度，拖动分隔线不改变工作区外框。`ObservedViewController` 用 `withObservationTracking` 注册一次性依赖并在变更后重新注册，在主线程更新既有控件；不轮询模型，不因每次输入重建编辑器。窗口工具栏使用独立 `WorkspaceToolbarSnapshot` 跳过相同状态的重复更新。
 
-主窗口仅安装一条 `.unified` 原生 `NSToolbar`，工作区切换直接使用 `NSSegmentedControl`。设置顶部通过 `ToolbarSectionControl` 桥接同类系统控件，使用“通用 / 环境管理”切换内容；两处均采用 `.large` 控件尺寸。设置与主窗口都隐藏窗口标题文字；设置根视图的 `SettingsWindowAppearance` 在挂接窗口及布局完成后直接配置 `NSWindow`，避免 `Settings` 场景的偏好工具栏样式覆盖声明。所有设置页面共用稳定容器与 800 × 540 pt 内容尺寸，切换时不按页面重新调整窗口宽高；分段控件按固有尺寸布局。实际标题栏与控件外观仍需运行验收。通用页在同一个可滚动的分组 Form 中收纳启动方式、浏览器选择、本地代理、上游代理、协议支持与 HTTPS 证书，不再提供独立连接标签。浏览器选择通过 `NSPopUpButton` 与 `NSWorkspace.icon(forFile:)` 在下拉菜单、选中项显示应用图标，不提供第二个启动按钮。设置内的环境分栏使用 `NSSplitViewController`，其内容由两个观察同一工作区模型的 `NSHostingController` 承载。设置的环境分栏不安装自己的导航工具栏。这是 macOS App，不引入 UIKit 或 Mac Catalyst。
+主窗口仅安装一条 `.unified` 原生 `NSToolbar`，工作区切换直接使用 `NSSegmentedControl`。`WorkspaceSettingsWindowController` 持有独立设置窗口，使用 `ToolbarSectionControl` 原生分段控件切换“通用 / 环境管理”，保留 `.large` 尺寸与系统胶囊形状。两个窗口隐藏标题文字，设置内容固定 800 × 540 pt，切换页面不改变窗口大小。通用页在同一个 `NSScrollView` 中用系统 `NSBox` 分组，收纳启动方式、浏览器、本地代理、上游代理、协议支持和 HTTPS 证书。浏览器使用带应用图标的 `NSPopUpButton`；设置内的环境列表与编辑页采用 `NSSplitViewController`、`NSTableView` 和 AppKit 字段。设置不另装第二条导航栏。
 
 请求日志使用原生 `NSTableView`，按“时间 / 状态码 / 请求 / 命中的规则 / 项目 / 环境 / 耗时”展示。行高 56 pt，主文字 13 pt。请求列将有同色边框和浅背景的方法标签与 URL 单行居中，仅失败时显示第二行说明；状态码按 1xx/2xx/3xx/4xx–5xx 分别使用系统蓝/绿/橙/红色。规则列以次级颜色展示类型、主颜色展示执行时捕获的工作流名称，最多两行，更多通过原生 +N 按钮查看；项目列只显示项目。列宽支持原生表头拖动，按稳定列标识保存到 `UserDefaults`（`requestLog.columnWidths.v1`），重新打开页面或 App 时恢复。通过 `NSTableColumn.width` 的变化在原生鼠标跟踪过程中同步调整相邻列及表格边界，松手通知仅保存最终列宽，窗口或详情栏改变可用宽度时按保存比例适配并保留最小宽度；记录刷新不重置列宽，自动适配不覆盖偏好。保持无横向滚动、禁止列重排；耗时固定在最右列，标题与数值右对齐。长文本截断并提供完整提示。
 
 `RequestFilterControls` 在列表顶部提供单行暂停/清空、资源类型和筛选 Popover。搜索使用 `WorkspaceSplitController` 管理的原生 `NSSearchToolbarItem`，紧邻标题栏启动按钮左侧，仅请求日志页显示；通过 `WorkspaceToolbarSnapshot` 同步 `history.filter.search`，支持输入、清除、Popover 重置与切换页签保留条件。窄内容区将资源分段控件收为下拉菜单。`ExecutionHistoryModel.filter` 持有 `CaptureRecordFilter`，Core 统一处理搜索、MIME/扩展名分类、项目/环境/结果/方法以及原始/修改后请求 Header 条件。Header 使用全部/任一组合和三值逻辑，缺失证据不因反向匹配产生假命中。`WorkflowEngine.apply` 每步成功后回调，代理记录有界 `CaptureMatchedRule` 快照；未执行、禁用和失败步骤不混入成功规则。具体语义及验收见 [请求日志筛选设计](Design/request-log-filters.md)。
 
-请求日志页使用原生 `NSToolbarItem` 作为唯一详情开关，创建时显式连接分栏控制器的 `toggleInspector` 动作；左栏按钮同样连接 `toggleSidebar`。这些工具栏项使用应用自己的标识，保持 `view = nil`，由 AppKit 显示 SF Symbol 和默认按钮外观，不依赖当前焦点转发动作。详情按钮在展开和收起后均保留，未选中有效记录时禁用；请求修改页复用该项展开步骤详情，详情标题与选择状态随页面切换。`NSTrackingSeparatorToolbarItem` 跟随右侧分栏边界，其后仅在展开时显示左对齐的“请求详情”标题；标题使用原生 `NSTextField`，字号取 `NSFont.preferredFont(forTextStyle: .title2).pointSize`，字重为 `.semibold`，工具栏项 `isBordered = false`，不额外添加玻璃背景。`RequestInspectorView` 不声明 SwiftUI 工具栏，`RequestsView` 不提供第二个详情按钮。选中记录自动展开，手动收起保留选择及 Tab 状态；原生 `isCollapsed` 是可见性的唯一来源，KVO 将其同步到详情的 `isPresented`，关闭隐藏内容及 Popover 的交互而保留宿主。清空或记录淘汰关闭详情，进入请求日志页仍从未选择状态开始。整个窗口与详情均不设底部状态栏；详情上方保留方向、数量、“仅显示变更”和内容提示，数据区域延伸至底部操作区上方。控件层依据 [Apple AppKit Inspector 与工具栏说明](https://developer.apple.com/videos/play/wwdc2023/10054/)，此次原生窗口布局仍待真实 App 运行验收。
+请求日志页使用原生 `NSToolbarItem` 作为唯一详情开关，创建时显式连接分栏控制器的 `toggleInspector` 动作；左栏按钮同样连接 `toggleSidebar`。这些工具栏项使用应用自己的标识，保持 `view = nil`，由 AppKit 显示 SF Symbol 和默认按钮外观，不依赖当前焦点转发动作。详情按钮在展开和收起后均保留，未选中有效记录时禁用；请求修改页复用该项展开步骤详情，详情标题与选择状态随页面切换。`NSTrackingSeparatorToolbarItem` 跟随右侧分栏边界，其后仅在展开时显示左对齐的“请求详情”标题；标题使用原生 `NSTextField`，字号取 `NSFont.preferredFont(forTextStyle: .title2).pointSize`，字重为 `.semibold`，工具栏项 `isBordered = false`，不额外添加玻璃背景。`RequestInspectorViewController` 不另建工具栏，`RequestsViewController` 不提供第二个详情按钮。选中记录自动展开，手动收起保留选择及 Tab 状态；原生 `isCollapsed` 是可见性的唯一来源，KVO 将其同步到详情的 `isPresented`，关闭隐藏内容及 Popover 的交互而保留宿主。清空或记录淘汰关闭详情，进入请求日志页仍从未选择状态开始。整个窗口与详情均不设底部状态栏；详情上方保留方向、数量、“仅显示变更”和内容提示，数据区域延伸至底部操作区上方。控件层依据 [Apple AppKit Inspector 与工具栏说明](https://developer.apple.com/videos/play/wwdc2023/10054/)，此次原生窗口布局仍待真实 App 运行验收。
 
 捕获按钮使用原生 `NSButton` 的 `.imageOnly` 布局，显示绿色播放或红色停止图标；可见标题保持为空，当前启动方式与状态说明通过 `toolTip` 和辅助功能标签提供。状态刷新不向 `title` 写入文本，以免 AppKit 自动切换为图文重叠布局。
 
-`check-workspace-sidebar.py` 编译实际工作区原生壳与模型、内容替身，在不显示的 `NSWindow` 中回归分栏布局、工具栏和状态同步，包括捕获按钮在浏览器名称、启动/停止及禁用状态变化后的宽度、图标布局与动作，以及 SwiftUI 外壳下在 1100/1440/1800 pt 窗口中调整左右分隔线后，工作区仍贴住窗口左右边缘、窗口大小保持不变和可见栏最小宽度。它与完整 App 的外观、鼠标交互和真实数据验收分别报告，不能以隐藏窗口回归代替视觉验收。
+`check-workspace-sidebar.py` 编译实际工作区原生壳与模型、内容替身，在不显示的 `NSWindow` 中回归分栏布局、工具栏和状态同步，包括捕获按钮在浏览器名称、启动/停止及禁用状态变化后的宽度、图标布局与动作，以及纯 AppKit 窗口下在 1100/1440/1800 pt 窗口中调整左右分隔线后，工作区仍贴住窗口左右边缘、窗口大小保持不变和可见栏最小宽度。它与完整 App 的外观、鼠标交互和真实数据验收分别报告，不能以隐藏窗口回归代替视觉验收。
 
-`check-inspector-performance.py` 进一步使用真实请求表格和详情组件、75 条替身记录，在隐藏窗口反复选择、展开、缩放和收起详情，检查空闲 CPU 与相同快照下工具栏图像的稳定性。内容宿主保留关闭自动尺寸推导的边界，工具栏快照相同则跳过控件赋值，避免重复布局更新；隐藏窗口测试仍不能替代实际 App 的性能验收。
+`check-inspector-performance.py` 进一步使用真实请求表格和详情组件、75 条替身记录，在隐藏窗口反复选择、展开、缩放和收起详情，检查空闲 CPU 与相同快照下工具栏图像的稳定性。页面控制器保留既有视图层级与明确尺寸约束，工具栏快照相同则跳过控件赋值，避免重复布局更新；隐藏窗口测试仍不能替代实际 App 的性能验收。
 
 详情内容复用 `ToolbarSectionControl`，直接使用 `NSSegmentedControl` 展示请求头、请求体、响应头、响应体四项；macOS 26+ 用控件自身的 `borderShape = .capsule` 配置胶囊形状，macOS 27+ 设 `.tabs` 语义，继续使用 `.automatic` 分段样式；主工作区和设置保留其既有布局。内容 Tab 使用 `.fillEqually` 均分可用宽度，macOS 26+ 采用原生 `.extraLarge` 尺寸，旧系统使用 `.large`，不再以 `.fit` 紧凑居中；同一行右侧放置原生复制按钮。该行使用固有高度；分段与复制按钮均配置垂直 hugging/compression 优先级，复制桥接实现 `sizeThatFits`，防止其抢占内容区高度并将 Tab 推到侧栏中间。当前可见 Payload 通过 Preference 提供复制内容及其 Tab、版本，切换中或数据不可用时禁用复制，防止复制上一页内容。形状与绘制均由 AppKit 提供，不添加 `NSGlassEffectView` 包装。
 
@@ -62,11 +62,11 @@ HTTP/1.1 顺序请求复用下游连接，每条下游最多保留一个同目�
 
 `CaptureBodyCollector` 随流量完整记录原始请求、发出请求、服务器响应和最终响应，`CaptureBodySnapshot` 共享不可变内容，不设置单快照尺寸或全局 Body 预算。URL 和 Header 完整保留，所有凭据与环境变量直接显示原值。记录包括完整、未完成、未采集和不可用状态，Mock 无上游原始响应。写入失败不会被后续结束标记成功掩盖。`RequestBodyDecoding` 只对完整快照在详情后台任务中使用系统 zlib 解码 gzip / deflate，不设置解压输出尺寸和编码层数上限；JSON 树不设置应用层字节数、层数和节点数上限。Body 预览不落盘，详见 [性能边界](Performance.md) 与 [请求详情设计](Design/request-inspector.md)。
 
-详情顶部以原生 `Button` 承载单行中间省略的 URL，保留原字号与系统全文悬停提示。点击通过 SwiftUI `.popover` 展示 `RequestURLDetails`，完整已记录文本可选择、折行并在超长时滚动，原生按钮调用 `RequestClipboard.copy(record.url)`；`urlWasTruncated` 时显示不完整提示并禁用完整复制。侧栏隐藏时关闭 URL Popover，切换记录沿用 `.id(record.id)` 生命周期。
+详情顶部以原生 `NSButton` 承载单行中间省略的 URL，保留原字号与系统全文悬停提示。点击通过 `NSPopover` 展示完整已记录文本，文本可选择、折行并在超长时滚动，复制按钮调用 `RequestClipboard.copy(record.url)`；`urlWasTruncated` 时显示不完整提示并禁用完整复制。侧栏隐藏或切换记录时关闭 URL Popover。
 
 更多菜单由工作区的 `NSMenuToolbarItem` 承载，设 `isBordered = true` 使用系统按钮外观，位于展开侧栏工具栏的收起按钮左侧，折叠时隐藏，不再占用 URL 摘要。菜单依次提供“复制完整 URL / 复制原始请求为 cURL / 复制修改后请求为 cURL”，不完整时禁用相应项并提供原因。`RequestCURL` 使用原始或发送快照导出，正文保持采集的实体字节，不复用解压或格式化后的显示文本；传输分帧与长度交给 curl 重建。URL、Header 或 Body 不完整时不生成误导性的完整请求，Header 原值直接用于导出。命令只在用户点击复制时构造，不自动执行请求。
 
-`RequestDataNode.jsonStringValue` 保存可检查字符串的实际值，与显示摘要、JSON 引号及复制载荷分开；Header 按当前显示版本的完整性决定是否提供该值。行悬停时通过后台任务调用 `RequestInspectionData.stringJSONPreview`，复用既有 JSON 解析限制与节点生成；成功后用原生按钮打开 `NSPopover`，其 `NSHostingController` 内容仍是 `RequestDataOutline`。解析不替换原节点，嵌套字符串按需逐层检查，不预先递归解码所有字符串。
+`RequestDataNode.jsonStringValue` 保存可检查字符串的实际值，与显示摘要、JSON 引号及复制载荷分开；Header 按当前显示版本的完整性决定是否提供该值。行悬停时通过后台任务调用 `RequestInspectionData.stringJSONPreview`，复用既有 JSON 解析限制与节点生成；成功后用原生按钮打开 `NSPopover`，其原生 `NSViewController` 内容仍是 `RequestDataOutline`。解析不替换原节点，嵌套字符串按需逐层检查，不预先递归解码所有字符串。
 
 统一启动由 `WorkspaceModel.toggleCapture` 编排。全局模式通过 `CaptureService.start(..., mode: .systemProxy)` 监听并接管系统代理，不启动浏览器；浏览器模式先发现并校验所选应用，再通过 `.browser` 仅启动监听，最后由 `BrowserLauncher` 使用 NSWorkspace 和代理参数启动应用。浏览器启动失败关闭本次监听并在主窗口提示；没有浏览器也不影响全局模式启动。偏好保存在 UserDefaults，默认维持全局接管；实际会话固定 `activeMode` 和浏览器快照，运行中修改偏好不改变当前流量范围。停止与退出依据实际会话执行。
 
@@ -150,3 +150,7 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 ## 请求修改配置与同步脚本（2026-09-26）
 
 匹配配置改为 URL / Host 与四类规则，旧前缀按转义正则迁移，工作区保存版本为 2。步骤详情接入同一个窗口级 Inspector，Header 使用插件候选列表的原生可编辑组合框。同步 JavaScript 通过可终止的独立进程执行，具有脚本的阶段在后台读取完整 Body、解码文本后执行；未带脚本的阶段保留 NIO 流式路径。取消与事务截止时间沿脚本流程传递；输入/输出没有新增载荷尺寸上限。完整 API、并发和时限、验收范围见[请求修改配置](Design/request-modification.md)。
+
+## AppKit 界面迁移（2026-09-26）
+
+`RequestmanEntry` 在处理脚本 worker 参数后创建 `NSApplication`。`WorkspaceAppDelegate` 安装系统菜单、持有主窗口和设置窗口，负责启动加载、前台证书状态刷新、后台保存及退出前恢复代理。所有界面与测试替身移除 SwiftUI 和 Hosting 桥接，核心 Observation 模型、代理、证书及脚本契约保留。`check-native-sources.py` 同时检查工程源引用及 AppKit-only 约束，阻止重新引入声明式桥接。工作区、请求详情、筛选、Header、规则编辑和设置使用隐藏 AppKit 窗口回归；完整 App 的系统外观、真实鼠标体验与浏览器网络验收仍单独报告。

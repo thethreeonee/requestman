@@ -1,5 +1,4 @@
 import AppKit
-import SwiftUI
 
 enum RequestDataChange: Sendable, Equatable {
     case unchanged, added, removed, modified
@@ -51,19 +50,20 @@ struct RequestDataNode: Identifiable, Sendable, Equatable {
 
 /// A native field table and JSON outline. The owner supplies a complete copy
 /// payload for each node, including the entire JSON subtree for containers.
-struct RequestDataOutline: NSViewRepresentable {
-    let nodes: [RequestDataNode]
-    let showsTypes: Bool
-    let isVisible: Bool
-    var stateKey: String = "default"
-    var expandsMatches: Bool = false
+@MainActor
+final class RequestDataOutline: NSView {
     var onSelectPath: (String) -> Void = { _ in }
+    private let coordinator = Coordinator(onSelectPath: { _ in })
+    private let scrollView = RequestDataScrollView()
 
-    func makeCoordinator() -> Coordinator { Coordinator(onSelectPath: onSelectPath) }
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        configure()
+    }
+    convenience init() { self.init(frame: .zero) }
+    required init?(coder: NSCoder) { nil }
 
-    func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = RequestDataScrollView()
-        scrollView.isHidden = !isVisible
+    private func configure() {
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
@@ -99,34 +99,33 @@ struct RequestDataOutline: NSViewRepresentable {
             outline.addTableColumn(item)
             if column == .name { outline.outlineTableColumn = item }
         }
-        outline.dataSource = context.coordinator
-        outline.delegate = context.coordinator
+        outline.dataSource = coordinator
+        outline.delegate = coordinator
         scrollView.documentView = outline
-        context.coordinator.outline = outline
-        scrollView.contentWidthChanged = { [weak coordinator = context.coordinator] width in
+        coordinator.outline = outline
+        scrollView.contentWidthChanged = { [weak coordinator = coordinator] width in
             coordinator?.fitColumns(to: width)
         }
-        return scrollView
+        scrollView.frame = bounds
+        scrollView.autoresizingMask = [.width, .height]
+        addSubview(scrollView)
     }
 
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+    func update(nodes: [RequestDataNode], showsTypes: Bool, isVisible: Bool,
+                stateKey: String = "default", expandsMatches: Bool = false) {
         if scrollView.isHidden == isVisible {
-            if !isVisible, let outline = context.coordinator.outline, outline.window?.firstResponder === outline {
+            if !isVisible, let outline = coordinator.outline, outline.window?.firstResponder === outline {
                 outline.window?.makeFirstResponder(nil)
             }
             scrollView.isHidden = !isVisible
-            if let outline = context.coordinator.outline {
+            if let outline = coordinator.outline {
                 outline.contentVisibilityDidChange(isVisible)
                 outline.window?.invalidateCursorRects(for: outline)
             }
         }
-        context.coordinator.onSelectPath = onSelectPath
-        context.coordinator.update(nodes: nodes, showsTypes: showsTypes, stateKey: stateKey, expandsMatches: expandsMatches)
-        context.coordinator.fitColumns(to: scrollView.contentView.bounds.width)
-    }
-
-    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
-        coordinator.outline?.contentVisibilityDidChange(false)
+        coordinator.onSelectPath = onSelectPath
+        coordinator.update(nodes: nodes, showsTypes: showsTypes, stateKey: stateKey, expandsMatches: expandsMatches)
+        coordinator.fitColumns(to: scrollView.contentView.bounds.width)
     }
 
     @MainActor
@@ -564,9 +563,9 @@ private final class RequestDataRowView: NSTableRowView, NSPopoverDelegate {
         popover.behavior = .transient
         popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView: RequestStringJSONPreview(
+        popover.contentViewController = RequestStringJSONPreview(
             fieldName: fieldName, nodes: nodes, onClose: { [weak popover] in popover?.performClose(nil) }
-        ))
+        )
         popover.contentSize = NSSize(width: 520, height: 380)
         previewPopover = popover
         // The button fades when the popover becomes key. Anchor to the stable
@@ -673,29 +672,43 @@ private final class RequestRowActionButton: NSButton {
     }
 }
 
-private struct RequestStringJSONPreview: View {
-    let fieldName: String
-    let nodes: [RequestDataNode]
-    let onClose: () -> Void
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("JSON 预览").font(.headline)
-                Text(fieldName).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                Spacer(minLength: 8)
-                Button(action: onClose) {
-                    Label("关闭预览", systemImage: "xmark")
-                }
-                .labelStyle(.iconOnly).buttonStyle(.borderless)
-                .keyboardShortcut(.cancelAction).help("关闭预览")
-            }
-            .padding(12)
-            Divider()
-            RequestDataOutline(nodes: nodes, showsTypes: true, isVisible: true)
-        }
-        .frame(width: 520, height: 380)
+@MainActor
+private final class RequestStringJSONPreview: NSViewController {
+    private let fieldName: String
+    private let nodes: [RequestDataNode]
+    private let onClose: () -> Void
+    init(fieldName: String, nodes: [RequestDataNode], onClose: @escaping () -> Void) {
+        self.fieldName = fieldName; self.nodes = nodes; self.onClose = onClose
+        super.init(nibName: nil, bundle: nil)
     }
+    required init?(coder: NSCoder) { nil }
+    override func loadView() {
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 380))
+        let title = NSTextField(labelWithString: "JSON 预览")
+        title.font = .boldSystemFont(ofSize: 13)
+        let field = NSTextField(labelWithString: fieldName)
+        field.textColor = .secondaryLabelColor
+        field.lineBreakMode = .byTruncatingMiddle
+        let close = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "关闭预览")!, target: self, action: #selector(closePreview))
+        close.isBordered = false
+        close.keyEquivalent = "\u{1b}"
+        let header = NSStackView(views: [title, field, close])
+        header.spacing = 8
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let outline = RequestDataOutline()
+        for child in [header, outline] { child.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(child) }
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            header.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            header.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            outline.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 12),
+            outline.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            outline.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            outline.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        outline.update(nodes: nodes, showsTypes: true, isVisible: true)
+    }
+    @objc private func closePreview() { onClose() }
 }
 
 @MainActor

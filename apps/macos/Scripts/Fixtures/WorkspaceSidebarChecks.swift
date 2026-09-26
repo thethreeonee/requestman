@@ -2,7 +2,6 @@ import AppKit
 import Foundation
 import Observation
 import RequestmanCore
-import SwiftUI
 
 /// Capture menu results without touching the user's pasteboard.
 @MainActor
@@ -11,10 +10,11 @@ enum RequestClipboard {
     static func copy(_ value: String) { copied = value }
 }
 
-/// Only model and unrelated SwiftUI content are fixtures. The split controller, toolbar,
+/// Only model and unrelated page content are fixtures. The split controller, toolbar,
 /// transitions and snapshot adapter are compiled directly from the production source.
 @MainActor @Observable
 final class WorkspaceModel {
+    var settingsSection: WorkspaceSettingsSection = .general
     var selectedStepID: UUID?
     var selectedStep: ModificationStep?
     var selection: WorkspaceSection = .rules
@@ -43,60 +43,45 @@ final class SidebarHistoryFixture {
     func clear() { records.removeAll(); selectedID = nil }
 }
 
-struct WorkspaceSidebarContent: View {
-    let model: WorkspaceModel
-    var body: some View { Text("Sidebar fixture").frame(maxWidth: .infinity, maxHeight: .infinity) }
+enum WorkspaceSettingsSection { case general, environments }
+
+@MainActor final class ProjectSidebarViewController: NSViewController {
+    init(model: WorkspaceModel) { super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { nil }
+    override func loadView() { view = NSView() }
 }
-struct WorkspaceMainContent: View {
-    let model: WorkspaceModel
-    var body: some View { Text(model.selection.title).frame(maxWidth: .infinity, maxHeight: .infinity) }
+@MainActor final class RulesViewController: NSViewController {
+    init(model: WorkspaceModel) { super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { nil }
+    override func loadView() { view = NSView() }
 }
-struct RequestInspectorView: View {
+@MainActor final class RequestsViewController: NSViewController {
+    init(model: WorkspaceModel) { super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { nil }
+    override func loadView() { view = NSView() }
+}
+@MainActor final class StepInspectorViewController: NSViewController {
+    var isPresented = false
+    init(model: WorkspaceModel) { super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { nil }
+    override func loadView() { view = NSView() }
+}
+@MainActor final class RequestInspectorViewController: ObservedViewController {
     let history: SidebarHistoryFixture
-    let isPresented: Bool
     let mode: RequestInspectionMode
-    var body: some View {
-        Group {
-            if isPresented { BodyRespondersFixture(version: mode.version) }
-            else { Text("") }
-        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    var isPresented = false
+    private let text = NSTextView()
+    init(history: SidebarHistoryFixture, mode: RequestInspectionMode) {
+        self.history = history; self.mode = mode; super.init()
     }
-}
-struct EnvironmentSelectionPopover: View {
-    let model: WorkspaceModel
-    let onDismiss: () -> Void
-    let openSettings: () -> Void
-    var body: some View { Text("Environment fixture") }
-}
-
-/// Native body controls exercise the actual NSHostingController/NSViewRepresentable responder path.
-private struct BodyRespondersFixture: NSViewRepresentable {
-    let version: InspectionVersion
-
-    func makeNSView(context: Context) -> NSStackView {
-        let text = NSTextView()
-        text.string = version.title
-        let table = NSTableView()
-        table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("value")))
-        let stack = NSStackView(views: [text, table])
-        stack.orientation = .vertical
-        stack.distribution = .fillEqually
-        stack.alignment = .width
-        return stack
+    required init?(coder: NSCoder) { nil }
+    override func loadView() {
+        let table = NSTableView(); table.addTableColumn(NSTableColumn(identifier: .init("value")))
+        let stack = NSStackView(views: [text, table]); stack.orientation = .vertical
+        stack.distribution = .fillEqually; stack.alignment = .width
+        view = stack
     }
-    func updateNSView(_ view: NSStackView, context: Context) {
-        (view.arrangedSubviews.first as? NSTextView)?.string = version.title
-    }
-}
-
-/// Matches WorkspaceView's observation boundary; no manual controller updates are made in this path.
-private struct WorkspaceHostingFixture: View {
-    let model: WorkspaceModel
-    var body: some View {
-        WorkspaceSplitView(model: model, snapshot: WorkspaceToolbarSnapshot(model: model), openSettings: {})
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .ignoresSafeArea(.container, edges: [.top, .bottom])
-    }
+    override func refresh() { text.string = mode.version.title }
 }
 
 @main
@@ -113,12 +98,56 @@ struct WorkspaceSidebarChecks {
     static func main() {
         let application = NSApplication.shared
         application.setActivationPolicy(.prohibited)
-        checkSwiftUIIntegration()
+        checkEnvironmentSelection()
+        checkObservationIntegration()
         checkDirectController()
         precondition(widthFailures.isEmpty, widthFailures.joined(separator: "; "))
         precondition(toolbarGeometryFailures.isEmpty, toolbarGeometryFailures.joined(separator: "; "))
         print("Workspace sidebar CLI checks passed: native item roles, unique toolbar toggle and display-mode control, mode actions and persistence, 400/520 pt toolbar geometry, title visibility, selection/clear/page changes, fixed window width, safe-area geometry and teardown")
         print("Actual WorkspaceSplitView.swift executed with model/content fixtures in hidden NSWindows; no user App built/launched, window shown, network request or configuration write. Visual appearance remains unverified.")
+    }
+
+    private static func checkEnvironmentSelection() {
+        let model = WorkspaceModel()
+        let dev = WorkspaceEnvironment(name: "Development")
+        let prod = WorkspaceEnvironment(name: "Production")
+        model.document.environments = [dev, prod]
+        model.document.selectedEnvironmentID = dev.id
+        var dismissals = 0
+        var openedSettings = false
+        let controller = EnvironmentSelectionPopover(model: model, onDismiss: { dismissals += 1 },
+                                                      openSettings: { openedSettings = true })
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 260),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller
+        window.setContentSize(controller.preferredContentSize)
+        defer { window.close() }
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let controls = descendants(controller.view)
+        let table = controls.compactMap { $0 as? NSTableView }.first!
+        let search = controls.compactMap { $0 as? NSSearchField }.first!
+        precondition(table.numberOfRows == 3 && table.selectedRow == 1)
+        search.stringValue = "prod"
+        controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: search))
+        precondition(table.numberOfRows == 1 && table.selectedRow == -1)
+        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        precondition(NSApp.sendAction(table.action!, to: table.target, from: table))
+        precondition(model.document.selectedEnvironmentID == prod.id && dismissals == 1)
+        controller.cancelOperation(nil)
+        precondition(dismissals == 2 && model.document.selectedEnvironmentID == prod.id)
+        search.stringValue = "does-not-exist"
+        controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: search))
+        precondition(table.numberOfRows == 0)
+        let empty = controls.compactMap { $0 as? NSTextField }.first { $0.stringValue == "没有匹配的环境" }!
+        precondition(!empty.isHidden)
+        search.stringValue = ""
+        controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: search))
+        precondition(table.numberOfRows == 3 && table.selectedRow == 2 && empty.isHidden)
+        let manage = controls.compactMap { $0 as? NSButton }.first { $0.title == "管理环境…" }!
+        manage.performClick(nil)
+        precondition(openedSettings && model.settingsSection == .environments && dismissals == 3)
+        print("Environment popover checks passed: current selection, filter/empty/reset, selection, cancel and settings routing")
     }
 
     private static func checkDirectController() {
@@ -199,9 +228,9 @@ struct WorkspaceSidebarChecks {
                      "AppKit must create the native toolbar button with an explicit split-controller target")
         checkGeometry(controller, window: window, inspector: inspector, windowWidth: windowWidth)
         checkInitialInspectorWidth(inspector, scenario: "first selection after no selection")
-        let root = inspector.viewController as! NSHostingController<WorkspaceInspectorContent>
-        precondition(root.rootView.isPresented, "Visible inspector enables its hosted detail content")
-        let inspectionMode = root.rootView.mode
+        let root = inspector.viewController as! WorkspaceInspectorController
+        precondition(root.requests.isPresented, "Visible inspector enables its hosted detail content")
+        let inspectionMode = root.requests.mode
         checkInspectionModeActions(controller, window: window, inspector: inspector)
         checkRequestMenu(controller, model: model, window: window)
         expectInspectionMode(window, root: root, mode: inspectionMode, visible: true)
@@ -211,7 +240,7 @@ struct WorkspaceSidebarChecks {
         settle(controller) { inspector.isCollapsed }
         expectToolbar(window, inspectorVisible: false, requests: true)
         precondition(model.history.selectedID == record.id, "Manual collapse preserves the selected request")
-        precondition(!root.rootView.isPresented)
+        precondition(!root.requests.isPresented)
         expectInspectionMode(window, root: root, mode: inspectionMode, visible: false)
         update(controller, model: model)
         precondition(inspector.isCollapsed, "Unrelated updates must not reopen a manually collapsed inspector")
@@ -226,7 +255,7 @@ struct WorkspaceSidebarChecks {
         model.history.selectedID = nextRecord.id
         update(controller, model: model)
         settle(controller) { !inspector.isCollapsed }
-        precondition(root.rootView.model.history.selectedID == nextRecord.id)
+        precondition(root.requests.history.selectedID == nextRecord.id)
         expectInspectionMode(window, root: root, mode: inspectionMode, visible: true)
 
         // Removing a retained selection, even before selectedID resets, closes details.
@@ -247,7 +276,7 @@ struct WorkspaceSidebarChecks {
         update(controller, model: model)
         settle(controller) { inspector.isCollapsed && !sidebar.isCollapsed }
         expectToolbar(window, inspectorVisible: false, requests: false)
-        precondition(!root.rootView.isPresented)
+        precondition(!root.requests.isPresented)
 
         // The project sidebar keeps a manual collapse preference across page changes.
         let sidebarToggle = window.toolbar!.items.first { $0.itemIdentifier == sidebarToggleIdentifier }!
@@ -279,14 +308,14 @@ struct WorkspaceSidebarChecks {
         precondition(!window.isVisible)
     }
 
-    private static func checkSwiftUIIntegration() {
+    private static func checkObservationIntegration() {
         let model = WorkspaceModel()
         let record = CaptureRecord(method: "GET", url: "https://example.test/initial")
         let other = CaptureRecord(method: "POST", url: "https://example.test/changed")
         model.selection = .requests
         model.history.records = [record, other]
         model.history.selectedID = record.id
-        let host = NSHostingController(rootView: WorkspaceHostingFixture(model: model))
+        let host = WorkspaceSplitController(model: model, snapshot: WorkspaceToolbarSnapshot(model: model), openSettings: {})
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
                               styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -297,18 +326,18 @@ struct WorkspaceSidebarChecks {
         let controller = findController(in: host)!
         let inspector = controller.splitViewItems[2]
         // Hidden windows do not receive viewDidAppear. A model observation refresh after mounting
-        // must install the toolbar through the real representable update, without calling it here.
+        // must install the toolbar through native observation, without calling it here.
         model.document.environments = [WorkspaceEnvironment(name: "fixture")]
         model.document.selectedEnvironmentID = model.document.environments[0].id
         waitFor(host) { window.toolbar != nil }
-        precondition(!inspector.isCollapsed, "Initial selected request must open the inspector through the representable")
-        precondition((inspector.viewController as! NSHostingController<WorkspaceInspectorContent>).rootView.isPresented)
+        precondition(!inspector.isCollapsed, "Initial selected request must open the inspector through observation")
+        precondition((inspector.viewController as! WorkspaceInspectorController).requests.isPresented)
         expectToolbar(window, inspectorVisible: true, requests: true)
         let originalWidth = window.frame.width
         checkGeometry(controller, window: window, inspector: inspector, windowWidth: originalWidth)
         checkInitialInspectorWidth(inspector, scenario: "initial snapshot already has a selection")
-        let inspectorRoot = inspector.viewController as! NSHostingController<WorkspaceInspectorContent>
-        let inspectionMode = inspectorRoot.rootView.mode
+        let inspectorRoot = inspector.viewController as! WorkspaceInspectorController
+        let inspectionMode = inspectorRoot.requests.mode
         checkInspectionModeActions(host, window: window, inspector: inspector)
         checkInspectorToolbarGeometry(controller, window: window, inspector: inspector)
         checkCaptureButton(host, model: model, window: window)
@@ -323,7 +352,7 @@ struct WorkspaceSidebarChecks {
         expectToolbar(window, inspectorVisible: false, requests: true)
         expectInspectionMode(window, root: inspectorRoot, mode: inspectionMode, visible: false)
 
-        // Observation must update native state without calling controller.update or replacing rootView.
+        // Observation must update native state without calling controller.update or replacing a page.
         model.history.selectedID = other.id
         waitFor(host) { !inspector.isCollapsed }
         expectToolbar(window, inspectorVisible: true, requests: true)
@@ -346,7 +375,7 @@ struct WorkspaceSidebarChecks {
         checkDividerResizing(host, controller: controller, model: model, window: window)
         precondition(!window.isVisible, "The CLI check must never show a window")
         controller.tearDown()
-        log("SwiftUI integration actions passed: Observation-driven selection/clear/page updates and native toolbar actions with empty/text/table focus.")
+        log("AppKit observation integration actions passed: Observation-driven selection/clear/page updates and native toolbar actions with empty/text/table focus.")
     }
 
     private static func checkDividerResizing(_ host: NSViewController, controller: WorkspaceSplitController,
@@ -424,8 +453,8 @@ struct WorkspaceSidebarChecks {
 
     private static func checkInspectionModeActions(_ host: NSViewController, window: NSWindow,
                                                    inspector: NSSplitViewItem) {
-        let root = inspector.viewController as! NSHostingController<WorkspaceInspectorContent>
-        let mode = root.rootView.mode
+        let root = inspector.viewController as! WorkspaceInspectorController
+        let mode = root.requests.mode
         let item = window.toolbar!.items.first { $0.itemIdentifier == inspectorModeIdentifier }!
         let control = item.view as! NSSegmentedControl
         precondition(mode.version == .final && control.selectedSegment == 1,
@@ -443,15 +472,15 @@ struct WorkspaceSidebarChecks {
             precondition(control.sendAction(control.action, to: control.target), "Use the actual segmented-control action")
             precondition(mode.version == version, "The native mode action must update the shared production state")
             waitFor(host) { findView(NSTextView.self, in: root.view)?.string == version.title }
-            precondition(root.rootView.mode === mode, "The hosting root must keep the same shared mode object")
+            precondition(root.requests.mode === mode, "The hosting root must keep the same shared mode object")
         }
         precondition(mode.version == .difference)
         log("Inspector mode actions passed: three native segments update the same observable production mode and its hosted consumer; default is modified.")
     }
 
-    private static func expectInspectionMode(_ window: NSWindow, root: NSHostingController<WorkspaceInspectorContent>,
+    private static func expectInspectionMode(_ window: NSWindow, root: WorkspaceInspectorController,
                                              mode: RequestInspectionMode, visible: Bool) {
-        precondition(root.rootView.mode === mode && mode.version == .difference,
+        precondition(root.requests.mode === mode && mode.version == .difference,
                      "Display mode must survive record changes, hosted-content updates and collapse/reopen")
         let items = window.toolbar!.items.filter { $0.itemIdentifier == inspectorModeIdentifier }
         precondition(items.count == (visible ? 1 : 0), "Collapsed details must remove their sole display-mode entry")
@@ -617,8 +646,6 @@ struct WorkspaceSidebarChecks {
     private static func findController(in controller: NSViewController) -> WorkspaceSplitController? {
         if let split = controller as? WorkspaceSplitController { return split }
         if let child = controller.children.lazy.compactMap({ findController(in: $0) }).first { return child }
-        // NSViewControllerRepresentable has no NSHostingController child on this SDK. Its actual
-        // NSSplitView's public delegate still gives access to the production controller.
         return findView(NSSplitView.self, in: controller.view)?.delegate as? WorkspaceSplitController
     }
 
@@ -639,7 +666,7 @@ struct WorkspaceSidebarChecks {
             host.view.layoutSubtreeIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.03))
         } while !condition() && Date() < deadline
-        precondition(condition(), "SwiftUI/AppKit integration did not reach the expected state", file: file, line: line)
+        precondition(condition(), "AppKit integration did not reach the expected state", file: file, line: line)
         RunLoop.main.run(until: Date().addingTimeInterval(0.4))
         host.view.layoutSubtreeIfNeeded()
     }
@@ -724,10 +751,4 @@ struct WorkspaceSidebarChecks {
         precondition(view.safeAreaRect.width >= 0 && view.safeAreaRect.height >= 0)
         precondition(inspector.allowsFullHeightLayout && window.styleMask.contains(.fullSizeContentView))
     }
-}
-
-struct StepInspectorView: View {
-    let model: WorkspaceModel
-    var isPresented = true
-    var body: some View { Text("Step fixture") }
 }

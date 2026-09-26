@@ -1,216 +1,217 @@
 import AppKit
-import SwiftUI
 import RequestmanCore
 
-struct FlowEditorView: View {
-    @Bindable var model: WorkspaceModel
-    @Binding var workflow: RequestWorkflow
-    @State private var showsPreview = false
-    private let stepHeight: CGFloat = 56
-    private let stepVerticalInset: CGFloat = 4
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            Text(model.projectName).font(.callout).foregroundStyle(.secondary)
-            HStack {
-                TextField("请求修改名称", text: $workflow.name).font(.title.bold()).textFieldStyle(.plain)
-                Toggle("已启用", isOn: $workflow.enabled).toggleStyle(.switch).fixedSize()
-            }
-            VStack(alignment: .leading, spacing: 10) {
-                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-                    GridRow {
-                        Text("匹配目标").gridColumnAlignment(.trailing)
-                        FlowMatchPicker(title: "匹配目标", options: WorkflowMatchTarget.allCases.map { ($0.title, $0) }, selection: $workflow.matchTarget)
-                            .frame(width: 130)
-                        HStack(spacing: 8) {
-                            Text("方法").fixedSize()
-                            FlowMatchPicker(title: "方法", options: ["*", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].map { ($0 == "*" ? "全部" : $0, $0) }, selection: $workflow.method)
-                                .frame(width: 105)
-                            Spacer(minLength: 0)
-                        }
-                    }
-                    GridRow {
-                        Text("匹配规则")
-                        FlowMatchPicker(title: "匹配规则", options: WorkflowMatchRule.allCases.map { ($0.title, $0) }, selection: $workflow.matchRule)
-                            .frame(width: 130)
-                        TextField(workflow.matchTarget == .url ? "https://api.example.com/orders/*" : "*.example.com", text: $workflow.matchPattern)
-                            .textFieldStyle(.roundedBorder).accessibilityLabel("匹配值")
-                    }
-                }
-                if let error = WorkflowMatcher.validationError(rule: workflow.matchRule, pattern: workflow.matchPattern) {
-                    Text(error).font(.caption).foregroundStyle(.red)
-                } else {
-                    Text(workflow.matchTarget == .host ? "仅匹配域名，不包含协议、端口和路径；不区分大小写。" : "匹配完整 URL，区分大小写。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            HStack(alignment: .top, spacing: 20) {
-                lane(response: false)
-                lane(response: true)
-            }
-            Button("预览流程", systemImage: "play") { showsPreview = true }
+@MainActor final class FlowEditorViewController: ObservedViewController {
+    let model: WorkspaceModel
+    private let project = NativeUI.label("", size: 12, secondary: true)
+    private lazy var name = ActionTextField(placeholder: "请求修改名称") { [weak self] value in self?.modify { $0.name = value } }
+    private lazy var enabled = RulesSwitch { [weak self] value in self?.modify { $0.enabled = value } }
+    private lazy var target = ActionPopUpButton(items: WorkflowMatchTarget.allCases.map(\.title)) { [weak self] index in self?.modify { $0.matchTarget = WorkflowMatchTarget.allCases[index] } }
+    private lazy var rule = ActionPopUpButton(items: WorkflowMatchRule.allCases.map(\.title)) { [weak self] index in self?.modify { $0.matchRule = WorkflowMatchRule.allCases[index] } }
+    private let methods = ["*", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+    private lazy var method = ActionPopUpButton(items: methods.map { $0 == "*" ? "全部" : $0 }) { [weak self] index in guard let self else { return }; modify { $0.method = methods[index] } }
+    private lazy var pattern = ActionTextField(placeholder: "匹配值") { [weak self] value in self?.modify { $0.matchPattern = value } }
+    private let explanation = NativeUI.label("", size: 11, secondary: true)
+    private lazy var requestLane = RulesStepLane(model: model, response: false)
+    private lazy var responseLane = RulesStepLane(model: model, response: true)
+    init(model: WorkspaceModel) { self.model = model; super.init() }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func loadView() {
+        view = NSView()
+        view.widthAnchor.constraint(greaterThanOrEqualToConstant: 420).isActive = true
+        name.isBezeled = false; name.drawsBackground = false; name.font = .systemFont(ofSize: 22, weight: .bold)
+        name.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let title = NativeUI.stack([name, NativeUI.label("已启用"), enabled], vertical: false)
+        let methodRow = NativeUI.stack([NativeUI.label("方法"), method], vertical: false, spacing: 8)
+        let grid = NSGridView(views: [[NativeUI.label("匹配目标"), target, methodRow], [NativeUI.label("匹配规则"), rule, pattern]])
+        grid.columnSpacing = 12; grid.rowSpacing = 10
+        grid.column(at: 0).xPlacement = .trailing; grid.column(at: 0).width = 52
+        grid.column(at: 1).width = 130; grid.column(at: 1).xPlacement = .fill
+        target.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        rule.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        grid.column(at: 2).xPlacement = .fill
+        method.widthAnchor.constraint(equalToConstant: 105).isActive = true
+        pattern.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        pattern.setAccessibilityLabel("匹配值")
+        for picker in [target, rule] { picker.setContentHuggingPriority(.defaultLow, for: .horizontal) }
+        let matching = NativeUI.stack([grid, explanation], spacing: 10)
+        grid.widthAnchor.constraint(equalTo: matching.widthAnchor).isActive = true
+        let lanes = NativeUI.stack([requestLane, responseLane], vertical: false, spacing: 20)
+        lanes.alignment = .top; lanes.distribution = .fillEqually
+        let preview = ActionButton(title: "预览流程") { [weak self] in
+            guard let self, let workflow = model.workflow else { return }
+            presentAsSheet(WorkflowPreviewViewController(workflow: workflow, environment: model.document.environment))
         }
-        .padding(24)
-        .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .sheet(isPresented: $showsPreview) { WorkflowPreviewView(workflow: workflow, environment: model.document.environment) }
+        preview.image = NSImage(systemSymbolName: "play", accessibilityDescription: nil); preview.imagePosition = .imageLeading
+        let stack = NativeUI.stack([project, title, matching, lanes, preview], spacing: 22)
+        NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 24, left: 24, bottom: 24, right: 24))
+        for wide in [title, matching, lanes] { wide.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        lanes.setContentHuggingPriority(.defaultLow, for: .vertical)
+        lanes.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
     }
-
-    private func lane(response: Bool) -> some View {
-        let steps = response ? workflow.responseSteps : workflow.requestSteps
-        return VStack(alignment: .leading, spacing: 12) {
-            Label(response ? "响应阶段" : "请求阶段", systemImage: response ? "arrow.left" : "arrow.right").font(.headline)
-            Text(response ? "服务器 → 客户端" : "客户端 → 服务器").font(.caption).foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 10) {
-                List {
-                    ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
-                        stepRow(step, index: index, response: response)
-                            .listRowInsets(EdgeInsets(top: stepVerticalInset, leading: 0, bottom: stepVerticalInset, trailing: 0))
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                            .contextMenu {
-                                Button(step.enabled ? "停用" : "启用") { modify(step.id, response: response) { $0.enabled.toggle() } }
-                                Button("删除步骤", role: .destructive) { remove(step.id, response: response) }
-                            }
-                    }
-                    .onMove { from, to in
-                        if response { workflow.responseSteps.move(fromOffsets: from, toOffset: to) }
-                        else { workflow.requestSteps.move(fromOffsets: from, toOffset: to) }
-                    }
-                }
-                .listStyle(.plain)
-                .contentMargins(.vertical, 0, for: .scrollContent)
-                .environment(\.defaultMinListRowHeight, stepHeight + stepVerticalInset * 2)
-                .scrollContentBackground(.hidden)
-                .frame(height: min(CGFloat(max(steps.count, 1)) * (stepHeight + stepVerticalInset * 2), 400))
-                .onMoveCommand { direction in
-                    guard !steps.isEmpty, direction == .up || direction == .down else { return }
-                    let current = model.editingResponse == response
-                        ? steps.firstIndex { $0.id == model.selectedStepID } : nil
-                    let next = current.map { min(max($0 + (direction == .down ? 1 : -1), 0), steps.count - 1) }
-                        ?? (direction == .down ? 0 : steps.count - 1)
-                    select(steps[next].id, response: response)
-                }
-                Menu("添加步骤", systemImage: "plus") {
-                    ForEach(ModificationKind.allCases.filter { $0.supports(response: response) }, id: \.self) { kind in
-                        Button(kind.title) { model.addStep(kind, response: response) }
-                    }
-                }.fixedSize()
-            }
-            .padding(10)
-            .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
-                    .allowsHitTesting(false)
-            }
-            Spacer(minLength: 0)
-        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    override func refresh() {
+        guard let workflow = model.workflow else { return }
+        project.stringValue = model.projectName
+        if name.stringValue != workflow.name { name.stringValue = workflow.name }
+        enabled.state = workflow.enabled ? .on : .off
+        target.selectItem(at: WorkflowMatchTarget.allCases.firstIndex(of: workflow.matchTarget) ?? 0)
+        rule.selectItem(at: WorkflowMatchRule.allCases.firstIndex(of: workflow.matchRule) ?? 0)
+        method.selectItem(at: methods.firstIndex(of: workflow.method) ?? 0)
+        if pattern.stringValue != workflow.matchPattern { pattern.stringValue = workflow.matchPattern }
+        pattern.placeholderString = workflow.matchTarget == .url ? "https://api.example.com/orders/*" : "*.example.com"
+        let error = WorkflowMatcher.validationError(rule: workflow.matchRule, pattern: workflow.matchPattern)
+        explanation.stringValue = error ?? (workflow.matchTarget == .host ? "仅匹配域名，不包含协议、端口和路径；不区分大小写。" : "匹配完整 URL，区分大小写。")
+        explanation.textColor = error == nil ? .secondaryLabelColor : .systemRed
+        requestLane.refresh(); responseLane.refresh()
+        for control in [name, enabled, target, rule, method, pattern] as [NSControl] { control.isEnabled = model.loaded }
     }
+    private func modify(_ update: (inout RequestWorkflow) -> Void) { guard model.loaded, var workflow = model.workflow else { return }; update(&workflow); model.updateWorkflow(workflow) }
+}
 
-    private func stepRow(_ step: ModificationStep, index: Int, response: Bool) -> some View {
-        let isSelected = model.editingResponse == response && model.selectedStepID == step.id
-        return Button {
-            select(step.id, response: response)
-        } label: {
-            HStack(alignment: .center, spacing: 10) {
-                Text("\(index + 1)")
-                    .monospacedDigit()
-                    .frame(width: 26, height: 28)
-                    .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 6))
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(step.kind.title).lineLimit(1).help(step.kind.title)
-                    Text(summary(step)).font(.caption).foregroundStyle(.secondary).lineLimit(1).help(summary(step))
-                }
-                Spacer(minLength: 0)
-                if !step.enabled { Image(systemName: "pause.circle").foregroundStyle(.secondary) }
-            }
-            .foregroundStyle(.primary)
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: stepHeight)
-            .background(isSelected ? Color.blue.opacity(0.12) : Color.primary.opacity(0.045),
-                        in: RoundedRectangle(cornerRadius: 8))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(isSelected ? Color.blue.opacity(0.55) : Color.clear, lineWidth: 1)
-            }
-            .overlay(alignment: .leading) {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: 2).fill(.blue).frame(width: 3).padding(.vertical, 8)
-                }
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 8))
+@MainActor private final class RulesStepLane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
+    let model: WorkspaceModel
+    let response: Bool
+    let table = NSTableView()
+    private var steps: [ModificationStep] = []
+    private var updating = false
+    private var tableHeight: NSLayoutConstraint!
+    private let addButton = NSPopUpButton(frame: .zero, pullsDown: true)
+    private static let dragType = NSPasteboard.PasteboardType("app.requestman.rule-step")
+    init(model: WorkspaceModel, response: Bool) {
+        self.model = model; self.response = response; super.init(frame: .zero)
+        let heading = NativeUI.label(response ? "←  响应阶段" : "→  请求阶段", weight: .semibold)
+        let subtitle = NativeUI.label(response ? "服务器 → 客户端" : "客户端 → 服务器", size: 11, secondary: true)
+        let column = NSTableColumn(identifier: .init("step")); table.addTableColumn(column)
+        table.headerView = nil; table.rowHeight = 64; table.intercellSpacing = NSSize(width: 0, height: 0)
+        table.style = .fullWidth; table.selectionHighlightStyle = .none; table.backgroundColor = .clear; table.dataSource = self; table.delegate = self
+        table.allowsEmptySelection = true; table.setAccessibilityLabel(response ? "响应步骤" : "请求步骤")
+        table.registerForDraggedTypes([Self.dragType]); table.setDraggingSourceOperationMask(.move, forLocal: true)
+        let menu = NSMenu(); menu.delegate = self; table.menu = menu
+        let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
+        tableHeight = scroll.heightAnchor.constraint(equalToConstant: 64); tableHeight.isActive = true
+        addButton.identifier = .init("rules.addStep")
+        addButton.bezelStyle = .rounded; addButton.autoenablesItems = false
+        addButton.addItem(withTitle: "添加步骤")
+        addButton.item(at: 0)?.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+        addButton.setAccessibilityLabel(response ? "添加响应步骤" : "添加请求步骤")
+        for kind in ModificationKind.allCases where kind.supports(response: response) {
+            addButton.menu?.addItem(RulesMenuItem(kind.title) { [weak self] in
+                guard let self, self.model.loaded else { return }; self.model.addStep(kind, response: self.response)
+            })
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        let contents = NativeUI.stack([scroll, addButton], spacing: 10)
+        scroll.widthAnchor.constraint(equalTo: contents.widthAnchor).isActive = true
+        let box = NSBox(); box.identifier = .init("rules.laneBorder")
+        box.boxType = .custom; box.titlePosition = .noTitle
+        box.borderWidth = 1; box.borderColor = .separatorColor; box.fillColor = .clear; box.cornerRadius = 10
+        box.contentViewMargins = NSSize(width: 10, height: 10)
+        box.contentView = NSView(); NativeUI.pin(contents, to: box.contentView!)
+        let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        let stack = NativeUI.stack([heading, subtitle, box, spacer], spacing: 12)
+        NativeUI.pin(stack, to: self)
+        box.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
-    private func summary(_ step: ModificationStep) -> String {
-        if step.kind == .script { return step.name.isEmpty ? "JavaScript" : step.name }
-        if step.kind == .setStatus { return String(step.status) }
-        return step.name.isEmpty ? (step.value.isEmpty ? "点击配置" : step.value) : step.name
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func refresh() {
+        let current = response ? model.workflow?.responseSteps ?? [] : model.workflow?.requestSteps ?? []
+        updating = true; defer { updating = false }
+        if current != steps { steps = current; table.reloadData() }
+        let rowCount = max(model.workflow?.requestSteps.count ?? 0, model.workflow?.responseSteps.count ?? 0, 1)
+        tableHeight.constant = min(CGFloat(rowCount) * 64, 400)
+        if model.editingResponse == response, let row = steps.firstIndex(where: { $0.id == model.selectedStepID }) { table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
+        else { table.deselectAll(nil) }
+        addButton.isEnabled = model.loaded
+        for row in 0..<table.numberOfRows {
+            if let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? RulesStepCell {
+                cell.setSelected(model.editingResponse == response && steps[row].id == model.selectedStepID)
+            }
+        }
     }
-    private func select(_ id: UUID, response: Bool) {
-        model.editingResponse = response
-        model.selectedStepID = id
+    func numberOfRows(in tableView: NSTableView) -> Int { steps.count }
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let cell = RulesStepCell(step: steps[row], number: row + 1)
+        cell.setSelected(model.editingResponse == response && steps[row].id == model.selectedStepID)
+        return cell
     }
-    private func modify(_ id: UUID, response: Bool, action: (inout ModificationStep) -> Void) {
-        if response, let index = workflow.responseSteps.firstIndex(where: { $0.id == id }) { action(&workflow.responseSteps[index]) }
-        if !response, let index = workflow.requestSteps.firstIndex(where: { $0.id == id }) { action(&workflow.requestSteps[index]) }
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let view = NSTableRowView(); view.selectionHighlightStyle = .none; return view
     }
-    private func remove(_ id: UUID, response: Bool) {
-        if response { workflow.responseSteps.removeAll { $0.id == id } }
-        else { workflow.requestSteps.removeAll { $0.id == id } }
-        if model.selectedStepID == id { model.selectedStepID = nil }
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !updating, model.loaded, steps.indices.contains(table.selectedRow) else { return }
+        model.editingResponse = response; model.selectedStepID = steps[table.selectedRow].id
+    }
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems(); guard model.loaded, steps.indices.contains(table.clickedRow) else { return }; let step = steps[table.clickedRow]
+        menu.addItem(RulesMenuItem(step.enabled ? "停用" : "启用") { [weak self] in self?.modify(step.id, remove: false) })
+        menu.addItem(RulesMenuItem("删除步骤") { [weak self] in self?.modify(step.id, remove: true) })
+    }
+    private func modify(_ id: UUID, remove: Bool) {
+        guard var workflow = model.workflow else { return }
+        var items = response ? workflow.responseSteps : workflow.requestSteps
+        if remove { items.removeAll { $0.id == id }; if model.selectedStepID == id { model.selectedStepID = nil } }
+        else if let index = items.firstIndex(where: { $0.id == id }) { items[index].enabled.toggle() }
+        if response { workflow.responseSteps = items } else { workflow.requestSteps = items }; model.updateWorkflow(workflow)
+    }
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+        guard model.loaded else { return nil }; let item = NSPasteboardItem(); item.setString(steps[row].id.uuidString, forType: Self.dragType); return item
+    }
+    func tableView(_ tableView: NSTableView, validateDrop info: any NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
+        guard info.draggingSource as? NSTableView === table, model.loaded else { return [] }
+        table.setDropRow(row, dropOperation: .above); return .move
+    }
+    func tableView(_ tableView: NSTableView, acceptDrop info: any NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
+        guard var workflow = model.workflow, let text = info.draggingPasteboard.string(forType: Self.dragType), let id = UUID(uuidString: text), let from = steps.firstIndex(where: { $0.id == id }) else { return false }
+        var current = response ? workflow.responseSteps : workflow.requestSteps
+        let moved = current.remove(at: from); current.insert(moved, at: min(max(0, row - (row > from ? 1 : 0)), current.count))
+        if response { workflow.responseSteps = current } else { workflow.requestSteps = current }; model.updateWorkflow(workflow); return true
     }
 }
 
-/// Let the native control fill the grid column instead of centering an intrinsic-width picker.
-private struct FlowMatchPicker<Value: Equatable>: NSViewRepresentable {
-    let title: String
-    let options: [(title: String, value: Value)]
-    @Binding var selection: Value
-
-    func makeCoordinator() -> Coordinator { Coordinator(selection: $selection, options: options) }
-
-    func makeNSView(context: Context) -> NSPopUpButton {
-        let button = NSPopUpButton(frame: .zero, pullsDown: false)
-        button.target = context.coordinator
-        button.action = #selector(Coordinator.selectOption(_:))
-        button.autoenablesItems = false
-        button.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return button
-    }
-
-    func updateNSView(_ button: NSPopUpButton, context: Context) {
-        context.coordinator.selection = $selection
-        context.coordinator.options = options
-        let titles = options.map(\.title)
-        if button.itemTitles != titles {
-            button.removeAllItems()
-            button.addItems(withTitles: titles)
+/// Keeps the existing workflow-card content while NSTableView owns selection, keyboard and drag behavior.
+@MainActor private final class RulesStepCell: NSTableCellView {
+    private let card = NSBox()
+    private let accent = NSBox()
+    init(step: ModificationStep, number: Int) {
+        super.init(frame: .zero)
+        card.identifier = .init("rules.stepCard")
+        card.boxType = .custom; card.titlePosition = .noTitle
+        card.borderWidth = 1; card.cornerRadius = 8; card.contentViewMargins = .zero; card.contentView = NSView()
+        NativeUI.pin(card, to: self, insets: NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0))
+        let badge = NSBox(); badge.identifier = .init("rules.stepNumber")
+        badge.boxType = .custom; badge.titlePosition = .noTitle; badge.borderWidth = 0; badge.borderColor = .clear
+        badge.fillColor = NSColor.labelColor.withAlphaComponent(0.045); badge.cornerRadius = 6
+        badge.contentViewMargins = .zero; badge.contentView = NSView()
+        let numberLabel = NativeUI.label(String(number)); numberLabel.alignment = .center
+        numberLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        badge.contentView!.addSubview(numberLabel); numberLabel.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([badge.widthAnchor.constraint(equalToConstant: 26), badge.heightAnchor.constraint(equalToConstant: 28),
+            numberLabel.centerXAnchor.constraint(equalTo: badge.contentView!.centerXAnchor), numberLabel.centerYAnchor.constraint(equalTo: badge.contentView!.centerYAnchor)])
+        let title = NativeUI.label(step.kind.title); title.toolTip = step.kind.title
+        let summary = step.kind == .script ? (step.name.isEmpty ? "JavaScript" : step.name) : step.kind == .setStatus ? String(step.status) : (step.name.isEmpty ? (step.value.isEmpty ? "点击配置" : step.value) : step.name)
+        let detail = NativeUI.label(summary, size: 11, secondary: true); detail.toolTip = summary
+        let texts = NativeUI.stack([title, detail], spacing: 5)
+        texts.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let row = NativeUI.stack([badge, texts], vertical: false, spacing: 10)
+        if !step.enabled {
+            let pause = NSImageView(image: NSImage(systemSymbolName: "pause.circle", accessibilityDescription: "已停用")!)
+            pause.contentTintColor = .secondaryLabelColor; row.addArrangedSubview(pause)
         }
-        button.selectItem(at: options.firstIndex { $0.value == selection } ?? -1)
-        button.isEnabled = context.environment.isEnabled
-        button.setAccessibilityLabel(title)
-        button.setAccessibilityValue(button.selectedItem?.title ?? "")
+        NativeUI.pin(row, to: card.contentView!, insets: NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10))
+        accent.identifier = .init("rules.stepAccent")
+        accent.boxType = .custom; accent.titlePosition = .noTitle; accent.borderWidth = 0; accent.borderColor = .clear
+        accent.fillColor = .systemBlue; accent.cornerRadius = 2
+        accent.translatesAutoresizingMaskIntoConstraints = false; card.addSubview(accent)
+        NSLayoutConstraint.activate([accent.leadingAnchor.constraint(equalTo: card.leadingAnchor), accent.widthAnchor.constraint(equalToConstant: 3),
+            accent.topAnchor.constraint(equalTo: card.topAnchor, constant: 8), accent.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -8)])
+        setAccessibilityElement(true); setAccessibilityLabel("第 \(number) 步，\(step.kind.title)，\(summary)")
     }
-
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSPopUpButton, context: Context) -> CGSize? {
-        CGSize(width: proposal.width ?? nsView.intrinsicContentSize.width, height: nsView.intrinsicContentSize.height)
-    }
-
-    @MainActor final class Coordinator: NSObject {
-        var selection: Binding<Value>
-        var options: [(title: String, value: Value)]
-
-        init(selection: Binding<Value>, options: [(title: String, value: Value)]) {
-            self.selection = selection
-            self.options = options
-        }
-
-        @objc func selectOption(_ sender: NSPopUpButton) {
-            guard sender.isEnabled, options.indices.contains(sender.indexOfSelectedItem) else { return }
-            selection.wrappedValue = options[sender.indexOfSelectedItem].value
-        }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func setSelected(_ selected: Bool) {
+        card.fillColor = selected ? NSColor.systemBlue.withAlphaComponent(0.12) : NSColor.labelColor.withAlphaComponent(0.045)
+        card.borderColor = selected ? NSColor.systemBlue.withAlphaComponent(0.55) : .clear
+        accent.isHidden = !selected
+        setAccessibilitySelected(selected)
     }
 }

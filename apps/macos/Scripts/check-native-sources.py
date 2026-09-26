@@ -2,6 +2,7 @@
 """Check project references; optionally typecheck host Swift sources without building an App."""
 import argparse
 import json
+import re
 from pathlib import Path
 import subprocess
 import xml.etree.ElementTree as ET
@@ -13,6 +14,11 @@ root = Path(__file__).resolve().parents[1]
 project = root / "Requestman.xcodeproj"
 objects = json.loads(subprocess.check_output(["plutil", "-convert", "json", "-o", "-", str(project / "project.pbxproj")]))["objects"]
 sources = set((root / "Requestman").rglob("*.swift"))
+ui_sources = sources | set((root / "Scripts/Fixtures").glob("*.swift"))
+for source in ui_sources:
+    assert not re.search(r"\bimport\s+SwiftUI\b|\bNSHosting(?:View|Controller)\b|\bNSView(?:Controller)?Representable\b|@(?:State|Binding|Bindable|Environment|FocusState)\b", source.read_text()), (
+        f"AppKit-only UI contract violated: {source.relative_to(root)}"
+    )
 references = {key: root / value["path"] for key, value in objects.items()
               if value.get("isa") == "PBXFileReference" and value.get("path", "").endswith(".swift")}
 assert set(references.values()) == sources, "Swift source files and project references differ"
@@ -42,6 +48,7 @@ for scheme in (project / "xcshareddata/xcschemes").glob("*.xcscheme"):
     for ref in ET.parse(scheme).iter("BuildableReference"):
         assert objects[ref.attrib["BlueprintIdentifier"]]["isa"] == "PBXNativeTarget"
 print(f"Project references OK: {len(sources)} Swift sources, local packages, shared scheme and architecture settings")
+print("AppKit-only source and UI fixture checks OK")
 
 if args.typecheck:
     build = root / "Packages/RequestmanCore/.build"

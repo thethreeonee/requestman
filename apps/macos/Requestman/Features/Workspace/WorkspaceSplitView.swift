@@ -1,33 +1,6 @@
 import AppKit
 import RequestmanCore
-import SwiftUI
-
-struct WorkspaceSplitView: NSViewControllerRepresentable {
-    let model: WorkspaceModel
-    let snapshot: WorkspaceToolbarSnapshot
-    let openSettings: () -> Void
-
-    func makeNSViewController(context: Context) -> WorkspaceSplitController {
-        WorkspaceSplitController(model: model, snapshot: snapshot, openSettings: openSettings)
-    }
-
-    func updateNSViewController(_ controller: WorkspaceSplitController, context: Context) {
-        controller.update(snapshot: snapshot, openSettings: openSettings)
-    }
-
-    func sizeThatFits(_ proposal: ProposedViewSize, nsViewController: WorkspaceSplitController,
-                     context: Context) -> CGSize? {
-        // Divider tracking changes AppKit's fitting size. It must not become the
-        // workspace's outer size: SwiftUI owns that; AppKit only sizes the panes.
-        guard let width = proposal.width, let height = proposal.height,
-              width.isFinite, height.isFinite else { return nil }
-        return CGSize(width: width, height: height)
-    }
-
-    static func dismantleNSViewController(_ controller: WorkspaceSplitController, coordinator: ()) {
-        controller.tearDown()
-    }
-}
+import Observation
 
 @MainActor
 struct WorkspaceToolbarSnapshot: Equatable {
@@ -78,9 +51,9 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
     private let model: WorkspaceModel
     private var state: WorkspaceToolbarSnapshot
     private var openSettings: () -> Void
-    private let sidebarHost: NSHostingController<WorkspaceSidebarContent>
-    private let mainHost: NSHostingController<WorkspaceMainContent>
-    private let inspectorHost: NSHostingController<WorkspaceInspectorContent>
+    private let sidebarHost: WorkspaceSidebarController
+    private let mainHost: WorkspaceMainController
+    private let inspectorHost: WorkspaceInspectorController
     private let inspectionMode: RequestInspectionMode
     private var sidebarItem: NSSplitViewItem!
     private var inspectorItem: NSSplitViewItem!
@@ -117,28 +90,32 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         self.model = model
         self.state = snapshot
         self.openSettings = openSettings
-        sidebarHost = NSHostingController(rootView: WorkspaceSidebarContent(model: model))
-        mainHost = NSHostingController(rootView: WorkspaceMainContent(model: model))
+        sidebarHost = WorkspaceSidebarController(model: model)
+        mainHost = WorkspaceMainController(model: model)
         let inspectionMode = RequestInspectionMode()
         self.inspectionMode = inspectionMode
-        inspectorHost = NSHostingController(rootView: WorkspaceInspectorContent(model: model, section: snapshot.section, isPresented: false, mode: inspectionMode))
+        inspectorHost = WorkspaceInspectorController(model: model, mode: inspectionMode)
         super.init(nibName: nil, bundle: nil)
         configureSplitItems()
         updateInspectorContentVisibility()
         configureToolbar()
         updateControls()
+        observeModel()
     }
 
     required init?(coder: NSCoder) { nil }
 
-    private func configureSplitItems() {
-        sidebarHost.sceneBridgingOptions = []
-        mainHost.sceneBridgingOptions = []
-        inspectorHost.sceneBridgingOptions = []
-        sidebarHost.sizingOptions = []
-        mainHost.sizingOptions = []
-        inspectorHost.sizingOptions = []
+    private func observeModel() {
+        guard !isTearingDown else { return }
+        let snapshot = withObservationTracking {
+            WorkspaceToolbarSnapshot(model: model)
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in self?.observeModel() }
+        }
+        update(snapshot: snapshot, openSettings: openSettings)
+    }
 
+    private func configureSplitItems() {
         splitView.isVertical = true
         splitView.dividerStyle = .thin
         sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarHost)
@@ -207,6 +184,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         let stepChanged = state.selectedStepID != next.selectedStepID
         if sectionChanged, state.section == .rules { rulesSidebarCollapsed = sidebarItem.isCollapsed }
         state = next
+        mainHost.update(section: next.section)
         if sectionChanged {
             if next.section != .requests { requestSearchItem.endSearchInteraction() }
             environmentPopover?.close()
@@ -263,7 +241,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         guard inspectorContentIsPresented != isPresented || inspectorContentSection != state.section else { return }
         inspectorContentIsPresented = isPresented
         inspectorContentSection = state.section
-        inspectorHost.rootView = WorkspaceInspectorContent(model: model, section: state.section, isPresented: isPresented, mode: inspectionMode)
+        inspectorHost.update(section: state.section, isPresented: isPresented)
     }
 
     override func toggleInspector(_ sender: Any?) {
@@ -469,7 +447,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         switch identifier {
         case Item.toggleSidebar, Item.toggleInspector:
             // Reserved toggle identifiers discard explicit targets. A native toolbar button
-            // keeps the action connected even when SwiftUI's outer window has no field focus.
+            // keeps the action connected even when the window has no field focus.
             let isInspector = identifier == Item.toggleInspector
             item.image = NSImage(systemSymbolName: isInspector ? "sidebar.right" : "sidebar.left",
                                  accessibilityDescription: isInspector ? inspectorTitle : "项目侧栏")
@@ -570,9 +548,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         let content = EnvironmentSelectionPopover(model: model, onDismiss: { [weak popover] in
             popover?.performClose(nil)
         }, openSettings: { [weak self] in self?.openSettings() })
-        let host = NSHostingController(rootView: content)
-        host.sceneBridgingOptions = []
-        popover.contentViewController = host
+        popover.contentViewController = content
         environmentPopover = popover
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
     }
@@ -586,7 +562,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         splitTransitions.removeAll()
         environmentPopover?.close()
         environmentPopover = nil
-        inspectorHost.rootView = WorkspaceInspectorContent(model: model, section: state.section, isPresented: false, mode: inspectionMode)
+        inspectorHost.update(section: state.section, isPresented: false)
         restoreWindow()
         toolbar.delegate = nil
         requestSearchItem.searchField.delegate = nil
@@ -602,19 +578,5 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         }
         installedWindow = nil
         previousToolbar = nil
-    }
-}
-
-struct WorkspaceInspectorContent: View {
-    let model: WorkspaceModel
-    let section: WorkspaceSection
-    let isPresented: Bool
-    let mode: RequestInspectionMode
-
-    var body: some View {
-        switch section {
-        case .rules: StepInspectorView(model: model, isPresented: isPresented).disabled(!isPresented)
-        case .requests: RequestInspectorView(history: model.history, isPresented: isPresented, mode: mode)
-        }
     }
 }

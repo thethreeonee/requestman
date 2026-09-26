@@ -1,345 +1,268 @@
 import AppKit
-import SwiftUI
 import RequestmanCore
 
-struct RequestInspectorView: View {
-    let history: ExecutionHistoryModel
-    let isPresented: Bool
-    let mode: RequestInspectionMode
-    @State private var tab: RequestDetailTab = .requestHeaders
+@MainActor
+final class RequestInspectorViewController: ObservedViewController {
+    private let history: ExecutionHistoryModel
+    private let mode: RequestInspectionMode
+    var isPresented = false { didSet { if isViewLoaded { refresh() } } }
+    private var tab: RequestDetailTab = .requestHeaders
+    private var record: CaptureRecord?
+    private var panes: [RequestDetailTab: RequestPayloadViewController] = [:]
+    private var popover: NSPopover?
+    private let url = NSButton(title: "", target: nil, action: nil)
+    private let query = NSButton(title: "查询参数", target: nil, action: nil)
+    private let method = NativeUI.label("", size: 12, weight: .medium, secondary: true)
+    private let status = NativeUI.label("", size: 12)
+    private let duration = NativeUI.label("", size: 12, secondary: true)
+    private let bytes = NativeUI.label("", size: 12, secondary: true)
+    private let rule = NSButton(title: "", target: nil, action: nil)
+    private let error = NativeUI.label("", size: 11)
+    private let content = NSView()
+    private let copyButton = NSButton(title: "", target: nil, action: nil)
+    private var tabs: ToolbarSectionControl!
+    private var rootStack: NSStackView!
 
-    var body: some View {
-        VStack(spacing: 0) {
-            if let record = history.selected {
-                RequestDetailView(record: record, tab: $tab, isPresented: isPresented, version: mode.version).id(record.id)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    init(history: ExecutionHistoryModel, mode: RequestInspectionMode) {
+        self.history = history; self.mode = mode
+        super.init()
     }
-}
-
-private struct RequestDetailView: View {
-    let record: CaptureRecord
-    @Binding var tab: RequestDetailTab
-    let isPresented: Bool
-    let version: InspectionVersion
-    @State private var visited: Set<RequestDetailTab> = []
-    @State private var showsURL = false
-    @State private var showsRule = false
-    @State private var showsQuery = false
-    @State private var payloadCopy: RequestPayloadCopyContent?
-
-    var body: some View {
-        VStack(spacing: 0) {
-            summary.padding(16)
-            HStack(spacing: 10) {
-                ToolbarSectionControl(
-                    labels: RequestDetailTab.allCases.map(\.title), accessibilityLabel: "请求数据",
-                    fillsAvailableWidth: true, controlSize: dataControlSize,
-                    selection: Binding(
-                        get: { RequestDetailTab.allCases.firstIndex(of: tab) ?? 0 },
-                        set: { tab = RequestDetailTab.allCases[$0] }
-                    )
-                )
-                .frame(maxWidth: .infinity)
-                RequestPayloadCopyButton(title: "复制当前\(tab.title)", isEnabled: currentCopy != nil) {
-                    if let currentCopy { RequestClipboard.copy(currentCopy.text) }
-                }
-            }
-            .controlSize(dataControlSize == .large ? .large : .extraLarge)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 16).padding(.bottom, 10)
-            // Keep visited panes mounted so native scrolling, expansion and search survive a tab switch.
-            ZStack {
-                ForEach(RequestDetailTab.allCases) { item in
-                    if visited.contains(item) || item == tab {
-                        RequestPayloadView(record: record, tab: item, isActive: isPresented && item == tab, version: version)
-                            .opacity(item == tab ? 1 : 0)
-                            .allowsHitTesting(item == tab)
-                            .accessibilityHidden(item != tab)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    required init?(coder: NSCoder) { nil }
+    override func loadView() {
+        view = FlippedView()
+        url.font = .systemFont(ofSize: 17, weight: .semibold); url.alignment = .left
+        url.isBordered = false; url.lineBreakMode = .byTruncatingMiddle
+        url.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        url.target = self; url.action = #selector(showURL)
+        query.isBordered = false; query.alignment = .left; query.font = .systemFont(ofSize: 12)
+        query.target = self; query.action = #selector(showQuery)
+        query.toolTip = "查看 URL 中的查询参数，与请求正文分开展示"
+        rule.isBordered = false; rule.alignment = .left; rule.font = .systemFont(ofSize: 12)
+        rule.image = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: nil)
+        rule.imagePosition = .imageLeading; rule.lineBreakMode = .byTruncatingTail
+        rule.target = self; rule.action = #selector(showRules)
+        rule.toolTip = "查看命中规则与执行步骤"
+        error.textColor = .systemRed; error.maximumNumberOfLines = 2
+        let stats = NativeUI.stack([method, status, NativeUI.label("│", size: 12, secondary: true), duration,
+                                   NativeUI.label("│", size: 12, secondary: true), bytes], vertical: false, spacing: 10)
+        let summary = NativeUI.stack([url, query, stats, rule, error], spacing: 10)
+        summary.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        for child in [url, rule, error] { child.widthAnchor.constraint(equalTo: summary.widthAnchor, constant: -32).isActive = true }
+        let size: NSControl.ControlSize
+        if #available(macOS 26.0, *) { size = .extraLarge } else { size = .large }
+        tabs = ToolbarSectionControl(labels: RequestDetailTab.allCases.map(\.title), accessibilityLabel: "请求数据",
+                                     fillsAvailableWidth: true, controlSize: size) { [weak self] in self?.selectTab($0) }
+        tabs.selectedSegment = 0
+        copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
+        copyButton.imagePosition = .imageOnly; copyButton.controlSize = size
+        copyButton.target = self; copyButton.action = #selector(copyContent(_:))
+        if #available(macOS 26.0, *) { copyButton.bezelStyle = .glass; copyButton.borderShape = .circle }
+        else { copyButton.bezelStyle = .circular }
+        for orientation in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
+            copyButton.setContentHuggingPriority(.required, for: orientation)
+            copyButton.setContentCompressionResistancePriority(.required, for: orientation)
         }
-        .onPreferenceChange(RequestPayloadCopyKey.self) { payloadCopy = $0 }
-        .onAppear { visited.insert(tab) }
-        .onChange(of: tab) { _, value in
-            visited.insert(value)
-            // Hidden native panes must not retain the keyboard copy target.
-            if !(NSApp.keyWindow?.firstResponder is NSSegmentedControl) {
-                NSApp.keyWindow?.makeFirstResponder(nil)
-            }
-        }
-        .onChange(of: isPresented) { _, value in
-            if !value { showsURL = false }
-        }
+        let tabRow = NativeUI.stack([tabs, copyButton], vertical: false, spacing: 10)
+        tabRow.distribution = .fill
+        tabRow.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 10, right: 16)
+        tabs.heightAnchor.constraint(equalToConstant: tabs.intrinsicContentSize.height).isActive = true
+        copyButton.heightAnchor.constraint(equalToConstant: copyButton.intrinsicContentSize.height).isActive = true
+        rootStack = NativeUI.stack([summary, tabRow, content], spacing: 0)
+        NativeUI.pin(rootStack, to: view)
+        for child in [summary, tabRow, content] { child.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true }
+        content.setContentHuggingPriority(.defaultLow, for: .vertical)
     }
-
-    private var dataControlSize: NSControl.ControlSize {
-        if #available(macOS 26.0, *) { return .extraLarge }
-        return .large
+    override func refresh() {
+        let next = history.selected
+        let version = mode.version
+        if record?.id != next?.id {
+            popover?.close(); popover = nil
+            for pane in panes.values { pane.update(version: version, isActive: false); pane.view.removeFromSuperview(); pane.removeFromParent() }
+            panes.removeAll()
+        }
+        record = next
+        rootStack.isHidden = next == nil
+        guard let record else { return }
+        if !isPresented { popover?.close(); popover = nil }
+        url.title = record.url; url.toolTip = record.url
+        url.setAccessibilityLabel("请求 URL"); url.setAccessibilityValue(record.url)
+        let initialQuery = URLComponents(string: record.url)?.queryItems?.count ?? 0
+        let finalQuery = URLComponents(string: record.finalURL)?.queryItems?.count ?? 0
+        query.isHidden = initialQuery == 0 && finalQuery == 0
+        query.title = "查询参数  " + (initialQuery == finalQuery ? "\(initialQuery)" : "\(initialQuery) → \(finalQuery)") + "  ›"
+        method.stringValue = record.method
+        status.stringValue = statusText(record)
+        status.textColor = record.error != nil || (record.status ?? 0) >= 400 ? .systemRed : ((record.status ?? 300) >= 300 ? .secondaryLabelColor : .systemGreen)
+        duration.stringValue = "\(Int(record.duration * 1000)) ms"
+        bytes.stringValue = "响应 \(ByteCountFormatter.string(fromByteCount: Int64(record.responseBytes), countStyle: .file))"
+        rule.isHidden = record.matchedWorkflowID == nil
+        rule.title = "\(record.workflow)    \(record.project)  ›"
+        error.isHidden = record.error == nil; error.stringValue = record.error ?? ""; error.toolTip = record.error
+        if panes[tab] == nil {
+            let pane = RequestPayloadViewController(record: record, tab: tab, version: version)
+            pane.onCopyChange = { [weak self] in self?.updateCopy() }
+            panes[tab] = pane; addChild(pane); NativeUI.pin(pane.view, to: content)
+        }
+        for (item, pane) in panes {
+            pane.view.isHidden = item != tab
+            pane.update(version: version, isActive: isPresented && item == tab)
+        }
+        updateCopy()
     }
-
+    private func selectTab(_ index: Int) {
+        guard RequestDetailTab.allCases.indices.contains(index) else { return }
+        tab = RequestDetailTab.allCases[index]
+        if !(view.window?.firstResponder is NSSegmentedControl) { view.window?.makeFirstResponder(nil) }
+        refresh()
+    }
     private var currentCopy: RequestPayloadCopyContent? {
-        guard isPresented, let payloadCopy, payloadCopy.tab == tab,
-              payloadCopy.version == version, !payloadCopy.text.isEmpty else { return nil }
-        return payloadCopy
+        guard isPresented, let copy = panes[tab]?.copyContent, copy.tab == tab, copy.version == mode.version, !copy.text.isEmpty else { return nil }
+        return copy
     }
-
-    private var summary: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button { showsURL = true } label: {
-                Text(record.url)
-                    .font(.system(size: 17, weight: .semibold))
-                    .lineLimit(1).truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            .help(record.url)
-            .accessibilityLabel("请求 URL").accessibilityValue(record.url)
-            .popover(isPresented: $showsURL) { RequestURLDetails(record: record) }
-            if hasQueryParameters {
-                Button { showsQuery.toggle() } label: {
-                    HStack(spacing: 5) {
-                        Text("查询参数")
-                        Text(queryCount == finalQueryCount ? "\(queryCount)" : "\(queryCount) → \(finalQueryCount)")
-                            .monospacedDigit().foregroundStyle(.secondary)
-                        Image(systemName: "chevron.right").font(.caption2)
-                    }.font(.system(size: 12))
-                }
-                .buttonStyle(.borderless)
-                .help("查看 URL 中的查询参数，与请求正文分开展示")
-                .popover(isPresented: $showsQuery) { RequestQueryDetails(record: record) }
-            }
-            HStack(spacing: 10) {
-                Text(record.method).fontWeight(.medium)
-                Text(statusText).foregroundStyle(statusColor)
-                Divider().frame(height: 12)
-                Text("\(Int(record.duration * 1000)) ms").monospacedDigit()
-                Divider().frame(height: 12)
-                Text("响应 \(ByteCountFormatter.string(fromByteCount: Int64(record.responseBytes), countStyle: .file))")
-                    .lineLimit(1)
-            }.font(.system(size: 12)).foregroundStyle(.secondary)
-            if record.matchedWorkflowID != nil {
-                Button { showsRule.toggle() } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.triangle.branch").foregroundStyle(.tint)
-                        Text(record.workflow).lineLimit(1)
-                        Text(record.project).foregroundStyle(.secondary).lineLimit(1)
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
-                    }
-                    .font(.system(size: 12)).padding(.top, 2)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).help("查看命中规则与执行步骤")
-                .popover(isPresented: $showsRule) { ruleDetails }
-            }
-            if let error = record.error {
-                Label(error, systemImage: "exclamationmark.circle")
-                    .font(.caption).foregroundStyle(.red).lineLimit(2).help(error)
-            }
-        }
+    private func updateCopy() {
+        copyButton.isEnabled = currentCopy != nil
+        copyButton.toolTip = "复制当前\(tab.title)"; copyButton.setAccessibilityLabel("复制当前\(tab.title)")
     }
-
-    private var queryCount: Int {
-        URLComponents(string: record.url)?.queryItems?.count ?? 0
+    @objc private func copyContent(_ sender: NSButton) { if let currentCopy { RequestClipboard.copy(currentCopy.text) } }
+    private func show(_ controller: NSViewController, from sender: NSView, size: NSSize) {
+        guard isPresented else { return }
+        popover?.close()
+        let next = NSPopover(); next.behavior = .transient; next.contentViewController = controller; next.contentSize = size
+        popover = next; next.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minX)
     }
-
-    private var hasQueryParameters: Bool {
-        queryCount > 0 || finalQueryCount > 0
+    @objc private func showURL() {
+        guard let record else { return }
+        show(RequestURLDetails(record: record), from: url, size: NSSize(width: 480, height: 360))
     }
-
-    private var finalQueryCount: Int {
-        URLComponents(string: record.finalURL)?.queryItems?.count ?? 0
+    @objc private func showQuery() {
+        guard let record else { return }
+        show(RequestQueryDetails(record: record), from: query, size: NSSize(width: 420, height: 360))
     }
-
-    private var statusText: String {
+    @objc private func showRules() {
+        guard let record else { return }
+        let controller = RequestTextDetails(title: record.workflow,
+            text: (["项目  \(record.project)", "环境  \(record.environment)", "执行步骤"] +
+                   (record.steps.isEmpty ? ["没有执行步骤"] : record.steps.enumerated().map { "\($0.offset + 1). \($0.element)" }) + [record.outcome.rawValue]).joined(separator: "\n\n"))
+        show(controller, from: rule, size: NSSize(width: 340, height: 360))
+    }
+    private func statusText(_ record: CaptureRecord) -> String {
         guard let status = record.status else { return record.outcome.rawValue }
-        let reasons = [200: "OK", 201: "Created", 202: "Accepted", 204: "No Content",
-                       301: "Moved Permanently", 302: "Found", 304: "Not Modified", 307: "Temporary Redirect",
-                       308: "Permanent Redirect", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden",
-                       404: "Not Found", 429: "Too Many Requests", 500: "Internal Server Error",
-                       502: "Bad Gateway", 503: "Service Unavailable", 504: "Gateway Timeout"]
+        let reasons = [200: "OK", 201: "Created", 202: "Accepted", 204: "No Content", 301: "Moved Permanently", 302: "Found", 304: "Not Modified", 307: "Temporary Redirect", 308: "Permanent Redirect", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 429: "Too Many Requests", 500: "Internal Server Error", 502: "Bad Gateway", 503: "Service Unavailable", 504: "Gateway Timeout"]
         return reasons[status].map { "\(status) \($0)" } ?? String(status)
     }
+}
 
-    private var statusColor: Color {
-        if record.error != nil { return .red }
-        guard let status = record.status else { return .secondary }
-        if status >= 400 { return .red }
-        if status >= 300 { return .secondary }
-        return .green
-    }
-
-    private var ruleDetails: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(record.workflow).font(.headline)
-                LabeledContent("项目", value: record.project)
-                LabeledContent("环境", value: record.environment)
-                Divider()
-                Text("执行步骤").font(.subheadline.weight(.medium))
-                if record.steps.isEmpty { Text("没有执行步骤").foregroundStyle(.secondary) }
-                ForEach(Array(record.steps.enumerated()), id: \.offset) { index, step in
-                    Text("\(index + 1). \(step)").textSelection(.enabled)
-                }
-                Text(record.outcome.rawValue).foregroundStyle(.secondary)
-            }.font(.system(size: 12)).padding(16)
-        }.frame(width: 340).frame(maxHeight: 360)
+@MainActor
+private final class RequestURLDetails: NSViewController {
+    private let record: CaptureRecord
+    init(record: CaptureRecord) { self.record = record; super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { nil }
+    override func loadView() {
+        view = FlippedView()
+        let copy = ActionButton(title: "复制完整 URL") { [record] in RequestClipboard.copy(record.url) }
+        copy.isEnabled = !record.urlWasTruncated
+        copy.toolTip = record.urlWasTruncated ? "URL 记录已截断，无法复制完整地址" : "复制完整 URL"
+        let header = NativeUI.stack([NativeUI.label("请求 URL", weight: .semibold), NSView(), copy], vertical: false)
+        let source = RequestSourceView()
+        source.update(text: record.url, search: "", stateKey: "url", isVisible: true)
+        let note = NSTextField(wrappingLabelWithString: "URL 超出记录上限，以下仅显示已记录的部分，地址不完整。")
+        note.font = .systemFont(ofSize: 11); note.textColor = .secondaryLabelColor; note.isHidden = !record.urlWasTruncated
+        let stack = NativeUI.stack([header, note, source], spacing: 12)
+        NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16))
+        for child in [header, note, source] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        source.setContentHuggingPriority(.defaultLow, for: .vertical)
     }
 }
 
-/// Native action beside the content tabs; the selected pane supplies its ready-to-copy data.
-private struct RequestPayloadCopyButton: NSViewRepresentable {
-    let title: String
-    let isEnabled: Bool
-    let copy: () -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator(copy: copy) }
-
-    func makeNSView(context: Context) -> NSButton {
-        let button = NSButton(title: "", target: context.coordinator, action: #selector(Coordinator.copyContent(_:)))
-        button.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
-        button.imagePosition = .imageOnly
-        if #available(macOS 26.0, *) {
-            button.bezelStyle = .glass
-            button.borderShape = .circle
-            button.controlSize = .extraLarge
-        } else {
-            button.bezelStyle = .circular
-            button.controlSize = .large
+@MainActor
+private final class RequestQueryDetails: NSViewController {
+    private let record: CaptureRecord
+    init(record: CaptureRecord) { self.record = record; super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { nil }
+    override func loadView() {
+        let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false
+        view = scroll
+        var fields: [NSView] = [NativeUI.label("查询参数", weight: .semibold)]
+        func section(_ title: String, url: String, truncated: Bool) {
+            fields.append(NativeUI.label(title, size: 12, weight: .medium, secondary: true))
+            let items = URLComponents(string: url)?.queryItems ?? []
+            if items.isEmpty { fields.append(NativeUI.label("无查询参数", size: 11, secondary: true)) }
+            for item in items { fields.append(URLParameterRow(name: item.name, value: item.value ?? "")) }
+            if truncated { fields.append(NativeUI.label("URL 超出记录上限，查询参数可能不完整。", size: 11, secondary: true)) }
         }
-        button.setContentHuggingPriority(.required, for: .horizontal)
-        button.setContentCompressionResistancePriority(.required, for: .horizontal)
-        button.setContentHuggingPriority(.required, for: .vertical)
-        button.setContentCompressionResistancePriority(.required, for: .vertical)
-        return button
-    }
-
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSButton, context: Context) -> CGSize? {
-        nsView.intrinsicContentSize
-    }
-
-    func updateNSView(_ button: NSButton, context: Context) {
-        context.coordinator.copy = copy
-        button.isEnabled = isEnabled && context.environment.isEnabled
-        button.toolTip = title
-        button.setAccessibilityLabel(title)
-    }
-
-    @MainActor final class Coordinator: NSObject {
-        var copy: () -> Void
-        init(copy: @escaping () -> Void) { self.copy = copy }
-        @objc func copyContent(_ sender: NSButton) {
-            guard sender.isEnabled else { return }
-            copy()
+        section("原始 URL", url: record.url, truncated: record.urlWasTruncated)
+        if URLComponents(string: record.url)?.percentEncodedQuery != URLComponents(string: record.finalURL)?.percentEncodedQuery {
+            fields.append(NativeUI.separator()); section("最终 URL", url: record.finalURL, truncated: record.finalURLWasTruncated)
         }
+        let stack = NativeUI.stack(fields, spacing: 12)
+        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = stack
+        stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
+        for field in fields { field.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32).isActive = true }
     }
 }
 
-private struct RequestURLDetails: View {
-    let record: CaptureRecord
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("请求 URL").font(.headline)
-                Spacer()
-                copyURLButton
-            }
-            if record.urlWasTruncated {
-                Text("URL 超出记录上限，以下仅显示已记录的部分，地址不完整。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            ScrollView {
-                Text(record.url)
-                    .font(.system(size: 12, design: .monospaced))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxHeight: 320)
-        }
-        .padding(16)
-        .frame(width: 480)
+@MainActor
+private final class URLParameterRow: NSView {
+    private let name: NSTextField
+    private let value: NSTextField
+    private let copy: NSButton
+    private let text: String
+    private var tracking: NSTrackingArea?
+    init(name: String, value: String) {
+        self.name = NativeUI.label(name, size: 12)
+        self.value = NSTextField(wrappingLabelWithString: value)
+        self.text = value
+        self.copy = NSButton(image: NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "复制 \(name)")!, target: nil, action: nil)
+        super.init(frame: .zero)
+        self.value.isSelectable = true
+        for label in [self.name, self.value] { label.font = .monospacedSystemFont(ofSize: 12, weight: .regular) }
+        copy.isBordered = false; copy.alphaValue = 0; copy.isEnabled = false
+        copy.target = self; copy.action = #selector(copyValue); copy.toolTip = "复制字段值"
+        let stack = NativeUI.stack([self.name, self.value, copy], vertical: false, spacing: 8)
+        stack.alignment = .top
+        NativeUI.pin(stack, to: self, insets: NSEdgeInsets(top: 3, left: 0, bottom: 3, right: 0))
+        self.name.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        self.value.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let menu = NSMenu(); let item = NSMenuItem(title: "复制字段值", action: #selector(copyValue), keyEquivalent: "")
+        item.target = self; menu.addItem(item); self.menu = menu
     }
-
-    @ViewBuilder private var copyURLButton: some View {
-        let button = Button("复制完整 URL") { RequestClipboard.copy(record.url) }
-            .disabled(record.urlWasTruncated)
-            .help(record.urlWasTruncated ? "URL 记录已截断，无法复制完整地址" : "复制完整 URL")
-        if #available(macOS 15.0, *) {
-            // The popover can overlap the parent window's resize region.
-            // Scope the arrow to the button so URL text selection keeps its cursor.
-            button.pointerStyle(.default)
-        } else {
-            button
-        }
+    required init?(coder: NSCoder) { nil }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let tracking = NSTrackingArea(rect: .zero, options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect], owner: self)
+        addTrackingArea(tracking); self.tracking = tracking
     }
+    override func mouseEntered(with event: NSEvent) { setHovered(true) }
+    override func mouseExited(with event: NSEvent) { setHovered(false) }
+    private func setHovered(_ hovered: Bool) {
+        copy.isEnabled = hovered
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { copy.alphaValue = hovered ? 1 : 0 }
+        else { NSAnimationContext.runAnimationGroup { context in context.duration = 0.15; copy.animator().alphaValue = hovered ? 1 : 0 } }
+    }
+    @objc private func copyValue() { RequestClipboard.copy(text) }
 }
 
-/// URL query items remain separate from the HTTP entity body, including GET
-/// requests with no body. Repeated parameter names retain their original order.
-private struct RequestQueryDetails: View {
-    let record: CaptureRecord
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("查询参数").font(.headline)
-                querySection("原始 URL", url: record.url, truncated: record.urlWasTruncated)
-                if URLComponents(string: record.url)?.percentEncodedQuery != URLComponents(string: record.finalURL)?.percentEncodedQuery {
-                    Divider()
-                    querySection("最终 URL", url: record.finalURL, truncated: record.finalURLWasTruncated)
-                }
-            }.padding(16)
-        }.frame(width: 420).frame(maxHeight: 440)
-    }
-
-    private func querySection(_ title: String, url: String, truncated: Bool) -> some View {
-        let items = URLComponents(string: url)?.queryItems ?? []
-        return VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-            if items.isEmpty {
-                Text("无查询参数").font(.caption).foregroundStyle(.secondary)
-            }
-            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                URLParameterRow(name: item.name, value: item.value ?? "")
-            }
-            if truncated {
-                Text("URL 超出记录上限，查询参数可能不完整。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-private struct URLParameterRow: View {
-    let name: String
-    let value: String
-    @State private var hovering = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var body: some View {
-        HStack(alignment: .top) {
-            Text(name).frame(width: 120, alignment: .leading)
-            Text(value).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-            Button { RequestClipboard.copy(value) } label: { Label("复制 \(name)", systemImage: "doc.on.doc") }
-                .labelStyle(.iconOnly).buttonStyle(.borderless)
-                .opacity(hovering ? 1 : 0).help("复制字段值")
-                .allowsHitTesting(hovering)
-                .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: hovering)
-        }
-        .font(.system(size: 12, design: .monospaced)).padding(.vertical, 3)
-        .contentShape(Rectangle()).onHover { hovering = $0 }
-        .contextMenu { Button("复制字段值") { RequestClipboard.copy(value) } }
+@MainActor
+private final class RequestTextDetails: NSViewController {
+    private let heading: String
+    private let text: String
+    init(title: String, text: String) { heading = title; self.text = text; super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { nil }
+    override func loadView() {
+        view = NSView()
+        let source = RequestSourceView(); source.setFont(.systemFont(ofSize: 12))
+        source.update(text: text, search: "", stateKey: "details", isVisible: true)
+        let stack = NativeUI.stack([NativeUI.label(heading, weight: .semibold), source], spacing: 12)
+        NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16))
+        source.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
 }
 
 enum RequestClipboard {
     @MainActor static func copy(_ value: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(value, forType: .string)
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string)
     }
 }

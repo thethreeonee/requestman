@@ -131,3 +131,7 @@
 ## 通用设置合并（2026-09-26）
 
 设置顶部仅保留“通用 / 环境管理”。原连接页的本地监听端口、HTTP 上游代理、配置错误与协议支持合入通用页，与启动方式、浏览器、HTTPS 证书共用一个可滚动的原生分组 Form；窗口仍保持 800 × 540 pt。配置绑定、实时应用和证书操作流程保持原有行为。本节覆盖早期记录中的独立连接页布局。
+
+## 全 AppKit 实现（2026-09-26）
+
+当前应用入口、主窗口、规则编辑、请求日志、详情及设置已全部迁移为 AppKit。上文 SwiftUI 容器名称仅记录历史实现；当前使用 `NSApplication`、`NSWindowController`、`NSSplitViewController`、`NSOutlineView`、`NSTableView`、`NSGridView` 与系统原生控件，保留三栏布局、工具栏位置、双阶段编辑及设置尺寸。工程检查禁止重新引入 SwiftUI 或 Hosting 桥接。隐藏窗口布局和交互回归与真实 App 的视觉验收分别记录，见 [架构](../Architecture.md)。

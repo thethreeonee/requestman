@@ -1,7 +1,6 @@
 import AppKit
 import Observation
 import RequestmanCore
-import SwiftUI
 
 @MainActor @Observable
 private final class FilterFixture {
@@ -24,16 +23,30 @@ private final class FilterFixture {
     }
 }
 
-private struct FilterFixtureView: View {
-    @Bindable var model: FilterFixture
-    let defaults: UserDefaults
-    var body: some View {
-        VStack(spacing: 0) {
-            RequestFilterControls(filter: $model.filter, records: model.records, paused: model.paused,
-                toggleRecording: { model.paused.toggle() }, clear: { model.records.removeAll() })
-            Divider()
-            RequestRecordsTable(records: model.records.filter { model.filter.matches($0) }, selectedID: $model.selectedID, columnDefaults: defaults)
-        }
+@MainActor
+private final class FilterFixtureView: ObservedViewController {
+    let model: FilterFixture
+    let controls = RequestFilterControls()
+    let table: RequestRecordsTable
+    init(model: FilterFixture, defaults: UserDefaults) {
+        self.model = model; table = RequestRecordsTable(columnDefaults: defaults); super.init()
+    }
+    required init?(coder: NSCoder) { nil }
+    override func loadView() {
+        view = FlippedView()
+        controls.onFilterChange = { [weak model] in model?.filter = $0 }
+        controls.toggleRecording = { [weak model] in model?.paused.toggle() }
+        controls.clear = { [weak model] in model?.records.removeAll() }
+        table.onSelectionChange = { [weak model] in model?.selectedID = $0 }
+        let stack = NativeUI.stack([controls, table], spacing: 0)
+        NativeUI.pin(stack, to: view)
+        controls.heightAnchor.constraint(equalToConstant: 48).isActive = true
+        for child in [controls, table] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        table.setContentHuggingPriority(.defaultLow, for: .vertical)
+    }
+    override func refresh() {
+        controls.update(filter: model.filter, records: model.records, paused: model.paused)
+        table.update(records: model.records.filter { model.filter.matches($0) }, selectedID: model.selectedID)
     }
 }
 
@@ -45,7 +58,7 @@ private enum RequestFilterChecks {
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let model = FilterFixture()
-        let host = NSHostingController(rootView: FilterFixtureView(model: model, defaults: defaults))
+        let host = FilterFixtureView(model: model, defaults: defaults)
         let window = makeWindow(host)
         defer { window.close() }
         for width in [1440.0, 820, 600, 420] {
@@ -129,8 +142,7 @@ private enum RequestFilterChecks {
         checkColumnWidths(table, host: host, window: window, model: model, defaults: defaults)
 
         model.filter.headers = [.init(name: "Content-Type", value: "json")]
-        let panel = NSHostingController(rootView: RequestFilterPanel(filter: Binding(
-            get: { model.filter }, set: { model.filter = $0 }), records: model.records))
+        let panel = RequestFilterPanel(filter: model.filter, records: model.records) { model.filter = $0 }
         let panelWindow = makeWindow(panel)
         panelWindow.setContentSize(NSSize(width: 560, height: 370))
         settle(panel.view)
@@ -214,7 +226,7 @@ private enum RequestFilterChecks {
         }
         precondition(zip(widths, table.tableColumns).allSatisfy { abs($0 - $1.width) < 1 },
                      "Returning to the original viewport must restore widths")
-        let restored = NSHostingController(rootView: FilterFixtureView(model: FilterFixture(), defaults: defaults))
+        let restored = FilterFixtureView(model: FilterFixture(), defaults: defaults)
         let restoredWindow = makeWindow(restored)
         restoredWindow.setContentSize(NSSize(width: 1440, height: 620))
         settle(restored.view)
@@ -223,7 +235,7 @@ private enum RequestFilterChecks {
                      "A new table must restore persisted widths: expected=\(widths), actual=\(restoredTable.tableColumns.map(\.width)), viewport=\(restoredTable.enclosingScrollView!.contentSize.width), saved=\(saved)")
         restoredWindow.close()
         defaults.set(["request": -20], forKey: key)
-        let fallback = NSHostingController(rootView: FilterFixtureView(model: FilterFixture(), defaults: defaults))
+        let fallback = FilterFixtureView(model: FilterFixture(), defaults: defaults)
         let fallbackWindow = makeWindow(fallback)
         fallbackWindow.setContentSize(NSSize(width: 1440, height: 620))
         settle(fallback.view)

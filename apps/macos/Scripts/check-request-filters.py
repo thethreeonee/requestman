@@ -23,6 +23,7 @@ try:
     executable = temporary / "check"
     subprocess.run([
         "swiftc", *flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore",
+        str(root / "Requestman/Features/Workspace/AppKitSupport.swift"),
         str(root / "Requestman/Features/Requests/RequestFilterControls.swift"),
         str(root / "Requestman/Features/Requests/RequestRecordsTable.swift"),
         str(root / "Scripts/Fixtures/RequestFilterChecks.swift"), "-o", str(executable),

@@ -1,20 +1,23 @@
 import AppKit
-import SwiftUI
 import RequestmanCore
 
-struct RequestRecordsTable: NSViewRepresentable {
-    let records: [CaptureRecord]
-    @Binding var selectedID: UUID?
-
-    var columnDefaults: UserDefaults = .standard
+@MainActor
+final class RequestRecordsTable: NSView {
     static let columnWidthsKey = "requestLog.columnWidths.v1"
+    var onSelectionChange: (UUID?) -> Void = { _ in }
+    private let coordinator: Coordinator
+    private let scrollView: NSScrollView
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(selection: $selectedID, defaults: columnDefaults)
+    init(columnDefaults: UserDefaults = .standard) {
+        coordinator = Coordinator(defaults: columnDefaults)
+        scrollView = RecordsScrollView()
+        super.init(frame: .zero)
+        coordinator.onSelectionChange = { [weak self] in self?.onSelectionChange($0) }
+        configure()
     }
+    required init?(coder: NSCoder) { nil }
 
-    func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = RecordsScrollView()
+    private func configure() {
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
@@ -42,29 +45,32 @@ struct RequestRecordsTable: NSViewRepresentable {
             item.isEditable = false
             item.headerCell.alignment = column == .duration ? .right : .left
             table.addTableColumn(item)
-            item.widthChanged = { [weak coordinator = context.coordinator] column in
+            item.widthChanged = { [weak coordinator = coordinator] column in
                 coordinator?.resizeColumn(column)
             }
         }
-        table.dataSource = context.coordinator
-        table.delegate = context.coordinator
+        table.dataSource = coordinator
+        table.delegate = coordinator
         scrollView.documentView = table
-        context.coordinator.table = table
-        scrollView.contentWidthChanged = { [weak coordinator = context.coordinator] width in
+        coordinator.table = table
+        (scrollView as! RecordsScrollView).contentWidthChanged = { [weak coordinator = coordinator] width in
             coordinator?.fitColumns(to: width)
         }
-        return scrollView
+        scrollView.frame = bounds
+        scrollView.autoresizingMask = [.width, .height]
+        addSubview(scrollView)
     }
 
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        context.coordinator.selection = $selectedID
-        context.coordinator.update(records: records)
-        context.coordinator.fitColumns(to: scrollView.contentView.bounds.width)
+    func update(records: [CaptureRecord], selectedID: UUID?) {
+        coordinator.selection = selectedID
+        coordinator.update(records: records)
+        coordinator.fitColumns(to: scrollView.contentView.bounds.width)
     }
 
     @MainActor
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
-        var selection: Binding<UUID?>
+        var selection: UUID?
+        var onSelectionChange: (UUID?) -> Void = { _ in }
         weak var table: NSTableView?
         private var rows: [RecordRow] = []
         private var updating = false
@@ -80,8 +86,7 @@ struct RequestRecordsTable: NSViewRepresentable {
             return formatter
         }()
 
-        init(selection: Binding<UUID?>, defaults: UserDefaults) {
-            self.selection = selection
+        init(defaults: UserDefaults) {
             self.defaults = defaults
             if let saved = defaults.dictionary(forKey: RequestRecordsTable.columnWidthsKey) {
                 let widths = RecordColumn.allCases.compactMap { column -> CGFloat? in
@@ -127,7 +132,7 @@ struct RequestRecordsTable: NSViewRepresentable {
                 }
             }
 
-            let selectedRow = selection.wrappedValue.flatMap { id in rows.firstIndex { $0.id == id } }
+            let selectedRow = selection.flatMap { id in rows.firstIndex { $0.id == id } }
             let indexes = selectedRow.map { IndexSet(integer: $0) } ?? IndexSet()
             if table.selectedRowIndexes != indexes {
                 table.selectRowIndexes(indexes, byExtendingSelection: false)
@@ -229,7 +234,7 @@ struct RequestRecordsTable: NSViewRepresentable {
         func tableViewSelectionDidChange(_ notification: Notification) {
             guard !updating, let table else { return }
             let selected = rows.indices.contains(table.selectedRow) ? rows[table.selectedRow].id : nil
-            if selection.wrappedValue != selected { selection.wrappedValue = selected }
+            if selection != selected { selection = selected; onSelectionChange(selected) }
         }
     }
 }
@@ -432,16 +437,25 @@ private final class RecordCell: NSTableCellView {
     @objc private func showRules(_ sender: NSButton) {
         let popover = NSPopover()
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView:
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("命中的规则").font(.headline)
-                    ForEach(Array(ruleSummaries.enumerated()), id: \.offset) { _, text in
-                        Text(text).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
-                    }
-                }.padding(16)
-            }.frame(width: 360, height: min(360, CGFloat(ruleSummaries.count) * 32 + 60))
-        )
+        let controller = NSViewController()
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        let text = NSTextView()
+        text.isEditable = false
+        text.isRichText = false
+        text.drawsBackground = false
+        text.font = .systemFont(ofSize: 13)
+        text.textContainerInset = NSSize(width: 16, height: 16)
+        text.string = (["命中的规则"] + ruleSummaries).joined(separator: "\n\n")
+        text.isVerticallyResizable = true
+        text.autoresizingMask = [.width]
+        text.textContainer?.widthTracksTextView = true
+        scroll.documentView = text
+        controller.view = scroll
+        popover.contentViewController = controller
+        popover.contentSize = NSSize(width: 360, height: min(360, CGFloat(ruleSummaries.count) * 32 + 60))
         rulesPopover = popover
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
     }

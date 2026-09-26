@@ -24,6 +24,8 @@ try:
     subprocess.run([
         "swiftc", *flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore",
         str(root / "Requestman/Features/Workspace/WorkspaceSection.swift"),
+        str(root / "Requestman/Features/Workspace/AppKitSupport.swift"),
+        str(root / "Requestman/Features/Workspace/WorkspaceView.swift"),
         str(root / "Requestman/Features/Workspace/WorkspaceSplitView.swift"),
         str(root / "Requestman/Features/Requests/RequestInspectionMode.swift"),
         str(root / "Requestman/Features/Requests/RequestCURL.swift"),

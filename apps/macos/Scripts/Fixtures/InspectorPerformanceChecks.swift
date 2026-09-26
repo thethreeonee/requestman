@@ -2,11 +2,11 @@ import AppKit
 import Foundation
 import Observation
 import RequestmanCore
-import SwiftUI
 import Darwin
 
 @MainActor @Observable
 final class WorkspaceModel {
+    var settingsSection: WorkspaceSettingsSection = .general
     var selectedStepID: UUID?
     var selectedStep: ModificationStep?
     var selection: WorkspaceSection = .rules
@@ -24,11 +24,16 @@ final class WorkspaceModel {
     }
     var captureButtonHelp: String { "测试捕获控件" }
     func toggleCapture() async { isCapturing.toggle() }
+    func setRecordingPaused(_ value: Bool) { history.paused = value }
+    func clearHistory() { history.clear() }
 }
 
 @MainActor @Observable
 final class ExecutionHistoryModel {
     var records: [CaptureRecord] = []
+    var paused = false
+    var dropped = 0
+    var filtered: [CaptureRecord] { records.filter { filter.matches($0) } }
     var selectedID: UUID?
     var filter = CaptureRecordFilter()
     var selected: CaptureRecord? { records.first { $0.id == selectedID } }
@@ -36,24 +41,14 @@ final class ExecutionHistoryModel {
 }
 
 
-struct WorkspaceSidebarContent: View {
-    let model: WorkspaceModel
-    var body: some View { Text("Sidebar").frame(maxWidth: .infinity, maxHeight: .infinity) }
+enum WorkspaceSettingsSection { case general, environments }
+@MainActor class ProjectSidebarViewController: NSViewController {
+    init(model: WorkspaceModel) { super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { nil }
+    override func loadView() { view = NSView() }
 }
-struct WorkspaceMainContent: View {
-    let model: WorkspaceModel
-    var body: some View {
-        RequestRecordsTable(records: model.history.records, selectedID: Binding(
-            get: { model.history.selectedID }, set: { model.history.selectedID = $0 }))
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-struct EnvironmentSelectionPopover: View {
-    let model: WorkspaceModel
-    let onDismiss: () -> Void
-    let openSettings: () -> Void
-    var body: some View { Text("Environment") }
-}
+@MainActor final class RulesViewController: ProjectSidebarViewController {}
+@MainActor final class StepInspectorViewController: ProjectSidebarViewController { var isPresented = false }
 
 @main @MainActor
 struct InspectorPerformanceChecks {
@@ -145,7 +140,7 @@ struct InspectorPerformanceChecks {
             let button = copyButton()!
             let buttonFrame = button.convert(button.bounds, to: inspector)
             let tabTop = inspector.isFlipped ? tabFrame.minY : inspector.bounds.height - tabFrame.maxY
-            print("Content tabs geometry: top=\(tabTop), tabs=\(tabFrame), copy=\(buttonFrame), intrinsic=\(button.intrinsicContentSize)")
+            print("Content tabs geometry: inspector=\(inspector.bounds), tabRow=\(tabs.superview!.bounds), top=\(tabTop), tabs=\(tabFrame), copy=\(buttonFrame), intrinsic=\(button.intrinsicContentSize)")
             precondition(tabTop < 180, "Content tabs must stay directly below the summary, not float mid-inspector")
             precondition(abs(tabFrame.height - tabs.intrinsicContentSize.height) <= 1,
                          "Tabs must retain their native height")
@@ -153,6 +148,8 @@ struct InspectorPerformanceChecks {
                          "Copy button must not stretch the entire tab row vertically")
             precondition(tabs.segmentDistribution == .fillEqually)
             precondition(tabFrame.minX >= 0 && buttonFrame.maxX <= inspector.bounds.width)
+            precondition(abs(buttonFrame.maxX - (inspector.bounds.width - 16)) <= 1,
+                         "Content tabs must expand across the inspector, keeping the copy action at the trailing inset")
             precondition(buttonFrame.minX > tabFrame.maxX && abs(buttonFrame.midY - tabFrame.midY) <= 1,
                          "The copy action must remain immediately to the right of the data tabs, in the same row")
             precondition(tabFrame.width + 1 >= tabs.intrinsicContentSize.width)
@@ -224,10 +221,4 @@ struct InspectorPerformanceChecks {
         print("Inspector \(label): process CPU \(String(format: "%.3f", cpu)) s / 0.6 s idle")
         precondition(cpu < 0.3, "Idle inspector consumed over half a CPU core")
     }
-}
-
-struct StepInspectorView: View {
-    let model: WorkspaceModel
-    var isPresented = true
-    var body: some View { Text("Step fixture") }
 }

@@ -1,12 +1,12 @@
 # Requestman for macOS
 
-独立的原生 macOS Web 调试工具。以项目组织请求修改，每条修改包含请求、响应两条流程；标题栏通过“请求修改 / 请求日志”切换全局页面，环境管理收纳在设置中。设置顶部的“通用 / 环境管理”与主界面的“请求修改 / 请求日志”均使用原生 `NSSegmentedControl`。界面依据 [设计稿](Docs/Design/README.md) 实现，浏览器扩展仍独立运行与发布。
+独立的纯 AppKit macOS Web 调试工具。以项目组织请求修改，每条修改包含请求、响应两条流程；标题栏通过“请求修改 / 请求日志”切换全局页面，环境管理收纳在设置中。设置顶部的“通用 / 环境管理”与主界面的“请求修改 / 请求日志”均使用原生 `NSSegmentedControl`。界面依据 [设计稿](Docs/Design/README.md) 实现，浏览器扩展仍独立运行与发布。
 
 ## 当前实现
 
 | 模块 | 已实现 |
 | --- | --- |
-| 原生工作区 | 原生侧栏与步骤 List、Form 编辑及 Inspector 详情；项目/请求修改增删与复制、启停、步骤排序、本地预览 |
+| 原生工作区 | 原生 NSOutlineView 侧栏、NSTableView 步骤、AppKit 表单及 Inspector 详情；项目/请求修改增删与复制、启停、步骤排序、本地预览 |
 | 环境 | 命名变量组增删与编辑、整组切换、固定值与 `{{env.name}}` 模板、`{{$uuid}}`、`{{$timestamp}}` |
 | HTTP/1.1 代理 | 回环监听、显式接入、双向流式转发、分块上传、可配置 HTTP 上游、停止关闭连接 |
 | 启动方式 | 通用设置选择全局接管或仅启动浏览器；主导航栏统一启动/停止，浏览器下拉显示应用图标 |
@@ -69,7 +69,7 @@ TLS 传输使用 Apple `swift-nio-ssl`。按目标域名/IP 签发短期站点�
 
 ## 请求详情
 
-主窗口使用 AppKit `NSSplitViewController` 承载左侧项目栏、主内容和右侧 Inspector；两侧使用系统侧栏角色与全高材质。选中日志后展开详情，宽度默认 520 pt，可在 400–760 pt 调整。窗口只有一条原生 `NSToolbar`：右上角的原生 `NSToolbarItem` 显式连接分栏控制器的 `toggleInspector` 动作，采用系统默认按钮外观；收起、展开后都保留，未选中记录时禁用，请求修改页不显示。列表不另设第二个展开按钮。“请求详情”标题仅在展开时显示，位于跟随右栏边界的工具栏分隔线之后，左对齐，使用系统 `.title2` 对应字号和 semibold 字重，不添加边框或额外玻璃背景。手动收起保留选择及各 Tab 浏览状态。
+主窗口使用 AppKit `NSSplitViewController` 承载左侧项目栏、主内容和右侧 Inspector；两侧使用系统侧栏角色与全高材质。选中日志后展开详情，宽度默认 520 pt，可在 400–760 pt 调整。窗口只有一条原生 `NSToolbar`：右上角的原生 `NSToolbarItem` 显式连接分栏控制器的 `toggleInspector` 动作，采用系统默认按钮外观；收起、展开后都保留，未选中有效内容时禁用；请求修改页复用该按钮控制步骤详情。列表不另设第二个展开按钮。“请求详情”标题仅在展开时显示，位于跟随右栏边界的工具栏分隔线之后，左对齐，使用系统 `.title2` 对应字号和 semibold 字重，不添加边框或额外玻璃背景。手动收起保留选择及各 Tab 浏览状态。
 
 整个窗口及详情均不设底部状态栏。详情上方保留方向、数量、“仅显示变更”和内容提示，数据区域延伸至底部操作区上方。底部只保留搜索和 JSON 原始数据切换，横向 12 pt、纵向 10 pt 留白与左栏一致。侧栏使用系统背景，字段树和原始数据视图不再铺设独立白底。此轮原生窗口布局和外观仍待真实 App 运行验收。
 
@@ -102,11 +102,18 @@ python3 apps/macos/Scripts/check-request-inspection.py
 python3 apps/macos/Scripts/check-request-filters.py
 python3 apps/macos/Scripts/check-workspace-sidebar.py
 python3 apps/macos/Scripts/check-inspector-performance.py
+python3 apps/macos/Scripts/check-header-suggestions.py
+python3 apps/macos/Scripts/check-rules-ui.py
+python3 apps/macos/Scripts/check-settings-ui.py
 python3 apps/macos/Scripts/check-browser-discovery.py
 ```
 
 核心与代理测试包含核心资源/取消/模板/匹配测试、本地回环网络集成、上游启动检查与选择分支，以及 7 项系统代理设置与恢复测试。网络集成覆盖真实请求与响应修改、Mock 不访问主上游、分块上传、替换 Body、HEAD、CONNECT 首包及上游串联、错误记录、停止释放端口。上游检查测试覆盖回环连接、关闭连接、失败时限、取消，以及关闭上游/保留上游/取消启动三个分支。实时配置测试覆盖上游启用/关闭和无效回环配置、新端口启动与失败回滚、系统恢复失败保留监听。双模式生命周期测试验证浏览器启动、上游与端口重配、失败回滚和停止时系统代理调用为零，以及全局会话的接管/恢复顺序、模式保留和旧日志恢复失败的阻断。系统设置测试使用内存替身，覆盖多服务恢复、外部修改保留、授权拒绝、应用失败重试及损坏恢复文件，不修改测试机器的网络设置。宿主源文件另通过 Swift 6 静态类型检查。浏览器检查脚本验证 Chromium 识别、嵌入式应用与更新缓存过滤、去重、应用失效及调试配置隔离，并只读列出本机浏览器，不启动应用或修改系统代理。
 
-工作区侧栏检查脚本使用实际 `WorkspaceSplitView` 原生壳与模型、内容替身，在不显示的 `NSWindow` 中检查布局、工具栏和状态同步；这类回归不代表真实 App 的视觉验收通过。
+工作区侧栏检查脚本使用实际 `WorkspaceSplitController` 原生壳与模型、内容替身，在不显示的 `NSWindow` 中检查布局、工具栏和状态同步；这类回归不代表真实 App 的视觉验收通过。
 
 这些检查没有构建、安装或运行 App，也不代表 Chrome 界面和真实网站验收、Surge 真实共存或性能基准已通过。手动验收重点包括上游不可用时两种启动方式的原生提示和三种选择、系统授权允许/取消、Wi-Fi 与以太网切换、停止与退出恢复原设置、崩溃后重新打开恢复、监听期间外部代理改动，以及原有工作区和 Chrome 接入流程。遵守仓库约束，不使用 Xcode / `xcodebuild` 编译并部署 App 到真机，也不拆分操作绕过此约束。
+
+## AppKit 界面
+
+应用入口、主窗口、设置、环境、请求编辑、请求日志和全部弹层均由 AppKit 实现。保留现有三栏宽度、工具栏顺序、步骤卡片、分组设置及请求详情布局；Observation 仅用于模型变更追踪，不承载界面。窗口直接约束分栏和各页，避免跨框架尺寸协商。`python3 Scripts/check-native-sources.py --typecheck` 检查工程引用、纯 AppKit 约束和 Swift 6 类型；各 `check-*-ui.py` 与既有详情/分栏脚本运行隐藏窗口回归，不构建或启动完整 App。

@@ -1,128 +1,146 @@
 import AppKit
-import SwiftUI
 import RequestmanCore
 
-struct RequestPayloadView: View {
-    let record: CaptureRecord
+@MainActor
+final class RequestPayloadViewController: NSViewController, NSSearchFieldDelegate {
+    private let record: CaptureRecord
     let tab: RequestDetailTab
-    let isActive: Bool
-    let version: InspectionVersion
-    @State private var format: InspectionFormat = .tree
-    @State private var search = ""
-    @State private var onlyChanges = false
-    @State private var presentation: RequestPayloadPresentation?
-    @State private var presentedVersion: InspectionVersion?
-    @State private var isLoading = true
+    var onCopyChange: () -> Void = {}
+    private var format: InspectionFormat = .tree
+    private var search = ""
+    private var onlyChanges = false
+    private var presentation: RequestPayloadPresentation?
+    private var version: InspectionVersion
+    private var presentedVersion: InspectionVersion?
+    private var active = false
+    private var isLoading = true
+    private var task: Task<Void, Never>?
+    private var generation = 0
+    private let directionLabel = NativeUI.label("", size: 11, secondary: true)
+    private let summary = NativeUI.label("", size: 11, secondary: true)
+    private let notice = NSTextField(wrappingLabelWithString: "")
+    private let changes = NSButton(checkboxWithTitle: "仅显示变更", target: nil, action: nil)
+    private let outline = RequestDataOutline()
+    private let source = RequestSourceView()
+    private let empty = RequestEmptyStateView()
+    private let progress = NSProgressIndicator()
+    private let formatButton = NSButton(title: "原始数据", target: nil, action: nil)
+    private let searchField = NSSearchField()
+    private let dataContainer = NSView()
+    private var header: NSStackView!
 
-    private var visibleNodes: [RequestDataNode] {
-        RequestInspectionData.filtering(presentation?.nodes ?? [], query: search, onlyChanges: onlyChanges)
+    init(record: CaptureRecord, tab: RequestDetailTab, version: InspectionVersion) {
+        self.record = record; self.tab = tab; self.version = version
+        super.init(nibName: nil, bundle: nil)
     }
-
-    private var searchPrompt: String {
-        guard tab.isBody else { return "查找\(tab.title)" }
-        return presentation?.isJSON == true && format == .tree ? "查找键或值" : "查找原始数据"
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if let presentation {
-                HStack(spacing: 8) {
-                    Text(direction).lineLimit(1)
-                    Spacer(minLength: 0)
-                    Text(presentation.summary).lineLimit(1).help(presentation.footer)
-                    if presentation.canCompare && (!tab.isBody || (presentation.isJSON && format == .tree)) {
-                        Toggle("仅显示变更", isOn: $onlyChanges)
-                            .toggleStyle(.checkbox).controlSize(.small).fixedSize()
-                            .disabled(isLoading)
-                    }
-                }
-                .font(.caption).foregroundStyle(.secondary)
-                .padding(.horizontal, 16).padding(.bottom, 10)
-                if let notice = presentation.notice {
-                    Text(notice).font(.caption).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16).padding(.bottom, 8)
-                }
-                Divider()
-                content(presentation)
-                    .opacity(isLoading ? 0 : 1)
-                    .allowsHitTesting(!isLoading && isActive)
-                    .overlay { if isLoading { ProgressView().controlSize(.small) } }
-            } else {
-                Spacer()
-                ProgressView("正在读取内容").controlSize(.small)
-                Spacer()
-            }
-            RequestPayloadControls(
-                format: $format, search: $search,
-                searchPrompt: searchPrompt,
-                showsFormat: tab.isBody && presentation?.isJSON == true,
-                isLoading: isLoading, isActive: isActive
-            )
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+    required init?(coder: NSCoder) { nil }
+    deinit { task?.cancel() }
+    override func loadView() {
+        view = FlippedView()
+        changes.controlSize = .small; changes.target = self; changes.action = #selector(toggleChanges)
+        directionLabel.lineBreakMode = .byTruncatingTail; summary.lineBreakMode = .byTruncatingTail
+        summary.setContentHuggingPriority(.required, for: .horizontal)
+        changes.setContentHuggingPriority(.required, for: .horizontal)
+        notice.font = .systemFont(ofSize: 11); notice.textColor = .secondaryLabelColor
+        let info = NativeUI.stack([directionLabel, NSView(), summary, changes], vertical: false, spacing: 8)
+        info.distribution = .fill
+        header = NativeUI.stack([info, notice], spacing: 8)
+        header.alignment = .leading
+        info.widthAnchor.constraint(equalTo: header.widthAnchor, constant: -32).isActive = true
+        notice.widthAnchor.constraint(equalTo: header.widthAnchor, constant: -32).isActive = true
+        header.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 10, right: 16)
+        let separator = NSBox(); separator.boxType = .separator
+        progress.style = .spinning; progress.controlSize = .small
+        for child in [outline, source] { NativeUI.pin(child, to: dataContainer) }
+        for child in [empty, progress] {
+            child.translatesAutoresizingMaskIntoConstraints = false; dataContainer.addSubview(child)
+            child.centerXAnchor.constraint(equalTo: dataContainer.centerXAnchor).isActive = true
+            child.centerYAnchor.constraint(equalTo: dataContainer.centerYAnchor).isActive = true
         }
-        .preference(key: RequestPayloadCopyKey.self, value: copyContent)
-        .task(id: version) {
-            isLoading = true
-            let snapshot = record
-            let selectedTab = tab
-            let selectedVersion = version
-            let worker = Task.detached(priority: .userInitiated) {
-                RequestPayloadPresentation.make(record: snapshot, tab: selectedTab, version: selectedVersion)
-            }
-            let next = await withTaskCancellationHandler {
-                await worker.value
-            } onCancel: { worker.cancel() }
-            guard !Task.isCancelled else { return }
-            presentation = next
-            presentedVersion = selectedVersion
-            isLoading = false
-            if !next.canCompare { onlyChanges = false }
-        }
-        .onChange(of: format) { _, _ in NSApp.keyWindow?.makeFirstResponder(nil) }
-        .onChange(of: version) { _, _ in
-            if isActive, !(NSApp.keyWindow?.firstResponder is NSSegmentedControl) {
-                NSApp.keyWindow?.makeFirstResponder(nil)
-            }
+        empty.widthAnchor.constraint(lessThanOrEqualTo: dataContainer.widthAnchor, constant: -32).isActive = true
+        formatButton.target = self; formatButton.action = #selector(toggleFormat)
+        searchField.delegate = self; searchField.sendsSearchStringImmediately = true
+        searchField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        searchField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for control in [formatButton, searchField] as [NSControl] { control.controlSize = .large }
+        if #available(macOS 26.0, *) { formatButton.bezelStyle = .glass; formatButton.borderShape = .capsule }
+        else { formatButton.bezelStyle = .rounded }
+        formatButton.setContentHuggingPriority(.required, for: .horizontal)
+        let controls = NativeUI.stack([formatButton, searchField], vertical: false, spacing: 10)
+        controls.distribution = .fill
+        controls.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        let stack = NativeUI.stack([header, separator, dataContainer, controls], spacing: 0)
+        NativeUI.pin(stack, to: view)
+        for child in [header!, separator, dataContainer, controls] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        dataContainer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        dataContainer.heightAnchor.constraint(greaterThanOrEqualToConstant: 0).isActive = true
+        searchField.heightAnchor.constraint(equalToConstant: searchField.intrinsicContentSize.height).isActive = true
+        formatButton.heightAnchor.constraint(equalTo: searchField.heightAnchor).isActive = true
+        loadPresentation()
+    }
+    func update(version: InspectionVersion, isActive: Bool) {
+        let changed = self.version != version
+        self.version = version; active = isActive
+        guard isViewLoaded else { return }
+        if changed {
+            if active, !(view.window?.firstResponder is NSSegmentedControl) { view.window?.makeFirstResponder(nil) }
+            loadPresentation()
+        } else { refreshContent() }
+    }
+    var copyContent: RequestPayloadCopyContent? {
+        guard active, !isLoading, let presentation, let presentedVersion else { return nil }
+        return .init(tab: tab, version: presentedVersion, text: presentation.copyText)
+    }
+    private func loadPresentation() {
+        task?.cancel(); generation += 1
+        let generation = generation, snapshot = record, tab = tab, version = version
+        isLoading = true; refreshContent()
+        task = Task { @MainActor [weak self] in
+            let worker = Task.detached(priority: .userInitiated) { RequestPayloadPresentation.make(record: snapshot, tab: tab, version: version) }
+            let result = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+            guard !Task.isCancelled, let self, self.generation == generation else { return }
+            self.presentation = result; self.presentedVersion = version; self.isLoading = false
+            if !result.canCompare { self.onlyChanges = false }
+            self.refreshContent()
         }
     }
-
-    private var copyContent: RequestPayloadCopyContent? {
-        guard isActive, !isLoading, let presentation, let presentedVersion else { return nil }
-        return RequestPayloadCopyContent(tab: tab, version: presentedVersion, text: presentation.copyText)
+    private func refreshContent() {
+        guard isViewLoaded else { return }
+        directionLabel.stringValue = direction
+        summary.stringValue = presentation?.summary ?? ""
+        summary.toolTip = presentation?.footer
+        notice.stringValue = presentation?.notice ?? ""; notice.isHidden = presentation?.notice == nil
+        changes.isHidden = !(presentation?.canCompare == true && (!tab.isBody || (presentation?.isJSON == true && format == .tree)))
+        changes.state = onlyChanges ? .on : .off; changes.isEnabled = !isLoading && active
+        let usesSource = tab.isBody && (presentation?.isJSON != true || format == .source)
+        let nodes = RequestInspectionData.filtering(presentation?.nodes ?? [], query: search, onlyChanges: onlyChanges)
+        let showsContent = active && !isLoading && presentation?.emptyTitle == nil
+        outline.update(nodes: nodes, showsTypes: tab.isBody, isVisible: showsContent && !usesSource,
+                       stateKey: "\(version.rawValue)-\(search.isEmpty ? "all" : "search")-\(onlyChanges)", expandsMatches: !search.isEmpty || onlyChanges)
+        outline.isHidden = usesSource || isLoading || presentation?.emptyTitle != nil
+        source.update(text: presentation?.source ?? "", search: usesSource ? search : "", stateKey: version.rawValue, isVisible: showsContent && usesSource)
+        source.isHidden = !usesSource || isLoading || presentation?.emptyTitle != nil
+        let title = presentation?.emptyTitle ?? ((!usesSource && nodes.isEmpty) ? (onlyChanges ? "没有符合条件的变更" : "没有匹配字段") : "")
+        empty.update(title: title, description: presentation?.emptyDescription ?? "调整搜索或筛选条件。", symbol: presentation?.emptyTitle == nil ? "magnifyingglass" : "doc.text")
+        empty.isHidden = title.isEmpty || isLoading
+        progress.isHidden = !isLoading
+        if isLoading { progress.startAnimation(nil) } else { progress.stopAnimation(nil) }
+        formatButton.isHidden = !(tab.isBody && presentation?.isJSON == true)
+        formatButton.title = format == .tree ? "原始数据" : "树形视图"
+        formatButton.toolTip = format == .tree ? "查看当前版本的原始数据" : "以字段树查看当前版本的 JSON"
+        formatButton.isEnabled = active && !isLoading
+        if searchField.stringValue != search { searchField.stringValue = search }
+        let prompt = !tab.isBody ? "查找\(tab.title)" : (presentation?.isJSON == true && format == .tree ? "查找键或值" : "查找原始数据")
+        searchField.placeholderString = prompt; searchField.setAccessibilityLabel(prompt); searchField.isEnabled = active
+        if !active, let editor = searchField.currentEditor(), editor === view.window?.firstResponder { view.window?.makeFirstResponder(nil) }
+        onCopyChange()
     }
-
-    private func content(_ data: RequestPayloadPresentation) -> some View {
-        let usesSource = tab.isBody && (!data.isJSON || format == .source)
-        let showsContent = isActive && !isLoading && data.emptyTitle == nil
-        let nodes = visibleNodes
-        return ZStack {
-            // Keep both native views alive across format/search/version changes.
-            RequestDataOutline(nodes: nodes, showsTypes: tab.isBody,
-                               isVisible: showsContent && !usesSource,
-                               stateKey: "\(version.rawValue)-\(search.isEmpty ? "all" : "search")-\(onlyChanges)",
-                               expandsMatches: !search.isEmpty || onlyChanges)
-                .opacity(!usesSource && data.emptyTitle == nil ? 1 : 0)
-                .allowsHitTesting(!usesSource && data.emptyTitle == nil)
-                .accessibilityHidden(usesSource || data.emptyTitle != nil)
-            if tab.isBody {
-                RequestSourceView(text: data.source, search: usesSource ? search : "", stateKey: version.rawValue,
-                                  isVisible: showsContent && usesSource)
-                    .opacity(usesSource && data.emptyTitle == nil ? 1 : 0)
-                    .allowsHitTesting(usesSource && data.emptyTitle == nil)
-                    .accessibilityHidden(!usesSource || data.emptyTitle != nil)
-            }
-            if let title = data.emptyTitle {
-                ContentUnavailableView(title, systemImage: "doc.text", description: Text(data.emptyDescription ?? ""))
-            } else if !usesSource && nodes.isEmpty {
-                ContentUnavailableView(onlyChanges ? "没有符合条件的变更" : "没有匹配字段", systemImage: "magnifyingglass",
-                                       description: Text("调整搜索或筛选条件。"))
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    @objc private func toggleChanges() { onlyChanges = changes.state == .on; refreshContent() }
+    @objc private func toggleFormat() {
+        format = format == .tree ? .source : .tree
+        view.window?.makeFirstResponder(nil); refreshContent()
     }
-
+    func controlTextDidChange(_ notification: Notification) { search = searchField.stringValue; refreshContent() }
     private var direction: String {
         if version == .difference { return tab.isRequest ? "客户端原始 → 发往服务器" : "服务器原始 → 发往客户端" }
         if tab.isRequest { return version == .original ? "客户端原始请求" : "发往服务器" }
@@ -138,124 +156,12 @@ struct RequestPayloadCopyContent: Equatable, Sendable {
     let text: String
 }
 
-struct RequestPayloadCopyKey: PreferenceKey {
-    static let defaultValue: RequestPayloadCopyContent? = nil
-
-    static func reduce(value: inout RequestPayloadCopyContent?, nextValue: () -> RequestPayloadCopyContent?) {
-        if let next = nextValue() { value = next }
-    }
-}
-
-/// The inspector's bottom controls use the same AppKit sizing as the project sidebar.
-private struct RequestPayloadControls: NSViewRepresentable {
-    @Binding var format: InspectionFormat
-    @Binding var search: String
-    let searchPrompt: String
-    let showsFormat: Bool
-    let isLoading: Bool
-    let isActive: Bool
-
-    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
-
-    func makeNSView(context: Context) -> ControlsView {
-        let view = ControlsView()
-        view.formatButton.target = context.coordinator
-        view.formatButton.action = #selector(Coordinator.toggleFormat(_:))
-        view.searchField.delegate = context.coordinator
-        return view
-    }
-
-    func updateNSView(_ view: ControlsView, context: Context) {
-        context.coordinator.parent = self
-        if !isActive, let editor = view.searchField.currentEditor(), editor === view.window?.firstResponder {
-            view.window?.makeFirstResponder(nil)
-        }
-        view.isHidden = !isActive
-        let enabled = context.environment.isEnabled && isActive
-        view.formatButton.isHidden = !showsFormat
-        view.formatButton.title = format == .tree ? "原始数据" : "树形视图"
-        view.formatButton.toolTip = format == .tree ? "查看当前版本的原始数据" : "以字段树查看当前版本的 JSON"
-        view.formatButton.isEnabled = enabled && !isLoading
-        if view.searchField.stringValue != search { view.searchField.stringValue = search }
-        view.searchField.placeholderString = searchPrompt
-        view.searchField.setAccessibilityLabel(searchPrompt)
-        view.searchField.isEnabled = enabled
-    }
-
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: ControlsView, context: Context) -> CGSize? {
-        CGSize(width: proposal.width ?? 376, height: nsView.fittingSize.height)
-    }
-
-    @MainActor final class Coordinator: NSObject, NSSearchFieldDelegate {
-        var parent: RequestPayloadControls
-        init(parent: RequestPayloadControls) { self.parent = parent }
-
-        @objc func toggleFormat(_ sender: NSButton) {
-            parent.format = parent.format == .tree ? .source : .tree
-        }
-
-        func controlTextDidChange(_ notification: Notification) {
-            guard let field = notification.object as? NSSearchField else { return }
-            parent.search = field.stringValue
-        }
-    }
-
-    final class ControlsView: NSView {
-        let formatButton = NSButton(title: "原始数据", target: nil, action: nil)
-        let searchField = NSSearchField()
-
-        override init(frame frameRect: NSRect) {
-            super.init(frame: frameRect)
-            searchField.sendsSearchStringImmediately = true
-            searchField.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            searchField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-            for control in [formatButton, searchField] as [NSControl] {
-                control.controlSize = .large
-                control.translatesAutoresizingMaskIntoConstraints = false
-            }
-            formatButton.setContentHuggingPriority(.required, for: .horizontal)
-            formatButton.setContentCompressionResistancePriority(.required, for: .horizontal)
-            if #available(macOS 26.0, *) {
-                formatButton.bezelStyle = .glass
-                formatButton.borderShape = .capsule
-            } else {
-                formatButton.bezelStyle = .rounded
-            }
-
-            let stack = NSStackView(views: [formatButton, searchField])
-            stack.orientation = .horizontal
-            stack.alignment = .centerY
-            stack.spacing = 10
-            stack.detachesHiddenViews = true
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(stack)
-            NSLayoutConstraint.activate([
-                stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-                stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-                stack.topAnchor.constraint(equalTo: topAnchor),
-                stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-                searchField.heightAnchor.constraint(equalToConstant: searchField.intrinsicContentSize.height),
-                formatButton.heightAnchor.constraint(equalTo: searchField.heightAnchor)
-            ])
-        }
-
-        required init?(coder: NSCoder) { nil }
-    }
-}
-
-/// Read-only native text selection, find highlighting and copying for non-JSON bodies and source mode.
-private struct RequestSourceView: NSViewRepresentable {
-    let text: String
-    let search: String
-    let stateKey: String
-    let isVisible: Bool
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
-        scroll.isHidden = !isVisible
+@MainActor
+final class RequestSourceView: NSView {
+    private let scroll = NSScrollView()
+    private let coordinator = Coordinator()
+    override init(frame: NSRect) {
+        super.init(frame: frame)
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
@@ -278,10 +184,16 @@ private struct RequestSourceView: NSViewRepresentable {
         view.textContainer?.containerSize = NSSize(width: scroll.contentSize.width, height: .greatestFiniteMagnitude)
         view.setAccessibilityLabel("Body 源码")
         scroll.documentView = view
-        return scroll
+        scroll.frame = bounds
+        scroll.autoresizingMask = [.width, .height]
+        addSubview(scroll)
     }
+    convenience init() { self.init(frame: .zero) }
+    required init?(coder: NSCoder) { nil }
 
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
+    func setFont(_ font: NSFont) { (scroll.documentView as? NSTextView)?.font = font }
+
+    func update(text: String, search: String, stateKey: String, isVisible: Bool) {
         guard let view = scroll.documentView as? NSTextView else { return }
         // Keep the view alive for scroll state, but hide it natively as well
         // so its I-beam cursor regions cannot cover the visible field table.
@@ -292,7 +204,6 @@ private struct RequestSourceView: NSViewRepresentable {
             scroll.isHidden = !isVisible
             view.window?.invalidateCursorRects(for: view)
         }
-        let coordinator = context.coordinator
         let changed = coordinator.text != text || coordinator.stateKey != stateKey
         if changed {
             coordinator.positions[coordinator.stateKey] = scroll.contentView.bounds.origin
@@ -326,5 +237,34 @@ private struct RequestSourceView: NSViewRepresentable {
         var search = ""
         var stateKey = ""
         var positions: [String: NSPoint] = [:]
+    }
+}
+
+/// Business empty-state content built from native labels and an image view.
+@MainActor
+final class RequestEmptyStateView: NSView {
+    private let icon = NSImageView()
+    private var symbolName = ""
+    private let title = NativeUI.label("", size: 20, weight: .semibold)
+    private let detail = NSTextField(wrappingLabelWithString: "")
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        icon.contentTintColor = .tertiaryLabelColor
+        icon.symbolConfiguration = .init(pointSize: 40, weight: .regular)
+        title.alignment = .center; detail.alignment = .center
+        detail.font = .systemFont(ofSize: 13); detail.textColor = .secondaryLabelColor
+        let stack = NativeUI.stack([icon, title, detail], spacing: 10)
+        stack.alignment = .centerX
+        NativeUI.pin(stack, to: self)
+        detail.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
+        title.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 46).isActive = true
+    }
+    convenience init() { self.init(frame: .zero) }
+    required init?(coder: NSCoder) { nil }
+    override var intrinsicContentSize: NSSize { NSSize(width: 320, height: 130) }
+    func update(title: String, description: String, symbol: String) {
+        self.title.stringValue = title; detail.stringValue = description
+        if symbolName != symbol { icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); symbolName = symbol }
     }
 }

@@ -23,10 +23,12 @@ try:
     executable = temporary / "check"
     subprocess.run([
         "swiftc", *flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore",
+        str(root / "Requestman/Features/Workspace/AppKitSupport.swift"),
+        str(root / "Requestman/Features/Workspace/WorkspaceView.swift"),
         str(root / "Requestman/Features/Workspace/WorkspaceSection.swift"),
         str(root / "Requestman/Features/Workspace/WorkspaceSplitView.swift"),
         str(root / "Requestman/Features/Workspace/WorkspaceSectionControl.swift"),
-        *map(str, sorted(p for p in (root / "Requestman/Features/Requests").glob("Request*.swift") if p.name != "RequestsView.swift")),
+        *map(str, sorted(p for p in (root / "Requestman/Features/Requests").glob("Request*.swift"))),
         str(root / "Scripts/Fixtures/InspectorPerformanceChecks.swift"), "-o", str(executable),
     ], check=True)
     try:

@@ -1,64 +1,29 @@
 import AppKit
-import SwiftUI
 
 /// Mirrored from ModifyHeadersRuleDetail.tsx / COMMON_HEADERS. Keep names and order identical.
-struct HeaderNameField: NSViewRepresentable {
-    @Binding var name: String
+@MainActor final class HeaderNameField: NSComboBox, NSComboBoxDelegate {
     static let suggestions = [
-        "Accept",
-        "Accept-Encoding",
-        "Accept-Language",
-        "Authorization",
-        "Cache-Control",
-        "Content-Length",
-        "Content-Type",
-        "Cookie",
-        "Host",
-        "Origin",
-        "Pragma",
-        "Referer",
-        "Operation-Type",
-        "User-Agent",
-        "X-Forwarded-For",
-        "X-Requested-With",
-        "ETag",
-        "If-Modified-Since",
-        "Last-Modified",
-        "Location",
-        "Set-Cookie",
-        "Access-Control-Allow-Origin",
-        "Access-Control-Allow-Headers",
-        "Access-Control-Allow-Methods",
-        "Access-Control-Expose-Headers",
+        "Accept", "Accept-Encoding", "Accept-Language", "Authorization", "Cache-Control",
+        "Content-Length", "Content-Type", "Cookie", "Host", "Origin", "Pragma", "Referer",
+        "Operation-Type", "User-Agent", "X-Forwarded-For", "X-Requested-With", "ETag",
+        "If-Modified-Since", "Last-Modified", "Location", "Set-Cookie", "Access-Control-Allow-Origin",
+        "Access-Control-Allow-Headers", "Access-Control-Allow-Methods", "Access-Control-Expose-Headers",
     ]
-    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
-    func makeNSView(context: Context) -> NSComboBox {
-        let control = NSComboBox()
-        control.addItems(withObjectValues: Self.suggestions)
-        control.isEditable = true
-        control.completes = true
-        control.numberOfVisibleItems = 12
-        control.placeholderString = "选择或输入 Header"
-        control.setAccessibilityLabel("Header 名称")
-        control.delegate = context.coordinator
-        control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return control
+    var onChange: (String) -> Void
+    init(name: String = "", onChange: @escaping (String) -> Void) {
+        self.onChange = onChange
+        super.init(frame: .zero)
+        addItems(withObjectValues: Self.suggestions)
+        isEditable = true; completes = true; numberOfVisibleItems = 12
+        placeholderString = "选择或输入 Header"
+        setAccessibilityLabel("Header 名称")
+        delegate = self; stringValue = name
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     }
-    func updateNSView(_ control: NSComboBox, context: Context) {
-        context.coordinator.parent = self
-        if control.stringValue != name { control.stringValue = name }
-        control.isEnabled = context.environment.isEnabled
-    }
-    @MainActor final class Coordinator: NSObject, NSComboBoxDelegate {
-        var parent: HeaderNameField
-        init(parent: HeaderNameField) { self.parent = parent }
-        func controlTextDidChange(_ notification: Notification) {
-            guard let control = notification.object as? NSComboBox else { return }
-            parent.name = control.stringValue
-        }
-        func comboBoxSelectionDidChange(_ notification: Notification) {
-            guard let control = notification.object as? NSComboBox, let name = control.objectValueOfSelectedItem as? String else { return }
-            parent.name = name
-        }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func controlTextDidChange(_ notification: Notification) { onChange(stringValue) }
+    func comboBoxSelectionDidChange(_ notification: Notification) {
+        guard let name = objectValueOfSelectedItem as? String else { return }
+        stringValue = name; onChange(name)
     }
 }
