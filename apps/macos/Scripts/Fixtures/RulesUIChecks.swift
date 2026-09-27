@@ -130,7 +130,62 @@ import RequestmanCore
                 }
             }
         }
+        checkGutterBaselineRendering()
         print("Numbered editors passed: template/literal Body and JavaScript, aligned ruler/text edges, rounded clipping, resizing and scrolling")
+    }
+
+    static func checkGutterBaselineRendering() {
+        let area = CodeEditorView(language: .plaintext)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 240), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = area
+        defer { window.close() }
+        area.string = (1...60).map(String.init).joined(separator: "\n")
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            area.appearance = NSAppearance(named: appearance)
+            for style in [NSScroller.Style.overlay, .legacy] {
+                area.scrollerStyle = style
+                for offset in [0, (area.string as NSString).length] {
+                    area.textView.scrollToRange(NSRange(location: offset, length: 0))
+                    settleEditor(area)
+                    let gutter = descendants(area).compactMap { $0 as? GutterView }.first!
+                    let separator = descendants(gutter).compactMap { $0 as? NSBox }.first { $0.identifier?.rawValue == "editor.gutterSeparator" }!
+                    precondition(separator.boxType == .separator && abs(separator.alignmentRect(forFrame: separator.frame).maxX - gutter.bounds.maxX) <= 0.5, "Separator frame=\(separator.frame), gutter=\(gutter.bounds)")
+                    precondition(abs(area.textView.textInsets.left - gutter.frame.width - 8) < 0.5)
+                    let bitmap = area.bitmapImageRepForCachingDisplay(in: area.bounds)!
+                    area.cacheDisplay(in: area.bounds, to: bitmap)
+                    let scale = CGFloat(bitmap.pixelsWide) / area.bounds.width
+                    let dark = appearance == .darkAqua
+                    func inkBottom(in rect: NSRect) -> Int? {
+                        let top = area.isFlipped ? rect.minY : area.bounds.height - rect.maxY
+                        let x0 = max(0, Int(ceil(rect.minX * scale))), x1 = min(bitmap.pixelsWide, Int(floor(rect.maxX * scale)))
+                        let y0 = max(0, Int(ceil(top * scale))), y1 = min(bitmap.pixelsHigh, Int(floor((top + rect.height) * scale)))
+                        guard x0 < x1, y0 < y1 else { return nil }
+                        return (y0..<y1).last { y in
+                            (x0..<x1).contains { x in
+                                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB), color.alphaComponent > 0.5 else { return false }
+                                return dark ? min(color.redComponent, color.greenComponent, color.blueComponent) > 0.5 : max(color.redComponent, color.greenComponent, color.blueComponent) < 0.65
+                            }
+                        }
+                    }
+                    var checked = 0
+                    for line in area.textView.layoutManager.linesStartingAt(area.contentView.bounds.minY, until: area.contentView.bounds.maxY) {
+                        guard line.index > 0, let fragment = line.data.lineFragments.first?.data else { continue }
+                        let row = area.textView.convert(NSRect(x: 0, y: line.yPos, width: area.textView.bounds.width, height: fragment.scaledHeight), to: area)
+                        guard area.bounds.insetBy(dx: 0, dy: 8).contains(row.intersection(NSRect(x: 0, y: row.minY, width: area.bounds.width, height: row.height))) else { continue }
+                        let numberRect = NSRect(x: 4, y: row.minY, width: gutter.frame.width - 12, height: row.height)
+                        let textRect = NSRect(x: area.textView.textInsets.left, y: row.minY, width: 24, height: row.height)
+                        guard let numberBottom = inkBottom(in: numberRect), let textBottom = inkBottom(in: textRect) else { preconditionFailure("Missing rendered line number or text") }
+                        precondition(abs(numberBottom - textBottom) <= Int(ceil(scale)), "Rendered number/text baselines differ: line=\(line.index + 1), number=\(numberBottom), text=\(textBottom), scale=\(scale)")
+                        checked += 1
+                    }
+                    precondition(checked >= 3, "Baseline comparison must cover multiple visible lines")
+                    if let path = ProcessInfo.processInfo.environment["REQUESTMAN_GUTTER_PREVIEW"], appearance == .aqua, style == .overlay, offset == 0 {
+                        try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
+                    }
+                }
+            }
+        }
+        print("Rendered gutter passed: number/text baselines, native separator and spacing, both themes and scroller styles, before/after scrolling")
     }
 
     static func checkSingleLineBackgrounds() {

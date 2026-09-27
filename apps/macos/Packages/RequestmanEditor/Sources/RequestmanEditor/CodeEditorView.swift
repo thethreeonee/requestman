@@ -34,14 +34,15 @@ import CodeEditTextView
                             textColor: .secondaryLabelColor, selectedTextColor: .labelColor,
                             textView: textView, delegate: self)
         gutter.backgroundColor = .textBackgroundColor
-        gutter.highlightSelectedLines = false
         gutter.edgeInsets = .init(leading: 8, trailing: 8)
         gutter.backgroundEdgeInsets = .init(leading: 0, trailing: 0)
         gutter.translatesAutoresizingMaskIntoConstraints = true
         addFloatingSubview(gutter, for: .horizontal)
         gutter.updateWidthIfNeeded()
+        contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(invalidateGutter), name: NSView.boundsDidChangeNotification, object: contentView)
         NotificationCenter.default.addObserver(self, selector: #selector(textChanged), name: TextView.textDidChangeNotification, object: textView)
-        NotificationCenter.default.addObserver(self, selector: #selector(selectionChanged), name: TextSelectionManager.selectionChangedNotification, object: textView.selectionManager)
+        NotificationCenter.default.addObserver(self, selector: #selector(invalidateGutter), name: TextSelectionManager.selectionChangedNotification, object: textView.selectionManager)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -69,7 +70,7 @@ import CodeEditTextView
     }
 
     public func gutterViewWidthDidUpdate() {
-        textView.textInsets = .init(left: gutter?.frame.width ?? 40, right: 8)
+        textView.textInsets = .init(left: (gutter?.frame.width ?? 40) + 8, right: 8)
         needsLayout = true
     }
 
@@ -93,7 +94,7 @@ import CodeEditTextView
         scheduleHighlight()
     }
 
-    @objc private func selectionChanged() { gutter.needsDisplay = true }
+    @objc private func invalidateGutter() { gutter.needsDisplay = true }
     @objc private func textChanged() {
         guard !assigningText else { return }
         scheduleHighlight(); needsLayout = true

@@ -1,5 +1,6 @@
 // Adapted from CodeEditSourceEditor 0.15.2 (MIT); see ThirdPartyNotices.md.
-// Changes: remove folding/controller dependencies; use owner-driven invalidation.
+// Changes: remove folding/controller dependencies; use owner-driven invalidation,
+// the text fragment baseline, and a native gutter separator.
 //
 //  GutterView.swift
 //  CodeEditSourceEditor
@@ -45,11 +46,7 @@ public class GutterView: NSView {
 
     var textColor: NSColor = .secondaryLabelColor
 
-    var font: NSFont = .systemFont(ofSize: 13) {
-        didSet {
-            updateFontLineHeight()
-        }
-    }
+    var font: NSFont = .systemFont(ofSize: 13)
 
     var edgeInsets: EdgeInsets = EdgeInsets(leading: 20, trailing: 12)
 
@@ -61,26 +58,11 @@ public class GutterView: NSView {
 
     var selectedLineTextColor: NSColor? = .labelColor
 
-    var selectedLineColor: NSColor = NSColor.selectedTextBackgroundColor.withSystemEffect(.disabled)
-
     private weak var textView: TextView?
     private weak var delegate: GutterViewDelegate?
     private var maxLineNumberWidth: CGFloat = 0
     /// The maximum number of digits found for a line number.
     private var maxLineLength: Int = 0
-
-    private var fontLineHeight = 1.0
-
-    private func updateFontLineHeight() {
-        let string = NSAttributedString(string: "0", attributes: [.font: font])
-        let typesetter = CTTypesetterCreateWithAttributedString(string)
-        let ctLine = CTTypesetterCreateLine(typesetter, CFRangeMake(0, 1))
-        var ascent: CGFloat = 0
-        var descent: CGFloat = 0
-        var leading: CGFloat = 0
-        CTLineGetTypographicBounds(ctLine, &ascent, &descent, &leading)
-        fontLineHeight = (ascent + descent + leading)
-    }
 
     private let foldingRibbonWidth: CGFloat = 0
 
@@ -110,8 +92,17 @@ public class GutterView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         layer?.masksToBounds = true
 
-
-
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.identifier = .init("editor.gutterSeparator")
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(separator)
+        NSLayoutConstraint.activate([
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor),
+            separator.topAnchor.constraint(equalTo: topAnchor),
+            separator.bottomAnchor.constraint(equalTo: bottomAnchor),
+            separator.widthAnchor.constraint(equalToConstant: 1)
+        ])
     }
 
     required init?(coder: NSCoder) {
@@ -174,7 +165,7 @@ public class GutterView: NSView {
         context.saveGState()
 
         var highlightedLines: Set<UUID> = []
-        context.setFillColor(selectedLineColor.cgColor)
+        context.setFillColor(selectionManager.selectedLineBackgroundColor.cgColor)
 
         let xPos = backgroundEdgeInsets.leading
         let width = frame.width - backgroundEdgeInsets.trailing
@@ -186,14 +177,10 @@ public class GutterView: NSView {
                 continue
             }
             highlightedLines.insert(line.data.id)
-            context.fill(
-                CGRect(
-                    x: xPos,
-                    y: line.yPos,
-                    width: width,
-                    height: line.height
-                )
-            )
+            // Use the same document-space pixel alignment as the text selection renderer.
+            let lineRect = CGRect(x: 0, y: line.yPos, width: width, height: line.height).pixelAligned
+            let gutterRect = convert(lineRect, from: textView)
+            context.fill(CGRect(x: xPos, y: gutterRect.minY, width: width, height: gutterRect.height))
         }
 
         context.restoreGState()
@@ -206,6 +193,10 @@ public class GutterView: NSView {
     private func drawLineNumbers(_ context: CGContext, dirtyRect: NSRect) {
         guard let textView = textView else { return }
         var attributes: [NSAttributedString.Key: Any] = [.font: font]
+        let boldFont = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+        let currentLineIDs = Set(textView.selectionManager.textSelections.compactMap { selection in
+            selection.range.isEmpty ? textView.layoutManager.textLineForOffset(selection.range.location)?.data.id : nil
+        })
 
         var selectionRangeMap = IndexSet()
         textView.selectionManager?.textSelections.forEach {
@@ -220,8 +211,11 @@ public class GutterView: NSView {
         context.clip(to: dirtyRect)
 
         context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
-        for linePosition in textView.layoutManager.linesStartingAt(dirtyRect.minY, until: dirtyRect.maxY) {
-            if selectionRangeMap.intersects(integersIn: linePosition.range) {
+        let textRect = convert(dirtyRect, to: textView)
+        for linePosition in textView.layoutManager.linesStartingAt(textRect.minY, until: textRect.maxY) {
+            let isCurrentLine = currentLineIDs.contains(linePosition.data.id)
+            attributes[.font] = isCurrentLine ? boldFont : font
+            if isCurrentLine || selectionRangeMap.intersects(integersIn: linePosition.range) {
                 attributes[.foregroundColor] = selectedLineTextColor ?? textColor
             } else {
                 attributes[.foregroundColor] = textColor
@@ -230,12 +224,12 @@ public class GutterView: NSView {
             let ctLine = CTLineCreateWithAttributedString(
                 NSAttributedString(string: "\(linePosition.index + 1)", attributes: attributes)
             )
-            let fragment: LineFragment? = linePosition.data.lineFragments.first?.data
-            var ascent: CGFloat = 0
-            let lineNumberWidth = CTLineGetTypographicBounds(ctLine, &ascent, nil, nil)
-            let fontHeightDifference = ((fragment?.height ?? 0) - fontLineHeight) / 4
-
-            let yPos = linePosition.yPos + ascent + (fragment?.heightDifference ?? 0)/2 + fontHeightDifference
+            guard let fragment = linePosition.data.lineFragments.first?.data else { continue }
+            let lineNumberWidth = CTLineGetTypographicBounds(ctLine, nil, nil, nil)
+            // Match LineFragmentRenderer's baseline, including its local pixel alignment.
+            // Font-size compensation shifts the gutter away from the actual text baseline.
+            let baseline = CGPoint(x: 0, y: fragment.height - fragment.descent + fragment.heightDifference / 2).pixelAligned.y
+            let yPos = convert(NSPoint(x: 0, y: linePosition.yPos + baseline), from: textView).y
             // Leading padding + (width - linewidth)
             let xPos = edgeInsets.leading + (maxLineNumberWidth - lineNumberWidth)
 

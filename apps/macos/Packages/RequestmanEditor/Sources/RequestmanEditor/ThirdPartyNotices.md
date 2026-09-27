@@ -1,6 +1,6 @@
 # Editor dependencies
 
-GutterView.swift is adapted from CodeEditSourceEditor 0.15.2, commit `424453d2232c9912933a3b5a1f3d3df669404ed0`, `Sources/CodeEditSourceEditor/Gutter/GutterView.swift`. Folding and controller dependencies were removed; line geometry and drawing are retained.
+GutterView.swift is adapted from CodeEditSourceEditor 0.15.2, commit `424453d2232c9912933a3b5a1f3d3df669404ed0`, `Sources/CodeEditSourceEditor/Gutter/GutterView.swift`. Folding and controller dependencies were removed. Line lookup and drawing are retained; number baselines now follow CodeEditTextView line fragments directly with coordinates converted into the floating gutter, an AppKit separator marks the gutter edge, and the caret line uses the editor’s background highlight with a bold line number.
 
 MIT License
 
