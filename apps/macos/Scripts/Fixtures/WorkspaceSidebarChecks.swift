@@ -214,6 +214,47 @@ struct WorkspaceSidebarChecks {
             precondition(abs(filters.convert(filters.bounds, to: host.view).minY - controlsFrame.minY) < 1,
                          "Filters stay fixed while records scroll underneath")
         }
+        // Sample intermediate geometry, not just the settled endpoints: controls in
+        // the titlebar and filter toolbar must remain fixed while the form reveals.
+        for width: CGFloat in [1440, 600] {
+            window.setContentSize(NSSize(width: width, height: 800)); settle()
+            let fixedControls: [NSView] = replayViewsForAnimation(filters).compactMap { $0 as? NSControl }
+                + (window.toolbar?.items.compactMap(\.view) ?? [])
+            let originalFrames = fixedControls.map { $0.convert($0.bounds, to: nil) }
+            let originalWindowFrame = window.frame
+            let originalAccessoryTop = accessory.view.convert(accessory.view.bounds, to: nil).maxY
+            let closedHeight = filters.bounds.height
+            var sampledHeights: [CGFloat] = []
+            func sampleTransition() {
+                for _ in 0..<15 {
+                    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+                    window.contentView?.layoutSubtreeIfNeeded()
+                    precondition(window.frame == originalWindowFrame)
+                    precondition(abs(accessory.view.convert(accessory.view.bounds, to: nil).maxY - originalAccessoryTop) < 1)
+                    for (control, frame) in zip(fixedControls, originalFrames) {
+                        let current = control.convert(control.bounds, to: nil)
+                        precondition(abs(current.minY - frame.minY) < 1 && abs(current.minX - frame.minX) < 1,
+                                     "Filter toolbar must stay fixed throughout the reveal: \(frame) -> \(current)")
+                    }
+                    sampledHeights.append(filters.bounds.height)
+                    host.requests.refresh() // Live records must not finish the animation early.
+                }
+            }
+            filters.showFilters(); sampleTransition()
+            let openHeight = filters.bounds.height
+            if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                precondition(sampledHeights.contains { $0 > closedHeight + 1 && $0 < openHeight - 1 },
+                             "The form must expose intermediate heights")
+            }
+            filters.showFilters()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.04))
+            filters.showFilters() // Reverse the close before it finishes.
+            sampleTransition()
+            precondition(filters.isExpanded && abs(filters.bounds.height - openHeight) < 1)
+            filters.showFilters(); sampleTransition()
+            precondition(abs(filters.bounds.height - closedHeight) < 1)
+        }
+        window.setContentSize(NSSize(width: 1440, height: 800)); settle()
         let normalHeight = accessory.view.bounds.height
         model.history.paused = true; host.requests.refresh(); settle()
         precondition(accessory.view.bounds.height > normalHeight, "Paused status must expand the native accessory")
@@ -251,6 +292,16 @@ struct WorkspaceSidebarChecks {
             }
             window.orderOut(nil)
         }
+        model.history.filter.conditionGroup = .init(conditions: [.init(value: "/requests -internal")], groups: [
+            .init(combination: .any, conditions: [.init(field: .domain, value: "example.test"), .init(field: .method, value: "POST")])
+        ])
+        host.requests.refresh()
+        filters.showFilters(); settle(); settle()
+        precondition(filters.isExpanded && accessory.view.bounds.height > normalHeight + 100)
+        let expandedFrame = filters.convert(filters.bounds, to: host.view)
+        let expandedHeader = table.headerView!.convert(table.headerView!.bounds, to: host.view)
+        precondition(expandedHeader.minY >= expandedFrame.maxY - 1, "Expanded form must move native table headings below it")
+        precondition(scroll.contentInsets.top >= expandedFrame.maxY - 1)
         model.history.filter.search = "example.test"
         for _ in 0..<3 {
             model.selection = .rules
@@ -263,9 +314,16 @@ struct WorkspaceSidebarChecks {
             precondition(!accessory.isHidden && item.topAlignedAccessoryViewControllers.count == 1)
             precondition(item.topAlignedAccessoryViewControllers.first === accessory)
             precondition(filters.window === window && !filters.isHiddenOrHasHiddenAncestor)
-            precondition(model.history.filter.search == "example.test")
+            precondition(model.history.filter.search == "example.test" && filters.isExpanded)
+            precondition(model.history.filter.conditionGroup?.activeConditionCount == 3)
         }
+        filters.showFilters(); settle(); settle()
+        precondition(!filters.isExpanded && abs(accessory.view.bounds.height - normalHeight) < 1)
         print("Request scroll chrome: native full-height content, safe table headings, responsive filter accessory and page switching passed")
+    }
+
+    private static func replayViewsForAnimation(_ view: NSView) -> [NSView] {
+        [view] + view.subviews.flatMap(replayViewsForAnimation)
     }
 
     private static func checkKeyboardCommands() {

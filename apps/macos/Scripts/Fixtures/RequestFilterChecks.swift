@@ -243,39 +243,7 @@ private enum RequestFilterChecks {
 
         checkColumnWidths(table, host: host, window: window, model: model, defaults: defaults)
 
-        model.filter.headers = [.init(name: "Content-Type", value: "json")]
-        let panel = RequestFilterPanel(filter: model.filter, records: model.records) { model.filter = $0 }
-        let panelWindow = makeWindow(panel)
-        panelWindow.setContentSize(panel.preferredContentSize)
-        settle(panel.view)
-        let combo = descendants(panel.view).compactMap { $0 as? NSComboBox }.first { $0.accessibilityLabel() == "Header 名称" }!
-        precondition(combo.stringValue == "Content-Type" && combo.numberOfItems > 0)
-        combo.stringValue = "Accept"
-        combo.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: combo))
-        precondition(model.filter.headers[0].name == "Accept")
-        precondition(panelWindow.makeFirstResponder(combo))
-        settle(panel.view)
-        let removals = descendants(panel.view).compactMap { $0 as? NSButton }
-            .filter { $0.action == NSSelectorFromString("removeCondition:") }
-        precondition(removals.count == 1)
-        let remove = removals[0]
-        precondition(abs(remove.bounds.width - remove.bounds.height) <= 1 && remove.bounds.height >= 28,
-                     "Header removal must be a square native circular button, not a minus-height pill")
-        let nameFrame = combo.convert(combo.bounds, to: panel.view)
-        let removeFrame = remove.convert(remove.bounds, to: panel.view)
-        precondition(abs(nameFrame.midY - removeFrame.midY) <= 1, "Header controls must be vertically centered")
-        precondition(combo.bounds.height >= combo.intrinsicContentSize.height)
-        if let clip = combo.enclosingScrollView?.contentView {
-            let focusFrame = combo.convert(combo.bounds, to: clip).insetBy(dx: -5, dy: -5)
-            precondition(clip.bounds.contains(focusFrame), "Header focus ring must fit inside the scroll viewport")
-        } else { preconditionFailure("Header rows must use a bounded native scroll viewport") }
-        print("Header row: input=\(nameFrame), remove=\(removeFrame), nativeHeight=\(combo.intrinsicContentSize.height)")
-        remove.performClick(nil)
-        settle(panel.view)
-        precondition(model.filter.headers.isEmpty, "Native remove action must remove its bound condition")
-        checkMetadataFilters(panel, window: panelWindow, model: model)
-        precondition(!panelWindow.isVisible)
-        panelWindow.close()
+        checkGroupedFilters(host: host, window: window, model: model)
         print("Request filter CLI checks passed: content-sized minimum–1440 pt layout, six columns, status colors and selection restoration, single-line request/reuse, no horizontal scrolling, filter model search/reset, table selection, Header suggestions and editing. Hidden component windows only; no App or visual acceptance.")
     }
     private static func checkResourceSegmentPaint(_ controls: NSView, segments: NSSegmentedControl) {
@@ -304,47 +272,130 @@ private enum RequestFilterChecks {
         print("Resource segment painted height: \(paintedHeight) pt")
     }
 
-    private static func checkMetadataFilters(_ panel: RequestFilterPanel, window: NSWindow, model: FilterFixture) {
-        let views = descendants(panel.view)
-        func popup(_ label: String) -> NSPopUpButton {
-            views.compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == label }!
+    private static func checkGroupedFilters(host: FilterFixtureView, window: NSWindow, model: FilterFixture) {
+        model.filter = CaptureRecordFilter()
+        settle(host.view)
+        let collapsedHeight = host.controls.frame.height
+        host.controls.showFilters()
+        settle(host.view)
+        let emptyFormHeight = host.controls.frame.height - collapsedHeight
+        precondition(host.controls.isExpanded && emptyFormHeight > 0 && emptyFormHeight < 150,
+                     "An empty form must fit its controls without a 150 pt minimum")
+        precondition(host.controls.window === window, "Filter form must be inside the table's window")
+        func button(_ title: String) -> NSButton {
+            descendants(host.controls).compactMap { $0 as? NSButton }.first { $0.title == title }!
         }
-        func select(_ label: String, _ value: String) {
-            let control = popup(label)
-            control.selectItem(withTitle: value)
-            precondition(NSApp.sendAction(control.action!, to: control.target, from: control))
+        func popups(_ label: String) -> [NSPopUpButton] {
+            descendants(host.controls).compactMap { $0 as? NSPopUpButton }.filter { $0.accessibilityLabel() == label }
         }
-        let domain = views.compactMap { $0 as? NSComboBox }.first { $0.accessibilityLabel() == "域名" }!
-        let url = views.compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "URL" }!
+        func select(_ popup: NSPopUpButton, _ title: String) {
+            popup.selectItem(withTitle: title)
+            precondition(NSApp.sendAction(popup.action!, to: popup.target, from: popup))
+            settle(host.view)
+        }
+        func input(_ label: String, _ text: String) -> NSComboBox {
+            let control = descendants(host.controls).compactMap { $0 as? NSComboBox }.first { $0.accessibilityLabel() == label && !$0.isHiddenOrHasHiddenAncestor }!
+            control.stringValue = text
+            control.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: control))
+            settle(host.view)
+            return control
+        }
+        button("添加条件").performClick(nil)
+        settle(host.view)
+        let singleConditionHeight = host.controls.frame.height - collapsedHeight
+        precondition(singleConditionHeight > emptyFormHeight + 20, "Adding a condition must grow the form")
+        let filterButton = descendants(host.controls).compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "筛选" }!
+        let liveURL = descendants(host.controls).compactMap { $0 as? NSComboBox }.first { $0.accessibilityLabel() == "URL" }!
+        precondition(window.makeFirstResponder(liveURL))
+        let liveEditor = window.fieldEditor(false, for: liveURL) as! NSTextView
+        precondition((filterButton.accessibilityValue() as? String) == "已展开，无筛选条件")
+        liveEditor.insertText("/path", replacementRange: NSRange(location: 0, length: liveEditor.string.utf16.count))
+        precondition(model.filter.hasCriteria && (filterButton.accessibilityValue() as? String) == "已展开，1 个筛选条件",
+                     "The button must reflect effective input synchronously, before Return or an observation refresh")
+        precondition(window.firstResponder === liveEditor && filterButton.bezelColor == nil,
+                     "Keep editing focus and the untinted native glass bezel")
+        settle(host.view)
+        try! saveSnapshot(filterButton, name: "request-filter-button-active")
+        checkFilterDiscAlignment(filterButton)
+        liveEditor.insertText("", replacementRange: NSRange(location: 0, length: liveEditor.string.utf16.count))
+        precondition(!model.filter.hasCriteria && (filterButton.accessibilityValue() as? String) == "已展开，无筛选条件",
+                     "Removing the last effective value must clear the indicator before Return")
+        try! saveSnapshot(filterButton, name: "request-filter-button-inactive")
+        let url = input("URL", "/path, /users -tracking")
+        precondition(window.makeFirstResponder(url))
+        let editor = window.fieldEditor(false, for: url)
+        _ = input("URL", "/path, /users -internal")
+        precondition(window.firstResponder === editor, "Typing must preserve the field editor")
+        precondition(model.filter.conditionGroup?.conditions.first?.value == "/path, /users -internal")
+        button("添加条件组").performClick(nil)
+        settle(host.view)
+        precondition(model.filter.conditionGroup?.groups.count == 1)
+        precondition(host.controls.frame.height - collapsedHeight > singleConditionHeight + 20,
+                     "Adding a group must grow the form")
+        select(popups("条件组组合")[0], "任一满足（或）")
+        select(popups("筛选字段")[1], "域名")
+        let domain = input("域名", "example.test, other.test -blocked.test")
         precondition(domain.objectValues.compactMap { $0 as? String }.contains("example.test"))
-        select("状态码", "200"); select("请求方法", "POST"); select("环境", "dev")
-        url.stringValue = "/long/path"
-        url.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: url))
-        domain.stringValue = "example.test"
-        domain.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: domain))
-        precondition(model.filter.statusCode == 200 && model.filter.method == "POST" && model.filter.environment == "dev")
-        precondition(model.filter.urlContains == "/long/path" && model.filter.domain == "example.test")
-        precondition(model.filter.activeConditionCount == 5)
-        precondition(model.records.filter { model.filter.matches($0) }.map(\.id) == [model.records[1].id])
-        domain.selectItem(at: 0)
-        panel.comboBoxSelectionDidChange(Notification(name: NSComboBox.selectionDidChangeNotification, object: domain))
-        precondition(model.filter.domain == "example.test")
-        panel.update(filter: model.filter, records: [])
-        precondition(domain.stringValue == "example.test" && popup("状态码").titleOfSelectedItem == "200")
-        var retained = model.filter; retained.statusCode = 418
-        panel.update(filter: retained, records: [])
-        precondition(popup("状态码").titleOfSelectedItem == "418")
-        window.setContentSize(panel.preferredContentSize)
-        settle(panel.view)
-        for control in [popup("状态码"), popup("请求方法"), popup("环境"), domain, url] as [NSControl] {
-            let frame = control.convert(control.bounds, to: panel.view)
-            precondition(panel.view.bounds.contains(frame) && frame.width >= 80 && frame.height >= 20,
-                         "Metadata controls must remain visible and usable: \(frame)")
+        precondition(model.filter.activeConditionCount == 2)
+        let saved = model.filter
+        host.controls.showFilters(); settle(host.view)
+        precondition(!host.controls.isExpanded && host.controls.frame.height == collapsedHeight)
+        precondition(model.filter == saved)
+        host.controls.showFilters(); settle(host.view)
+        precondition(model.filter == saved && domain.stringValue.contains("-blocked.test"))
+        let original = model.records
+        model.records = []; settle(host.view)
+        precondition(domain.stringValue.contains("example.test") && model.filter == saved)
+        model.records = original; settle(host.view)
+        for width: CGFloat in [host.controls.minimumContentWidth, 820, 1440] {
+            window.setContentSize(NSSize(width: width, height: 620)); settle(host.view)
+            let formInputs = descendants(host.controls).compactMap { $0 as? NSComboBox }.filter { !$0.isHiddenOrHasHiddenAncestor }
+            for control in formInputs {
+                precondition(control.bounds.width > 80 && control.bounds.height >= 20)
+                let clip = control.enclosingScrollView!.contentView
+                let frame = control.convert(control.bounds, to: clip)
+                precondition(frame.minX >= 0 && frame.maxX <= clip.bounds.width, "No horizontal clipping in nested forms")
+            }
+            try! saveSnapshot(host.controls, name: "request-filter-form-\(Int(width))")
         }
-        let reset = views.compactMap { $0 as? NSButton }.first { $0.title == "重置" }!
-        reset.performClick(nil)
+        window.setContentSize(NSSize(width: 500, height: 440)); settle(host.view)
+        precondition(host.controls.frame.height <= 96 + 440 * 0.45 + 1, "Short windows keep space for the table")
+        // Add another nested group and enough rows to exercise the bounded scroll area.
+        let addGroups = descendants(host.controls).compactMap { $0 as? NSButton }.filter { $0.title == "添加条件组" && !$0.isHiddenOrHasHiddenAncestor }
+        addGroups.last!.performClick(nil); settle(host.view)
+        precondition(model.filter.conditionGroup?.groups[0].groups.count == 1)
+        for _ in 0..<5 { button("添加条件").performClick(nil); settle(host.view) }
+        let fields = popups("筛选字段")
+        precondition(fields.count == 8)
+        let lastField = fields.last!
+        lastField.scrollToVisible(lastField.bounds); settle(host.view)
+        let viewport = lastField.enclosingScrollView!.contentView
+        precondition(viewport.bounds.contains(lastField.convert(lastField.bounds, to: viewport)), "Last nested condition must remain reachable")
+        try! saveSnapshot(host.controls, name: "request-filter-form-scrolled")
+        // Restore the two-condition form before checking Header editing.
+        model.filter = saved; settle(host.view)
+        window.setContentSize(NSSize(width: 820, height: 620)); settle(host.view)
+        select(popups("筛选字段")[1], "请求 Header")
+        let name = input("Header 名称", "Content-Type")
+        _ = input("Header 值", "json")
+        precondition(name.numberOfItems > 0)
+        try! saveSnapshot(host.controls, name: "request-filter-form-header")
+        precondition(model.filter.conditionGroup?.groups[0].conditions[0].headerName == "Content-Type")
+        select(popups("Header 来源").last!, "修改后请求")
+        precondition(model.filter.conditionGroup?.groups[0].conditions[0].headerSource == .sent)
+        let remove = descendants(host.controls).compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "移除条件组" }!
+        precondition(remove.bounds.width == remove.bounds.height && remove.bounds.height >= 28)
+        remove.performClick(nil); settle(host.view)
+        precondition(model.filter.conditionGroup?.groups.isEmpty == true)
+        precondition(abs(host.controls.frame.height - collapsedHeight - singleConditionHeight) < 1,
+                     "Removing a group must reclaim its height")
+        model.filter.search = "retained search"; model.filter.resource = .json; settle(host.view)
+        button("重置").performClick(nil); settle(host.view)
         precondition(model.filter == CaptureRecordFilter())
-        precondition(domain.stringValue.isEmpty && url.stringValue.isEmpty && popup("状态码").indexOfSelectedItem == 0)
+        precondition(host.controls.isExpanded, "Reset keeps the form open")
+        precondition(abs(host.controls.frame.height - collapsedHeight - emptyFormHeight) < 1,
+                     "Reset must shrink the form back to its empty content height")
+        host.controls.showFilters(); settle(host.view)
     }
 
     private static func checkColumnWidths(_ table: NSTableView, host: FilterFixtureView,
@@ -575,12 +626,44 @@ private enum RequestFilterChecks {
         settle(host.view)
     }
 
+    private static func checkFilterDiscAlignment(_ button: NSButton) {
+        let bitmap = button.bitmapImageRepForCachingDisplay(in: button.bounds)!
+        button.cacheDisplay(in: button.bounds, to: bitmap)
+        var minX = bitmap.pixelsWide, minY = bitmap.pixelsHigh, maxX = -1, maxY = -1
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                      color.alphaComponent > 0.9, color.blueComponent > color.redComponent + 0.3,
+                      color.blueComponent > color.greenComponent + 0.15 else { continue }
+                minX = min(minX, x); maxX = max(maxX, x)
+                minY = min(minY, y); maxY = max(maxY, y)
+            }
+        }
+        precondition(maxX >= minX && maxY >= minY, "The active filter disc must render blue")
+        let scaleX = CGFloat(bitmap.pixelsWide) / button.bounds.width
+        let scaleY = CGFloat(bitmap.pixelsHigh) / button.bounds.height
+        let centerX = CGFloat(minX + maxX + 1) / (2 * scaleX)
+        let centerY = CGFloat(minY + maxY + 1) / (2 * scaleY)
+        precondition(abs(centerX - button.bounds.midX) <= 0.5 && abs(centerY - button.bounds.midY) <= 0.5,
+                     "The blue disc must center in the native bezel: \(centerX), \(centerY) in \(button.bounds)")
+        print("Filter disc pixel alignment passed: center \(centerX), \(centerY) in \(button.bounds.size)")
+    }
+
     private static func saveSnapshot(_ view: NSView, name: String) throws {
         guard let directory = ProcessInfo.processInfo.environment["REQUESTMAN_FILTER_SNAPSHOT_DIR"] else { return }
         let destination = URL(fileURLWithPath: directory, isDirectory: true)
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: bitmap)
+        // Composite transparent native controls over the system window background for inspection.
+        NSGraphicsContext.saveGraphicsState()
+        if let context = NSGraphicsContext(bitmapImageRep: bitmap) {
+            NSGraphicsContext.current = context
+            context.cgContext.setBlendMode(.destinationOver)
+            context.cgContext.setFillColor(NSColor.windowBackgroundColor.cgColor)
+            context.cgContext.fill(CGRect(x: 0, y: 0, width: bitmap.pixelsWide, height: bitmap.pixelsHigh))
+        }
+        NSGraphicsContext.restoreGraphicsState()
         if let data = bitmap.representation(using: .png, properties: [:]) {
             try data.write(to: destination.appendingPathComponent(name + ".png"))
         }
@@ -593,7 +676,7 @@ private enum RequestFilterChecks {
         return window
     }
     private static func settle(_ view: NSView) {
-        for _ in 0..<8 {
+        for _ in 0..<12 {
             view.layoutSubtreeIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }

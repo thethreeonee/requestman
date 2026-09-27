@@ -52,6 +52,71 @@ struct CaptureRecordFilterTests {
         #expect(filter.matches(record()))
     }
 
+    @Test func groupedConditionsSupportNestedAndOrAndDrafts() {
+        var filter = CaptureRecordFilter()
+        filter.conditionGroup = .init(conditions: [.init(field: .method, value: "POST")], groups: [
+            .init(combination: .any, conditions: [
+                .init(field: .domain, value: "other.test"), .init(value: "/orders"), .init()
+            ], groups: [.init()])
+        ])
+        #expect(filter.activeConditionCount == 3)
+        #expect(filter.matches(record()))
+        var other = record(); other.method = "GET"
+        #expect(!filter.matches(other))
+        other.method = "POST"; other.url = "https://example.test/missing"
+        #expect(!filter.matches(other), "Empty OR children must not match everything")
+        filter.inverted = true
+        #expect(filter.matches(other))
+        filter.conditionGroup = .init(groups: [.init(conditions: [.init(value: "- ,")])])
+        #expect(filter.matches(record()), "Only empty drafts plus inversion still show all records")
+    }
+
+    @Test func multipleValuesApplyExclusionsAfterAlternatives() {
+        var filter = CaptureRecordFilter()
+        filter.conditionGroup = .init(conditions: [
+            .init(field: .url, value: "/orders, /users -internal -tracking"),
+            .init(field: .domain, value: "EXAMPLE.TEST, other.test -blocked.test"),
+            .init(field: .method, value: "GET POST,-DELETE"),
+            .init(field: .status, value: "200,201 -500")
+        ])
+        var record = record(); record.status = 201
+        #expect(filter.matches(record))
+        record.url += "?internal=true"
+        #expect(!filter.matches(record))
+        filter.conditionGroup = .init(conditions: [.init(value: "-tracking,-internal")])
+        #expect(!filter.matches(record))
+        record.url = "https://example.test/users"
+        #expect(filter.matches(record))
+        filter.conditionGroup = .init(conditions: [.init(field: .domain, value: "example.test -example.test")])
+        #expect(!filter.matches(record), "Exclusions win even when also included")
+        filter.conditionGroup = .init(conditions: [.init(field: .status, value: "-500")])
+        record.status = nil
+        #expect(!filter.matches(record))
+        filter.inverted = true
+        #expect(!filter.matches(record), "Unavailable status is not asserted by exclusion or inversion")
+    }
+
+    @Test func groupsRetainUnknownHeaderEvidenceAndLiteralValues() {
+        var filter = CaptureRecordFilter()
+        filter.conditionGroup = .init(combination: .any, conditions: [
+            .init(field: .header, operation: .equals, value: "Bearer a, b", headerName: "Authorization", headerSource: .sent),
+            .init(field: .domain, value: "other.test")
+        ])
+        var record = record(); record.hasSentRequestHeaders = false
+        #expect(!filter.matches(record))
+        filter.inverted = true
+        #expect(!filter.matches(record))
+        record.url = "https://other.test/"
+        #expect(!filter.matches(record), "True OR unknown resolves true before inversion")
+        filter.inverted = false
+        #expect(filter.matches(record))
+        record.url = "https://example.test/"; record.hasSentRequestHeaders = true
+        record.sentHeaders = [HTTPField("Authorization", "Bearer a, b")]
+        #expect(filter.matches(record))
+        filter.conditionGroup?.combination = .all
+        #expect(!filter.matches(record))
+    }
+
     private func record() -> CaptureRecord {
         var record = CaptureRecord(method: "POST", url: "https://example.test/orders")
         record.requestHeaders = [HTTPField("Content-Type", "application/json"), HTTPField("X-Tag", "Alpha"), HTTPField("X-Tag", "Beta")]
