@@ -25,7 +25,8 @@ let package = Package(
         .target(name: "RequestmanProxy", dependencies: [
             "RequestmanCore", "RequestmanCertificates", .product(name: "NIOSSL", package: "swift-nio-ssl"),
             .product(name: "NIOCore", package: "swift-nio"),
-            .product(name: "NIOPosix", package: "swift-nio"), .product(name: "NIOHTTP1", package: "swift-nio")
+            .product(name: "NIOPosix", package: "swift-nio"), .product(name: "NIOHTTP1", package: "swift-nio"),
+            .product(name: "NIOWebSocket", package: "swift-nio")
         ]),
         .testTarget(name: "RequestmanCoreTests", dependencies: ["RequestmanCore", "RequestmanScriptWorker"]),
         .testTarget(name: "RequestmanCertificatesTests", dependencies: ["RequestmanCertificates"]),

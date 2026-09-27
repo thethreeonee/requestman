@@ -1427,8 +1427,29 @@ import RequestmanCore
         print("Match testing: native layout, success, Header mismatch, invalid pattern/input and stale-result checks passed")
     }
 
+    static func checkSSEConfiguration() {
+        let model = WorkspaceModel(); model.addProject()
+        let controller = FlowEditorViewController(model: model)
+        let window = NSWindow(contentViewController: controller)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        controller.refresh(); window.contentView?.layoutSubtreeIfNeeded()
+        let toggle = descendants(controller.view).first { $0.identifier?.rawValue == "rules.isSSE" } as! NSButton
+        precondition(toggle.state == .off && model.workflow?.isSSE == false)
+        toggle.performClick(nil); controller.refresh()
+        precondition(model.workflow?.isSSE == true && model.workflow?.responseSteps.count == 1)
+        precondition(model.workflow?.responseSteps.first?.headerEntries.map(\.name) == ["Content-Type", "Cache-Control"])
+        toggle.performClick(nil); controller.refresh(); toggle.performClick(nil); controller.refresh()
+        precondition(model.workflow?.responseSteps.count == 1, "Re-enabling SSE must not duplicate its Header step")
+        let stack = toggle.superview as! NSStackView
+        precondition(stack.arrangedSubviews.firstIndex(of: toggle) == 2, "SSE sits between matching conditions and step lanes")
+        print("SSE checkbox, editable response Header insertion, persistence model and placement passed")
+    }
+
     static func main() {
         NSApplication.shared.setActivationPolicy(.prohibited)
+        if ProcessInfo.processInfo.environment["REQUESTMAN_SSE_ONLY"] == "1" { checkSSEConfiguration(); return }
+        checkSSEConfiguration()
         if ProcessInfo.processInfo.environment["REQUESTMAN_NUMBERED_EDITORS_ONLY"] == "1" {
             checkNumberedEditorGeometry(); checkCodeEditorBehavior(); checkBodyEditing(); checkScriptEditing(); print("Body and script editing passed"); return
         }

@@ -106,7 +106,7 @@ macOS 26+ 主内容栏启用 `allowsFullHeightLayout`，请求日志筛选栏与
 客户端 ← 本地 HTTP/HTTPS 代理 ← 响应流程 ←────────────── 服务器响应 / Mock
 ```
 
-当前支持 HTTP/1.1 内容处理、HTTPS 解密以及未配置证书时的 CONNECT 字节透传。HTTP/2 内容处理、HTTP/3、WebSocket、自定义 TCP/UDP 后续分别定义能力边界。TLS 两端只协商 HTTP/1.1；上游可直接 TLS 或经 HTTP 代理 CONNECT 后 TLS。证书绑定应用不能仅靠安装本地 CA 获得支持。
+当前支持 HTTP/1.1 内容处理、HTTPS 解密以及未配置证书时的 CONNECT 字节透传。SSE 与 WebSocket 基础支持见 [持续捕获](Design/streaming-capture.md)；HTTP/2 内容处理、HTTP/3、自定义 TCP/UDP 后续分别定义能力边界。TLS 两端只协商 HTTP/1.1；上游可直接 TLS 或经 HTTP 代理 CONNECT 后 TLS。证书绑定应用不能仅靠安装本地 CA 获得支持。
 
 系统代理接入只影响遵循 macOS 代理设置的应用，并非全流量透明接管。上游连接使用 NIO socket，不读取指向 Requestman 的系统 HTTP 代理，避免递归；显式配置指向自身的上游仍拒绝，连接完成后再检查解析后的地址。
 
@@ -208,7 +208,7 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 `WorkspaceDocument.httpsDecryption` 保存 `HTTPSDecryptionConfiguration`：`decryptAllRequests` 默认开启，缺少配置的旧工作区保持全部解密；关闭时由 `domains` 决定，空列表全部透传。精确域名和 `*.` 子域名通配符按 DNS 标签边界匹配，忽略大小写与单个末尾点；通配符不含根域。设置编辑器校验域名，错误草稿不写入工作区，未校验的无效模式在匹配时也不扩大解密范围。
 
-代理在新 CONNECT 连接中读取最新工作区范围，只有范围命中时才调用证书提供方；未命中直接沿既有 `beginPassthrough` 路径转发，不读取 CA、不签发叶证书，也不进入 HTTP 规则与内容采集。证书不可用仍沿原有透传或错误路径处理，普通 HTTP 的既有行为不变。范围通过原工作区保存/更新通道应用，不属于需重配监听的 `ExplicitProxyConfiguration`，现有连接保持原模式。全量归档包含该配置，项目/请求归档合并不覆盖当前配置。
+代理在 CONNECT 协议识别后读取最新工作区范围，只有 TLS 且范围命中时才调用证书提供方；未命中直接沿既有 `connectOpaqueTunnel` 路径转发，不读取 CA、不签发叶证书，也不进入 HTTP 规则与内容采集。证书不可用仍沿原有透传或错误路径处理，普通 HTTP 与 CONNECT 内明文 HTTP 的既有行为不变。范围通过原工作区保存/更新通道应用，不属于需重配监听的 `ExplicitProxyConfiguration`，现有连接保持原模式。全量归档包含该配置，项目/请求归档合并不覆盖当前配置。
 
 验证覆盖旧工作区解码、保存与归档、域名边界、空列表和全部开关；本地 TCP/TLS 测试通过客户端仅信任预期签发方确认透传没有 MITM，并检查证书提供方调用次数、规则是否执行、日志内容以及 HTTP 上游串联。设置采用原生 `NSSwitch` 与 `NSTextView`，隐藏窗口检查覆盖开关、有效输入、错误草稿与导入刷新；不等同于完整 App 的浏览器运行验收。
 
@@ -221,3 +221,7 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 `Packages/RequestmanEditor` 由 Body 与 JavaScript 表单共用。文本编辑、布局和撤销使用 CodeEditTextView 0.12.1；语法颜色由 HighlighterSwift 3.1.0 在独立 actor 中计算，80 ms 合并输入，回到主线程前检查文本和版本，忽略过时结果与输入法组字期。仅更新颜色属性，不重写正文、选择或撤销记录；明暗主题使用 atom-one-light / atom-one-dark。行号复用 CodeEditSourceEditor 0.15.2 的 MIT GutterView，移除折叠和控制器依赖，直接使用同一个 TextLayoutManager 的行几何；不引入其 SwiftUI 界面。正文与行号共用 8 pt 外层裁切。短文本把滚轮传给外层表单，长文本保留内部滚动。
 
 Body 解析模板开启时，完整表达式用浅色背景标识；字面值和 Base64 不标识模板。格式化继续使用 BodyJSONPresentation 保留数值原始拼写和模板，通过编辑器的替换接口形成可撤销操作。Header 等普通模板字段仍用 RulesTextArea；移除旧 BodyLineRuler 与 JavaScriptSyntax。依赖许可证随编辑器资源包提供，来源与改动见 [编辑器说明](../Packages/RequestmanEditor/README.md)。
+
+## SSE 与 WebSocket 持续记录
+
+`CaptureRecordBuffer` 按稳定 ID 合并活动快照，`ExecutionHistoryModel` 更新原行；清空通过代次隔离旧连接。SSE/WS 载荷由 `CaptureStreamStore` 在后台串行写入会话临时文件，界面按页读取。SSE 可自动识别，也可通过请求修改的 `isSSE` 启用；有限 Body 替换取消上游，延迟不等待 EOF。WebSocket 基于 NIOWebSocket，CONNECT 区分明文与 TLS，握手完成后切换双向帧管线。具体协议边界、规则兼容和存储生命周期见 [持续捕获](Design/streaming-capture.md)。

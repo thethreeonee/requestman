@@ -31,6 +31,12 @@ public struct CaptureHeadersInfo: Sendable {
 public struct CaptureRecord: Identifiable, Sendable {
     public enum Outcome: String, CaseIterable, Sendable { case forwarded = "已转发", modified = "已修改", mocked = "Mock", tunnel = "加密隧道", failed = "失败" }
     public let id: UUID
+    public var captureProtocol: CaptureProtocol = .http
+    public var connectionState: CaptureConnectionState = .closed
+    public var revision: UInt64 = 0
+    public var stream: CaptureStreamStore?
+    public var receivedStream: CaptureStreamStore?
+    public var closeReason: String?
     public var startedAt: Date
     public var method: String
     public var url: String
@@ -88,14 +94,31 @@ public final class CaptureRecordBuffer: Sendable {
         var records: [CaptureRecord] = []
         var dropped = 0
         var paused = false
+        var generation: UInt64 = 0
+        var publishedActive: Set<UUID> = []
+        var pausedUpdates: [UUID: CaptureRecord] = [:]
     }
     private let state = OSAllocatedUnfairLock(initialState: State())
     public let capacity: Int
     public init(capacity: Int = 256) { self.capacity = max(1, capacity) }
-    public func append(_ record: CaptureRecord) {
+    public func isCurrent(_ generation: UInt64) -> Bool { state.withLock { $0.generation == generation } }
+    public var generation: UInt64 { state.withLock { $0.generation } }
+    public func append(_ record: CaptureRecord, generation: UInt64? = nil) {
         let bounded = record.bounded()
         state.withLock {
-            guard !$0.paused else { return }
+            guard generation == nil || generation == $0.generation else { return }
+            if $0.paused {
+                // An already visible stream may close while history is paused.
+                // Retain its latest state so resuming cannot leave a stale active row.
+                if $0.publishedActive.contains(record.id) { $0.pausedUpdates[record.id] = bounded }
+                return
+            }
+            if record.connectionState.isActive { $0.publishedActive.insert(record.id) }
+            else { $0.publishedActive.remove(record.id) }
+            if let index = $0.records.firstIndex(where: { $0.id == bounded.id }) {
+                $0.records[index] = bounded
+                return
+            }
             if $0.records.count == capacity { $0.records.removeFirst(); $0.dropped += 1 }
             $0.records.append(bounded)
         }
@@ -108,6 +131,25 @@ public final class CaptureRecordBuffer: Sendable {
             return (records, dropped)
         }
     }
-    public func setPaused(_ paused: Bool) { state.withLock { $0.paused = paused } }
-    public func clear() { state.withLock { $0.records.removeAll(keepingCapacity: true); $0.dropped = 0 } }
+    public func setPaused(_ paused: Bool) {
+        state.withLock {
+            $0.paused = paused
+            guard !paused else { return }
+            for record in $0.pausedUpdates.values.sorted(by: { $0.startedAt < $1.startedAt }) {
+                if let index = $0.records.firstIndex(where: { $0.id == record.id }) { $0.records[index] = record }
+                else {
+                    if $0.records.count == capacity { $0.records.removeFirst(); $0.dropped += 1 }
+                    $0.records.append(record)
+                }
+                if !record.connectionState.isActive { $0.publishedActive.remove(record.id) }
+            }
+            $0.pausedUpdates.removeAll()
+        }
+    }
+    public func clear() {
+        state.withLock {
+            $0.records.removeAll(keepingCapacity: true); $0.dropped = 0; $0.generation &+= 1
+            $0.publishedActive.removeAll(); $0.pausedUpdates.removeAll()
+        }
+    }
 }

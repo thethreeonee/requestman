@@ -30,7 +30,7 @@
 | 显示元数据 | 项目/工作流/环境/规则名 128 字符；错误 512 字符；步骤摘要 64 条、每条 128 字符；命中动作快照 128 条。均不用于截断实际 URL、Header 或 Body |
 | 流程 | 首个匹配流程胜出；每方向最多 64 个步骤；请求 Mock / 重定向后进入响应流程 |
 | Header 操作语义 | 设置 Header 替换全部同名项；Host、Content-Length、Transfer-Encoding、Connection、Upgrade、Trailer 由代理维护 |
-| 协议 | 内容处理仅 HTTP/1.1；不支持流水线、协议升级/WebSocket、TRACE；未配置证书时 HTTPS 仅 CONNECT 透传 |
+| 协议 | 内容处理仅 HTTP/1.1；不支持流水线、非 WebSocket 协议升级、TRACE；未配置证书时 HTTPS 仅 CONNECT 透传 |
 | 缓存 | 树视图状态 24 份；站点证书与 TLS context 各 128 项；CA 信任检查最多缓存 5 秒 |
 | 导出完整性 | 未采集/断流、外部标记不完整数据、CONNECT、带正文 HEAD、重复 Host、无法可靠导出的字符仍会禁用对应 cURL 导出 |
 
@@ -43,3 +43,7 @@
 ## 同步脚本补充（2026-09-26）
 
 脚本没有新增 Body/Header/源码或匹配字符串的大小上限。保留执行时限：单次脚本默认 1000 ms，可配置 50–5000 ms，HTTP 事务和流程预览不设总时限；取消会终止工作进程。脚本流程与工作进程各最多 4 个，满时明确失败；正则匹配通过 ICU progress 回调在 20 ms 后取消搜索。数据结构和转发语义见[请求修改配置](Design/request-modification.md)。
+
+## 持续捕获补充
+
+SSE 与 WebSocket 使用会话临时文件完整保存流内容，按页读取，不套用普通 HTTP Body 的内存采集器。WS 单帧沿用 NIO 可配置上限 UInt32.max，当前未完成事件/消息仍需组装；消息总长度不做应用层截断。WebSocket 不协商压缩扩展，关闭握手等待 5 秒。暂停、清空与错误边界见 [持续捕获](Design/streaming-capture.md)。

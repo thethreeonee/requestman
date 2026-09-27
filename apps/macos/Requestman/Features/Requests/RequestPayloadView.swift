@@ -3,7 +3,7 @@ import RequestmanCore
 
 @MainActor
 final class RequestPayloadViewController: NSViewController, NSSearchFieldDelegate {
-    private let record: CaptureRecord
+    private var record: CaptureRecord
     let tab: RequestDetailTab
     var onCopyChange: () -> Void = {}
     private var format: InspectionFormat = .tree
@@ -77,6 +77,16 @@ final class RequestPayloadViewController: NSViewController, NSSearchFieldDelegat
         searchField.heightAnchor.constraint(equalToConstant: searchField.intrinsicContentSize.height).isActive = true
         formatButton.heightAnchor.constraint(equalTo: searchField.heightAnchor).isActive = true
         loadPresentation()
+    }
+    func update(record next: CaptureRecord, version: InspectionVersion, isActive: Bool) {
+        let changed = record.status != next.status || record.requestHeaders != next.requestHeaders
+            || record.sentHeaders != next.sentHeaders || record.receivedHeaders != next.receivedHeaders
+            || record.responseHeaders != next.responseHeaders || record.finalURL != next.finalURL
+            || record.requestBody.state != next.requestBody.state || record.sentBody.state != next.sentBody.state
+            || record.receivedBody.state != next.receivedBody.state || record.responseBody.state != next.responseBody.state
+        record = next
+        if changed, isViewLoaded { self.version = version; active = isActive; loadPresentation() }
+        else { update(version: version, isActive: isActive) }
     }
     func update(version: InspectionVersion, isActive: Bool) {
         let changed = self.version != version

@@ -7,6 +7,7 @@ enum RequestCURL {
     enum Version { case original, modified }
 
     static func unavailableReason(for record: CaptureRecord, version: Version) -> String? {
+        guard record.captureProtocol != .webSocket else { return "WebSocket 会话不能导出为普通 HTTP cURL" }
         let request = snapshot(for: record, version: version)
         if request.urlWasTruncated { return "URL 已截断" }
         guard let url = URLComponents(string: request.url),
@@ -48,6 +49,7 @@ enum RequestCURL {
         var lines: [String] = []
         // --disable must be curl's first option; do not inherit ~/.curlrc options or credentials.
         var options = ["curl --disable", "--globoff", "--path-as-is", "--http1.1", "--request " + quote(request.method)]
+        if record.captureProtocol == .sse { options.append("--no-buffer") }
         if request.method == "HEAD" { options.append("--head") }
         for field in headers {
             // In curl, Name: suppresses a header; Name; sends the captured empty header instead.

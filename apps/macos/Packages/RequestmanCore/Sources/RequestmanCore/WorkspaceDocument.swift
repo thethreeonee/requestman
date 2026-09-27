@@ -226,6 +226,7 @@ public struct RequestWorkflow: Codable, Equatable, Identifiable, Sendable {
     public var method = "*"
     public var matchTarget: WorkflowMatchTarget = .url
     public var matchRule: WorkflowMatchRule = .wildcard
+    public var isSSE = false
     public var matchHeaderEnabled = false
     public var matchHeaderName = ""
     public var matchHeaderRule: WorkflowMatchRule = .equals
@@ -234,6 +235,25 @@ public struct RequestWorkflow: Codable, Equatable, Identifiable, Sendable {
     public var requestSteps: [ModificationStep] = []
     public var responseSteps: [ModificationStep] = []
     public init(name: String = "新的请求修改") { self.name = name }
+
+    /// Insert a normal, editable response step once when SSE is enabled. Disabling preserves edits.
+    public mutating func setSSE(_ enabled: Bool) {
+        guard isSSE != enabled else { return }
+        isSSE = enabled
+        guard enabled else { return }
+        let required = [("Content-Type", "text/event-stream; charset=utf-8"), ("Cache-Control", "no-cache")]
+        let missing = required.filter { name, value in
+            !responseSteps.contains { step in
+                step.enabled && step.kind == .setHeader && step.headerEntries.contains {
+                    $0.name.caseInsensitiveCompare(name) == .orderedSame && $0.value == value && $0.operation == .set
+                }
+            }
+        }
+        guard !missing.isEmpty else { return }
+        var step = ModificationStep(kind: .setHeader)
+        step.headers = missing.map { HeaderEntry(operation: .set, name: $0.0, value: $0.1) }
+        responseSteps.append(step)
+    }
 
     /// Compatibility for existing callers. Persisted v1 prefixes migrate without widening matches.
     public var urlPrefix: String {
@@ -250,7 +270,7 @@ public struct RequestWorkflow: Codable, Equatable, Identifiable, Sendable {
                                                                       pattern: matchHeaderPattern, headers: headers))
     }
     private enum CodingKeys: String, CodingKey {
-        case id, name, enabled, method, matchTarget, matchRule, matchPattern, matchHeaderEnabled, matchHeaderName, matchHeaderRule, matchHeaderPattern, requestSteps, responseSteps
+        case id, name, enabled, method, isSSE, matchTarget, matchRule, matchPattern, matchHeaderEnabled, matchHeaderName, matchHeaderRule, matchHeaderPattern, requestSteps, responseSteps
     }
     private enum LegacyKeys: String, CodingKey { case urlPrefix }
     public init(from decoder: any Decoder) throws {
@@ -261,6 +281,7 @@ public struct RequestWorkflow: Codable, Equatable, Identifiable, Sendable {
         method = try values.decode(String.self, forKey: .method)
         requestSteps = try values.decode([ModificationStep].self, forKey: .requestSteps)
         responseSteps = try values.decode([ModificationStep].self, forKey: .responseSteps)
+        isSSE = try values.decodeIfPresent(Bool.self, forKey: .isSSE) ?? false
         matchHeaderEnabled = try values.decodeIfPresent(Bool.self, forKey: .matchHeaderEnabled) ?? false
         matchHeaderRule = try values.decodeIfPresent(WorkflowMatchRule.self, forKey: .matchHeaderRule) ?? .equals
         matchHeaderPattern = try values.decodeIfPresent(String.self, forKey: .matchHeaderPattern) ?? ""

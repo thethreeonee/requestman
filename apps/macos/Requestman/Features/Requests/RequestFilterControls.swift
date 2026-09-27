@@ -11,11 +11,13 @@ final class RequestFilterControls: NSView {
     private let pause = RequestFilterActionButton(symbol: "pause", label: "暂停记录")
     private let clearButton = RequestFilterActionButton(symbol: "trash", label: "清空")
     private let separator = NSBox()
-    private let primary = NSSegmentedControl(labels: CaptureResourceType.allCases.map(\.rawValue), trackingMode: .selectOne, target: nil, action: nil)
+    private let primary = NSSegmentedControl(labels: CaptureResourceType.allCases.filter { $0 != .sse && $0 != .webSocket }.map(\.rawValue), trackingMode: .selectOne, target: nil, action: nil)
     private let filterButton = RequestFilterActionButton(symbol: "line.3.horizontal.decrease", label: "筛选")
     private var popover: NSPopover?
     private var panel: RequestFilterPanel?
-    private let primaryTypes = CaptureResourceType.allCases
+    private let protocolTypes: [CaptureResourceType] = [.sse, .webSocket]
+    private let protocols = NSSegmentedControl(labels: ["SSE", "WS"], trackingMode: .selectOne, target: nil, action: nil)
+    private let primaryTypes = CaptureResourceType.allCases.filter { $0 != .sse && $0 != .webSocket }
     private var heightConstraint: NSLayoutConstraint!
     private var usesSecondRow = false
 
@@ -41,9 +43,15 @@ final class RequestFilterControls: NSView {
             primary.borderShape = .capsule
         }
         if #available(macOS 27.0, *) { primary.role = .tabs }
+        protocols.target = self; protocols.action = #selector(selectProtocol)
+        protocols.setAccessibilityLabel("协议类型")
+        protocols.font = font; protocols.controlSize = primary.controlSize
+        protocols.segmentStyle = .automatic; protocols.segmentDistribution = .fit
+        if #available(macOS 26.0, *) { protocols.borderShape = .capsule }
+        if #available(macOS 27.0, *) { protocols.role = .tabs }
         filterButton.handler = { [weak self] in self?.showFilters() }
         filterButton.toolTip = "筛选状态码、URL、域名、请求方法、环境和请求 Header"
-        for child in [pause, clearButton, separator, primary, filterButton] { addSubview(child) }
+        for child in [pause, clearButton, separator, primary, protocols, filterButton] { addSubview(child) }
         translatesAutoresizingMaskIntoConstraints = false
         heightConstraint = heightAnchor.constraint(equalToConstant: toolbarHeight)
         heightConstraint.isActive = true
@@ -62,7 +70,7 @@ final class RequestFilterControls: NSView {
 
     private func updateRowPlacement() {
         guard heightConstraint != nil, bounds.width > 0 else { return }
-        let nextUsesSecondRow = bounds.width < primary.intrinsicContentSize.width + controlHeight * 3 + 63
+        let nextUsesSecondRow = bounds.width < primary.intrinsicContentSize.width + protocols.intrinsicContentSize.width + controlHeight * 3 + 73
         guard usesSecondRow != nextUsesSecondRow else { return }
         usesSecondRow = nextUsesSecondRow
         // Width arrives during the parent's layout pass. Resize the arranged view
@@ -83,6 +91,7 @@ final class RequestFilterControls: NSView {
         pause.toolTip = (paused ? "继续记录" : "暂停记录（代理继续工作）") + "（⌘⇧R）"
         clearButton.isEnabled = !records.isEmpty
         clearButton.toolTip = "清空全部请求日志（⌘K）"
+        protocols.selectedSegment = protocolTypes.firstIndex(of: filter.resource) ?? -1
         primary.selectedSegment = primaryTypes.firstIndex(of: filter.resource) ?? -1
         let count = filter.activeConditionCount
         filterButton.bezelColor = count == 0 ? nil : .systemBlue
@@ -109,6 +118,12 @@ final class RequestFilterControls: NSView {
         let origin: CGFloat = usesSecondRow ? 10 : 43 + height * 2
         // Keep the native drawing scale so labels and the bezel retain their proportions.
         primary.frame = NSRect(origin: NSPoint(x: origin, y: 8), size: size)
+        let protocolX = usesSecondRow ? 32 + height * 2 : primary.frame.maxX + 10
+        protocols.frame = NSRect(x: protocolX, y: actionY, width: protocols.intrinsicContentSize.width, height: height)
+    }
+    @objc private func selectProtocol() {
+        guard protocolTypes.indices.contains(protocols.selectedSegment) else { return }
+        changeResource(protocolTypes[protocols.selectedSegment])
     }
     private func changeResource(_ resource: CaptureResourceType) {
         filter.resource = resource; onFilterChange(filter)
@@ -136,6 +151,7 @@ final class RequestFilterPanel: NSViewController, NSTextFieldDelegate, NSComboBo
     private let projects = NSPopUpButton(), environments = NSPopUpButton(), outcomes = NSPopUpButton(), methods = NSPopUpButton()
     private let statuses = NSPopUpButton(), domains = NSComboBox(), url = NSTextField()
     private let sources = NSPopUpButton(), combinations = NSPopUpButton()
+    private let activeOnly = NSButton(checkboxWithTitle: "仅活动连接", target: nil, action: nil)
     private let inverse = NSButton(checkboxWithTitle: "反向匹配", target: nil, action: nil)
     private let reset = NSButton(title: "重置", target: nil, action: nil)
     private let add = NSButton(title: "添加条件", target: nil, action: nil)
@@ -175,6 +191,7 @@ final class RequestFilterPanel: NSViewController, NSTextFieldDelegate, NSComboBo
         rowsScroll.documentView = rowsView
         rowsScroll.translatesAutoresizingMaskIntoConstraints = false
         rowsHeight = rowsScroll.heightAnchor.constraint(equalToConstant: 0); rowsHeight.isActive = true
+        activeOnly.target = self; activeOnly.action = #selector(toggleActiveOnly)
         inverse.target = self; inverse.action = #selector(invert)
         inverse.toolTip = "反向匹配全部当前条件；不可判断的 Header 值不会被纳入"
         reset.target = self; reset.action = #selector(resetFilter); reset.bezelStyle = .rounded
@@ -188,7 +205,7 @@ final class RequestFilterPanel: NSViewController, NSTextFieldDelegate, NSComboBo
             control.setContentHuggingPriority(.required, for: .horizontal)
             control.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
-        let bottom = NativeUI.stack([inverse, NSView(), reset], vertical: false)
+        let bottom = NativeUI.stack([activeOnly, inverse, NSView(), reset], vertical: false)
         stack = NativeUI.stack([NativeUI.label("筛选", weight: .semibold), grid, urlRow, divider(),
             headerRow,
             rowsScroll, add, divider(), bottom], spacing: 14)
@@ -231,6 +248,7 @@ final class RequestFilterPanel: NSViewController, NSTextFieldDelegate, NSComboBo
         options(outcomes, values: ["全部结果"] + CaptureRecord.Outcome.allCases.map(\.rawValue), selected: filter.outcome?.rawValue ?? "全部结果")
         options(sources, values: CaptureHeaderSource.allCases.map(\.rawValue), selected: filter.headerSource.rawValue)
         options(combinations, values: CaptureHeaderCombination.allCases.map(\.rawValue), selected: filter.headerCombination.rawValue)
+        activeOnly.state = filter.activeOnly ? .on : .off
         inverse.state = filter.inverted ? .on : .off; reset.isEnabled = filter != CaptureRecordFilter()
         add.isEnabled = filter.headers.count < 16
         if rows.map(\.conditionID) != filter.headers.map(\.id) {
@@ -277,6 +295,7 @@ final class RequestFilterPanel: NSViewController, NSTextFieldDelegate, NSComboBo
         filter.domain = domain
         changed()
     }
+    @objc private func toggleActiveOnly() { filter.activeOnly = activeOnly.state == .on; changed() }
     @objc private func invert() { filter.inverted = inverse.state == .on; changed() }
     @objc private func resetFilter() { filter = CaptureRecordFilter(); changed() }
     @objc private func addCondition() { guard filter.headers.count < 16 else { return }; filter.headers.append(.init()); changed() }

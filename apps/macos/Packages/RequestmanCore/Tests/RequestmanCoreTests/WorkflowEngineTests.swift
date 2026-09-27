@@ -167,12 +167,16 @@ struct WorkflowEngineTests {
     }
     @Test func historyIsBoundedPausedAndKeepsCredentials() {
         let buffer = CaptureRecordBuffer(capacity: 2)
-        var record = CaptureRecord(method: "GET", url: "http://localhost/")
-        record.requestHeaders = [HTTPField("Cookie", "session=original"), HTTPField("Authorization", "secret")]
-        record.sentHeaders = [HTTPField("cOoKiE", "session=modified")]
-        record.receivedHeaders = [HTTPField("Set-Cookie", "session=server; HttpOnly"), HTTPField("Set-Cookie", "theme=dark")]
-        record.responseHeaders = [HTTPField("set-cookie", "session=client; HttpOnly")]
-        buffer.append(record); buffer.append(record); buffer.append(record)
+        func makeRecord() -> CaptureRecord {
+            var record = CaptureRecord(method: "GET", url: "http://localhost/")
+            record.requestHeaders = [HTTPField("Cookie", "session=original"), HTTPField("Authorization", "secret")]
+            record.sentHeaders = [HTTPField("cOoKiE", "session=modified")]
+            record.receivedHeaders = [HTTPField("Set-Cookie", "session=server; HttpOnly"), HTTPField("Set-Cookie", "theme=dark")]
+            record.responseHeaders = [HTTPField("set-cookie", "session=client; HttpOnly")]
+            return record
+        }
+        let record = makeRecord()
+        buffer.append(makeRecord()); buffer.append(record); buffer.append(makeRecord())
         let batch = buffer.drain(limit: 1)
         #expect(batch.records.count == 1); #expect(batch.dropped == 1)
         #expect(batch.records[0].requestHeaders[0].value == "session=original")

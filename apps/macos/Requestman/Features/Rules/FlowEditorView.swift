@@ -29,6 +29,7 @@ extension ModificationKind {
     private lazy var method = ActionPopUpButton(items: methods.map { $0 == "*" ? "全部" : $0 }) { [weak self] index in guard let self else { return }; modify { $0.method = methods[index] } }
     private lazy var pattern = ActionTextField(placeholder: "匹配值") { [weak self] value in self?.modify { $0.matchPattern = value } }
     private lazy var headerName = HeaderNameField { [weak self] value in self?.modify { $0.matchHeaderName = value } }
+    private let sseEnabled = NSButton(checkboxWithTitle: "SSE（服务器发送事件）", target: nil, action: nil)
     private let headerEnabled = NSButton(checkboxWithTitle: "Header", target: nil, action: nil)
     private lazy var headerRule = ActionPopUpButton(items: WorkflowMatchRule.allCases.map(\.title)) { [weak self] index in self?.modify { $0.matchHeaderRule = WorkflowMatchRule.allCases[index] } }
     private lazy var headerPattern = ActionTextField(placeholder: "Header 匹配值") { [weak self] value in self?.modify { $0.matchHeaderPattern = value } }
@@ -133,6 +134,9 @@ extension ModificationKind {
         NativeUI.pin(conditions, to: box.contentView!)
         let matching = NativeUI.stack([NativeUI.label("满足以下所有条件", weight: .medium), box], spacing: 8)
         box.widthAnchor.constraint(equalTo: matching.widthAnchor).isActive = true
+        sseEnabled.target = self; sseEnabled.action = #selector(toggleSSE)
+        sseEnabled.identifier = .init("rules.isSSE")
+        sseEnabled.toolTip = "添加 SSE 响应 Header；替换响应 Body 时取消上游并返回替代响应。"
         let lanes = NativeUI.stack([requestLane, responseLane], vertical: false, spacing: 20)
         lanes.alignment = .top; lanes.distribution = .fillEqually
         let preview = ActionButton(title: "预览流程") { [weak self] in
@@ -140,7 +144,7 @@ extension ModificationKind {
             presentAsSheet(WorkflowPreviewViewController(workflow: workflow, environment: model.document.environment))
         }
         preview.image = NSImage(systemSymbolName: "play", accessibilityDescription: nil); preview.imagePosition = .imageLeading
-        let stack = NativeUI.stack([title, matching, lanes, preview], spacing: 22)
+        let stack = NativeUI.stack([title, matching, sseEnabled, lanes, preview], spacing: 22)
         NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 24, left: 24, bottom: 24, right: 24))
         for wide in [title, matching, lanes] { wide.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         lanes.setContentHuggingPriority(.defaultLow, for: .vertical)
@@ -157,6 +161,7 @@ extension ModificationKind {
     override func refresh() {
         guard let workflow = model.workflow else { return }
         if name.stringValue != workflow.name { name.stringValue = workflow.name }
+        sseEnabled.state = workflow.isSSE ? .on : .off
         enabled.state = workflow.enabled ? .on : .off
         target.selectItem(at: WorkflowMatchTarget.allCases.firstIndex(of: workflow.matchTarget) ?? 0)
         rule.selectItem(at: WorkflowMatchRule.allCases.firstIndex(of: workflow.matchRule) ?? 0)
@@ -194,8 +199,9 @@ extension ModificationKind {
         explanation.isHidden = error == nil
         target.toolTip = help; pattern.toolTip = help
         requestLane.refresh(); responseLane.refresh()
-        for control in [name, enabled, target, rule, method, pattern, headerName, headerEnabled, headerRule, headerPattern] as [NSControl] { control.isEnabled = model.loaded }
+        for control in [name, enabled, target, rule, method, pattern, headerName, headerEnabled, headerRule, headerPattern, sseEnabled] as [NSControl] { control.isEnabled = model.loaded }
     }
+    @objc private func toggleSSE() { modify { $0.setSSE(sseEnabled.state == .on) } }
     @objc private func toggleHeaderMatching() { modify { $0.matchHeaderEnabled = headerEnabled.state == .on } }
     private func modify(_ update: (inout RequestWorkflow) -> Void) { guard model.loaded, var workflow = model.workflow else { return }; update(&workflow); model.updateWorkflow(workflow) }
 }

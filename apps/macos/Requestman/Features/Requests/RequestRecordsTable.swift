@@ -346,7 +346,7 @@ private struct RecordRow: Equatable {
     init(record: CaptureRecord, timeFormatter: DateFormatter, workflowName: String?) {
         id = record.id
         time = timeFormatter.string(from: record.startedAt)
-        method = record.method
+        method = record.captureProtocol == .http ? record.method : record.captureProtocol == .sse ? "SSE" : "WS"
         url = record.url
         project = record.project
         workflow = record.matchedWorkflowID != nil
@@ -355,7 +355,7 @@ private struct RecordRow: Equatable {
         environment = record.environment
         status = record.status
         let seconds = max(0, record.duration)
-        duration = seconds >= 1 ? String(format: "%.1f s", seconds) : String(format: "%.0f ms", seconds * 1000)
+        duration = record.connectionState.isActive ? record.connectionState.rawValue : seconds >= 1 ? String(format: "%.1f s", seconds) : String(format: "%.0f ms", seconds * 1000)
         result = record.error.map { "\(record.outcome.rawValue) · \($0)" } ?? record.outcome.rawValue
         failure = record.error ?? (record.outcome == .failed ? record.outcome.rawValue : nil)
     }

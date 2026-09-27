@@ -2,10 +2,13 @@ import Foundation
 
 public enum CaptureResourceType: String, CaseIterable, Sendable {
     case all = "全部", json = "JSON", document = "文档", css = "CSS", script = "JS"
+    case sse = "SSE", webSocket = "WS"
     case image = "图片", font = "字体", media = "媒体", other = "其他"
 
     public static func classify(_ record: CaptureRecord) -> Self {
         guard record.outcome != .tunnel else { return .other }
+        if record.captureProtocol == .sse { return .sse }
+        if record.captureProtocol == .webSocket { return .webSocket }
         let contentType = record.responseHeaders.first { $0.name.lowercased() == "content-type" }?
             .value.lowercased().split(separator: ";").first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
         if !contentType.isEmpty {
@@ -79,12 +82,13 @@ public struct CaptureRecordFilter: Equatable, Sendable {
     public var headerSource: CaptureHeaderSource = .original
     public var headerCombination: CaptureHeaderCombination = .all
     public var headers: [CaptureHeaderCondition] = []
+    public var activeOnly = false
     public var inverted = false
     public init() {}
 
     public var activeConditionCount: Int {
         [!project.isEmpty, !environment.isEmpty, outcome != nil, !method.isEmpty,
-         statusCode != nil, !urlQuery.isEmpty, !domainQuery.isEmpty, inverted].filter { $0 }.count
+         statusCode != nil, !urlQuery.isEmpty, !domainQuery.isEmpty, activeOnly, inverted].filter { $0 }.count
             + headers.filter(\.isActive).count
     }
     public var hasCriteria: Bool {
@@ -96,6 +100,7 @@ public struct CaptureRecordFilter: Equatable, Sendable {
             || record.workflow.localizedCaseInsensitiveContains(search)
             || record.matchedRules.contains { $0.summary.localizedCaseInsensitiveContains(search) }
         let metadataMatches = textMatches && (resource == .all || CaptureResourceType.classify(record) == resource)
+            && (!activeOnly || record.connectionState.isActive)
             && (project.isEmpty || record.project == project)
             && (environment.isEmpty || record.environment == environment)
             && (outcome == nil || record.outcome == outcome)

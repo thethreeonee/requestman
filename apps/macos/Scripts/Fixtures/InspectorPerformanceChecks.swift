@@ -192,6 +192,31 @@ struct InspectorPerformanceChecks {
         settle(controller)
         precondition(!link.isEnabled, "Deleted workflows must not navigate to a stale selection")
         print("Summary checks passed: shared method/status styles, direct matched-workflow navigation and deleted-target disabling")
+        // An open SSE record updates the existing Inspector without changing selection.
+        let stream = CaptureStreamStore()
+        stream.appendSSE(Data("data: first\n\n".utf8)) {}
+        let deadline = Date().addingTimeInterval(2)
+        while stream.summary.count < 1 && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        var live = CaptureRecord(method: "GET", url: "https://example.invalid/events")
+        live.captureProtocol = .sse; live.connectionState = .open; live.stream = stream; live.receivedStream = stream
+        model.history.records = [live]; model.history.selectedID = live.id
+        settle(controller)
+        let tabs = views(NSSegmentedControl.self, in: details.requests.view).first { $0.accessibilityLabel() == "请求数据" }!
+        tabs.selectedSegment = 4; precondition(NSApp.sendAction(tabs.action!, to: tabs.target, from: tabs))
+        settle(controller)
+        let messages = views(NSTableView.self, in: details.requests.view).first { $0.accessibilityLabel() == "事件与消息" }!
+        precondition(messages.numberOfRows == 1 && tabs.label(forSegment: 4) == "事件流")
+        stream.appendSSE(Data("data: second\n\n".utf8)) {}
+        let secondDeadline = Date().addingTimeInterval(2)
+        while stream.summary.count < 2 && Date() < secondDeadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        live.revision += 1; model.history.records = [live]
+        settle(controller)
+        precondition(messages.numberOfRows == 2 && messages.selectedRow == 1)
+        precondition(views(NSTextView.self, in: details.requests.view).contains { $0.string == "second" })
+        print("Live SSE Inspector passed: stable selection, incremental messages, latest message and copy payload")
+        controller.tearDown()
+        window.contentViewController = nil
+        window.close()
         print("Inspector performance checks passed: actual table/detail views, 6 selection/open/resize/close cycles; bounded idle CPU, stable toolbar images. Hidden CLI window only; App acceptance still required.")
     }
 

@@ -133,8 +133,8 @@ private enum RequestFilterChecks {
                 .filter { $0.action == NSSelectorFromString("performAction:") }
             precondition(actions.count == 3)
             let types = views.compactMap { $0 as? NSSegmentedControl }.first!
-            precondition(types.segmentCount == CaptureResourceType.allCases.count && !types.isHidden)
-            precondition((0..<types.segmentCount).map { types.label(forSegment: $0)! } == CaptureResourceType.allCases.map(\.rawValue))
+            precondition(types.segmentCount == CaptureResourceType.allCases.filter { $0 != .sse && $0 != .webSocket }.count && !types.isHidden)
+            precondition((0..<types.segmentCount).map { types.label(forSegment: $0)! } == CaptureResourceType.allCases.filter { $0 != .sse && $0 != .webSocket }.map(\.rawValue))
             precondition(!descendants(host.controls).contains { $0 is NSPopUpButton }, "All resource types stay inline")
             if #available(macOS 26.0, *) { precondition(types.controlSize == .extraLarge) }
             else { precondition(types.controlSize == .large) }
@@ -153,7 +153,7 @@ private enum RequestFilterChecks {
                 precondition(types.width(forSegment: index) >= ceil(textWidth) + 16,
                              "Every resource segment must retain its wider horizontal padding")
             }
-            if width < types.intrinsicContentSize.width + nativeHeight * 3 + 63 {
+            if width < types.intrinsicContentSize.width + (descendants(host.controls).compactMap { $0 as? NSSegmentedControl }.first { $0.accessibilityLabel() == "协议类型" }!.intrinsicContentSize.width) + nativeHeight * 3 + 73 {
                 precondition(host.controls.bounds.height == nativeHeight * 2 + 24 && types.frame.maxY < filterButton.frame.minY,
                              "Narrow layouts move all nine full-width segments onto their own row: width=\(width), controls=\(host.controls.bounds), frame=\(host.controls.frame), heights=\(host.controls.constraints.filter { $0.firstAttribute == .height }.map { $0.constant }), segments=\(types.frame), filter=\(filterButton.frame)")
             } else {
@@ -210,11 +210,17 @@ private enum RequestFilterChecks {
         settle(host.view)
         precondition(table.numberOfRows == 8)
         let types = descendants(host.controls).compactMap { $0 as? NSSegmentedControl }.first!
-        for (index, type) in CaptureResourceType.allCases.enumerated() {
+        for (index, type) in CaptureResourceType.allCases.filter({ $0 != .sse && $0 != .webSocket }).enumerated() {
             types.selectedSegment = index
             precondition(NSApp.sendAction(types.action!, to: types.target, from: types))
             settle(host.view)
             precondition(model.filter.resource == type)
+        }
+        let protocols = descendants(host.controls).compactMap { $0 as? NSSegmentedControl }.first { $0.accessibilityLabel() == "协议类型" }!
+        for (index, type) in [CaptureResourceType.sse, .webSocket].enumerated() {
+            protocols.selectedSegment = index
+            precondition(NSApp.sendAction(protocols.action!, to: protocols.target, from: protocols))
+            settle(host.view); precondition(model.filter.resource == type && types.selectedSegment == -1)
         }
         model.filter = CaptureRecordFilter()
         settle(host.view)
@@ -282,10 +288,12 @@ private enum RequestFilterChecks {
         controls.layer?.backgroundColor = NSColor.white.cgColor
         defer { controls.appearance = appearance; controls.layer?.backgroundColor = background }
         controls.displayIfNeeded()
-        let bitmap = controls.bitmapImageRepForCachingDisplay(in: controls.bounds)!
-        controls.cacheDisplay(in: controls.bounds, to: bitmap)
-        let scale = CGFloat(bitmap.pixelsHigh) / controls.bounds.height
-        let x = Int(segments.frame.midX * scale)
+        // On two rows, protocol tabs can also cross the resource tabs' midpoint.
+        // Inspect this control's rectangle rather than unrelated controls above it.
+        let bitmap = controls.bitmapImageRepForCachingDisplay(in: segments.frame)!
+        controls.cacheDisplay(in: segments.frame, to: bitmap)
+        let scale = CGFloat(bitmap.pixelsHigh) / segments.frame.height
+        let x = bitmap.pixelsWide / 2
         let rows = (0..<bitmap.pixelsHigh).filter { y in
             guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return false }
             return color.redComponent < 0.98 && color.greenComponent < 0.98 && color.blueComponent < 0.98

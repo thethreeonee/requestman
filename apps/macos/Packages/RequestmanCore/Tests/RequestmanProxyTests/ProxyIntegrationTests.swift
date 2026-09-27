@@ -10,6 +10,55 @@ import RequestmanCore
 
 @Suite(.serialized)
 struct ProxyIntegrationTests {
+    @Test(arguments: [false, true]) func SSEReplacementCancelsEndlessOriginAndDelayDoesNotWaitForEOF(file: Bool) async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("requestman-sse-test-\(UUID())")
+        if file { try Data("data: replacement\n\n".utf8).write(to: url) }
+        defer { if file { _ = try? FileManager.default.trashItem(at: url, resultingItemURL: nil) } }
+        try await withHarness { h in
+            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            workflow.setSSE(true)
+            var body = ModificationStep(kind: .replaceBody); body.value = "data: replacement\n\n"
+            if file { body.bodySource = .file; body.bodyFilePath = url.path }
+            var delay = ModificationStep(kind: .delay); delay.value = "20"
+            workflow.responseSteps.insert(contentsOf: [delay, body], at: 0)
+            try await h.start(workflow: workflow)
+            let reply = try await h.exchange("GET \(h.originURL)events HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            #expect(reply.contains("data: replacement") && !reply.contains("data: origin"))
+            try await Task.sleep(for: .milliseconds(80))
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(record.captureProtocol == .sse && record.connectionState == .closed && record.error == nil)
+            #expect(record.closeReason?.contains("取消上游") == true)
+            #expect(h.observation.withLock { $0.closedConnections } == 1)
+            #expect(try await record.stream?.read(from: 0).first?.text == "replacement")
+        }
+    }
+    @Test func SSEDelayForwardsTheFirstEventWithoutWaitingForEOF() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL; workflow.setSSE(true)
+            var delay = ModificationStep(kind: .delay); delay.value = "20"
+            workflow.responseSteps.insert(delay, at: 0)
+            try await h.start(workflow: workflow)
+            let reply = try await h.exchange("GET \(h.originURL)events HTTP/1.1\r\nHost: localhost\r\n\r\n", until: "data: origin")
+            #expect(reply.contains("data: origin") && reply.contains("text/event-stream"))
+        }
+    }
+    @Test func SSEPublishesEventsBeforeOriginCloses() async throws {
+        try await withHarness { h in
+            try await h.start()
+            let channel = try await ClientBootstrap(group: h.group).connect(host: "127.0.0.1", port: h.proxyPort).get()
+            try await channel.writeAndFlush(channel.allocator.buffer(string: "GET \(h.originURL)events HTTP/1.1\r\nHost: localhost\r\n\r\n")).get()
+            try await Task.sleep(for: .milliseconds(350))
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(record.captureProtocol == .sse && record.connectionState == .open)
+            #expect(try await record.stream?.read(from: 0).first?.text == "origin")
+            #expect(record.responseBody.state == .unavailable)
+            h.proxy.records.clear()
+            try await Task.sleep(for: .milliseconds(250))
+            #expect(h.proxy.records.drain().records.isEmpty)
+            try await channel.close().get()
+        }
+    }
+
     @Test func mappedBodyFilesReachRequestResponseAndMock() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("requestman-proxy-body-\(UUID()).bin")
         defer { _ = try? FileManager.default.trashItem(at: url, resultingItemURL: nil) }
@@ -709,7 +758,7 @@ struct ProxyIntegrationTests {
     }
 }
 
-private struct OriginObservation { var requests = 0; var header = ""; var bodyBytes = 0; var uri = "" }
+private struct OriginObservation { var requests = 0; var header = ""; var bodyBytes = 0; var uri = ""; var closedConnections = 0 }
 private final class Harness: @unchecked Sendable {
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
     let proxy = LocalProxyServer()
@@ -722,7 +771,9 @@ private final class Harness: @unchecked Sendable {
         let observation = observation
         origin = try await ServerBootstrap(group: group).childChannelInitializer { channel in
             channel.eventLoop.makeCompletedFuture {
-                try channel.pipeline.syncOperations.configureHTTPServerPipeline()
+                // Keep reading FIN while the fixture's SSE response remains open.
+                // Pipelining assistance otherwise suspends reads until response end.
+                try channel.pipeline.syncOperations.configureHTTPServerPipeline(withPipeliningAssistance: false)
                 try channel.pipeline.syncOperations.addHandler(OriginHandler(observation: observation))
             }
         }.bind(host: "127.0.0.1", port: 0).get()
@@ -768,6 +819,7 @@ private final class OriginHandler: ChannelInboundHandler, @unchecked Sendable {
     var method = HTTPMethod.GET
     var uri = ""
     init(observation: OSAllocatedUnfairLock<OriginObservation>) { self.observation = observation }
+    func channelInactive(context: ChannelHandlerContext) { observation.withLock { $0.closedConnections += 1 } }
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         switch unwrapInboundIn(data) {
         case .head(let head):
@@ -776,6 +828,12 @@ private final class OriginHandler: ChannelInboundHandler, @unchecked Sendable {
         case .body(let bytes): observation.withLock { $0.bodyBytes += bytes.readableBytes }
         case .end:
             let channel = context.channel
+            if uri.hasSuffix("/events") {
+                channel.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .ok,
+                    headers: HTTPHeaders([("Content-Type", "text/event-stream"), ("Transfer-Encoding", "chunked")]))), promise: nil)
+                channel.writeAndFlush(HTTPServerResponsePart.body(.byteBuffer(channel.allocator.buffer(string: "data: origin\n\n"))), promise: nil)
+                return
+            }
             let body = uri.hasSuffix("/large") ? String(repeating: "z", count: 1_048_576) : "origin-body"
             let bytes = uri.hasSuffix("/encoded") ? gzipJSONFixture : Array(body.utf8)
             let interrupted = uri.hasSuffix("/interrupted")

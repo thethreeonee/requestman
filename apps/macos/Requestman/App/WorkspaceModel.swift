@@ -405,7 +405,10 @@ final class ExecutionHistoryModel {
     func append(_ batch: [CaptureRecord], dropped: Int) {
         guard !batch.isEmpty || dropped > 0 else { return }
         self.dropped += dropped
-        records.insert(contentsOf: batch.reversed(), at: 0)
+        for record in batch {
+            if let index = records.firstIndex(where: { $0.id == record.id }) { records[index] = record }
+            else { records.insert(record, at: 0) }
+        }
         if records.count > 500 { records.removeLast(records.count - 500) }
         if let selectedID, !records.contains(where: { $0.id == selectedID }) { self.selectedID = nil }
     }

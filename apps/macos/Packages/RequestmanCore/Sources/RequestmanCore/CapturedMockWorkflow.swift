@@ -3,6 +3,7 @@ import Foundation
 /// Turns one immutable capture into editable steps, using the original request and available origin response.
 public enum CapturedMockWorkflow {
     public static func unavailableReason(for record: CaptureRecord) -> String? {
+        guard record.captureProtocol == .http else { return "持续事件与 WebSocket 会话暂不支持生成完整 Mock。" }
         guard record.outcome != .tunnel, record.method.uppercased() != "CONNECT" else { return "加密隧道没有可用的 HTTP 请求。" }
         guard !record.urlWasTruncated, !record.requestHeadersInfo.isTruncated,
               record.requestHeadersInfo.truncatedNames.isEmpty else { return "原始请求信息不完整。" }
