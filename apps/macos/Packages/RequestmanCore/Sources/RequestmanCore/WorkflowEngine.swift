@@ -13,6 +13,9 @@ public struct HTTPMessageDraft: Sendable, Codable {
     public var headers: [HTTPField]
     /// nil means stream the original body, including binary data, without inspection.
     public var replacementBody: String?
+    public var replacementBodyData: Data?
+    public var hasReplacementBody: Bool { replacementBodyData != nil || replacementBody != nil }
+    public var replacementBytes: Data? { replacementBodyData ?? replacementBody.map { Data($0.utf8) } }
     public var bodyText: String?
     public var bodyData: Data?
     public var isMock = false
@@ -91,14 +94,15 @@ public enum WorkflowEngine {
         guard steps.count <= 64 else { throw WorkflowError.invalid("每个方向最多执行 64 个步骤") }
         let context = templateContext ?? WorkflowTemplateContext(id: id, date: date, request: response ? request : draft)
         let responseStatus = response ? (originalResponseStatus ?? draft.status) : nil
-        func resolveValue(_ text: String) throws -> String {
-            try resolve(text, environment: environment, context: context, responseStatus: responseStatus)
-        }
         var trace: [String] = []
         for step in steps where step.enabled {
+            func resolveValue(_ text: String) throws -> String {
+                if step.literalValues == true { return text }
+                return try resolve(text, environment: environment, context: context, responseStatus: responseStatus)
+            }
             try control?.check()
             guard step.kind.supports(response: response) else { throw WorkflowError.invalid("步骤不适用于当前方向") }
-            let value = [.script, .setHeader, .removeHeader, .setQueryParameter, .replaceURLString].contains(step.kind) ? step.value : try resolveValue(step.value)
+            let value = step.usesBodyFile || [.script, .setHeader, .removeHeader, .setQueryParameter, .replaceURLString].contains(step.kind) ? step.value : try resolveValue(step.value)
             switch step.kind {
             case .delay:
                 throw WorkflowError.invalid("延迟步骤需要异步执行流程")
@@ -131,7 +135,13 @@ public enum WorkflowEngine {
                     }
                 }
                 draft.headers = headers
-            case .replaceBody: draft.replacementBody = value; clearBodyEncoding(&draft)
+            case .replaceBody:
+                try replaceBody(value, step: step, in: &draft)
+                clearBodyEncoding(&draft)
+                if !step.usesBodyFile, step.bodyEncoding == .base64, let encoding = step.bodyContentEncoding {
+                    try validateHeader("Content-Encoding", value: encoding)
+                    draft.setHeader("Content-Encoding", encoding)
+                }
             case .rewriteURL:
                 guard let url = URL(string: value), ["http", "https"].contains(url.scheme ?? ""), url.host != nil, url.user == nil, url.fragment == nil else {
                     throw WorkflowError.invalid("当前目标改写只支持完整的 http:// 或 https:// 地址")
@@ -209,7 +219,8 @@ public enum WorkflowEngine {
                 draft.status = step.status
             case .mock:
                 guard (200...599).contains(step.status) else { throw WorkflowError.invalid("Mock 状态码无效") }
-                draft.isMock = true; draft.status = step.status; draft.replacementBody = value
+                try replaceBody(value, step: step, in: &draft)
+                draft.isMock = true; draft.status = step.status
                 draft.headers = [HTTPField("Content-Type", "application/json; charset=utf-8")]
             case .redirect:
                 guard [301,302,303,307,308].contains(step.status), let url = URL(string: value),
@@ -217,7 +228,7 @@ public enum WorkflowEngine {
                       !value.utf8.contains(where: { $0 < 32 || $0 == 127 }) else { throw WorkflowError.invalid("重定向地址或状态码无效") }
                 if !response { draft.headers = [] }
                 draft.status = step.status; draft.setHeader("Location", value)
-                draft.replacementBody = ""; draft.isMock = !response
+                draft.replacementBody = ""; draft.replacementBodyData = nil; draft.isMock = !response
                 clearBodyEncoding(&draft)
             }
             trace.append(step.kind.title)
@@ -276,6 +287,28 @@ public enum WorkflowEngine {
               let url = URL(string: value), ["http", "https"].contains(url.scheme ?? ""),
               let host = url.host, !host.isEmpty, url.user == nil, url.password == nil, url.fragment == nil else {
             throw WorkflowError.invalid("修改后的 URL 必须是完整的 http:// 或 https:// 地址，且不含空白、账号或片段")
+        }
+    }
+
+    private static func replaceBody(_ value: String, step: ModificationStep, in draft: inout HTTPMessageDraft) throws {
+        if step.usesBodyFile {
+            guard let path = step.bodyFilePath, !path.isEmpty else { throw WorkflowError.invalid("请选择映射的本地文件") }
+            let url = URL(fileURLWithPath: path)
+            let bytes: Data
+            do {
+                guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+                    throw WorkflowError.invalid("请选择普通文件")
+                }
+                bytes = try Data(contentsOf: url)
+            } catch {
+                throw WorkflowError.invalid("无法读取 Body 文件“\(url.lastPathComponent)”：\(error.localizedDescription)")
+            }
+            draft.replacementBodyData = bytes; draft.replacementBody = nil
+        } else if step.bodyEncoding == .base64 {
+            guard let bytes = Data(base64Encoded: value) else { throw WorkflowError.invalid("Body 不是有效的 Base64 数据") }
+            draft.replacementBodyData = bytes; draft.replacementBody = nil
+        } else {
+            draft.replacementBody = value; draft.replacementBodyData = nil
         }
     }
 

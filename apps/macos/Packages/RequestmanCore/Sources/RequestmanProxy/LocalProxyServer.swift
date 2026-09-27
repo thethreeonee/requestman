@@ -189,6 +189,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     private var scriptRequestDraft: HTTPMessageDraft?
     private var scriptResponseDraft: HTTPMessageDraft?
     private var scriptRequestBytes = Data()
+    private var readingResponseBodyFile = false
     private var scriptResponseBytes = Data()
 
     init(configuration: ExplicitProxyConfiguration, shared: ProxySharedState, records: CaptureRecordBuffer, tlsAuthority: String? = nil) {
@@ -337,6 +338,13 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                     }
                     return
                 }
+                if match.workflow.requestSteps.contains(where: { $0.enabled && $0.usesBodyFile }) {
+                    executeScriptFlow(response: false, draft: draft) { [self, head] result in
+                        do { try continueRequest(head, draft: result) }
+                        catch { fail(error.localizedDescription, status: 400) }
+                    }
+                    return
+                }
                 try applyRecordedSteps(match.workflow.requestSteps, response: false, to: &draft)
             }
             try continueRequest(head, draft: draft)
@@ -351,7 +359,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                 record?.sentBody = .unavailable("本地响应，请求未发送至上游")
                 record?.receivedBody = .unavailable("本地响应，没有上游响应")
                 var reply = draft
-                if match?.workflow.responseSteps.contains(where: { $0.enabled && [.script, .delay].contains($0.kind) }) == true {
+                if match?.workflow.responseSteps.contains(where: { $0.enabled && ([.script, .delay].contains($0.kind) || $0.usesBodyFile) }) == true {
                     executeScriptFlow(response: true, draft: reply) { [self] in sendStatic($0) }
                     return
                 }
@@ -366,8 +374,8 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             headers.replaceOrAdd(name: "Host", value: target.percentEncodedHost.map { $0 + (target.port.map { ":\($0)" } ?? "") } ?? host)
             headers.replaceOrAdd(name: "Connection", value: clientKeepsAlive ? "keep-alive" : "close")
             headers.remove(name: "Expect")
-            if let body = draft.replacementBody {
-                headers.remove(name: "Transfer-Encoding"); headers.replaceOrAdd(name: "Content-Length", value: String(body.utf8.count))
+            if let body = draft.replacementBytes {
+                headers.remove(name: "Transfer-Encoding"); headers.replaceOrAdd(name: "Content-Length", value: String(body.count))
             } else if head.headers.contains(name: "transfer-encoding") {
                 headers.remove(name: "Content-Length"); headers.replaceOrAdd(name: "Transfer-Encoding", value: "chunked")
             }
@@ -392,9 +400,9 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                     upstream = channel; connected = true
                     sentBodyCollector = CaptureBodyCollector(headers: record?.sentHeaders ?? [])
                     trackRequestWrite(channel.write(HTTPClientRequestPart.head(forwarded)))
-                    if let body = request?.replacementBody {
-                        sentBodyCollector?.append(body.utf8)
-                        trackRequestWrite(channel.write(HTTPClientRequestPart.body(.byteBuffer(channel.allocator.buffer(string: body)))))
+                    if let body = request?.replacementBytes {
+                        sentBodyCollector?.append(body)
+                        trackRequestWrite(channel.write(HTTPClientRequestPart.body(.byteBuffer(channel.allocator.buffer(bytes: body)))))
                     }
                     for part in pending { forward(part) }
                     pending.removeAll()
@@ -453,7 +461,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         guard let upstream, !tunnel else { return }
         switch part {
         case .body(let bytes):
-            if request?.replacementBody == nil {
+            if request?.hasReplacementBody != true {
                 sentBodyCollector?.append(bytes.readableBytesView)
                 trackRequestWrite(upstream.write(HTTPClientRequestPart.body(.byteBuffer(bytes))))
             }
@@ -513,33 +521,33 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                     scriptResponseDraft = draft
                     return
                 }
+                if match?.workflow.responseSteps.contains(where: { $0.enabled && $0.usesBodyFile }) == true {
+                    readingResponseBodyFile = true
+                    executeScriptFlow(response: true, draft: draft) { [self] result in
+                        readingResponseBodyFile = false
+                        startStreamingResponse(result)
+                        if responseEnded { endStreamingResponse(channel) }
+                        else { responseReadComplete(channel) }
+                    }
+                    return
+                }
                 if let match { try applyRecordedSteps(match.workflow.responseSteps, response: true, to: &draft) }
-                response = draft
-                responseKeepsAlive = clientKeepsAlive && requestEnded && requestWriteComplete
-                let headers = responseHeaders(draft, keepAlive: responseKeepsAlive)
-                record?.responseHeaders = fields(headers); record?.status = draft.status
-                responseBodyCollector = CaptureBodyCollector(headers: fields(headers))
-                responseStarted = true
-                if let client {
-                    trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .init(statusCode: draft.status), headers: headers))))
-                }
-                if let body = draft.replacementBody, allowsBody(draft.status), let client {
-                    responseBodyCollector?.append(body.utf8)
-                    trackResponseWrite(client.write(HTTPServerResponsePart.body(.byteBuffer(client.allocator.buffer(string: body)))))
-                }
+                startStreamingResponse(draft)
             case .body(let buffer):
                 record?.responseBytes += buffer.readableBytes
                 receivedBodyCollector?.append(buffer.readableBytesView)
+                if readingResponseBodyFile { return }
                 if scriptResponseDraft != nil {
                     scriptResponseBytes.append(contentsOf: buffer.readableBytesView)
                     return
                 }
-                if let response, response.replacementBody == nil, allowsBody(response.status) {
+                if let response, !response.hasReplacementBody, allowsBody(response.status) {
                     responseBodyCollector?.append(buffer.readableBytesView)
                     if let client { trackResponseWrite(client.write(HTTPServerResponsePart.body(.byteBuffer(buffer)))) }
                 }
             case .end:
                 if informationalResponse { informationalResponse = false; return }
+                if readingResponseBodyFile { responseEnded = true; return }
                 if var draft = scriptResponseDraft {
                     scriptResponseDraft = nil; responseEnded = true
                     draft.bodyData = scriptResponseBytes
@@ -548,26 +556,44 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
                     }
                     return
                 }
-                guard responseStarted, let client else { return fail("上游未返回完整响应", status: 502) }
-                responseEnded = true
-                client.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { [self] result in
-                    if case .success = result, !responseWriteFailed, responseKeepsAlive, failureMessage == nil {
-                        responseWriteComplete = true
-                        finish()
-                        prepareNextRequest()
-                    } else {
-                        if case .failure(let error) = result { finish(error: error.localizedDescription) }
-                        else { responseWriteComplete = !responseWriteFailed; finish() }
-                        closeProxyChannel(client); closeProxyChannel(channel)
-                    }
-                }
+                endStreamingResponse(channel)
             }
         } catch { fail(error.localizedDescription, status: 502) }
+    }
+    private func startStreamingResponse(_ draft: HTTPMessageDraft) {
+        response = draft
+        responseKeepsAlive = clientKeepsAlive && requestEnded && requestWriteComplete
+        let headers = responseHeaders(draft, keepAlive: responseKeepsAlive)
+        record?.responseHeaders = fields(headers); record?.status = draft.status
+        responseBodyCollector = CaptureBodyCollector(headers: fields(headers))
+        responseStarted = true
+        if let client {
+            trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .init(statusCode: draft.status), headers: headers))))
+        }
+        if let body = draft.replacementBytes, allowsBody(draft.status), let client {
+            responseBodyCollector?.append(body)
+            trackResponseWrite(client.write(HTTPServerResponsePart.body(.byteBuffer(client.allocator.buffer(bytes: body)))))
+        }
+    }
+    private func endStreamingResponse(_ channel: Channel) {
+        guard responseStarted, let client else { return fail("上游未返回完整响应", status: 502) }
+        responseEnded = true
+        client.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { [self] result in
+            if case .success = result, !responseWriteFailed, responseKeepsAlive, failureMessage == nil {
+                responseWriteComplete = true
+                finish()
+                prepareNextRequest()
+            } else {
+                if case .failure(let error) = result { finish(error: error.localizedDescription) }
+                else { responseWriteComplete = !responseWriteFailed; finish() }
+                closeProxyChannel(client); closeProxyChannel(channel)
+            }
+        }
     }
     func responseReadComplete(_ channel: Channel) {
         guard let client, isProcessing, record != nil, channel === upstream else { return }
         client.flush()
-        guard !responseEnded else { return }
+        guard !responseEnded, !readingResponseBodyFile else { return }
         let flushed = lastResponseWrite ?? channel.eventLoop.makeSucceededFuture(())
         flushed.whenComplete { [self] result in
             if case .failure(let error) = result { fail(error.localizedDescription, status: 502) }
@@ -593,7 +619,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         record = nil; match = nil; request = nil; response = nil; templateContext = nil
         scriptLease?.control.cancel()
         scriptLease = nil; scriptRequestHead = nil; scriptRequestDraft = nil; scriptResponseDraft = nil
-        scriptRequestBytes = Data(); scriptResponseBytes = Data()
+        scriptRequestBytes = Data(); scriptResponseBytes = Data(); readingResponseBodyFile = false
         pending.removeAll(keepingCapacity: true)
         lastRequestWrite = nil; lastResponseWrite = nil
         requestBodyCollector = nil; sentBodyCollector = nil
@@ -619,10 +645,10 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         record?.status = draft.status; record?.responseHeaders = fields(headers)
         responseBodyCollector = CaptureBodyCollector(headers: fields(headers))
         trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .init(statusCode: draft.status), headers: headers))))
-        if allowsBody(draft.status), let body = draft.replacementBody {
-            record?.responseBytes = body.utf8.count
-            responseBodyCollector?.append(body.utf8)
-            trackResponseWrite(client.write(HTTPServerResponsePart.body(.byteBuffer(client.allocator.buffer(string: body)))))
+        if allowsBody(draft.status), let body = draft.replacementBytes {
+            record?.responseBytes = body.count
+            responseBodyCollector?.append(body)
+            trackResponseWrite(client.write(HTTPServerResponsePart.body(.byteBuffer(client.allocator.buffer(bytes: body)))))
         }
         client.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { [self] result in
             if case .failure(let error) = result { finish(error: error.localizedDescription) }
@@ -634,8 +660,8 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         var headers = cleanHeaders(draft.headers)
         headers.remove(name: "Content-Length"); headers.remove(name: "Transfer-Encoding")
         headers.replaceOrAdd(name: "Connection", value: keepAlive ? "keep-alive" : "close")
-        if let body = draft.replacementBody, draft.status != 204, draft.status != 205, draft.status != 304 {
-            headers.replaceOrAdd(name: "Content-Length", value: String(body.utf8.count))
+        if let body = draft.replacementBytes, draft.status != 204, draft.status != 205, draft.status != 304 {
+            headers.replaceOrAdd(name: "Content-Length", value: String(body.count))
         } else if allowsBody(draft.status) { headers.replaceOrAdd(name: "Transfer-Encoding", value: "chunked") }
         return headers
     }
@@ -710,9 +736,9 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             let result: Result<HTTPMessageDraft, Error>
             do {
                 try control.check()
-                if hasScript, let data = output.bodyData { output.bodyText = try ScriptBodyText.decode(data, headers: output.headers, control: control) }
+                if hasScript, !output.hasReplacementBody, let data = output.bodyData { output.bodyText = try ScriptBodyText.decode(data, headers: output.headers, control: control) }
                 var preparedRequest = inputRequest
-                if hasScript, let data = preparedRequest?.bodyData, preparedRequest?.replacementBody == nil {
+                if hasScript, let data = preparedRequest?.bodyData, preparedRequest?.hasReplacementBody != true {
                     let headers = preparedRequest?.headers ?? []
                     preparedRequest?.bodyText = try ScriptBodyText.decode(data, headers: headers, control: control)
                 }
@@ -739,7 +765,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     private func sendBufferedResponse(_ draft: HTTPMessageDraft) {
         guard let client, isProcessing else { return }
         response = draft; responseStarted = true
-        let bytes = draft.replacementBody.map { Data($0.utf8) } ?? scriptResponseBytes
+        let bytes = draft.replacementBytes ?? scriptResponseBytes
         scriptResponseBytes = Data()
         var headers = responseHeaders(draft)
         headers.remove(name: "Transfer-Encoding")
@@ -765,7 +791,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         suspendedFlowControl?.cancel(); suspendedFlowControl = nil
         scriptLease?.control.cancel()
         scriptLease = nil; scriptRequestHead = nil; scriptRequestDraft = nil; scriptResponseDraft = nil
-        scriptRequestBytes = Data(); scriptResponseBytes = Data()
+        scriptRequestBytes = Data(); scriptResponseBytes = Data(); readingResponseBodyFile = false
         pending.removeAll()
         guard var record else { return }
         let elapsed = started.duration(to: .now).components

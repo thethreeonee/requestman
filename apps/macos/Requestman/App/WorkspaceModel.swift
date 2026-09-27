@@ -305,20 +305,38 @@ final class WorkspaceModel {
         let workflow = RequestWorkflow(); document.projects[i].workflows.append(workflow)
         selectedWorkflowID = workflow.id; selectedStepID = nil
     }
-    func addWorkflow(matchingURL url: String) {
+    func addMockWorkflow(from record: CaptureRecord) {
         guard loaded else { return }
-        if document.projects.isEmpty { document.projects.append(WorkflowProject()) }
-        let index = document.projects.firstIndex { $0.workflows.contains { $0.id == selectedWorkflowID } } ?? 0
-        var workflow = RequestWorkflow()
-        workflow.matchTarget = .url
-        workflow.matchRule = .equals
-        workflow.matchPattern = url
-        document.projects[index].workflows.append(workflow)
-        selectedWorkflowID = workflow.id
-        selectedStepID = nil
-        editingResponse = false
-        history.selectedID = nil
-        selection = .rules
+        Task { [weak self] in
+            do {
+                let workflow = try await Task.detached(priority: .userInitiated) {
+                    try CapturedMockWorkflow.make(from: record, decodeBody: RequestBodyDecoding.decode)
+                }.value
+                guard let self, loaded else { return }
+                if document.projects.isEmpty { document.projects.append(WorkflowProject()) }
+                // Place before the first active matching rule so the new Mock can take effect.
+                let matchingIndex = document.projects.firstIndex { project in
+                    project.enabled && project.workflows.contains {
+                        $0.matches(method: record.method, url: record.url, headers: record.requestHeaders)
+                    }
+                }
+                let selectedIndex = document.projects.firstIndex {
+                    $0.enabled && $0.workflows.contains { $0.id == selectedWorkflowID }
+                }
+                let index: Int
+                if let existing = matchingIndex ?? selectedIndex ?? document.projects.firstIndex(where: \.enabled) {
+                    index = existing
+                } else {
+                    document.projects.append(WorkflowProject()); index = document.projects.count - 1
+                }
+                document.projects[index].workflows.insert(workflow, at: 0)
+                selectedWorkflowID = workflow.id
+                selectedStepID = nil
+                editingResponse = false
+                history.selectedID = nil
+                selection = .rules
+            } catch { self?.errorMessage = "无法创建 Mock：\(error.localizedDescription)" }
+        }
     }
     func deleteWorkflow(_ id: UUID) {
         for i in document.projects.indices { document.projects[i].workflows.removeAll { $0.id == id } }

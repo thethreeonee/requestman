@@ -28,7 +28,7 @@ final class WorkspaceModel {
     func toggleCapture() async { isCapturing.toggle() }
     func setRecordingPaused(_ value: Bool) { history.paused = value }
     func clearHistory() { history.clear() }
-    func addWorkflow(matchingURL url: String) { selection = .rules }
+    func addMockWorkflow(from record: CaptureRecord) { selection = .rules }
 }
 
 @MainActor @Observable
@@ -58,7 +58,10 @@ enum WorkspaceSettingsSection { case general, environments }
     override func loadView() { view = NSView() }
 }
 @MainActor final class RulesViewController: ProjectSidebarViewController {}
-@MainActor final class StepInspectorViewController: ProjectSidebarViewController { var isPresented = false }
+@MainActor final class StepInspectorViewController: ProjectSidebarViewController {
+    var isPresented = false
+    func installAccessories(on item: NSSplitViewItem) {}
+}
 
 @main @MainActor
 struct InspectorPerformanceChecks {
@@ -189,9 +192,6 @@ struct InspectorPerformanceChecks {
         settle(controller)
         precondition(!link.isEnabled, "Deleted workflows must not navigate to a stale selection")
         print("Summary checks passed: shared method/status styles, direct matched-workflow navigation and deleted-target disabling")
-        controller.tearDown()
-        window.contentViewController = nil
-        window.close()
         print("Inspector performance checks passed: actual table/detail views, 6 selection/open/resize/close cycles; bounded idle CPU, stable toolbar images. Hidden CLI window only; App acceptance still required.")
     }
 

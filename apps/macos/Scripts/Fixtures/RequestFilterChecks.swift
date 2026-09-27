@@ -16,6 +16,10 @@ private final class FilterFixture {
         record.duration = index == 4 ? 3.2 : 0.128
         if index == 7 { record.outcome = .failed; record.error = "响应传输中断" }
         record.requestHeaders = [HTTPField("Content-Type", "application/json")]
+        record.requestBody = CaptureBodyCollector().snapshot(isComplete: true)
+        let response = CaptureBodyCollector()
+        response.append(Data("response-\(index)".utf8))
+        record.responseBody = response.snapshot(isComplete: true)
         record.matchedRules = [.init(kind: .setHeader, name: "添加调试标记", response: false),
                                .init(kind: .replaceBody, name: "订单数据", response: true),
                                .init(kind: .setStatus, name: "模拟状态", response: true)]
@@ -488,8 +492,8 @@ private enum RequestFilterChecks {
         }
     }
     private static func checkRequestMenu(_ table: NSTableView, host: FilterFixtureView, model: FilterFixture) {
-        var requestedURL: String?
-        host.table.onModifyRequest = { requestedURL = $0 }
+        var requestedRecord: CaptureRecord?
+        host.table.onMockRequest = { requestedRecord = $0 }
         table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         func menu(at point: NSPoint) -> NSMenu? {
             let location = table.convert(point, to: nil)
@@ -499,20 +503,26 @@ private enum RequestFilterChecks {
         }
         let row = table.rect(ofRow: 2)
         let clickedMenu = menu(at: NSPoint(x: row.midX, y: row.midY))!
-        precondition(clickedMenu.items.map(\.title) == ["修改请求"])
+        precondition(clickedMenu.items.map(\.title) == ["Mock 当前请求"])
         let item = clickedMenu.items[0]
+        precondition(item.isEnabled)
         let original = model.records
         let clickedURL = original[2].url
         model.records.insert(CaptureRecord(method: "GET", url: "https://new.test"), at: 0)
         settle(host.view)
         precondition(NSApp.sendAction(item.action!, to: item.target, from: item))
-        precondition(requestedURL == clickedURL, "The context action uses the clicked row even after a new log arrives")
+        precondition(requestedRecord?.url == clickedURL, "The context action uses the clicked row even after a new log arrives")
         model.records.removeAll()
         settle(host.view)
         precondition(NSApp.sendAction(item.action!, to: item.target, from: item))
-        precondition(requestedURL == clickedURL)
+        precondition(requestedRecord?.url == clickedURL)
+        precondition(requestedRecord?.responseBody.data == original[2].responseBody.data)
         precondition(menu(at: NSPoint(x: 20, y: 20)) == nil, "Empty space has no request menu")
         model.records = original
+        settle(host.view)
+        let invalid = table.rect(ofRow: 7)
+        let invalidMenu = menu(at: NSPoint(x: invalid.midX, y: invalid.midY))!
+        precondition(!invalidMenu.items[0].isEnabled && invalidMenu.items[0].toolTip != nil)
         model.selectedID = nil
         settle(host.view)
     }

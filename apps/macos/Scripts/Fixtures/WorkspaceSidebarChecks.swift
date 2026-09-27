@@ -49,7 +49,7 @@ final class WorkspaceModel {
     func toggleCapture() async { isCapturing.toggle() }
     func setRecordingPaused(_ paused: Bool) { history.paused = paused }
     func clearHistory() { history.clear() }
-    func addWorkflow(matchingURL: String) {}
+    func addMockWorkflow(from: CaptureRecord) {}
 }
 
 @MainActor @Observable
@@ -90,6 +90,7 @@ enum WorkspaceSettingsSection { case general, environments }
 }
 @MainActor final class StepInspectorViewController: NSViewController {
     var isPresented = false
+    func installAccessories(on item: NSSplitViewItem) {}
     init(model: WorkspaceModel) { super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { nil }
     override func loadView() { view = NSView() }
@@ -143,7 +144,7 @@ struct WorkspaceSidebarChecks {
     private static func checkRequestScrollChrome() {
         guard #available(macOS 26.0, *) else { return }
         let model = WorkspaceModel()
-        model.selection = .requests
+        model.selection = .rules
         model.history.records = (0..<80).map { CaptureRecord(method: "GET", url: "https://example.test/requests/\($0)") }
         let controller = WorkspaceSplitController(model: model, snapshot: WorkspaceToolbarSnapshot(model: model), openSettings: {})
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 800),
@@ -153,6 +154,15 @@ struct WorkspaceSidebarChecks {
         controller.viewDidAppear()
         let item = controller.splitViewItems[1]
         let host = item.viewController as! WorkspaceMainController
+        window.contentView?.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.12))
+        if let initialAccessory = item.topAlignedAccessoryViewControllers.first {
+            precondition(initialAccessory.view.isHiddenOrHasHiddenAncestor,
+                         "Starting on request modification must not display request-log filters")
+        }
+        precondition(item.topAlignedAccessoryViewControllers.isEmpty)
+        model.selection = .requests
+        controller.update(snapshot: WorkspaceToolbarSnapshot(model: model), openSettings: {})
         let accessory = item.topAlignedAccessoryViewControllers.first!
         let filters = findView(RequestFilterControls.self, in: accessory.view)!
         let table = findView(NSTableView.self, in: host.requests.view)!
@@ -202,12 +212,20 @@ struct WorkspaceSidebarChecks {
             }
             window.orderOut(nil)
         }
-        model.selection = .rules
-        controller.update(snapshot: WorkspaceToolbarSnapshot(model: model), openSettings: {}); settle()
-        precondition(accessory.isHidden)
-        model.selection = .requests
-        controller.update(snapshot: WorkspaceToolbarSnapshot(model: model), openSettings: {}); settle()
-        precondition(!accessory.isHidden && item.topAlignedAccessoryViewControllers.count == 1)
+        model.history.filter.search = "example.test"
+        for _ in 0..<3 {
+            model.selection = .rules
+            controller.update(snapshot: WorkspaceToolbarSnapshot(model: model), openSettings: {}); settle()
+            precondition(item.topAlignedAccessoryViewControllers.isEmpty)
+            precondition(filters.window == nil,
+                         "Request modification must detach request-log controls from the window")
+            model.selection = .requests
+            controller.update(snapshot: WorkspaceToolbarSnapshot(model: model), openSettings: {}); settle()
+            precondition(!accessory.isHidden && item.topAlignedAccessoryViewControllers.count == 1)
+            precondition(item.topAlignedAccessoryViewControllers.first === accessory)
+            precondition(filters.window === window && !filters.isHiddenOrHasHiddenAncestor)
+            precondition(model.history.filter.search == "example.test")
+        }
         print("Request scroll chrome: native full-height content, safe table headings, responsive filter accessory and page switching passed")
     }
 

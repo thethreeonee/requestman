@@ -10,6 +10,79 @@ import RequestmanCore
 
 @Suite(.serialized)
 struct ProxyIntegrationTests {
+    @Test func mappedBodyFilesReachRequestResponseAndMock() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("requestman-proxy-body-\(UUID()).bin")
+        defer { _ = try? FileManager.default.trashItem(at: url, resultingItemURL: nil) }
+        for mode in 0..<4 {
+            try await withHarness { h in
+                var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+                var file = ModificationStep(kind: mode == 2 ? .mock : .replaceBody)
+                file.bodySource = .file; file.bodyFilePath = url.path
+                if mode == 0 || mode == 2 { workflow.requestSteps = [file] }
+                else {
+                    if mode == 3 { workflow.requestSteps = [ModificationStep(kind: .mock)] }
+                    workflow.responseSteps = [file]
+                }
+                try await h.start(workflow: workflow)
+                for bytes in [Data([0, 255, 128, 10, 13]), Data("updated {{literal}}".utf8), Data()] {
+                    try bytes.write(to: url, options: .atomic)
+                    _ = try await h.exchange("POST \(h.originURL)file HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\nbody")
+                    let record = try #require(h.proxy.records.drain().records.first)
+                    #expect(record.error == nil)
+                    #expect((mode == 0 ? record.sentBody.data : record.responseBody.data) == bytes)
+                    #expect((record.outcome == .mocked) == (mode >= 2))
+                }
+            }
+        }
+    }
+
+    @Test func capturedRequestPrefillForwardsAndRestoresOriginalResponse() async throws {
+        try await withHarness { h in
+            try await h.start()
+            let request = "POST \(h.originURL)captured?q=a%2Bb&q=second HTTP/1.1\r\nHost: localhost\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\ninput"
+            _ = try await h.exchange(request)
+            var captured = try #require(h.proxy.records.drain().records.first)
+            captured.originalStatus = 202
+            captured.receivedHeaders = [HTTPField("Content-Type", "application/x-captured"), HTTPField("X-Origin-Snapshot", "saved")]
+            let body = CaptureBodyCollector(headers: captured.receivedHeaders)
+            body.append(Data("saved original response".utf8))
+            captured.receivedBody = body.snapshot(isComplete: true)
+            let workflow = try CapturedMockWorkflow.make(from: captured)
+            #expect(workflow.responseSteps.map(\.kind) == [.setStatus, .replaceBody, .setHeader])
+            var project = WorkflowProject(); project.workflows = [workflow]
+            var document = WorkspaceDocument(); document.projects = [project]
+            await h.proxy.update(document)
+            _ = try await h.exchange(request.replacingOccurrences(of: "input", with: "other"))
+            #expect(h.observation.withLock { $0.requests } == 2)
+            let forwarded = try #require(h.proxy.records.drain().records.first)
+            #expect(forwarded.outcome != .mocked)
+            #expect(forwarded.sentBody.data == Data("input".utf8))
+            #expect(forwarded.status == 202)
+            #expect(forwarded.responseBody.data == Data("saved original response".utf8))
+            #expect(forwarded.responseBody.data != forwarded.receivedBody.data)
+            #expect(forwarded.responseHeaders.contains(HTTPField("Content-Type", "application/x-captured")))
+            #expect(!forwarded.responseHeaders.contains { $0.name == "X-Origin-Snapshot" })
+        }
+    }
+
+    @Test func capturedBinaryRequestWritesOriginalBytesAndHeadersToOrigin() async throws {
+        try await withHarness { h in
+            var captured = CaptureRecord(method: "POST", url: h.originURL + "binary")
+            captured.requestHeaders = [HTTPField("Content-Type", "application/octet-stream"), HTTPField("X-Value", "first"), HTTPField("X-Value", "second")]
+            let bytes = Data([0, 255, 128, 10, 13, 65])
+            let collector = CaptureBodyCollector(headers: captured.requestHeaders); collector.append(bytes)
+            captured.requestBody = collector.snapshot(isComplete: true)
+            let workflow = try CapturedMockWorkflow.make(from: captured)
+            try await h.start(workflow: workflow)
+            _ = try await h.exchange("POST \(captured.url) HTTP/1.1\r\nHost: localhost\r\nContent-Type: text/plain\r\nX-Value: old1\r\nX-Value: old2\r\nContent-Length: 0\r\n\r\n")
+            let forwarded = try #require(h.proxy.records.drain().records.first)
+            #expect(forwarded.sentBody.data == bytes && forwarded.sentBody.isComplete)
+            #expect(forwarded.sentHeaders.filter { $0.name == "X-Value" }.map(\.value) == ["second", "second"])
+            #expect(forwarded.sentHeaders.first { $0.name == "Content-Length" }?.value == "6")
+            #expect(h.observation.withLock { $0.requests } == 1)
+        }
+    }
+
     @Test func originAndMockDelaysCanExceedThirtySeconds() async throws {
         try await withThrowingTaskGroup(of: Void.self) { group in
             for mocked in [false, true] {
@@ -707,6 +780,9 @@ private final class OriginHandler: ChannelInboundHandler, @unchecked Sendable {
             let bytes = uri.hasSuffix("/encoded") ? gzipJSONFixture : Array(body.utf8)
             let interrupted = uri.hasSuffix("/interrupted")
             var headers = HTTPHeaders([("Content-Length", String(bytes.count + (interrupted ? 32 : 0))), ("Connection", "close")])
+            if uri.hasPrefix("/captured?") {
+                headers.add(name: "Content-Type", value: "text/plain")
+            }
             if uri.hasSuffix("/large-headers") {
                 headers.add(name: "Set-Cookie", value: "session=" + String(repeating: "c", count: 100_000))
                 for index in 0..<150 { headers.add(name: "X-\(index)", value: "value") }

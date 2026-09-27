@@ -59,15 +59,15 @@ public struct NamedValue: Codable, Equatable, Identifiable, Sendable {
 
 public enum HeaderOperation: String, Codable, CaseIterable, Sendable {
     case add, modify, remove
-    /// Retained only for saved add-or-replace configurations.
+    /// Replace all same-name headers, or add the header when absent.
     case set
-    public static let editableCases: [Self] = [.add, .modify, .remove]
+    public static let editableCases: [Self] = [.add, .modify, .remove, .set]
     public var title: String {
         switch self {
         case .add: "添加"
         case .modify: "修改"
         case .remove: "删除"
-        case .set: "添加或覆盖（旧配置）"
+        case .set: "添加或覆盖"
         }
     }
 }
@@ -152,6 +152,10 @@ public struct URLReplacementEntry: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public enum BodySource: String, Codable, Sendable { case text, file }
+
+public enum BodyValueEncoding: String, Codable, Sendable { case text, base64 }
+
 public struct ModificationStep: Codable, Equatable, Identifiable, Sendable {
     public var id = UUID()
     public var kind: ModificationKind
@@ -159,6 +163,15 @@ public struct ModificationStep: Codable, Equatable, Identifiable, Sendable {
     public var name = ""
     public var value = ""
     public var status = 200
+    /// Captured values are literal by default; existing configurations continue resolving templates.
+    public var literalValues: Bool?
+    public var bodyEncoding: BodyValueEncoding?
+    /// Content encoding of captured entity bytes retained as Base64.
+    public var bodyContentEncoding: String?
+    /// Missing in older workspaces means manual text input.
+    public var bodySource: BodySource?
+    public var bodyFilePath: String?
+    public var usesBodyFile: Bool { [.replaceBody, .mock].contains(kind) && bodySource == .file }
     /// nil reads the legacy single name/value pair; an empty array is an empty step.
     public var headers: [HeaderEntry]?
     public var queryParameters: [QueryParameterEntry]?

@@ -5,7 +5,7 @@ import RequestmanCore
 final class RequestRecordsTable: NSView {
     static let columnWidthsKey = "requestLog.columnWidths.v1"
     var onSelectionChange: (UUID?) -> Void = { _ in }
-    var onModifyRequest: (String) -> Void = { _ in }
+    var onMockRequest: (CaptureRecord) -> Void = { _ in }
     private let coordinator: Coordinator
     private let scrollView: NSScrollView
 
@@ -14,7 +14,7 @@ final class RequestRecordsTable: NSView {
         scrollView = RecordsScrollView()
         super.init(frame: .zero)
         coordinator.onSelectionChange = { [weak self] in self?.onSelectionChange($0) }
-        coordinator.onModifyRequest = { [weak self] in self?.onModifyRequest($0) }
+        coordinator.onMockRequest = { [weak self] in self?.onMockRequest($0) }
         configure()
     }
     required init?(coder: NSCoder) { nil }
@@ -76,9 +76,10 @@ final class RequestRecordsTable: NSView {
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         var selection: UUID?
         var onSelectionChange: (UUID?) -> Void = { _ in }
-        var onModifyRequest: (String) -> Void = { _ in }
+        var onMockRequest: (CaptureRecord) -> Void = { _ in }
         weak var table: NSTableView?
         private var rows: [RecordRow] = []
+        private var capturedRecords: [UUID: CaptureRecord] = [:]
         private var updating = false
         private let defaults: UserDefaults
         private var preferredWidths: [CGFloat]?
@@ -123,6 +124,7 @@ final class RequestRecordsTable: NSView {
 
         func update(records: [CaptureRecord], workflowNames: [UUID: String]) {
             guard let table else { return }
+            capturedRecords = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
             let nextRows = records.map {
                 RecordRow(record: $0, timeFormatter: timeFormatter,
                           workflowName: $0.matchedWorkflowID.flatMap { workflowNames[$0] })
@@ -255,18 +257,22 @@ final class RequestRecordsTable: NSView {
 
         func menu(forRow row: Int) -> NSMenu? {
             guard rows.indices.contains(row) else { return nil }
-            let menu = NSMenu()
-            let item = NSMenuItem(title: "修改请求", action: #selector(modifyRequest(_:)), keyEquivalent: "")
+            guard let record = capturedRecords[rows[row].id] else { return nil }
+            let menu = NSMenu(); menu.autoenablesItems = false
+            let item = NSMenuItem(title: "Mock 当前请求", action: #selector(mockRequest(_:)), keyEquivalent: "")
             item.target = self
-            // Keep the clicked URL stable while new records are inserted or the list is cleared.
-            item.representedObject = rows[row].url
+            // Freeze the entire clicked capture while rows arrive, disappear, or are cleared.
+            item.representedObject = record
+            item.toolTip = CapturedMockWorkflow.unavailableReason(for: record)
+            item.isEnabled = item.toolTip == nil
             menu.addItem(item)
             return menu
         }
 
-        @objc private func modifyRequest(_ sender: NSMenuItem) {
-            guard let url = sender.representedObject as? String else { return }
-            onModifyRequest(url)
+        @objc private func mockRequest(_ sender: NSMenuItem) {
+            guard let record = sender.representedObject as? CaptureRecord,
+                  CapturedMockWorkflow.unavailableReason(for: record) == nil else { return }
+            onMockRequest(record)
         }
 
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {

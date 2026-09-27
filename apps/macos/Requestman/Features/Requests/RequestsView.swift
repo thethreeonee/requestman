@@ -9,6 +9,7 @@ final class RequestsViewController: ObservedViewController {
     private let status = NativeUI.label("", size: 11, secondary: true)
     private let empty = RequestEmptyStateView()
     private var filterAccessory: NSViewController?
+    private weak var filterAccessoryItem: NSSplitViewItem?
     init(model: WorkspaceModel) { self.model = model; super.init() }
     required init?(coder: NSCoder) { nil }
     override func loadView() {
@@ -17,7 +18,7 @@ final class RequestsViewController: ObservedViewController {
         filters.toggleRecording = { [weak model] in guard let model else { return }; model.setRecordingPaused(!model.history.paused) }
         filters.clear = { [weak model] in model?.clearHistory() }
         table.onSelectionChange = { [weak model] in model?.history.selectedID = $0 }
-        table.onModifyRequest = { [weak model] in model?.addWorkflow(matchingURL: $0) }
+        table.onMockRequest = { [weak model] in model?.addMockWorkflow(from: $0) }
         let tableContainer = NSView()
         NativeUI.pin(table, to: tableContainer)
         empty.translatesAutoresizingMaskIntoConstraints = false; tableContainer.addSubview(empty)
@@ -44,12 +45,21 @@ final class RequestsViewController: ObservedViewController {
         filters.widthAnchor.constraint(equalTo: bar.widthAnchor).isActive = true
         bar.setContentHuggingPriority(.required, for: .vertical)
         accessory.view = bar
-        accessory.isHidden = !visible
         filterAccessory = accessory
-        item.addTopAlignedAccessoryViewController(accessory)
+        filterAccessoryItem = item
+        setFilterAccessoryVisible(visible)
     }
     func setFilterAccessoryVisible(_ visible: Bool) {
-        if #available(macOS 26.0, *), let accessory = filterAccessory as? NSSplitViewItemAccessoryViewController {
+        if #available(macOS 26.0, *), let accessory = filterAccessory as? NSSplitViewItemAccessoryViewController,
+           let item = filterAccessoryItem {
+            // isHidden only collapses the accessory; its controls remain in the window.
+            // Detach it from the shared pane when showing request modification.
+            let index = item.topAlignedAccessoryViewControllers.firstIndex { $0 === accessory }
+            if visible, index == nil {
+                item.addTopAlignedAccessoryViewController(accessory)
+            } else if !visible, let index {
+                item.removeTopAlignedAccessoryViewController(at: index)
+            }
             accessory.isHidden = !visible
         }
     }

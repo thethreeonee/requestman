@@ -18,7 +18,7 @@ public struct ScriptMessage: Codable, Sendable {
     public init(_ draft: HTTPMessageDraft, response: Bool) {
         method = response ? nil : draft.method; url = response ? nil : draft.url
         status = response ? draft.status : nil; headers = draft.headers
-        body = draft.replacementBody ?? draft.bodyText
+        body = draft.replacementBodyData == nil ? (draft.replacementBody ?? draft.bodyText) : nil
     }
     private enum CodingKeys: String, CodingKey { case method, url, status, headers, body }
     public func encode(to encoder: any Encoder) throws {
@@ -215,8 +215,9 @@ public enum WorkflowScript {
             result.method = method.uppercased(); result.url = url
         }
         if let body = message.body {
-            if body != (original.replacementBody ?? original.bodyText) {
+            if original.replacementBodyData != nil || body != (original.replacementBody ?? original.bodyText) {
                 result.replacementBody = body
+                result.replacementBodyData = nil
                 WorkflowEngine.clearBodyEncoding(&result)
             }
         }

@@ -9,7 +9,7 @@ class WorkspacePaneController: NSViewController {
     required init?(coder: NSCoder) { nil }
     override func loadView() { view = FlippedView() }
 
-    func show(_ controller: NSViewController, extendsUnderTitlebar: Bool = false) {
+    func show(_ controller: NSViewController, extendsUnderTitlebar: Bool = false, extendsUnderBottomAccessory: Bool = false) {
         guard content !== controller else { return }
         if let content { content.view.removeFromSuperview(); content.removeFromParent() }
         content = controller
@@ -21,7 +21,7 @@ class WorkspacePaneController: NSViewController {
             child.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
             child.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
             child.topAnchor.constraint(equalTo: extendsUnderTitlebar ? view.topAnchor : view.safeAreaLayoutGuide.topAnchor),
-            child.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
+            child.bottomAnchor.constraint(equalTo: extendsUnderBottomAccessory ? view.bottomAnchor : view.safeAreaLayoutGuide.bottomAnchor)
         ])
     }
 }
@@ -77,7 +77,9 @@ final class WorkspaceInspectorController: WorkspacePaneController {
     func update(section: WorkspaceSection, isPresented: Bool) {
         steps.isPresented = isPresented && section == .rules
         requests.isPresented = isPresented && section == .requests
-        show(section == .rules ? steps : requests)
+        if #available(macOS 26.0, *), section == .rules {
+            show(steps, extendsUnderTitlebar: true, extendsUnderBottomAccessory: true)
+        } else { show(section == .rules ? steps : requests) }
     }
 }
 

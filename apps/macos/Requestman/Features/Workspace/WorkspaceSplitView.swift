@@ -149,6 +149,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         addSplitViewItem(contentItem)
         addSplitViewItem(inspectorItem)
         mainHost.requests.installFilterAccessory(on: contentItem, visible: state.section == .requests)
+        inspectorHost.steps.installAccessories(on: inspectorItem)
 
         sidebarObservation = sidebarItem.observe(\.isCollapsed, options: [.new]) { [weak self] _, _ in
             Task { @MainActor [weak self] in self?.splitItemStateDidChange() }

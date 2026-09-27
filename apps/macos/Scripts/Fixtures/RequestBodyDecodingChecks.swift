@@ -48,6 +48,16 @@ func runBodyDecodingChecks() throws {
             let result = try RequestBodyDecoding.decode(snapshot)
             precondition(test.error == nil, "\(test.name): expected \(String(describing: test.error))")
             precondition(result == test.expected, "\(test.name): unexpected decoded bytes")
+            var record = CaptureRecord(method: "GET", url: "https://example.test/mock")
+            record.status = 200
+            record.requestHeaders = headers
+            record.requestBody = snapshot
+            record.originalStatus = 200; record.receivedBody = snapshot; record.receivedHeaders = headers
+            let workflow = try CapturedMockWorkflow.make(from: record, decodeBody: RequestBodyDecoding.decode)
+            var draft = HTTPMessageDraft(method: record.method, url: record.url)
+            _ = try WorkflowEngine.apply(workflow.requestSteps, response: false, to: &draft, environment: [:], id: UUID(), date: Date())
+            _ = try WorkflowEngine.apply(workflow.responseSteps, response: true, to: &draft, environment: [:], id: UUID(), date: Date())
+            precondition(draft.replacementBytes == result, "\(test.name): generated request must use decoded entity bytes")
         } catch {
             guard let expected = test.error else { throw error }
             precondition(error as? RequestBodyDecoding.DecodingError == expected, "\(test.name): unexpected error \(error)")

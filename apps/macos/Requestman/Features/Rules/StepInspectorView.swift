@@ -4,8 +4,15 @@ import RequestmanEditor
 
 @MainActor final class StepInspectorViewController: ObservedViewController {
     let model: WorkspaceModel
-    var isPresented = true { didSet { script?.isPresented = isPresented; if !isPresented { deletion.close() } } }
+    var isPresented = true { didSet { script?.isPresented = isPresented; updateAccessoryVisibility(); if !isPresented { deletion.close() } } }
+    private var topAccessory: NSViewController?
+    private var bottomAccessory: NSViewController?
     private var stepID: UUID?
+    private var displayedLiteralValues = false
+    private var displayedBodySource: BodySource = .text
+    private var bodyFilePath: NSTextField?
+    private var bodySource: NSSegmentedControl?
+    private var chooseBodyFile: NSButton?
     private let titleLabel = NativeUI.label("", size: 18, weight: .bold)
     private let typeIcon = NSImageView()
     private lazy var enabled = RulesSwitch { [weak self] value in self?.modify { $0.enabled = value } }
@@ -35,9 +42,30 @@ import RequestmanEditor
     init(model: WorkspaceModel) { self.model = model; super.init() }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func loadView() { view = NSView() }
+    func installAccessories(on item: NSSplitViewItem) {
+        guard #available(macOS 26.0, *), topAccessory == nil else { return }
+        _ = view
+        let top = NSSplitViewItemAccessoryViewController(), bottom = NSSplitViewItemAccessoryViewController()
+        for accessory in [top, bottom] {
+            accessory.automaticallyAppliesContentInsets = false
+            if #available(macOS 26.1, *) { accessory.preferredScrollEdgeEffectStyle = .soft }
+            accessory.view = NSView()
+        }
+        topAccessory = top; bottomAccessory = bottom
+        item.addTopAlignedAccessoryViewController(top)
+        item.addBottomAlignedAccessoryViewController(bottom)
+        rebuild(model.selectedStep); refresh()
+    }
+    private func updateAccessoryVisibility() {
+        if #available(macOS 26.0, *) {
+            for accessory in [topAccessory, bottomAccessory] {
+                (accessory as? NSSplitViewItemAccessoryViewController)?.isHidden = !isPresented || model.selectedStep == nil
+            }
+        }
+    }
     override func refresh() {
         let selected = model.selectedStep
-        if stepID != selected?.id || view.subviews.isEmpty ||
+        if stepID != selected?.id || displayedBodySource != (selected?.bodySource ?? .text) || displayedLiteralValues != (selected?.literalValues == true) || view.subviews.isEmpty ||
             (selected.map { [.setHeader, .removeHeader].contains($0.kind) } == true && headerEditors.map(\.entryID) != selected?.headerEntries.map(\.id)) ||
             (selected?.kind == .setQueryParameter && queryEditors.map(\.entryID) != selected?.queryParameterEntries.map(\.id)) ||
             (selected?.kind == .replaceURLString && replacementEditors.map(\.entryID) != selected?.urlReplacementEntries.map(\.id)) { rebuild(selected) }
@@ -57,6 +85,10 @@ import RequestmanEditor
         if status?.integerValue != selected.status { status?.integerValue = selected.status }
         value?.string = selected.value
         bodyValue?.string = selected.value
+        bodySource?.isEnabled = model.loaded
+        chooseBodyFile?.isEnabled = model.loaded
+        bodyFilePath?.stringValue = selected.bodyFilePath ?? "尚未选择文件"
+        bodyFilePath?.toolTip = selected.bodyFilePath
         if delay?.stringValue != selected.value { delay?.stringValue = selected.value }
         delay?.isEnabled = model.loaded
         delayError?.isHidden = (try? WorkflowEngine.delayMilliseconds(selected.value)) != nil
@@ -65,7 +97,7 @@ import RequestmanEditor
         enabled.isEnabled = model.loaded; status?.isEnabled = model.loaded
         value?.textView.isEditable = model.loaded
         bodyValue?.textView.isEditable = model.loaded
-        formatBody?.isEnabled = model.loaded
+        formatBody?.isEnabled = model.loaded && selected.bodyEncoding != .base64
         script?.update(step: selected, response: model.editingResponse, environment: model.document.environment?.values ?? [:], environmentTypes: model.document.environment?.valueTypes ?? [:])
     }
     private func updateMethod(_ value: String) {
@@ -88,9 +120,13 @@ import RequestmanEditor
     private func rebuild(_ selected: ModificationStep?) {
         script?.isPresented = false; script?.removeFromParent(); script = nil
         deletion.close(); headerEditors = []; queryEditors = []; replacementEditors = []
-        queryDescription = nil
+        queryDescription = nil; bodyFilePath = nil; bodySource = nil; chooseBodyFile = nil
         status = nil; delay = nil; delayError = nil; value = nil; bodyValue = nil; method = nil; formatBody = nil
         view.subviews.forEach { $0.removeFromSuperview() }; stepID = selected?.id
+        for accessory in [topAccessory, bottomAccessory] { accessory?.view.subviews.forEach { $0.removeFromSuperview() } }
+        updateAccessoryVisibility()
+        displayedLiteralValues = selected?.literalValues == true
+        displayedBodySource = selected?.bodySource ?? .text
         guard let selected else {
             let empty = NativeUI.stack([NativeUI.label("选择一个步骤", size: 20, weight: .semibold), NativeUI.label("配置请求或响应的修改动作。", secondary: true)], spacing: 10)
             view.addSubview(empty); empty.translatesAutoresizingMaskIntoConstraints = false
@@ -103,14 +139,39 @@ import RequestmanEditor
         typeIcon.setAccessibilityElement(false)
         let heading = NativeUI.stack([typeIcon, titleLabel, spacer, NativeUI.label("启用"), enabled], vertical: false)
         let content: NSView
+        var bodySizingConstraints: [NSLayoutConstraint] = []
         if selected.kind == .script {
             let controller = ScriptEditorViewController(step: selected, response: model.editingResponse, environment: model.document.environment?.values ?? [:], environmentTypes: model.document.environment?.valueTypes ?? [:]) { [weak self] step in self?.replace(step) }
             controller.isPresented = isPresented; addChild(controller); script = controller; content = controller.view
         } else {
             let fields = NativeUI.stack([], spacing: 14)
+            let isBodyStep = [.replaceBody, .mock].contains(selected.kind)
+            if isBodyStep {
+                let source = NSSegmentedControl(labels: ["文本", "本地文件"], trackingMode: .selectOne, target: self, action: #selector(changeBodySource(_:)))
+                source.segmentStyle = .automatic
+                source.segmentDistribution = .fit
+                source.controlSize = .large
+                if #available(macOS 26.0, *) { source.borderShape = .capsule }
+                if #available(macOS 27.0, *) { source.role = .tabs }
+                source.setContentHuggingPriority(.required, for: .vertical)
+                source.setContentCompressionResistancePriority(.required, for: .vertical)
+                source.selectedSegment = selected.usesBodyFile ? 1 : 0
+                source.identifier = .init("rules.bodySource")
+                source.setAccessibilityLabel("Body 来源")
+                bodySource = source
+                fields.addArrangedSubview(source)
+            }
+            if ![.setStatus, .delay, .setMethod].contains(selected.kind) && !selected.usesBodyFile {
+                let templates = NSButton(checkboxWithTitle: "解析模板变量", target: self, action: #selector(toggleTemplates(_:)))
+                templates.state = selected.literalValues == true ? .off : .on
+                templates.isEnabled = model.loaded
+                templates.toolTip = "关闭时，{{…}} 按原文保留。"
+                templates.identifier = .init("rules.resolveTemplates")
+                fields.addArrangedSubview(templates)
+            }
             if [.setHeader, .removeHeader].contains(selected.kind) {
                 for entry in selected.headerEntries {
-                    let editor = HeaderEntryEditor(entry: entry, onChange: { [weak self] updated in
+                    let editor = HeaderEntryEditor(entry: entry, template: selected.literalValues != true, onChange: { [weak self] updated in
                         self?.modify { step in
                             var entries = step.headerEntries
                             guard let index = entries.firstIndex(where: { $0.id == updated.id }) else { return }
@@ -124,13 +185,6 @@ import RequestmanEditor
                     fields.addArrangedSubview(box)
                     box.widthAnchor.constraint(equalTo: fields.widthAnchor).isActive = true
                 }
-                let add = ActionButton(title: "Header 修改") { [weak self] in
-                    self?.modify { $0.headerEntries.append(HeaderEntry(operation: .add)) }
-                }
-                add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
-                add.imagePosition = .imageLeading
-                add.isEnabled = model.loaded; fields.addArrangedSubview(add)
-
             }
             if selected.kind == .setQueryParameter {
                 for entry in selected.queryParameterEntries {
@@ -148,12 +202,6 @@ import RequestmanEditor
                     fields.addArrangedSubview(box)
                     box.widthAnchor.constraint(equalTo: fields.widthAnchor).isActive = true
                 }
-                let add = ActionButton(title: "添加参数操作") { [weak self] in
-                    self?.modify { $0.queryParameterEntries.append(QueryParameterEntry()) }
-                }
-                add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
-                add.imagePosition = .imageLeading
-                add.isEnabled = model.loaded; fields.addArrangedSubview(add)
             }
             if selected.kind == .replaceURLString {
                 for entry in selected.urlReplacementEntries {
@@ -171,12 +219,6 @@ import RequestmanEditor
                     fields.addArrangedSubview(box)
                     box.widthAnchor.constraint(equalTo: fields.widthAnchor).isActive = true
                 }
-                let add = ActionButton(title: "添加替换配置") { [weak self] in
-                    self?.modify { $0.urlReplacementEntries.append(URLReplacementEntry()) }
-                }
-                add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
-                add.imagePosition = .imageLeading
-                add.isEnabled = model.loaded; fields.addArrangedSubview(add)
             }
             if [.mock, .setStatus, .redirect].contains(selected.kind) {
                 let field = ActionTextField(String(selected.status), placeholder: "状态码") { [weak self] value in if let number = Int(value) { self?.modify { $0.status = number } } }; status = field
@@ -203,15 +245,28 @@ import RequestmanEditor
                 fields.addArrangedSubview(popup)
                 popup.widthAnchor.constraint(equalTo: fields.widthAnchor).isActive = true
             }
-            if ![.setHeader, .removeHeader, .setStatus, .setQueryParameter, .replaceURLString, .setMethod, .delay].contains(selected.kind) {
+            if selected.usesBodyFile {
+                let choose = ActionButton(title: "映射本地文件…") { [weak self] in self?.selectBodyFile() }
+                choose.identifier = .init("rules.chooseBodyFile"); chooseBodyFile = choose
+                let path = NativeUI.label(selected.bodyFilePath ?? "尚未选择文件", secondary: true)
+                path.lineBreakMode = .byTruncatingMiddle; path.isSelectable = true
+                path.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                path.identifier = .init("rules.bodyFilePath"); bodyFilePath = path
+                let hint = NativeUI.label("每次执行时读取文件内容作为 Body。", size: 11, secondary: true)
+                for item in [choose, path, hint] { fields.addArrangedSubview(item) }
+                path.widthAnchor.constraint(equalTo: fields.widthAnchor).isActive = true
+            }
+            if ![.setHeader, .removeHeader, .setStatus, .setQueryParameter, .replaceURLString, .setMethod, .delay].contains(selected.kind) && !selected.usesBodyFile {
                 let body = [.replaceBody, .mock].contains(selected.kind)
-                let label = body ? "Body · 文本" : (selected.kind == .rewriteURL ? "目标 URL" :
+                let label = body ? (selected.bodyEncoding == .base64 ? "Body · Base64" : "Body · 文本") : (selected.kind == .rewriteURL ? "目标 URL" :
                     (selected.kind == .redirect ? "重定向目标" : "值"))
                 let area: NSView
                 if body {
-                    let editor = CodeEditorView(language: .json)
-                    editor.annotationRanges = { source in
-                        TemplateLayoutManager.expression.matches(in: source, range: NSRange(location: 0, length: (source as NSString).length)).map(\.range)
+                    let editor = CodeEditorView(language: selected.bodyEncoding == .base64 ? .plaintext : .json)
+                    if selected.literalValues != true {
+                        editor.annotationRanges = { source in
+                            TemplateLayoutManager.expression.matches(in: source, range: NSRange(location: 0, length: (source as NSString).length)).map(\.range)
+                        }
                     }
                     editor.textView.setAccessibilityLabel(label)
                     bodyValue = editor; area = editor
@@ -223,13 +278,18 @@ import RequestmanEditor
                     }
                     format.controlSize = .small; format.toolTip = "支持无引号 key 和末尾逗号；格式化为 JSON，保留字段顺序与变量，可撤销。"
                     formatBody = format
+                    format.isHidden = selected.bodyEncoding == .base64
                     let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
                     let row = NativeUI.stack([NativeUI.label(label), spacer, format], vertical: false)
                     fields.addArrangedSubview(row); row.widthAnchor.constraint(equalTo: fields.widthAnchor).isActive = true
                     fields.addArrangedSubview(message)
+                    if selected.bodyEncoding == .base64 {
+                        let hint = NativeUI.label("正文按原始字节保存，可编辑 Base64 内容。", size: 11, secondary: true)
+                        fields.addArrangedSubview(hint)
+                    }
                     editor.onChange = { [weak self] text in message.isHidden = true; self?.modify { $0.value = text } }
                 } else {
-                    let input = RulesTextArea(template: true) { [weak self] text in self?.modify { $0.value = text } }
+                    let input = RulesTextArea(template: selected.literalValues != true) { [weak self] text in self?.modify { $0.value = text } }
                     input.textView.setAccessibilityLabel(label)
                     value = input; area = input
                     fields.addArrangedSubview(NativeUI.label(label))
@@ -250,36 +310,67 @@ import RequestmanEditor
                 box.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             }
             let document = FlippedView()
-            NativeUI.pin(stack, to: document, insets: NSEdgeInsets(top: 0, left: 0, bottom: 12, right: 0))
+            // Keep the field gutter inside the document so the scroller can reach the pane edge.
+            NativeUI.pin(stack, to: document, insets: NSEdgeInsets(top: 0, left: topAccessory == nil ? 0 : 20, bottom: 12, right: 20))
             let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.drawsBackground = false
+            scroll.autohidesScrollers = true
+            scroll.verticalScrollElasticity = .none
+            scroll.horizontalScrollElasticity = .none
             scroll.documentView = document; document.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
                 document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
                 document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
                 document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor)
             ])
-            if [.replaceBody, .mock].contains(selected.kind) {
+            if isBodyStep && !selected.usesBodyFile {
                 stack.setHuggingPriority(.init(1), for: .vertical)
-                let fill = document.heightAnchor.constraint(equalTo: scroll.contentView.heightAnchor)
+                let availableHeight = topAccessory == nil ? scroll.contentView.heightAnchor : view.safeAreaLayoutGuide.heightAnchor
+                let fill = document.heightAnchor.constraint(equalTo: availableHeight)
                 fill.priority = .init(249)
                 // Fill the viewport when possible; the 360 pt editor minimum can make the form scroll.
-                NSLayoutConstraint.activate([
-                    document.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor), fill
-                ])
+                bodySizingConstraints = [
+                    document.heightAnchor.constraint(greaterThanOrEqualTo: availableHeight), fill
+                ]
             }
             content = scroll
         }
         let footerSpacer = NSView(); footerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         removeButton.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(paletteColors: [.systemRed]))
-        removeButton.imagePosition = .imageLeading; removeButton.controlSize = .small
+        removeButton.imagePosition = .imageLeading
+        removeButton.controlSize = .large
+        if #available(macOS 26.0, *) { removeButton.bezelStyle = .glass; removeButton.borderShape = .capsule }
         removeButton.contentTintColor = .systemRed
-        removeButton.attributedTitle = NSAttributedString(string: "删除", attributes: [
-            .foregroundColor: NSColor.systemRed,
-            .font: removeButton.font ?? NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
-        ])
-        let footer = NativeUI.stack([footerSpacer, removeButton], vertical: false)
-        let divider = NativeUI.separator()
+        let removalTitle = NSMutableAttributedString(attributedString: removeButton.attributedTitle)
+        removalTitle.addAttribute(.foregroundColor, value: NSColor.systemRed, range: NSRange(location: 0, length: removalTitle.length))
+        removeButton.attributedTitle = removalTitle
+        var footerItems: [NSView] = []
+        let add: ActionButton?
+        switch selected.kind {
+        case .setHeader, .removeHeader:
+            add = ActionButton(title: "Header 修改") { [weak self] in
+                self?.modify { $0.headerEntries.append(HeaderEntry(operation: .add)) }
+            }
+        case .setQueryParameter:
+            add = ActionButton(title: "添加参数操作") { [weak self] in
+                self?.modify { $0.queryParameterEntries.append(QueryParameterEntry()) }
+            }
+        case .replaceURLString:
+            add = ActionButton(title: "添加替换配置") { [weak self] in
+                self?.modify { $0.urlReplacementEntries.append(URLReplacementEntry()) }
+            }
+        default: add = nil
+        }
+        if let add {
+            add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+            add.imagePosition = .imageLeading
+            add.controlSize = .large
+            if #available(macOS 26.0, *) { add.bezelStyle = .glass; add.borderShape = .capsule }
+            add.isEnabled = model.loaded
+            footerItems.append(add)
+        }
+        let footer = NativeUI.stack(footerItems + [footerSpacer, removeButton], vertical: false)
+        footer.identifier = .init("rules.stepFooter")
         var sections: [NSView] = [heading]
         if selected.kind == .script {
             let hint = NativeUI.label("失败时停止当前流程，并在请求日志中记录错误。", size: 11, secondary: true)
@@ -322,10 +413,30 @@ import RequestmanEditor
             hint.maximumNumberOfLines = 0; hint.lineBreakMode = .byWordWrapping
             sections.append(hint)
         }
-        let stack = NativeUI.stack(sections + [content, divider, footer], spacing: 16)
-        for section in sections.dropFirst() { section.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
-        NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20))
-        for wide in [heading, content, divider, footer] { wide.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        if let topAccessory, let bottomAccessory {
+            let header = NativeUI.stack(sections, spacing: 16)
+            for section in sections { section.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true }
+            NativeUI.pin(header, to: topAccessory.view, insets: NSEdgeInsets(top: 20, left: 20, bottom: 16, right: 20))
+            NativeUI.pin(footer, to: bottomAccessory.view, insets: NSEdgeInsets(top: 16, left: 20, bottom: 20, right: 20))
+            if selected.kind == .script {
+                content.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(content)
+                NSLayoutConstraint.activate([
+                    content.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+                    content.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+                    content.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+                    content.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
+                ])
+            } else { NativeUI.pin(content, to: view) }
+            NSLayoutConstraint.activate(bodySizingConstraints)
+            return
+        }
+        let stack = NativeUI.stack(sections + [content, footer], spacing: 16)
+        NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 20, left: 20, bottom: 20, right: selected.kind == .script ? 20 : 0))
+        for fixed in sections + [footer] {
+            fixed.widthAnchor.constraint(equalTo: view.widthAnchor, constant: -40).isActive = true
+        }
+        content.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        NSLayoutConstraint.activate(bodySizingConstraints)
         content.setContentHuggingPriority(.defaultLow, for: .vertical)
     }
     private func fieldBox(_ content: NSView) -> NSBox {
@@ -335,6 +446,30 @@ import RequestmanEditor
         NativeUI.pin(content, to: box.contentView!)
         return box
     }
+    @objc private func changeBodySource(_ sender: NSSegmentedControl) {
+        view.window?.makeFirstResponder(nil)
+        modify { $0.bodySource = sender.selectedSegment == 1 ? .file : .text }
+        refresh()
+    }
+    private func selectBodyFile() {
+        guard model.loaded, let selected = model.selectedStep, selected.usesBodyFile,
+              let workflowID = model.workflow?.id else { return }
+        let response = model.editingResponse
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        panel.prompt = "映射文件"
+        if let path = selected.bodyFilePath { panel.directoryURL = URL(fileURLWithPath: path).deletingLastPathComponent() }
+        let completion: @MainActor (NSApplication.ModalResponse) -> Void = { [weak self] result in
+            guard result == .OK, let url = panel.url, let self,
+                  model.workflow?.id == workflowID, model.editingResponse == response,
+                  model.selectedStepID == selected.id, model.selectedStep?.usesBodyFile == true else { return }
+            modify { $0.bodyFilePath = url.path }
+            refresh()
+        }
+        if let window = view.window { panel.beginSheetModal(for: window, completionHandler: completion) }
+        else { panel.begin(completionHandler: completion) }
+    }
+    @objc private func toggleTemplates(_ sender: NSButton) { modify { $0.literalValues = sender.state != .on } }
     private func modify(_ update: (inout ModificationStep) -> Void) { guard model.loaded, var step = model.selectedStep else { return }; update(&step); replace(step) }
     private func replace(_ step: ModificationStep) {
         guard model.loaded, var workflow = model.workflow else { return }
@@ -374,13 +509,14 @@ import RequestmanEditor
 /// Each row keeps its controls while typing; only add/remove rebuilds the list.
 @MainActor private final class HeaderEntryEditor: NSView {
     private var entry: HeaderEntry
+    private let template: Bool
     var entryID: UUID { entry.id }
     private let onChange: (HeaderEntry) -> Void
     private var availableOperations: [HeaderOperation] {
-        entry.operation == .set ? [.set] + HeaderOperation.editableCases : HeaderOperation.editableCases
+        HeaderOperation.editableCases
     }
     private lazy var operation: ActionPopUpButton = ActionPopUpButton(items: availableOperations.map(\.title)) { [weak self] index in
-        guard let self, availableOperations.indices.contains(index), availableOperations[index] != .set else { return }
+        guard let self, availableOperations.indices.contains(index) else { return }
         entry.operation = availableOperations[index]
         onChange(entry)
         update(entry, editable: operation.isEnabled)
@@ -388,13 +524,13 @@ import RequestmanEditor
     private lazy var name = HeaderNameField(name: entry.name) { [weak self] text in
         guard let self else { return }; entry.name = text; onChange(entry)
     }
-    private lazy var value = RulesTextArea(template: true) { [weak self] text in
+    private lazy var value = RulesTextArea(template: template) { [weak self] text in
         guard let self else { return }; entry.value = text; onChange(entry)
     }
     private let warning = NativeUI.label("此 Header 由代理维护，请通过目标地址或 Body 步骤修改。", size: 11)
     private let remove: ActionButton
-    init(entry: HeaderEntry, onChange: @escaping (HeaderEntry) -> Void, onRemove: @escaping () -> Void) {
-        self.entry = entry; self.onChange = onChange
+    init(entry: HeaderEntry, template: Bool, onChange: @escaping (HeaderEntry) -> Void, onRemove: @escaping () -> Void) {
+        self.entry = entry; self.template = template; self.onChange = onChange
         remove = ActionButton(title: "") { onRemove() }
         super.init(frame: .zero)
         remove.image = NSImage(systemSymbolName: "minus", accessibilityDescription: "删除 Header")
@@ -429,7 +565,6 @@ import RequestmanEditor
             operation.removeAllItems(); operation.addItems(withTitles: titles)
         }
         operation.menu?.autoenablesItems = false
-        operation.item(withTitle: HeaderOperation.set.title)?.isEnabled = false
         operation.selectItem(withTitle: (entry.operation ?? .set).title)
         operation.isEnabled = editable
         let removes = entry.operation == .remove

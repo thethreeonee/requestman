@@ -354,9 +354,10 @@ import RequestmanCore
             let container = NSTextContainer(containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
             storage.addLayoutManager(layout); layout.addTextContainer(container)
             textView = TemplateTextView(frame: .zero, textContainer: container); templateLayout = layout
-        } else { textView = roundedInput ? RulesInputTextView() : NSTextView(); templateLayout = nil }
+        } else { textView = roundedInput ? RulesInputTextView() : RulesEditorTextView(); templateLayout = nil }
         super.init(frame: .zero)
         hasVerticalScroller = true; borderType = .bezelBorder; documentView = textView
+        autohidesScrollers = true
         textView.isRichText = false; textView.isEditable = editable; textView.isSelectable = true
         textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         textView.isAutomaticQuoteSubstitutionEnabled = false; textView.isAutomaticDashSubstitutionEnabled = false
@@ -394,6 +395,15 @@ import RequestmanCore
 
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func scrollWheel(with event: NSEvent) {
+        // Wrapped editors have no horizontal overflow. If their content fits vertically,
+        // let the surrounding form handle the complete wheel/trackpad event, including momentum.
+        if contentView.documentRect.height <= contentView.bounds.height + 1 {
+            nextResponder?.scrollWheel(with: event)
+        } else {
+            super.scrollWheel(with: event)
+        }
+    }
     override var focusRingMaskBounds: NSRect { roundedInput ? bounds.insetBy(dx: 2, dy: 2) : super.focusRingMaskBounds }
     override func drawFocusRingMask() {
         guard roundedInput else { super.drawFocusRingMask(); return }
@@ -429,7 +439,15 @@ import RequestmanCore
 
 }
 
-@MainActor private final class RulesInputTextView: NSTextView {
+@MainActor class RulesEditorTextView: NSTextView {
+    override func scrollWheel(with event: NSEvent) {
+        // Route before NSTextView applies its own wheel handling to fitting text.
+        if let scrollView = enclosingScrollView { scrollView.scrollWheel(with: event) }
+        else { super.scrollWheel(with: event) }
+    }
+}
+
+@MainActor private final class RulesInputTextView: RulesEditorTextView {
     var focusChanged: ((Bool) -> Void)?
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
@@ -444,7 +462,7 @@ import RequestmanCore
 }
 
 /// Keep decoration spacing out of the caret position after ordinary text.
-final class TemplateTextView: NSTextView {
+final class TemplateTextView: RulesEditorTextView {
     private func leadingPadding(at index: Int) -> CGFloat {
         (layoutManager as? TemplateLayoutManager)?.leadingPadding(at: index) ?? 0
     }
