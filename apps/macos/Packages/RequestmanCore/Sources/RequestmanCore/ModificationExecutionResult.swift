@@ -5,8 +5,8 @@ public enum ExecutionDisposition: Equatable, Sendable {
     case localResponse
 }
 
-public struct StepExecutionTrace: Sendable {
-    public enum Status: Equatable, Sendable { case applied, failed, cancelled }
+public struct StepExecutionTrace: Sendable, Codable {
+    public enum Status: String, Equatable, Sendable, Codable { case applied, failed, cancelled }
     public let stepID: UUID
     public let kind: ModificationKind
     public let phase: FlowPhase

@@ -1,8 +1,8 @@
 import Foundation
 
 /// HTTP entity bytes after transfer framing and before content decoding.
-public struct CaptureBodySnapshot: Sendable {
-    public enum State: String, Sendable { case notCollected, complete, incomplete, unavailable }
+public struct CaptureBodySnapshot: Sendable, Codable {
+    public enum State: String, Sendable, Codable { case notCollected, complete, incomplete, unavailable }
     public let state: State
     public let observedByteCount: Int
     public let isTruncated: Bool
@@ -18,6 +18,35 @@ public struct CaptureBodySnapshot: Sendable {
     public var isComplete: Bool { state == .complete && !isTruncated }
     public static let notCollected = CaptureBodySnapshot(state: .notCollected)
     public static func unavailable(_ reason: String) -> Self { Self(state: .unavailable, unavailableReason: reason) }
+    private enum CodingKeys: String, CodingKey {
+        case state, observedByteCount, isTruncated, contentType, contentEncoding, unavailableReason, payload, decodedText
+    }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        state = try values.decode(State.self, forKey: .state)
+        observedByteCount = try values.decode(Int.self, forKey: .observedByteCount)
+        isTruncated = try values.decode(Bool.self, forKey: .isTruncated)
+        contentType = try values.decodeIfPresent(String.self, forKey: .contentType)
+        contentEncoding = try values.decodeIfPresent(String.self, forKey: .contentEncoding)
+        unavailableReason = try values.decodeIfPresent(String.self, forKey: .unavailableReason)
+        let bytes = try values.decode(LogPayload.self, forKey: .payload).data
+        guard observedByteCount >= bytes.count else { throw CocoaError(.fileReadCorruptFile) }
+        storage = CaptureBodyStorage(data: bytes)
+    }
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(state, forKey: .state)
+        try values.encode(observedByteCount, forKey: .observedByteCount)
+        try values.encode(isTruncated, forKey: .isTruncated)
+        try values.encodeIfPresent(contentType, forKey: .contentType)
+        try values.encodeIfPresent(contentEncoding, forKey: .contentEncoding)
+        try values.encodeIfPresent(unavailableReason, forKey: .unavailableReason)
+        try values.encode(LogPayload(data), forKey: .payload)
+        if isEncoded, isComplete, let decoder = try? StreamContentDecoder(encoding: contentEncoding),
+           let decoded = try? decoder.append(data), let text = String(data: decoded, encoding: .utf8) {
+            try values.encode(text, forKey: .decodedText)
+        }
+    }
     fileprivate init(state: State, observedByteCount: Int = 0, isTruncated: Bool = false,
                      contentType: String? = nil, contentEncoding: String? = nil,
                      unavailableReason: String? = nil, storage: CaptureBodyStorage? = nil) {

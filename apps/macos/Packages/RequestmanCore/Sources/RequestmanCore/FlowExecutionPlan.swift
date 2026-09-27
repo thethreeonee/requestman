@@ -1,6 +1,6 @@
 import Foundation
 
-public enum FlowPhase: Hashable, Sendable {
+public enum FlowPhase: String, Hashable, Sendable, Codable {
     case request
     case response
 }

@@ -1,8 +1,8 @@
 import Foundation
 import os
 
-public enum CaptureProtocol: String, Sendable { case http = "HTTP", sse = "SSE", webSocket = "WebSocket" }
-public enum CaptureConnectionState: String, Sendable {
+public enum CaptureProtocol: String, Codable, Sendable { case http = "HTTP", sse = "SSE", webSocket = "WebSocket" }
+public enum CaptureConnectionState: String, Codable, Sendable {
     case connecting = "连接中", open = "接收中", closed = "已关闭", failed = "失败"
     public var isActive: Bool { self == .connecting || self == .open }
 }
@@ -73,7 +73,7 @@ public struct SSEParser: Sendable {
 /// Callers wait for append completion before reading the next network batch; no unbounded write queue.
 /// Only offsets live in memory; full payloads and original SSE bytes remain on disk until the last owner releases them.
 public final class CaptureStreamStore: @unchecked Sendable {
-    public struct Summary: Sendable {
+    public struct Summary: Codable, Sendable {
         public var count = 0
         public var bytes = 0
         public var revision = 0
@@ -179,4 +179,35 @@ public final class CaptureStreamStore: @unchecked Sendable {
         }
     }
     public func flush(_ completion: @escaping @Sendable () -> Void) { queue.async(execute: completion) }
+}
+
+extension CaptureStreamStore {
+    func archiveSnapshot() async throws -> CaptureStreamArchiveSnapshot {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async { [self] in
+                do {
+                    let rawLength = try raw?.seekToEnd() ?? 0
+                    continuation.resume(returning: CaptureStreamArchiveSnapshot(owner: self, directory: directory,
+                        summary: summary, messageLengths: offsets.map(\.1), rawLength: rawLength))
+                } catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+
+    /// Called only before publication, on the archive reader's background task.
+    static func restoreArchive(_ archive: RequestLogArchive.ArchiveStream) throws -> CaptureStreamStore {
+        guard archive.summary.count == archive.messages.count, archive.summary.bytes >= 0, archive.summary.revision >= 0 else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let store = CaptureStreamStore()
+        try store.prepare()
+        for (index, entry) in archive.messages.enumerated() {
+            try Task.checkCancellation()
+            guard entry.id == index else { throw CocoaError(.fileReadCorruptFile) }
+            try store.write(entry.message)
+        }
+        try store.raw?.write(contentsOf: archive.raw.data)
+        store.summaryState.withLock { $0 = archive.summary }
+        return store
+    }
 }

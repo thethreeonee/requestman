@@ -2,7 +2,7 @@ import Foundation
 import os
 
 /// An executed action and its workflow name, captured before later workspace edits.
-public struct CaptureMatchedRule: Equatable, Sendable {
+public struct CaptureMatchedRule: Equatable, Sendable, Codable {
     public let kind: ModificationKind
     public let name: String
     public let response: Bool
@@ -21,22 +21,28 @@ public struct CaptureMatchedRule: Equatable, Sendable {
     public var summary: String { "\(typeName) · \(name)" }
 }
 
-public struct CaptureHeadersInfo: Sendable {
+public struct CaptureHeadersInfo: Sendable, Codable {
     public var originalCount = 0
     public var isTruncated = false
     public var truncatedNames: Set<String> = []
     public init() {}
 }
 
-public struct CaptureRecord: Identifiable, Sendable {
-    public enum Outcome: String, CaseIterable, Sendable { case forwarded = "已转发", modified = "已修改", mocked = "Mock", tunnel = "加密隧道", failed = "失败" }
+public struct CaptureRecord: Identifiable, Sendable, Codable {
+    public enum Outcome: String, CaseIterable, Sendable, Codable { case forwarded = "已转发", modified = "已修改", mocked = "Mock", tunnel = "加密隧道", failed = "失败" }
     public let id: UUID
+    /// Set only for records read from a saved log; never represents a live connection.
+    public var archivedAt: Date?
+    public var connectionSummary: String {
+        archivedAt != nil ? "保存时：" + connectionState.rawValue : connectionState.rawValue
+    }
     public var replayID: UUID?
     public var replaySourceID: UUID?
     public var replayCancelled = false
     public var replaySummary: String? {
         guard replayID != nil else { return nil }
         if replayCancelled { return "重放已取消" }
+        if archivedAt != nil && connectionState.isActive { return "保存时重放尚未完成" }
         if connectionState.isActive { return captureProtocol == .sse ? "重放进行中 · 正在接收事件流" : "重放进行中" }
         if let error { return "重放失败：" + error }
         return "重放已完成" + (status.map { " · HTTP \($0)" } ?? "")
@@ -81,6 +87,17 @@ public struct CaptureRecord: Identifiable, Sendable {
     public var responseHeadersInfo = CaptureHeadersInfo()
     public var steps: [String] = []
     public var error: String?
+    // Stream stores are archived separately; coding covers only immutable message/trace metadata.
+    private enum CodingKeys: String, CodingKey {
+        case id, archivedAt, replayID, replaySourceID, replayCancelled
+        case captureProtocol, connectionState, revision, closeReason, startedAt
+        case method, url, finalURL, sentMethod, project, workflow, environment, outcome
+        case matchedWorkflowID, matchedRules, executionTrace, hasSentRequestHeaders
+        case originalStatus, status, duration, requestBytes, responseBytes
+        case requestHeaders, sentHeaders, responseHeaders, receivedHeaders
+        case requestBody, sentBody, receivedBody, responseBody, urlWasTruncated, finalURLWasTruncated
+        case requestHeadersInfo, sentHeadersInfo, receivedHeadersInfo, responseHeadersInfo, steps, error
+    }
     public init(id: UUID = UUID(), method: String, url: String) {
         self.id = id; self.method = method; self.sentMethod = method; self.url = url; self.finalURL = url; self.startedAt = Date()
     }
