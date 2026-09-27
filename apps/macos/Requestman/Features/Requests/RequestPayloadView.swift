@@ -9,6 +9,7 @@ final class RequestPayloadViewController: NSViewController, NSSearchFieldDelegat
     private var format: InspectionFormat = .tree
     private var search = ""
     private var onlyChanges = false
+    private var showsImageSource = false
     private var presentation: RequestPayloadPresentation?
     private var version: InspectionVersion
     private var presentedVersion: InspectionVersion?
@@ -22,6 +23,10 @@ final class RequestPayloadViewController: NSViewController, NSSearchFieldDelegat
     private let changes = NSButton(checkboxWithTitle: "仅显示变更", target: nil, action: nil)
     private let outline = RequestDataOutline()
     private let source = RequestSourceView()
+    private let imageView = NSImageView()
+    private let imageComparison = RequestImageComparisonView()
+    private let imageSource = NSButton(checkboxWithTitle: "显示原始数据", target: nil, action: nil)
+    private var imageOptions: NSStackView!
     private let empty = RequestEmptyStateView()
     private let progress = NSProgressIndicator()
     private let formatButton = NSButton(title: "原始数据", target: nil, action: nil)
@@ -44,14 +49,29 @@ final class RequestPayloadViewController: NSViewController, NSSearchFieldDelegat
         notice.font = .systemFont(ofSize: 11); notice.textColor = .secondaryLabelColor
         let info = NativeUI.stack([directionLabel, NSView(), summary, changes], vertical: false, spacing: 8)
         info.distribution = .fill
-        header = NativeUI.stack([info, notice], spacing: 8)
+        imageSource.controlSize = .small
+        imageSource.target = self; imageSource.action = #selector(toggleImageSource)
+        imageSource.setContentHuggingPriority(.required, for: .horizontal)
+        imageOptions = NativeUI.stack([NSView(), imageSource], vertical: false, spacing: 0)
+        imageOptions.distribution = .fill
+        imageOptions.heightAnchor.constraint(equalToConstant: imageSource.intrinsicContentSize.height).isActive = true
+        header = NativeUI.stack([info, imageOptions, notice], spacing: 8)
         header.alignment = .leading
         info.widthAnchor.constraint(equalTo: header.widthAnchor, constant: -32).isActive = true
+        imageOptions.widthAnchor.constraint(equalTo: info.widthAnchor).isActive = true
         notice.widthAnchor.constraint(equalTo: header.widthAnchor, constant: -32).isActive = true
         header.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 10, right: 16)
         let separator = NSBox(); separator.boxType = .separator
         progress.style = .spinning; progress.controlSize = .small
         for child in [outline, source] { NativeUI.pin(child, to: dataContainer) }
+        imageView.imageScaling = .scaleProportionallyDown
+        imageView.imageAlignment = .alignCenter
+        imageView.setAccessibilityLabel("响应图片预览")
+        imageView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        imageView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        imageView.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .vertical)
+        NativeUI.pin(imageView, to: dataContainer, insets: NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16))
+        NativeUI.pin(imageComparison, to: dataContainer)
         for child in [empty, progress] {
             child.translatesAutoresizingMaskIntoConstraints = false; dataContainer.addSubview(child)
             child.centerXAnchor.constraint(equalTo: dataContainer.centerXAnchor).isActive = true
@@ -110,6 +130,9 @@ final class RequestPayloadViewController: NSViewController, NSSearchFieldDelegat
             let result = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
             guard !Task.isCancelled, let self, self.generation == generation else { return }
             self.presentation = result; self.presentedVersion = version; self.isLoading = false
+            let image = result.imageData.flatMap { NSImage(data: $0) }
+            self.imageView.image = image?.isValid == true ? image : nil
+            self.imageComparison.update(result.imageComparison)
             if !result.canCompare { self.onlyChanges = false }
             self.refreshContent()
         }
@@ -119,34 +142,52 @@ final class RequestPayloadViewController: NSViewController, NSSearchFieldDelegat
         directionLabel.stringValue = direction
         summary.stringValue = presentation?.summary ?? ""
         summary.toolTip = presentation?.footer
-        notice.stringValue = presentation?.notice ?? ""; notice.isHidden = presentation?.notice == nil
-        changes.isHidden = !(presentation?.canCompare == true && (!tab.isBody || (presentation?.isJSON == true && format == .tree)))
+        let comparesImages = presentation?.imageComparison.count == 2
+        let isImageResponse = presentation?.imageData != nil || comparesImages
+        let hasImage = imageView.image != nil || comparesImages
+        let usesImage = hasImage && !showsImageSource
+        var noticeText = usesImage ? presentation?.imageNotice : presentation?.notice
+        if isImageResponse && !hasImage {
+            noticeText = ["无法预览此图片，当前显示原始数据。", noticeText].compactMap { $0 }.joined(separator: " ")
+        }
+        notice.stringValue = noticeText ?? ""; notice.isHidden = noticeText?.isEmpty != false
+        imageOptions.isHidden = !hasImage || isLoading
+        imageSource.state = showsImageSource ? .on : .off
+        imageSource.isEnabled = active && !isLoading
+        changes.isHidden = isImageResponse || !(presentation?.canCompare == true && (!tab.isBody || (presentation?.isJSON == true && format == .tree)))
         changes.state = onlyChanges ? .on : .off; changes.isEnabled = !isLoading && active
-        let usesSource = tab.isBody && (presentation?.isJSON != true || format == .source)
+        let usesSource = !usesImage && tab.isBody && (isImageResponse || presentation?.isJSON != true || format == .source)
         let nodes = RequestInspectionData.filtering(presentation?.nodes ?? [], query: search, onlyChanges: onlyChanges)
         let showsContent = active && !isLoading && presentation?.emptyTitle == nil
-        outline.update(nodes: nodes, showsTypes: tab.isBody, isVisible: showsContent && !usesSource,
+        imageView.isHidden = !showsContent || !usesImage || comparesImages
+        imageView.animates = !imageView.isHidden
+        imageComparison.setVisible(showsContent && usesImage && comparesImages)
+        outline.update(nodes: nodes, showsTypes: tab.isBody, isVisible: showsContent && !usesSource && !usesImage,
                        stateKey: "\(version.rawValue)-\(search.isEmpty ? "all" : "search")-\(onlyChanges)", expandsMatches: !search.isEmpty || onlyChanges)
-        outline.isHidden = usesSource || isLoading || presentation?.emptyTitle != nil
+        outline.isHidden = usesSource || usesImage || !showsContent
         source.update(text: presentation?.source ?? "", search: usesSource ? search : "", stateKey: version.rawValue,
                       isVisible: showsContent && usesSource, isJSON: presentation?.isJSON == true)
         source.isHidden = !usesSource || isLoading || presentation?.emptyTitle != nil
-        let title = presentation?.emptyTitle ?? ((!usesSource && nodes.isEmpty) ? (onlyChanges ? "没有符合条件的变更" : "没有匹配字段") : "")
+        let title = presentation?.emptyTitle ?? ((!usesSource && !usesImage && nodes.isEmpty) ? (onlyChanges ? "没有符合条件的变更" : "没有匹配字段") : "")
         empty.update(title: title, description: presentation?.emptyDescription ?? "调整搜索或筛选条件。", symbol: presentation?.emptyTitle == nil ? "magnifyingglass" : "doc.text")
         empty.isHidden = title.isEmpty || isLoading
         progress.isHidden = !isLoading
         if isLoading { progress.startAnimation(nil) } else { progress.stopAnimation(nil) }
-        formatButton.isHidden = !(tab.isBody && presentation?.isJSON == true)
+        formatButton.isHidden = isImageResponse || !(tab.isBody && presentation?.isJSON == true)
         formatButton.title = format == .tree ? "原始数据" : "树形视图"
         formatButton.toolTip = format == .tree ? "查看当前版本的原始数据" : "以字段树查看当前版本的 JSON"
         formatButton.isEnabled = active && !isLoading
         if searchField.stringValue != search { searchField.stringValue = search }
-        let prompt = !tab.isBody ? "查找\(tab.title)" : (presentation?.isJSON == true && format == .tree ? "查找键或值" : "查找原始数据")
-        searchField.placeholderString = prompt; searchField.setAccessibilityLabel(prompt); searchField.isEnabled = active
+        let prompt = !tab.isBody ? "查找\(tab.title)" : (!usesSource && presentation?.isJSON == true && format == .tree ? "查找键或值" : "查找原始数据")
+        searchField.placeholderString = prompt; searchField.setAccessibilityLabel(prompt); searchField.isEnabled = active && !usesImage
         if !active, let editor = searchField.currentEditor(), editor === view.window?.firstResponder { view.window?.makeFirstResponder(nil) }
         onCopyChange()
     }
     @objc private func toggleChanges() { onlyChanges = changes.state == .on; refreshContent() }
+    @objc private func toggleImageSource() {
+        showsImageSource = imageSource.state == .on
+        view.window?.makeFirstResponder(nil); refreshContent()
+    }
     @objc private func toggleFormat() {
         format = format == .tree ? .source : .tree
         view.window?.makeFirstResponder(nil); refreshContent()
@@ -172,6 +213,89 @@ struct RequestPayloadCopyContent: Equatable, Sendable {
     let tab: RequestDetailTab
     let version: InspectionVersion
     let text: String
+}
+
+/// Equal-width before/after columns; all content uses native AppKit views.
+@MainActor
+private final class RequestImageComparisonView: NSView {
+    private let columns = [Column(), Column()]
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        let stack = NativeUI.stack(columns, vertical: false, spacing: 16)
+        stack.distribution = .fillEqually
+        stack.alignment = .top
+        NativeUI.pin(stack, to: self, insets: NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16))
+        for column in columns { column.heightAnchor.constraint(equalTo: stack.heightAnchor).isActive = true }
+    }
+    convenience init() { self.init(frame: .zero) }
+    required init?(coder: NSCoder) { nil }
+
+    func update(_ previews: [RequestPayloadPresentation.ImagePreview]) {
+        for (index, column) in columns.enumerated() {
+            column.update(previews.indices.contains(index) ? previews[index] : nil)
+        }
+    }
+
+    func setVisible(_ visible: Bool) {
+        isHidden = !visible
+        for column in columns { column.image.animates = visible && column.image.image != nil }
+    }
+
+    private final class Column: NSView {
+        let image = NSImageView()
+        private let title = NativeUI.label("", size: 12, weight: .semibold)
+        private let message = NSTextField(wrappingLabelWithString: "")
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            title.alignment = .center
+            title.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(title)
+            let content = NSView()
+            content.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(content)
+            NSLayoutConstraint.activate([
+                title.topAnchor.constraint(equalTo: topAnchor),
+                title.leadingAnchor.constraint(equalTo: leadingAnchor),
+                title.trailingAnchor.constraint(equalTo: trailingAnchor),
+                title.heightAnchor.constraint(equalToConstant: title.intrinsicContentSize.height),
+                content.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 8),
+                content.leadingAnchor.constraint(equalTo: leadingAnchor),
+                content.trailingAnchor.constraint(equalTo: trailingAnchor),
+                content.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+            image.imageScaling = .scaleProportionallyDown
+            image.imageAlignment = .alignCenter
+            for orientation in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
+                image.setContentCompressionResistancePriority(.defaultLow, for: orientation)
+                image.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: orientation)
+            }
+            NativeUI.pin(image, to: content)
+            message.font = .systemFont(ofSize: 11)
+            message.textColor = .secondaryLabelColor
+            message.alignment = .center
+            message.translatesAutoresizingMaskIntoConstraints = false
+            content.addSubview(message)
+            NSLayoutConstraint.activate([
+                message.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+                message.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+                message.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            ])
+        }
+        convenience init() { self.init(frame: .zero) }
+        required init?(coder: NSCoder) { nil }
+
+        func update(_ preview: RequestPayloadPresentation.ImagePreview?) {
+            title.stringValue = preview?.title ?? ""
+            let decoded = preview?.data.flatMap { NSImage(data: $0) }
+            image.image = decoded?.isValid == true ? decoded : nil
+            image.setAccessibilityLabel("\(preview?.title ?? "")图片预览")
+            image.isHidden = image.image == nil
+            message.stringValue = preview?.unavailableReason ?? "无法预览此图片，可勾选“显示原始数据”查看内容。"
+            message.isHidden = image.image != nil
+        }
+    }
 }
 
 @MainActor

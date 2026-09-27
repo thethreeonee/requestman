@@ -34,7 +34,7 @@ try:
         str(root / "Scripts/Fixtures/InspectorPerformanceChecks.swift"), "-o", str(executable),
     ], check=True)
     try:
-        subprocess.run([str(executable)], check=True, timeout=60)
+        subprocess.run([str(executable), *sys.argv[1:]], check=True, timeout=60)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         print("Inspector performance CLI checks did not pass; inspect the assertion or runtime error above. "
               "WindowServer connection errors require a macOS GUI session. No visual acceptance is implied.", file=sys.stderr)

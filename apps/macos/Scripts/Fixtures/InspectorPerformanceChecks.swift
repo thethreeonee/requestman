@@ -130,6 +130,8 @@ struct InspectorPerformanceChecks {
     }
     static func main() {
         NSApplication.shared.setActivationPolicy(.prohibited)
+        checkImagePreviews()
+        if CommandLine.arguments.contains("--images-only") { return }
         checkJSONColors()
         let model = WorkspaceModel()
         model.selection = .requests
@@ -230,6 +232,102 @@ struct InspectorPerformanceChecks {
         print("Inspector performance checks passed: actual table/detail views, 6 selection/open/resize/close cycles; bounded idle CPU, stable toolbar images. Hidden CLI window only; App acceptance still required.")
     }
 
+    static func checkImagePreviews() {
+        let gif = Data(base64Encoded: "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==")!
+        func snapshot(_ data: Data, type: String = "image/gif") -> CaptureBodySnapshot {
+            let collector = CaptureBodyCollector(headers: [HTTPField("Content-Type", type)])
+            collector.append(data)
+            return collector.snapshot(isComplete: true)
+        }
+        var record = CaptureRecord(method: "GET", url: "https://example.invalid/image.gif")
+        record.receivedBody = snapshot(gif); record.responseBody = snapshot(gif)
+        let pane = RequestPayloadViewController(record: record, tab: .responseBody, version: .final)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 500), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentViewController = pane
+        pane.update(version: .final, isActive: true)
+        func wait(_ condition: () -> Bool) {
+            let deadline = Date().addingTimeInterval(3)
+            while !condition(), Date() < deadline {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+                pane.view.layoutSubtreeIfNeeded()
+            }
+            precondition(condition(), "Image presentation did not settle")
+        }
+        let checkbox = views(NSButton.self, in: pane.view).first { $0.title == "显示原始数据" }!
+        let preview = views(NSImageView.self, in: pane.view).first { $0.accessibilityLabel() == "响应图片预览" }!
+        let source = views(NSTextView.self, in: pane.view).first!
+        wait { pane.copyContent != nil && !preview.isHiddenOrHasHiddenAncestor }
+        precondition(preview.image?.isValid == true && preview.imageScaling == .scaleProportionallyDown)
+        precondition(checkbox.state == .off && source.isHiddenOrHasHiddenAncestor)
+        precondition(!views(NSSearchField.self, in: pane.view).first!.isEnabled)
+        let copy = pane.copyContent
+        for width: CGFloat in [400, 520, 760] {
+            window.setContentSize(NSSize(width: width, height: 500))
+            pane.view.layoutSubtreeIfNeeded()
+            let summary = views(NSTextField.self, in: pane.view).first { $0.stringValue.hasPrefix("image/gif ·") }!
+            let infoFrame = summary.convert(summary.alignmentRect(forFrame: summary.bounds), to: pane.view)
+            let checkFrame = checkbox.convert(checkbox.alignmentRect(forFrame: checkbox.bounds), to: pane.view)
+            precondition(checkFrame.minY >= infoFrame.maxY, "Checkbox must sit below Content-Type")
+            precondition(checkFrame.minY - infoFrame.maxY < 20, "Checkbox must be directly below Content-Type")
+            precondition(abs(checkFrame.maxX - infoFrame.maxX) <= 1, "Checkbox must align to the right of Content-Type: summary=\(infoFrame), checkbox=\(checkFrame)")
+            precondition(checkFrame.width >= checkbox.intrinsicContentSize.width - 1)
+        }
+        checkbox.performClick(nil)
+        precondition(preview.isHiddenOrHasHiddenAncestor && !source.isHiddenOrHasHiddenAncestor)
+        precondition(source.string.contains("47 49 46") && pane.copyContent == copy)
+        pane.update(version: .final, isActive: false)
+        pane.update(version: .final, isActive: true)
+        precondition(checkbox.state == .on && !source.isHiddenOrHasHiddenAncestor)
+        checkbox.performClick(nil)
+        precondition(!preview.isHiddenOrHasHiddenAncestor && source.isHiddenOrHasHiddenAncestor)
+        record.receivedBody = snapshot(Data(#"{"error":"not an image"}"#.utf8))
+        pane.update(record: record, version: .original, isActive: true)
+        wait { pane.copyContent?.version == .original }
+        precondition(preview.isHiddenOrHasHiddenAncestor && checkbox.isHiddenOrHasHiddenAncestor)
+        precondition(!source.isHiddenOrHasHiddenAncestor && source.string == #"{"error":"not an image"}"#)
+        precondition(views(NSTextField.self, in: pane.view).contains { $0.stringValue.contains("无法预览此图片") })
+        pane.update(version: .final, isActive: true)
+        wait { pane.copyContent?.version == .final }
+        precondition(!preview.isHiddenOrHasHiddenAncestor && source.isHiddenOrHasHiddenAncestor)
+        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 12, pixelsHigh: 8, bitsPerSample: 8,
+                                      samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                      bytesPerRow: 0, bitsPerPixel: 0)!
+        let png = bitmap.representation(using: .png, properties: [:])!
+        record.receivedBody = snapshot(png, type: "image/png")
+        pane.update(record: record, version: .difference, isActive: true)
+        wait { pane.copyContent?.version == .difference }
+        let before = views(NSImageView.self, in: pane.view).first { $0.accessibilityLabel() == "修改前图片预览" }!
+        let after = views(NSImageView.self, in: pane.view).first { $0.accessibilityLabel() == "修改后图片预览" }!
+        precondition(before.image?.size == NSSize(width: 12, height: 8) && after.image?.size == NSSize(width: 1, height: 1))
+        precondition(preview.isHiddenOrHasHiddenAncestor && source.isHiddenOrHasHiddenAncestor)
+        for width: CGFloat in [400, 520, 760] {
+            window.setContentSize(NSSize(width: width, height: 500))
+            pane.view.layoutSubtreeIfNeeded()
+            let left = before.convert(before.bounds, to: pane.view)
+            let right = after.convert(after.bounds, to: pane.view)
+            precondition(!before.isHiddenOrHasHiddenAncestor && !after.isHiddenOrHasHiddenAncestor)
+            precondition(left.maxX < right.minX && abs(left.width - right.width) <= 1)
+            precondition(abs(left.minY - right.minY) <= 1 && left.height > 100)
+            precondition(left.minX >= 16 && right.maxX <= width - 16)
+        }
+        checkbox.performClick(nil)
+        precondition(before.isHiddenOrHasHiddenAncestor && after.isHiddenOrHasHiddenAncestor)
+        precondition(!source.isHiddenOrHasHiddenAncestor && source.string.contains("89 50 4e 47") && source.string.contains("47 49 46"))
+        checkbox.performClick(nil)
+        pane.update(version: .original, isActive: true)
+        wait { pane.copyContent?.version == .original }
+        precondition(preview.image?.size == NSSize(width: 12, height: 8) && !preview.isHiddenOrHasHiddenAncestor)
+        precondition(before.isHiddenOrHasHiddenAncestor && after.isHiddenOrHasHiddenAncestor)
+        record.receivedBody = .unavailable("没有服务器原始响应")
+        pane.update(record: record, version: .difference, isActive: true)
+        wait { pane.copyContent?.version == .difference }
+        precondition(before.isHiddenOrHasHiddenAncestor && !after.isHiddenOrHasHiddenAncestor)
+        precondition(views(NSTextField.self, in: pane.view).contains { !$0.isHiddenOrHasHiddenAncestor && $0.stringValue == "没有服务器原始响应" })
+        print("Image preview checks passed: GIF/PNG, equal before/after columns at 400/520/760 pt, checkbox/raw data, copy, versions, tab retention and unavailable-image fallback. Hidden window only.")
+    }
+
     static func checkDisplayMode(_ controller: WorkspaceSplitController, window: NSWindow) {
         let inspector = controller.splitViewItems[2].viewController.view
         let more = window.toolbar!.items.first { $0.itemIdentifier.rawValue == "workspace.inspectorMore" } as! NSMenuToolbarItem
@@ -278,7 +376,7 @@ struct InspectorPerformanceChecks {
             let tabTop = inspector.isFlipped ? tabFrame.minY : inspector.bounds.height - tabFrame.maxY
             print("Content tabs geometry: inspector=\(inspector.bounds), tabRow=\(tabs.superview!.bounds), top=\(tabTop), tabs=\(tabFrame)")
             // The summary includes a 32 pt URL button instead of the old 21 pt intrinsic height.
-            precondition(tabTop < 200, "Content tabs must stay directly below the summary, not float mid-inspector")
+            precondition(tabTop < 200, "Content tabs must stay directly below the summary, not float mid-inspector: top=\(tabTop), tabs=\(tabFrame), inspector=\(inspector.bounds)")
             precondition(abs(tabFrame.height - tabs.intrinsicContentSize.height) <= 1,
                          "Tabs must retain their native height")
             precondition(tabs.segmentDistribution == .fillProportionally)

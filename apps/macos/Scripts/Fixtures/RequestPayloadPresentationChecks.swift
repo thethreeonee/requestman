@@ -6,6 +6,50 @@ func runPayloadPresentationChecks() throws {
     precondition(InspectionVersion.allCases.map(\.title) == ["修改前", "修改后", "修改对比"])
     precondition(RequestDetailTab.requestHeaders.isRequest && !RequestDetailTab.requestHeaders.isBody)
     precondition(RequestDetailTab.responseBody.isBody && !RequestDetailTab.responseBody.isRequest)
+    let gif = Data(base64Encoded: "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==")!
+    var image = CaptureRecord(method: "GET", url: "https://example.test/pixel.gif")
+    image.receivedBody = payloadSnapshot(bytes: gif, contentType: "image/gif")
+    image.responseBody = payloadSnapshot(bytes: gif, contentType: " Image/GIF; charset=binary")
+    for version in InspectionVersion.allCases {
+        let result = RequestPayloadPresentation.make(record: image, tab: .responseBody, version: version)
+        if version == .difference {
+            precondition(result.imageComparison.map(\.title) == ["修改前", "修改后"])
+            precondition(result.imageComparison.map(\.data) == [gif, gif])
+        } else { precondition(result.imageData == gif && result.imageComparison.isEmpty) }
+        precondition(!result.source.isEmpty && !result.isJSON)
+        precondition(result.imageNotice?.contains("十六进制") != true)
+    }
+    image.requestBody = image.responseBody
+    precondition(RequestPayloadPresentation.make(record: image, tab: .requestBody, version: .original).imageData == nil)
+    image.responseBody = payloadSnapshot(bytes: gif, contentType: "image/gif", isComplete: false)
+    let partialImage = RequestPayloadPresentation.make(record: image, tab: .responseBody, version: .final)
+    precondition(partialImage.imageData == nil && partialImage.notice?.contains("传输未完成") == true)
+    let partialComparison = RequestPayloadPresentation.make(record: image, tab: .responseBody, version: .difference)
+    precondition(partialComparison.imageComparison[0].data == gif)
+    precondition(partialComparison.imageComparison[1].data == nil)
+    precondition(partialComparison.imageComparison[1].unavailableReason?.contains("传输未完成") == true)
+    image.responseBody = payloadSnapshot("not an image", contentType: "text/plain")
+    precondition(RequestPayloadPresentation.make(record: image, tab: .responseBody, version: .final).imageData == nil)
+    image.responseBody = image.receivedBody
+    image.receivedBody = payloadSnapshot("before", contentType: "text/plain")
+    let changedImage = RequestPayloadPresentation.make(record: image, tab: .responseBody, version: .difference)
+    precondition(changedImage.imageComparison[0].unavailableReason == "此响应不是图片。")
+    precondition(changedImage.imageComparison[1].data == gif)
+    precondition(changedImage.source.contains("before") && changedImage.source.contains("最终"))
+    let compressedGIF = Data(base64Encoded: "H4sIAAAAAAAC/3P3dLOwTGRkYGRoYACB////K/5kYQQxdUAESIaBicmFkcEaAGuVIEcrAAAA")!
+    image.responseBody = payloadSnapshot(bytes: compressedGIF, contentType: "image/gif", encoding: "gzip")
+    let decodedImage = RequestPayloadPresentation.make(record: image, tab: .responseBody, version: .final)
+    precondition(decodedImage.imageData == gif && decodedImage.imageNotice?.contains("已解码 gzip") == true)
+    image.receivedBody = .unavailable("没有服务器原始响应")
+    let mockImage = RequestPayloadPresentation.make(record: image, tab: .responseBody, version: .difference)
+    precondition(mockImage.imageComparison[0].unavailableReason == "没有服务器原始响应")
+    precondition(mockImage.imageComparison[1].data == gif && mockImage.emptyTitle == nil)
+    image.receivedBody = payloadSnapshot(bytes: gif, contentType: "image/gif")
+    image.responseBody = payloadSnapshot("")
+    let removedImage = RequestPayloadPresentation.make(record: image, tab: .responseBody, version: .difference)
+    precondition(removedImage.imageComparison[0].data == gif && removedImage.imageComparison[1].data == nil)
+    precondition(removedImage.imageComparison[1].unavailableReason == "此消息没有内容。")
+    precondition(removedImage.emptyTitle == nil && removedImage.source.contains("最终"))
 
     var query = CaptureRecord(method: "GET", url: "https://example.test/?key=one&key=two&Key=upper&flag&empty=&encoded=%E4%B8%AD%E6%96%87")
     query.finalURL = "https://example.test/?key=one&key=changed&Key=upper&flag=&encoded=%E4%B8%AD%E6%96%87&new=yes"

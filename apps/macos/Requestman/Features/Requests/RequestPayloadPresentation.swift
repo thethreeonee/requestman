@@ -14,6 +14,15 @@ struct RequestPayloadPresentation: Sendable {
     var emptyDescription: String?
     var isJSON = false
     var canCompare = false
+    var imageData: Data?
+    var imageNotice: String?
+    var imageComparison: [ImagePreview] = []
+
+    struct ImagePreview: Sendable {
+        let title: String
+        let data: Data?
+        let unavailableReason: String?
+    }
 
     static func make(record: CaptureRecord, tab: RequestDetailTab, version: InspectionVersion) -> Self {
         if record.outcome == .tunnel {
@@ -108,6 +117,27 @@ struct RequestPayloadPresentation: Sendable {
         let finalContent = version == .original ? PreparedBody(snapshot: final) : selectedContent
         let completeComparison = originalContent.completeData != nil && finalContent.completeData != nil
         result.canCompare = completeComparison
+        if tab == .responseBody, version == .difference, isImage(original) || isImage(final) {
+            result.imageComparison = [
+                imagePreview(title: "修改前", snapshot: original, content: originalContent),
+                imagePreview(title: "修改后", snapshot: final, content: finalContent),
+            ]
+            result.emptyTitle = nil
+            result.emptyDescription = nil
+            result.imageNotice = [("修改前", originalContent.imageNotice), ("修改后", finalContent.imageNotice)]
+                .compactMap { title, notice in notice.map { "\(title)：\($0)" } }.joined(separator: " ")
+            let equal = completeComparison && originalContent.completeData == finalContent.completeData
+            result.footer = completeComparison ? (equal ? "内容未变化" : "原始与最终内容不同") : "内容预览"
+            if !equal {
+                func source(_ content: PreparedBody) -> String {
+                    content.text.isEmpty ? (content.emptyDescription ?? content.emptyTitle ?? "无可用数据") : content.text
+                }
+                result.source = "原始\n\(source(originalContent))\n\n最终\n\(source(finalContent))"
+            }
+            result.notice = [("修改前", originalContent.notice), ("修改后", finalContent.notice)]
+                .compactMap { title, notice in notice.map { "\(title)：\($0)" } }.joined(separator: " ")
+            return result
+        }
         // An explicitly cleared body still needs an original/final comparison.
         if version == .difference, completeComparison,
            originalContent.completeData != finalContent.completeData, selectedContent.completeData?.isEmpty == true {
@@ -118,6 +148,10 @@ struct RequestPayloadPresentation: Sendable {
             return result
         }
         guard result.emptyTitle == nil else { return result }
+        if tab == .responseBody, isImage(selected) {
+            result.imageData = selectedContent.completeData
+            result.imageNotice = selectedContent.imageNotice
+        }
         if version == .difference && !completeComparison {
             result.notice = [result.notice, "原始或最终内容不完整，无法计算差异；当前显示最终预览。"].compactMap { $0 }.joined(separator: " ")
         }
@@ -162,10 +196,29 @@ struct RequestPayloadPresentation: Sendable {
         ByteCountFormatter.string(fromByteCount: Int64(count), countStyle: .file)
     }
 
+    private static func isImage(_ snapshot: CaptureBodySnapshot) -> Bool {
+        snapshot.contentType?.split(separator: ";", maxSplits: 1).first?
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("image/") == true
+    }
+
+    private static func imagePreview(title: String, snapshot: CaptureBodySnapshot, content: PreparedBody) -> ImagePreview {
+        let data = isImage(snapshot) ? content.completeData : nil
+        let reason: String?
+        if let emptyTitle = content.emptyTitle {
+            reason = content.emptyDescription ?? emptyTitle
+        } else if !isImage(snapshot) {
+            reason = "此响应不是图片。"
+        } else if data == nil {
+            reason = content.imageNotice ?? content.notice ?? "没有完整的图片数据。"
+        } else { reason = nil }
+        return ImagePreview(title: title, data: reason == nil ? data : nil, unavailableReason: reason)
+    }
+
     private struct PreparedBody {
         var text = ""
         var completeData: Data?
         var notice: String?
+        var imageNotice: String?
         var emptyTitle: String?
         var emptyDescription: String?
 
@@ -211,6 +264,7 @@ struct RequestPayloadPresentation: Sendable {
                 }
                 return
             }
+            imageNotice = notes.isEmpty ? nil : notes.joined(separator: " ")
             if !snapshot.isEncoded || completeData != nil {
                 if let value = Self.text(data, contentType: snapshot.contentType) { text = value }
                 else {
