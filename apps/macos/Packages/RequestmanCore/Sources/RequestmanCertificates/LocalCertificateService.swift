@@ -44,6 +44,13 @@ public actor LocalCertificateService: CertificateService, TLSCertificateProvidin
     }
     private var authorityLease: AuthorityLease?
 
+    public func publicCertificateDER() async throws -> Data? {
+        guard let data = try documentStore.read() else { return nil }
+        let certificate = try CertificateMaterial.decodeRoot(data)
+        guard certificate.notValidAfter > now() else { throw LocalCertificateError.expiredCertificate }
+        return data
+    }
+
     public func serverIdentity(for host: String) throws -> TLSCertificateIdentity? {
         return try CertificateKeychainInteraction.perform(allowingUI: false) {
             try Task.checkCancellation()

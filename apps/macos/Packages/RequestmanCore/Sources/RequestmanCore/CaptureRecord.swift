@@ -61,6 +61,8 @@ public struct CaptureRecord: Identifiable, Sendable, Codable {
     public var project = "未匹配"
     public var workflow = "直接转发"
     public var environment = "无环境"
+    /// Peer IP (without its ephemeral port). nil denotes older/imported records with no source.
+    public var deviceSource: String?
     public var outcome: Outcome = .forwarded
     public var matchedWorkflowID: UUID?
     public var matchedRules: [CaptureMatchedRule] = []
@@ -91,7 +93,7 @@ public struct CaptureRecord: Identifiable, Sendable, Codable {
     private enum CodingKeys: String, CodingKey {
         case id, archivedAt, replayID, replaySourceID, replayCancelled
         case captureProtocol, connectionState, revision, closeReason, startedAt
-        case method, url, finalURL, sentMethod, project, workflow, environment, outcome
+        case method, url, finalURL, sentMethod, project, workflow, environment, deviceSource, outcome
         case matchedWorkflowID, matchedRules, executionTrace, hasSentRequestHeaders
         case originalStatus, status, duration, requestBytes, responseBytes
         case requestHeaders, sentHeaders, responseHeaders, receivedHeaders

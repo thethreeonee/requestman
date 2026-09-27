@@ -9,7 +9,8 @@ final class ProxySharedState: Sendable {
     static let maximumConnections = 256
     let replays = OSAllocatedUnfairLock(initialState: [UUID: ProxyReplaySession]())
     func replaySession(for channel: Channel) -> ProxyReplaySession? {
-        guard let port = channel.remoteAddress?.port else { return nil }
+        guard let host = channel.remoteAddress?.ipAddress, LocalNetwork.isLoopback(host),
+              let port = channel.remoteAddress?.port else { return nil }
         return replays.withLock { $0.values.first { $0.clientPort == port } }
     }
     let events = CaptureEventBuffer()

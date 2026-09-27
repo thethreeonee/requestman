@@ -6,7 +6,7 @@ import NIOSSL
 import RequestmanCertificates
 import RequestmanCore
 
-/// Explicit loopback proxy. Every connection handler is confined to the group's single event loop.
+/// Explicit HTTP proxy with opt-in IPv4 LAN access. Every connection handler is confined to the group's single event loop.
 public actor LocalProxyServer {
     private var group: MultiThreadedEventLoopGroup?
     private var listener: Channel?
@@ -24,8 +24,9 @@ public actor LocalProxyServer {
     public func update(_ document: WorkspaceDocument) { shared.document.withLock { $0 = document } }
     public func updateConfiguration(_ configuration: ExplicitProxyConfiguration) throws {
         try configuration.validate()
-        guard listener?.localAddress?.port == configuration.port else {
-            throw WorkflowError.invalid("监听端口变更需要切换监听")
+        guard listener?.localAddress?.port == configuration.port,
+              shared.configuration.withLock({ $0.allowLAN }) == configuration.allowLAN else {
+            throw WorkflowError.invalid("监听端口或局域网范围变更需要切换监听")
         }
         shared.configuration.withLock { $0 = configuration }
     }
@@ -49,6 +50,7 @@ public actor LocalProxyServer {
                 .childChannelInitializer { channel in
                     guard shared.register(channel) else {
                         var record = CaptureRecord(method: "—", url: "连接未受理")
+                        record.deviceSource = channel.remoteAddress?.ipAddress.map { DeviceSource.identifier(for: $0) }
                         record.outcome = .failed; record.workflow = "连接容量上限"
                         record.error = "当前已有 \(ProxySharedState.maximumConnections) 个连接"
                         records.append(record)
@@ -60,10 +62,11 @@ public actor LocalProxyServer {
                         try channel.pipeline.syncOperations.addHandlers([
                             HTTPResponseEncoder(configuration: encoder),
                             ByteToMessageHandler(HTTPRequestDecoder(leftOverBytesStrategy: .forwardBytes, limitConfiguration: proxyDecoderLimits())),
+                            MobileSetupHandler(configuration: configuration, certificateProvider: shared.certificateProvider),
                             ProxyConnection(configuration: shared.configuration.withLock { $0 }, shared: shared, records: records)
                         ])
                     }
-                }.bind(host: "127.0.0.1", port: configuration.port).get()
+                }.bind(host: configuration.allowLAN ? "0.0.0.0" : "127.0.0.1", port: configuration.port).get()
             listener = channel
             return channel.localAddress?.port ?? configuration.port
         } catch {

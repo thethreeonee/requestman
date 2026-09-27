@@ -6,6 +6,20 @@ import X509
 @testable import RequestmanCertificates
 
 struct LocalCertificateServiceTests {
+    @Test func publicDownloadDoesNotCreateKeysAuthorizeOrChangeTrust() async throws {
+        let missing = MemoryCertificates()
+        #expect(try await missing.service().publicCertificateDER() == nil)
+        #expect(missing.snapshot().keyCreates == 0)
+        let key = Certificate.PrivateKey(P256.Signing.PrivateKey())
+        let data = try CertificateMaterial.data(CertificateMaterial.root(privateKey: key, now: testDate))
+        let fixture = MemoryCertificates(document: data)
+        fixture.requireAuthorization()
+        #expect(try await fixture.service().publicCertificateDER() == data)
+        let state = fixture.snapshot()
+        #expect(state.keyCreates == 0 && state.installs == 0 && state.trusts == 0)
+        #expect(state.interactiveKeyReads == 0 && state.authorizationRepairs == 0)
+    }
+
     @Test func generatesSelfSignedRootWithConstrainedCAProfileAndRandomSerial() throws {
         let key = Certificate.PrivateKey(P256.Signing.PrivateKey())
         let first = try CertificateMaterial.root(privateKey: key, now: testDate)

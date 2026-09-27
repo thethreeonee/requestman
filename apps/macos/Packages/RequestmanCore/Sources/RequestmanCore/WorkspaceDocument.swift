@@ -294,13 +294,21 @@ public struct WorkflowProject: Codable, Equatable, Identifiable, Sendable {
 
 public struct ExplicitProxyConfiguration: Codable, Equatable, Sendable {
     public var port: Int = 9090
+    public var allowLAN = false
     public var upstream: UpstreamRoute = .system
     public init() {}
+    private enum CodingKeys: String, CodingKey { case port, allowLAN, upstream }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        port = try values.decode(Int.self, forKey: .port)
+        allowLAN = try values.decodeIfPresent(Bool.self, forKey: .allowLAN) ?? false
+        upstream = try values.decode(UpstreamRoute.self, forKey: .upstream)
+    }
     public func validate() throws {
         guard (1024...65535).contains(port) else { throw WorkflowError.invalid("监听端口需在 1024–65535 之间") }
         if case .httpProxy(let endpoint) = upstream {
             try endpoint.validate()
-            guard !(endpoint.port == port && ["localhost", "127.0.0.1", "::1"].contains(endpoint.host.lowercased())) else {
+            guard !(endpoint.port == port && LocalNetwork.isLocalHost(endpoint.host)) else {
                 throw WorkflowError.invalid("上游不能指向本地监听端口")
             }
         }
@@ -314,9 +322,10 @@ public struct WorkspaceDocument: Codable, Equatable, Sendable {
     public var selectedEnvironmentID: UUID?
     public var proxy = ExplicitProxyConfiguration()
     public var httpsDecryption = HTTPSDecryptionConfiguration()
+    public var deviceAliases: [String: String] = [:]
     public init() {}
     private enum CodingKeys: String, CodingKey {
-        case version, projects, environments, selectedEnvironmentID, proxy, httpsDecryption
+        case version, projects, environments, selectedEnvironmentID, proxy, httpsDecryption, deviceAliases
     }
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -326,6 +335,7 @@ public struct WorkspaceDocument: Codable, Equatable, Sendable {
         selectedEnvironmentID = try values.decodeIfPresent(UUID.self, forKey: .selectedEnvironmentID)
         proxy = try values.decode(ExplicitProxyConfiguration.self, forKey: .proxy)
         httpsDecryption = try values.decodeIfPresent(HTTPSDecryptionConfiguration.self, forKey: .httpsDecryption) ?? .init()
+        deviceAliases = try values.decodeIfPresent([String: String].self, forKey: .deviceAliases) ?? [:]
     }
     public var environment: WorkspaceEnvironment? { environments.first { $0.id == selectedEnvironmentID } }
 }

@@ -15,6 +15,17 @@ import RequestmanCore
 /// Real TCP/TLS tests. All certificates and trust anchors live only in memory.
 @Suite(.serialized)
 struct HTTPSIntegrationTests {
+    @Test func mobileLANHTTPSDecryptsThroughHTTPUpstream() async throws {
+        try await withHTTPSHarness { h in
+            try await h.start(useHTTPUpstream: true, allowLAN: true)
+            let reply = try await h.exchange(path: "/mobile", coalesceClientHello: true)
+            #expect(reply.status == 200 && reply.body == "secure-origin-body")
+            let record = try #require(await h.firstRecord())
+            #expect(record.deviceSource == "local")
+            #expect(record.outcome == .forwarded && record.responseBody.state == .complete)
+        }
+    }
+
     @Test(arguments: [false, true]) func requestReplayHTTPSUsesTLSAndConfiguredUpstream(upstream: Bool) async throws {
         try await withHTTPSHarness { h in
             try await h.start(useHTTPUpstream: upstream)
@@ -496,13 +507,14 @@ private final class HTTPSHarness: @unchecked Sendable {
         originPort = try #require(origin?.localAddress?.port)
     }
 
-    func start(workflow: RequestWorkflow? = nil, useHTTPUpstream: Bool = false) async throws {
+    func start(workflow: RequestWorkflow? = nil, useHTTPUpstream: Bool = false, allowLAN: Bool = false) async throws {
         var document = WorkspaceDocument()
         if let workflow {
             var project = WorkflowProject(name: "https-test"); project.workflows = [workflow]
             document.projects = [project]
         }
         var configuration = ExplicitProxyConfiguration()
+        configuration.allowLAN = allowLAN
         if useHTTPUpstream {
             let upstream = LocalProxyServer()
             self.upstream = upstream

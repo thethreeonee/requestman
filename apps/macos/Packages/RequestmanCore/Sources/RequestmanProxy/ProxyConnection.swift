@@ -26,7 +26,13 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     var ssePending: [ByteBuffer] = []
     var certificateTask: Task<Void, Never>?
     var replaySession: ProxyReplaySession?
-    var record: CaptureRecord?
+    var record: CaptureRecord? {
+        didSet {
+            if record != nil, record?.deviceSource == nil, let host = client?.remoteAddress?.ipAddress {
+                record?.deviceSource = DeviceSource.identifier(for: host)
+            }
+        }
+    }
     var recordOwnershipTransferred = false
     var started = ContinuousClock.now
     var traceRecorder: TransactionTraceRecorder?

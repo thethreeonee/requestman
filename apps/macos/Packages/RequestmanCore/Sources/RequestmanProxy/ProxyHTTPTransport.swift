@@ -52,10 +52,10 @@ extension ProxyConnection {
     }
 
     func isLoopChannel(_ channel: Channel) -> Bool {
-        channel.remoteAddress?.port == configuration.port && ["127.0.0.1", "::1"].contains(channel.remoteAddress?.ipAddress ?? "")
+        channel.remoteAddress?.port == configuration.port && LocalNetwork.isLocalHost(channel.remoteAddress?.ipAddress ?? "")
     }
     func isLoop(_ host: String, port: Int) -> Bool {
-        port == configuration.port && ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host.lowercased())
+        port == configuration.port && LocalNetwork.isLocalHost(host)
     }
     func bootstrap(on eventLoop: EventLoop) -> ClientBootstrap {
         ClientBootstrap(group: eventLoop).connectTimeout(.seconds(5))

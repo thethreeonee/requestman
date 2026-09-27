@@ -10,6 +10,7 @@ public final class CaptureEngine: CaptureService {
     private var session = CaptureSession()
     public var activePort: Int? { session.port }
     public var activeMode: CaptureMode? { session.mode }
+    public var activeConfiguration: ExplicitProxyConfiguration? { session.configuration }
     public var state: CaptureSession.State { session.state }
 
     public convenience init(journalURL: URL, certificateProvider: (any TLSCertificateProviding)? = nil) {
@@ -39,7 +40,7 @@ public final class CaptureEngine: CaptureService {
                       mode: CaptureMode) async throws -> Int {
         guard state == .stopped || (state == .recoveryRequired && activePort == nil) else { throw WorkflowError.invalid("代理已启动或正在切换状态") }
         try configuration.validate()
-        guard mode != .browser || !session.recoveryRequired else {
+        guard mode == .systemProxy || !session.recoveryRequired else {
             throw WorkflowError.invalid("需要先恢复上次的系统代理设置")
         }
         session.state = .starting
@@ -91,7 +92,7 @@ public final class CaptureEngine: CaptureService {
         guard let previous = session.configuration, let activePort, let activeMode else {
             throw WorkflowError.invalid("代理尚未启动")
         }
-        if configuration.port == previous.port {
+        if configuration.port == previous.port && configuration.allowLAN == previous.allowLAN {
             session.state = .reconfiguring
             defer { session.state = .running }
             try await server.updateConfiguration(configuration)
@@ -102,7 +103,7 @@ public final class CaptureEngine: CaptureService {
         return try await restart(configuration: configuration, restoring: previous, document: document, mode: activeMode)
     }
 
-    /// App startup recovery is separate from browser-only session lifecycle.
+    /// App startup recovery is separate from browser and proxy-only session lifecycles.
     public func recoverSystemProxy() async throws {
         guard activePort == nil, state == .stopped || state == .recoveryRequired else { return }
         session.state = .recovering

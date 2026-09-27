@@ -6,10 +6,66 @@ import NIOHTTP1
 import Testing
 import os
 import RequestmanCore
+import RequestmanCertificates
 @testable import RequestmanProxy
 
 @Suite(.serialized)
 struct ProxyIntegrationTests {
+    @Test func mobileLANHTTPUsesConfiguredUpstreamAndRecordsPeer() async throws {
+        try await withHarness { h in
+            var config = ExplicitProxyConfiguration(); config.allowLAN = true
+            config.upstream = .httpProxy(ProxyEndpoint(host: "127.0.0.1", port: h.originPort))
+            try await h.start(configuration: config)
+            let host = LocalNetwork.addresses().first?.host ?? "127.0.0.1"
+            let reply = try await h.exchange("GET http://mobile.test/phone HTTP/1.1\r\nHost: mobile.test\r\n\r\n", host: host)
+            #expect(reply.contains("200 OK"))
+            #expect(h.observation.withLock { $0.uri } == "http://mobile.test/phone")
+            let record = try #require(h.proxy.records.drain().records.last)
+            #expect(record.deviceSource == DeviceSource.identifier(for: host))
+            #expect(record.url == "http://mobile.test/phone")
+        }
+    }
+
+    @Test func mobileSetupDownloadsBypassRulesAndUpstream() async throws {
+        let certificate = Data("public-certificate-fixture".utf8)
+        let h = Harness(certificateProvider: MobilePublicCertificate(data: certificate))
+        do {
+            try await h.prepare()
+            var config = ExplicitProxyConfiguration(); config.allowLAN = true
+            config.upstream = .httpProxy(ProxyEndpoint(host: "127.0.0.1", port: h.originPort))
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = .init(field: .url, operation: .contains, value: "requestman")
+            var mock = ModificationStep(kind: .mock); mock.value = "should-not-appear"; workflow.requestSteps = [mock]
+            try await h.start(workflow: workflow, configuration: config)
+            let host = "127.0.0.1:\(h.proxyPort)"
+            let page = try await h.exchange("GET /requestman HTTP/1.1\r\nHost: \(host)\r\n\r\n")
+            #expect(page.contains("200 OK") && page.contains("连接 Requestman"))
+            let cert = try await h.exchange("GET http://\(host)/requestman/ca.cer HTTP/1.1\r\nHost: \(host)\r\n\r\n")
+            #expect(cert.contains("application/pkix-cert") && cert.hasSuffix("public-certificate-fixture"))
+            let profile = try await h.exchange("GET /requestman/ios.mobileconfig HTTP/1.1\r\nHost: \(host)\r\n\r\n")
+            let body = try #require(profile.components(separatedBy: "\r\n\r\n").last?.data(using: .utf8))
+            let plist = try #require(PropertyListSerialization.propertyList(from: body, format: nil) as? [String: Any])
+            let payload = try #require((plist["PayloadContent"] as? [[String: Any]])?.first)
+            #expect(payload["PayloadType"] as? String == "com.apple.security.root")
+            #expect(payload["PayloadContent"] as? Data == certificate)
+            #expect(h.observation.withLock { $0.requests } == 0)
+            #expect(h.proxy.records.drain().records.isEmpty)
+            await h.shutdown()
+        } catch { await h.shutdown(); throw error }
+    }
+
+    @Test func mobileSetupIsUnavailableWithoutLANOrCertificate() async throws {
+        try await withHarness { h in
+            try await h.start()
+            let unavailable = try await h.exchange("GET /requestman HTTP/1.1\r\nHost: 127.0.0.1:\(h.proxyPort)\r\n\r\n")
+            #expect(!unavailable.contains("200 OK"))
+            await h.proxy.stop()
+            var config = ExplicitProxyConfiguration(); config.allowLAN = true
+            try await h.start(configuration: config)
+            let certificate = try await h.exchange("GET /requestman/ca.cer HTTP/1.1\r\nHost: 127.0.0.1:\(h.proxyPort)\r\n\r\n")
+            #expect(certificate.contains("503 Service Unavailable"))
+        }
+    }
+
     @Test func requestReplayCancellationBeforeAttachmentClosesLaterTransport() throws {
         let records = CaptureRecordBuffer()
         records.setPaused(true)
@@ -1048,7 +1104,8 @@ struct ProxyIntegrationTests {
 private struct OriginObservation { var requests = 0; var header = ""; var bodyBytes = 0; var uri = ""; var closedConnections = 0 }
 private final class Harness: @unchecked Sendable {
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-    let proxy = LocalProxyServer()
+    let proxy: LocalProxyServer
+    init(certificateProvider: (any TLSCertificateProviding)? = nil) { proxy = LocalProxyServer(certificateProvider: certificateProvider) }
     let observation = OSAllocatedUnfairLock(initialState: OriginObservation())
     var origin: Channel?
     var originPort = 0
@@ -1080,14 +1137,14 @@ private final class Harness: @unchecked Sendable {
             catch { if attempt == 4 { throw error } }
         }
     }
-    func exchange(_ request: String, until: String? = nil, timeout: TimeAmount = .seconds(4)) async throws -> String {
+    func exchange(_ request: String, until: String? = nil, timeout: TimeAmount = .seconds(4), host: String = "127.0.0.1") async throws -> String {
         // This raw fixture collects until EOF; explicitly opt out of persistence.
         let request = request.hasPrefix("CONNECT ") ? request : request.replacingOccurrences(
             of: "HTTP/1.1\r\n", with: "HTTP/1.1\r\nConnection: close\r\n")
         let promise = group.next().makePromise(of: String.self)
         let channel = try await ClientBootstrap(group: group).channelInitializer { channel in
             channel.pipeline.addHandler(RawCollector(result: promise, until: until))
-        }.connect(host: "127.0.0.1", port: proxyPort).get()
+        }.connect(host: host, port: proxyPort).get()
         let timeout = channel.eventLoop.scheduleTask(in: timeout) { channel.close(promise: nil) }
         channel.writeAndFlush(channel.allocator.buffer(string: request), promise: nil)
         do { let reply = try await promise.futureResult.get(); timeout.cancel(); try? await channel.close().get(); return reply }
@@ -1173,4 +1230,10 @@ private final class RejectResponseBodyWrite: ChannelOutboundHandler, Sendable {
         if case .body = unwrapOutboundIn(data) { promise?.fail(InjectedBodyWriteError.rejected) }
         else { context.write(data, promise: promise) }
     }
+}
+
+private struct MobilePublicCertificate: TLSCertificateProviding {
+    let data: Data
+    func serverIdentity(for host: String) async throws -> TLSCertificateIdentity? { nil }
+    func publicCertificateDER() async throws -> Data? { data }
 }

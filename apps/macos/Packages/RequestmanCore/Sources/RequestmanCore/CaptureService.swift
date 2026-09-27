@@ -14,6 +14,7 @@ public protocol CaptureService {
     /// Retained if system settings could not be restored after a failed start/stop.
     var activePort: Int? { get }
     var activeMode: CaptureMode? { get }
+    var activeConfiguration: ExplicitProxyConfiguration? { get }
     func recoverSystemProxy() async throws
     func checkUpstream(_ endpoint: ProxyEndpoint) async throws
     func replay(_ request: RequestReplayDraft) async throws
@@ -58,6 +59,7 @@ public extension CaptureService {
     var captureEvents: CaptureEventBuffer? { nil }
     var activePort: Int? { nil }
     var activeMode: CaptureMode? { nil }
+    var activeConfiguration: ExplicitProxyConfiguration? { nil }
     func recoverSystemProxy() async throws {}
     func checkUpstream(_ endpoint: ProxyEndpoint) async throws {
         throw WorkflowError.invalid("此捕获服务不支持上游连接检查")

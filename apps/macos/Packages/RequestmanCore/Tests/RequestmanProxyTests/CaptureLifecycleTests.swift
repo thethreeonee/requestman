@@ -4,6 +4,21 @@ import RequestmanCore
 
 @MainActor
 struct CaptureLifecycleTests {
+    @Test func changingLANRestartsListenerAndKeepsIndependentMode() async throws {
+        let fixture = CaptureFixture()
+        _ = try await fixture.service.start(configuration: .init(), document: .init(), mode: .proxyOnly)
+        var config = ExplicitProxyConfiguration(); config.allowLAN = true
+        _ = try await fixture.service.reconfigure(configuration: config, document: .init())
+        #expect(fixture.trace.events == ["listen:9090", "stop", "listen:9090"])
+        #expect(fixture.service.activeConfiguration?.allowLAN == true)
+        #expect(fixture.service.activeMode == .proxyOnly)
+        #expect(fixture.system.calls.isEmpty)
+        config.allowLAN = false
+        _ = try await fixture.service.reconfigure(configuration: config, document: .init())
+        #expect(fixture.service.activeConfiguration?.allowLAN == false)
+        try await fixture.service.stop()
+    }
+
     @Test func transitionRejectsConcurrentStartAndStopWhileRecoveryIsSuspended() async throws {
         let fixture = CaptureFixture()
         fixture.system.suspendRestore = true
@@ -66,21 +81,21 @@ struct CaptureLifecycleTests {
         #expect(buffer.drain().isEmpty)
     }
 
-    @Test func browserSessionNeverReadsOrWritesSystemProxy() async throws {
+    @Test(arguments: [CaptureMode.browser, .proxyOnly]) func independentSessionNeverReadsOrWritesSystemProxy(mode: CaptureMode) async throws {
         let fixture = CaptureFixture()
         let service = fixture.service
-        #expect(try await service.start(configuration: .init(), document: .init(), mode: .browser) == 9090)
-        #expect(service.activeMode == .browser)
+        #expect(try await service.start(configuration: .init(), document: .init(), mode: mode) == 9090)
+        #expect(service.activeMode == mode)
 
         var updated = ExplicitProxyConfiguration()
         updated.upstream = .httpProxy(ProxyEndpoint(host: "127.0.0.1", port: 6152))
         #expect(try await service.reconfigure(configuration: updated, document: .init()) == 9090)
         #expect(fixture.server.configuration == updated)
-        #expect(service.activeMode == .browser)
+        #expect(service.activeMode == mode)
 
         updated.port = 9091
         #expect(try await service.reconfigure(configuration: updated, document: .init()) == 9091)
-        #expect(service.activeMode == .browser)
+        #expect(service.activeMode == mode)
         try await service.stop()
         #expect(service.activePort == nil)
         #expect(service.activeMode == nil)
@@ -116,7 +131,7 @@ struct CaptureLifecycleTests {
         #expect(fixture.service.activeMode == mode)
         #expect(fixture.server.configuration == previous)
         #expect(fixture.server.document?.proxy == previous)
-        if mode == .browser {
+        if mode != .systemProxy {
             #expect(fixture.system.calls.isEmpty)
         } else {
             #expect(fixture.system.calls.filter { $0 == "enable:9090" }.count == 2)
