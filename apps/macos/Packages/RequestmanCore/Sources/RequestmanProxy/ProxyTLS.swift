@@ -1,6 +1,7 @@
 import Foundation
 import NIOCore
 import NIOSSL
+import NIOTLS
 import RequestmanCertificates
 import Security
 import os
@@ -40,14 +41,16 @@ enum ProxyTLS {
         return error.localizedDescription
     }
 
-    private static let clientContext: Result<NIOSSLContext, Error> = Result {
+    private static let clientContext = makeClientContext(protocolName: "http/1.1")
+    private static let http2ClientContext = makeClientContext(protocolName: "h2")
+    private static func makeClientContext(protocolName: String) -> Result<NIOSSLContext, Error> { Result {
         var configuration = TLSConfiguration.makeClientConfiguration()
         configuration.minimumTLSVersion = .tlsv12
-        configuration.applicationProtocols = ["http/1.1"]
+        configuration.applicationProtocols = [protocolName]
         configuration.certificateVerification = .noHostnameVerification
         configuration.trustRoots = .certificates([])
         return try NIOSSLContext(configuration: configuration)
-    }
+    } }
     static func serverContext(_ identity: TLSCertificateIdentity) throws -> NIOSSLContext {
         let certificate = try NIOSSLCertificate(bytes: Array(identity.certificateDER), format: .der)
         let key = try NIOSSLPrivateKey(bytes: Array(identity.privateKeyPEM), format: .pem)
@@ -55,11 +58,11 @@ enum ProxyTLS {
             certificateChain: [.certificate(certificate)], privateKey: .privateKey(key)
         )
         configuration.minimumTLSVersion = .tlsv12
-        configuration.applicationProtocols = ["http/1.1"]
+        configuration.applicationProtocols = ["h2", "http/1.1"]
         return try NIOSSLContext(configuration: configuration)
     }
 
-    static func client(host: String, testTrustRoots: [NIOSSLCertificate]?) throws -> NIOSSLClientHandler {
+    static func client(host: String, testTrustRoots: [NIOSSLCertificate]?, http2: Bool = false) throws -> NIOSSLClientHandler {
         let name = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         // Security validates the target hostname below. NIOSSL must not compare an IP
         // target to the HTTP upstream proxy's socket address a second time.
@@ -68,7 +71,7 @@ enum ProxyTLS {
         let anchors = try testTrustRoots?.map { Data(try $0.toDERBytes()) }
         let sni = (try? SocketAddress(ipAddress: name, port: 443)) == nil ? name : nil
         return try NIOSSLClientHandler(
-            context: clientContext.get(), serverHostname: sni,
+            context: (http2 ? http2ClientContext : clientContext).get(), serverHostname: sni,
             customVerificationCallback: { certificates, promise in
                 do {
                     let chain = try certificates.map { Data(try $0.toDERBytes()) }

@@ -15,19 +15,27 @@ extension ProxyConnection {
         if input.method == .CONNECT {
             timer = client.eventLoop.scheduleTask(in: .seconds(30)) { [self] in fail("CONNECT 建立超时", status: 504) }
         }
-        clientKeepsAlive = input.isKeepAlive
+        clientKeepsAlive = !isHTTP2 && input.isKeepAlive
         var head = input
+        if let metadata = http2RequestMetadata {
+            head.headers = HTTPHeaders(metadata.headers.map { ($0.name, $0.value) })
+            if !head.headers.contains(name: "host"), let authority = metadata.authority { head.headers.add(name: "host", value: authority) }
+        }
         if let authority = tlsAuthority ?? plainAuthority {
             let scheme = tlsAuthority == nil ? "http" : "https"
             let defaultPort = tlsAuthority == nil ? 80 : 443
             let expected = URLComponents(string: scheme + "://" + authority)
+            let h2Target = http2RequestMetadata?.authority.flatMap { URLComponents(string: "https://" + $0) }
+            let validH2Target = !isHTTP2 || (http2RequestMetadata?.scheme == "https" && h2Target?.host?.lowercased() == expected?.host?.lowercased()
+                && (h2Target?.port ?? 443) == (expected?.port ?? 443) && h2Target?.user == nil
+                && h2Target?.path.isEmpty == true && h2Target?.query == nil && h2Target?.fragment == nil)
             let hostHeader = head.headers["host"]
             let supplied = hostHeader.count == 1 ? URLComponents(string: scheme + "://" + hostHeader[0]) : nil
             let originAuthority = (expected?.percentEncodedHost ?? "")
                 + (expected?.port.flatMap { $0 == defaultPort ? nil : ":\($0)" } ?? "")
             let fullURL = head.uri.hasPrefix("/") ? scheme + "://" + originAuthority + head.uri : head.uri
             let target = URLComponents(string: fullURL)
-            guard head.method != .CONNECT, target?.scheme == scheme,
+            guard validH2Target, head.method != .CONNECT, target?.scheme == scheme,
                   target?.host?.lowercased() == expected?.host?.lowercased(),
                   (target?.port ?? defaultPort) == (expected?.port ?? defaultPort),
                   supplied?.host?.lowercased() == expected?.host?.lowercased(),
@@ -47,6 +55,7 @@ extension ProxyConnection {
         record = CaptureRecord(id: replaySession?.request.id ?? UUID(), method: originalMethod, url: head.uri)
         record?.replayID = replaySession?.request.id
         record?.replaySourceID = replaySession?.request.sourceRecordID
+        record?.clientHTTPVersion = isHTTP2 ? "HTTP/2" : "HTTP/1.1"
         record?.requestHeaders = fields(head.headers)
         record?.environment = shared.document.withLock { $0.environment?.name ?? "无环境" }
         started = .now
@@ -100,7 +109,7 @@ extension ProxyConnection {
                     }
                     scriptRequestHead = head; scriptRequestDraft = draft
                     if head.headers["expect"].contains(where: { $0.lowercased() == "100-continue" }) {
-                        client.writeAndFlush(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .continue)), promise: nil)
+                        client.writeAndFlush(HTTPServerResponsePart.head(HTTPResponseHead(version: messageVersion, status: .continue)), promise: nil)
                         scriptRequestHead?.headers.remove(name: "Expect")
                     }
                     return
@@ -143,7 +152,7 @@ extension ProxyConnection {
             guard !isLoop(host, port: port) else { throw WorkflowError.invalid("请求目标会形成代理循环") }
             var headers = cleanHeaders(draft.headers)
             headers.replaceOrAdd(name: "Host", value: target.percentEncodedHost.map { $0 + (target.port.map { ":\($0)" } ?? "") } ?? host)
-            headers.replaceOrAdd(name: "Connection", value: clientKeepsAlive ? "keep-alive" : "close")
+            if !isHTTP2 { headers.replaceOrAdd(name: "Connection", value: clientKeepsAlive ? "keep-alive" : "close") }
             if webSocketRequest {
                 headers.replaceOrAdd(name: "Connection", value: "Upgrade")
                 headers.replaceOrAdd(name: "Upgrade", value: "websocket")
@@ -155,7 +164,7 @@ extension ProxyConnection {
             headers.remove(name: "Expect")
             if let body = draft.replacementBytes {
                 headers.remove(name: "Transfer-Encoding"); headers.replaceOrAdd(name: "Content-Length", value: String(body.count))
-            } else if head.headers.contains(name: "transfer-encoding") {
+            } else if !isHTTP2 && head.headers.contains(name: "transfer-encoding") {
                 headers.remove(name: "Content-Length"); headers.replaceOrAdd(name: "Transfer-Encoding", value: "chunked")
             }
             let uri: String
@@ -166,9 +175,9 @@ extension ProxyConnection {
             else { uri = (target.percentEncodedPath.isEmpty ? "/" : target.percentEncodedPath) + (target.percentEncodedQuery.map { "?\($0)" } ?? "") }
             record?.sentHeaders = fields(headers)
             record?.hasSentRequestHeaders = true
-            let forwarded = HTTPRequestHead(version: .http1_1, method: HTTPMethod(rawValue: draft.method), uri: uri, headers: headers)
+            let forwarded = HTTPRequestHead(version: messageVersion, method: HTTPMethod(rawValue: draft.method), uri: uri, headers: headers)
             if head.headers["expect"].contains(where: { $0.lowercased() == "100-continue" }) {
-                client.writeAndFlush(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .continue)), promise: nil)
+                client.writeAndFlush(HTTPServerResponsePart.head(HTTPResponseHead(version: messageVersion, status: .continue)), promise: nil)
             }
             connectHTTP(endpoint: endpoint, targetHost: host, targetPort: port, secure: secure, on: client.eventLoop).whenComplete { [self] result in
                 switch result {
@@ -177,6 +186,7 @@ extension ProxyConnection {
                     guard isProcessing else { closeProxyChannel(channel); return }
                     guard !isLoopChannel(channel) else { closeProxyChannel(channel); fail("目标解析后指向代理自身", status: 502); return }
                     upstream = channel; connected = true
+                    record?.upstreamHTTPVersion = isHTTP2 ? "HTTP/2" : "HTTP/1.1"
                     sentBodyCollector = CaptureBodyCollector(headers: record?.sentHeaders ?? [])
                     trackRequestWrite(channel.write(HTTPClientRequestPart.head(forwarded)))
                     if let body = request?.replacementBytes {
@@ -199,7 +209,9 @@ extension ProxyConnection {
                 trackRequestWrite(upstream.write(HTTPClientRequestPart.body(.byteBuffer(bytes))))
             }
         case .end:
-            let written = upstream.write(HTTPClientRequestPart.end(nil))
+            let trailers = isHTTP2 && request?.hasReplacementBody != true ? requestTrailers : nil
+            record?.sentTrailers = trailers.map(fields)
+            let written = upstream.write(HTTPClientRequestPart.end(trailers))
             trackRequestWrite(written)
             written.whenSuccess { [self] in requestWriteComplete = !requestWriteFailed }
         case .head: break

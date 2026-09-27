@@ -4,6 +4,7 @@ import Foundation
 public struct RequestReplayDraft: Sendable, Equatable {
     public var id = UUID()
     public var sourceRecordID: UUID?
+    public var httpVersion = "HTTP/1.1"
     public var method: String
     public var url: String
     public var headers: [HTTPField]
@@ -16,6 +17,7 @@ public struct RequestReplayDraft: Sendable, Equatable {
     public init(record: CaptureRecord) throws {
         if let reason = Self.unavailableReason(for: record) { throw WorkflowError.invalid(reason) }
         self.init(method: record.method, url: record.url, headers: Self.editableHeaders(record.requestHeaders), body: record.requestBody.data)
+        httpVersion = record.clientHTTPVersion ?? "HTTP/1.1"
         sourceRecordID = record.id
     }
 
@@ -32,6 +34,10 @@ public struct RequestReplayDraft: Sendable, Equatable {
     }
 
     public func validate() throws {
+        guard ["HTTP/1.1", "HTTP/2"].contains(httpVersion) else { throw WorkflowError.invalid("不支持此重放 HTTP 版本") }
+        if httpVersion == "HTTP/2", URLComponents(string: url)?.scheme != "https" {
+            throw WorkflowError.invalid("HTTP/2 重放要求 HTTPS 地址，不转换为 HTTP/1.1")
+        }
         guard HTTPMessageValidation.isToken(method), !["CONNECT", "TRACE"].contains(method.uppercased()) else {
             throw WorkflowError.invalid("请输入有效的 HTTP 方法；不支持 CONNECT 或 TRACE 重放")
         }

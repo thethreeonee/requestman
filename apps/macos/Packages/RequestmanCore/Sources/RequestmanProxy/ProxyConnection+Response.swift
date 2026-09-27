@@ -4,13 +4,25 @@ import NIOHTTP1
 import RequestmanCore
 
 extension ProxyConnection {
+    func writeResponseEnd(_ trailers: HTTPHeaders?) -> EventLoopFuture<Void> {
+        let client = client!
+        responseEndWritePending = true
+        let future = client.writeAndFlush(HTTPServerResponsePart.end(trailers))
+        future.whenComplete { [self] _ in responseEndWritePending = false }
+        return future
+    }
+
     func receive(_ part: HTTPClientResponsePart, channel: Channel) {
         guard isProcessing, record != nil, channel === upstream else { return }
         do {
             switch part {
-            case .head(let head):
+            case .head(var head):
+                if let headers = http2ResponseHeaders { head.headers = HTTPHeaders(headers.map { ($0.name, $0.value) }) }
                 if head.status.code < 200 {
                     informationalResponse = true
+                    if isHTTP2, head.status != .switchingProtocols, let client {
+                        trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http2, status: head.status, headers: cleanHeaders(fields(head.headers))))))
+                    }
                     if head.status == .switchingProtocols { pendingWebSocketResponse = head; webSocketUpgrading = true }
                     return
                 }
@@ -61,7 +73,8 @@ extension ProxyConnection {
                     responseBodyCollector?.append(buffer.readableBytesView)
                     if let client { trackResponseWrite(client.write(HTTPServerResponsePart.body(.byteBuffer(buffer)))) }
                 }
-            case .end:
+            case .end(let trailers):
+                if !informationalResponse { responseTrailers = trailers; record?.receivedTrailers = trailers.map(fields) }
                 if let upgrade = pendingWebSocketResponse {
                     pendingWebSocketResponse = nil
                     channel.eventLoop.execute { [self] in
@@ -100,7 +113,7 @@ extension ProxyConnection {
         }
         responseStarted = true
         if let client {
-            trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .init(statusCode: draft.status), headers: headers))))
+            trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: messageVersion, status: .init(statusCode: draft.status), headers: headers))))
         }
         if let body = draft.replacementBytes, allowsBody(draft.status), let client {
             responseBodyCollector?.append(body)
@@ -110,7 +123,9 @@ extension ProxyConnection {
     func endStreamingResponse(_ channel: Channel) {
         guard responseStarted, let client else { return fail("上游未返回完整响应", status: 502) }
         responseEnded = true
-        client.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { [self] result in
+        let trailers = isHTTP2 && response?.hasReplacementBody != true ? responseTrailers : nil
+        record?.responseTrailers = trailers.map(fields)
+        writeResponseEnd(trailers).whenComplete { [self] result in
             if case .success = result, !responseWriteFailed, responseKeepsAlive, failureMessage == nil {
                 responseWriteComplete = true
                 finish()
@@ -156,13 +171,13 @@ extension ProxyConnection {
             record?.stream = stream
             if let body = draft.replacementBytes { appendSSE(client.allocator.buffer(bytes: body), to: stream) }
         }
-        trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .init(statusCode: draft.status), headers: headers))))
+        trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: messageVersion, status: .init(statusCode: draft.status), headers: headers))))
         if allowsBody(draft.status), let body = draft.replacementBytes {
             record?.responseBytes = body.count
             responseBodyCollector?.append(body)
             trackResponseWrite(client.write(HTTPServerResponsePart.body(.byteBuffer(client.allocator.buffer(bytes: body)))))
         }
-        client.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { [self] result in
+        writeResponseEnd(nil).whenComplete { [self] result in
             if case .failure(let error) = result { finish(error: error.localizedDescription) }
             else { responseWriteComplete = !responseWriteFailed; finish() }
             closeProxyChannel(client)
@@ -171,10 +186,10 @@ extension ProxyConnection {
     func responseHeaders(_ draft: HTTPMessageDraft, keepAlive: Bool = false) -> HTTPHeaders {
         var headers = cleanHeaders(draft.headers)
         headers.remove(name: "Content-Length"); headers.remove(name: "Transfer-Encoding")
-        headers.replaceOrAdd(name: "Connection", value: keepAlive ? "keep-alive" : "close")
+        if !isHTTP2 { headers.replaceOrAdd(name: "Connection", value: keepAlive ? "keep-alive" : "close") }
         if let body = draft.replacementBytes, draft.status != 204, draft.status != 205, draft.status != 304 {
             headers.replaceOrAdd(name: "Content-Length", value: String(body.count))
-        } else if allowsBody(draft.status) { headers.replaceOrAdd(name: "Transfer-Encoding", value: "chunked") }
+        } else if !isHTTP2 && allowsBody(draft.status) { headers.replaceOrAdd(name: "Transfer-Encoding", value: "chunked") }
         return headers
     }
     func allowsBody(_ status: Int) -> Bool { originalMethod != "HEAD" && status != 204 && status != 205 && status != 304 }
@@ -188,12 +203,14 @@ extension ProxyConnection {
         if allowsBody(draft.status) { headers.replaceOrAdd(name: "Content-Length", value: String(bytes.count)) }
         record?.status = draft.status; record?.responseHeaders = fields(headers)
         responseBodyCollector = CaptureBodyCollector(headers: fields(headers))
-        trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .init(statusCode: draft.status), headers: headers))))
+        trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: messageVersion, status: .init(statusCode: draft.status), headers: headers))))
         if allowsBody(draft.status) {
             responseBodyCollector?.append(bytes)
             trackResponseWrite(client.write(HTTPServerResponsePart.body(.byteBuffer(client.allocator.buffer(bytes: bytes)))))
         }
-        client.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { [self] result in
+        let trailers = isHTTP2 && !draft.hasReplacementBody ? responseTrailers : nil
+        record?.responseTrailers = trailers.map(fields)
+        writeResponseEnd(trailers).whenComplete { [self] result in
             if case .failure(let error) = result { finish(error: error.localizedDescription) }
             else { responseWriteComplete = !responseWriteFailed; finish() }
             closeProxyChannel(client)

@@ -12,6 +12,13 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     let records: CaptureRecordBuffer
     let tlsAuthority: String?
     let plainAuthority: String?
+    let http2Session: ProxyHTTP2Session?
+    var isHTTP2: Bool { http2Session != nil }
+    var messageVersion: HTTPVersion { isHTTP2 ? .http2 : .http1_1 }
+    var http2RequestMetadata: HTTP2RequestMetadata?
+    var http2ResponseHeaders: [HTTPField]?
+    var requestTrailers: HTTPHeaders?
+    var responseTrailers: HTTPHeaders?
     var webSocketRequest = false
     var webSocketUpgrading = false
     var pendingTunnelHead: HTTPRequestHead?
@@ -44,6 +51,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     var pending: [HTTPServerRequestPart] = []
     var lastRequestWrite: EventLoopFuture<Void>?
     var lastResponseWrite: EventLoopFuture<Void>?
+    var responseEndWritePending = false
     var responseEnded = false
     var informationalResponse = false
     var connected = false
@@ -75,9 +83,9 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     var scriptRequestBytes = Data()
     var scriptResponseBytes = Data()
 
-    init(configuration: ExplicitProxyConfiguration, shared: ProxySharedState, records: CaptureRecordBuffer, tlsAuthority: String? = nil, plainAuthority: String? = nil) {
+    init(configuration: ExplicitProxyConfiguration, shared: ProxySharedState, records: CaptureRecordBuffer, tlsAuthority: String? = nil, plainAuthority: String? = nil, http2Session: ProxyHTTP2Session? = nil) {
         self.configuration = configuration; self.shared = shared; self.records = records
-        self.tlsAuthority = tlsAuthority; self.plainAuthority = plainAuthority
+        self.tlsAuthority = tlsAuthority; self.plainAuthority = plainAuthority; self.http2Session = http2Session
     }
     func handlerAdded(context: ChannelHandlerContext) {
         if context.channel.isActive { activate(context) }
@@ -102,7 +110,9 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
             if scriptRequestHead != nil {
                 scriptRequestBytes.append(contentsOf: buffer.readableBytesView)
             } else if !connected { enqueue(part) } else { forward(part) }
-        case .end:
+        case .end(let trailers):
+            requestTrailers = trailers
+            record?.requestTrailers = trailers.map(fields)
             requestEnded = true
             if let head = pendingTunnelHead {
                 pendingTunnelHead = nil
@@ -147,7 +157,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     }
     func channelInactive(context: ChannelHandlerContext) {
         timer?.cancel(); certificateTask?.cancel()
-        if !finished {
+        if !finished && !(isHTTP2 && responseEndWritePending) {
             if record?.captureProtocol == .sse { record?.closeReason = shared.isStopping ? "捕获已停止" : "客户端已关闭连接"; finish() }
             else { finish(error: "客户端连接已关闭") }
         }
@@ -164,6 +174,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         transaction?.cancel()
         transaction = nil; traceRecorder = nil; requestDisposition = .forward
         replaySession = nil
+        requestTrailers = nil; responseTrailers = nil
         record = nil; recordOwnershipTransferred = false; request = nil; response = nil
         scriptLease?.control.cancel()
         scriptLease = nil; scriptRequestHead = nil; scriptRequestDraft = nil; scriptResponseDraft = nil

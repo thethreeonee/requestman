@@ -393,7 +393,7 @@ struct HTTPSIntegrationTests {
     }
 }
 
-private struct EphemeralTLSAuthority: Sendable {
+struct EphemeralTLSAuthority: Sendable {
     let privateKey: Certificate.PrivateKey
     let root: Certificate
 
@@ -760,7 +760,7 @@ private final class HTTPSResponseCollector: ChannelInboundHandler, @unchecked Se
 
 /// Strips the clear-text CONNECT response before TLS. The early-TLS case writes the
 /// CONNECT request and the TLS engine's first ClientHello in one socket write.
-private final class HTTPSCONNECTGate: ChannelDuplexHandler, @unchecked Sendable {
+final class HTTPSCONNECTGate: ChannelDuplexHandler, @unchecked Sendable {
     typealias InboundIn = ByteBuffer
     typealias InboundOut = ByteBuffer
     typealias OutboundIn = ByteBuffer

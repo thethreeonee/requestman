@@ -4,7 +4,7 @@
 
 ## 产品方向与接入顺序
 
-主要场景是辅助 Chrome Web 开发，通过请求出站与响应回站两条流程执行自动修改、动态取值、脚本、辅助请求、Mock 和可选人工断点。完整范围、执行语义建议、模块选型及验收见 [产品与技术设计草案](ProductDesign.md)。当前已接入原生工作区、HTTP/1.1 显式代理、HTTPS 解密与未配置证书时的 CONNECT 透传。
+主要场景是辅助 Chrome Web 开发，通过请求出站与响应回站两条流程执行自动修改、动态取值、脚本、辅助请求、Mock 和可选人工断点。完整范围、执行语义建议、模块选型及验收见 [产品与技术设计草案](ProductDesign.md)。当前已接入原生工作区、HTTP/1.1 显式代理、HTTP/2 同协议解密转发、HTTPS 解密与未配置证书时的 CONNECT 透传。
 
 当前通过系统 HTTP/HTTPS 代理或 Chromium 浏览器显式代理接入，按应用透明接管作为另一接入适配器，复用代理与流程引擎。主导航栏是唯一启动入口，通用设置决定 `CaptureMode.systemProxy`（全局接管）、`.browser`（仅启动浏览器）或 `.proxyOnly`（仅启动代理）。前者修改系统代理，浏览器模式带参数打开所选浏览器，仅启动代理模式等待手动接入，两者不读写当前系统代理设置。默认监听回环，局域网开关可将任一模式的监听范围扩展至 IPv4 所有接口。显式代理不是按进程过滤；捕获启停不修改 Surge 配置和证书信任。用户主动打开 HTTPS 证书设置时，由独立服务生成、安装 CA 并请求当前用户的 SSL 信任授权。
 
@@ -21,7 +21,7 @@
 | CaptureEngine / CaptureSession | 捕获会话、代理重配与恢复 | 实现 CaptureService；旧 LocalProxyCaptureService 保留兼容别名 |
 | SystemProxyController | 系统 HTTP/HTTPS 代理接管、原配置保存与恢复 | SystemConfiguration + Authorization Services；设置策略与失败恢复已有替身测试，系统授权待人工验收 |
 | TransparentProxy 系统扩展 | 按来源筛选 TCP/UDP 流，转交代理引擎 | 待实现 |
-| RequestmanProxy | HTTP/CONNECT、双向修改、Mock、上游连接 | SwiftNIO + NIOSSL 实现 HTTP/1.1、HTTPS 解密与加密透传 |
+| RequestmanProxy | HTTP/CONNECT、双向修改、Mock、上游连接 | SwiftNIO + NIOHTTP2 + NIOSSL 实现 HTTP/1.1、HTTP/2、HTTPS 解密与加密透传 |
 | RuleMatchingEngine | 规则选择与条件诊断 | 真实捕获和匹配测试共用 |
 | ModificationExecutionEngine / StepProcessor | 有序双向修改、每步原子提交、执行 trace | 模板与脚本运行时独立；WorkflowEngine 仅保留兼容委托 |
 | TransactionCoordinator | 固定匹配、环境、计划与取消上下文 | 网络传输通过协调器调用执行引擎 |
@@ -110,7 +110,7 @@ macOS 26+ 主内容栏启用 `allowsFullHeightLayout`，请求日志筛选栏与
 客户端 ← 本地 HTTP/HTTPS 代理 ← 响应流程 ←────────────── 服务器响应 / Mock
 ```
 
-当前支持 HTTP/1.1 内容处理、HTTPS 解密以及未配置证书时的 CONNECT 字节透传。SSE 与 WebSocket 基础支持见 [持续捕获](Design/streaming-capture.md)；HTTP/2 内容处理、HTTP/3、自定义 TCP/UDP 后续分别定义能力边界。TLS 两端只协商 HTTP/1.1；上游可直接 TLS 或经 HTTP 代理 CONNECT 后 TLS。证书绑定应用不能仅靠安装本地 CA 获得支持。
+当前支持 HTTP/1.1 与 HTTPS 上的 HTTP/2 内容处理，以及未配置证书时的 CONNECT 字节透传。HTTP/2 每个 stream 独立执行规则并采集日志，同客户端会话内复用同目标上游连接；两端保持同协议，不降级、不转换、不自动重发。范围、生命周期与验证见 [HTTP/2 捕获与修改](Design/http2.md)。SSE 与 WebSocket 基础支持见 [持续捕获](Design/streaming-capture.md)；HTTP/3、自定义 TCP/UDP 后续分别定义能力边界。上游可直接 TLS 或经 HTTP 代理 CONNECT 后 TLS。证书绑定应用不能仅靠安装本地 CA 获得支持。
 
 系统代理接入只影响遵循 macOS 代理设置的应用，并非全流量透明接管。上游连接使用 NIO socket，不读取指向 Requestman 的系统 HTTP 代理，避免递归；显式配置指向自身的上游仍拒绝，连接完成后再检查解析后的地址。
 

@@ -2,6 +2,7 @@ import Foundation
 import NIOCore
 import NIOPosix
 import NIOHTTP1
+import NIOHTTP2
 import NIOSSL
 import RequestmanCertificates
 import RequestmanCore
@@ -95,6 +96,7 @@ public actor LocalProxyServer {
                 channel = try await ClientBootstrap(group: group).connectTimeout(.seconds(5))
                 .channelInitializer { channel in
                     guard shared.register(channel, downstream: false) else { return channel.close() }
+                    if request.httpVersion == "HTTP/2" { return channel.eventLoop.makeSucceededVoidFuture() }
                     return channel.pipeline.addHTTPClientHandlers(decoderLimitConfiguration: proxyDecoderLimits()).flatMap {
                         channel.pipeline.addHandler(ReplayResponseDrain())
                     }
@@ -112,22 +114,62 @@ public actor LocalProxyServer {
             do {
                 if Task.isCancelled { session.cancel() }
                 if session.isCancelled { throw CancellationError() }
-                var headers = HTTPHeaders(RequestReplayDraft.editableHeaders(request.headers).map { ($0.name, $0.value) })
                 let target = URLComponents(string: request.url)!
+                let transport: Channel
+                if request.httpVersion == "HTTP/2" {
+                    let host = target.host!
+                    guard shared.document.withLock({ $0.httpsDecryption.shouldDecrypt(host: host) }),
+                          let provider = shared.certificateProvider,
+                          try await provider.serverIdentity(for: host) != nil else {
+                        throw WorkflowError.invalid("HTTP/2 重放需要为目标域名启用 HTTPS 解密并配置证书")
+                    }
+                    transport = try await prepareHTTP2Replay(channel: channel, target: target, shared: shared)
+                } else { transport = channel }
+                var headers = HTTPHeaders(RequestReplayDraft.editableHeaders(request.headers).map { ($0.name, $0.value) })
                 headers.add(name: "Host", value: (target.percentEncodedHost ?? "") + (target.port.map { ":\($0)" } ?? ""))
                 headers.add(name: "Content-Length", value: String(request.body.count))
-                headers.add(name: "Connection", value: "close")
-                let head = HTTPRequestHead(version: .http1_1, method: HTTPMethod(rawValue: request.method), uri: request.url, headers: headers)
-                channel.write(HTTPClientRequestPart.head(head), promise: nil)
+                if request.httpVersion != "HTTP/2" { headers.add(name: "Connection", value: "close") }
+                let path = (target.percentEncodedPath.isEmpty ? "/" : target.percentEncodedPath) + (target.percentEncodedQuery.map { "?" + $0 } ?? "")
+                let head = HTTPRequestHead(version: request.httpVersion == "HTTP/2" ? .http2 : .http1_1,
+                                           method: HTTPMethod(rawValue: request.method), uri: request.httpVersion == "HTTP/2" ? path : request.url, headers: headers)
+                transport.write(HTTPClientRequestPart.head(head), promise: nil)
                 if !request.body.isEmpty {
-                    channel.write(HTTPClientRequestPart.body(.byteBuffer(channel.allocator.buffer(bytes: request.body))), promise: nil)
+                    transport.write(HTTPClientRequestPart.body(.byteBuffer(transport.allocator.buffer(bytes: request.body))), promise: nil)
                 }
-                try await channel.writeAndFlush(HTTPClientRequestPart.end(nil)).get()
+                try await transport.writeAndFlush(HTTPClientRequestPart.end(nil)).get()
             } catch {
                 try? await channel.close().get()
                 throw error
             }
         } onCancel: { session.cancel() }
+    }
+
+    private func prepareHTTP2Replay(channel: Channel, target: URLComponents, shared: ProxySharedState) async throws -> Channel {
+        try await channel.eventLoop.flatSubmit {
+            let handshake = channel.eventLoop.makePromise(of: Void.self)
+            let authority = (target.percentEncodedHost ?? "") + ":" + String(target.port ?? 443)
+            let deadline = channel.eventLoop.scheduleTask(in: .seconds(30)) { channel.close(promise: nil) }
+            let ready = channel.pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes, decoderLimitConfiguration: proxyDecoderLimits()).flatMap {
+                channel.pipeline.addHandler(TunnelHandshake(ready: handshake))
+            }.flatMap {
+                channel.write(HTTPClientRequestPart.head(HTTPRequestHead(version: .http1_1, method: .CONNECT, uri: authority, headers: HTTPHeaders([("Host", authority)]))), promise: nil)
+                channel.writeAndFlush(HTTPClientRequestPart.end(nil), promise: nil)
+                return handshake.futureResult
+            }.flatMap {
+                ProxyTLS.negotiateClient(channel: channel, host: target.host!, http2: true, shared: shared) {
+                    channel.configureHTTP2Pipeline(mode: .client, connectionConfiguration: proxyHTTP2Configuration(server: false), streamConfiguration: .init(), inboundStreamInitializer: { $0.close() })
+                }
+            }.flatMap { multiplexer in
+                multiplexer.createStreamChannel { stream in
+                    stream.closeFuture.whenComplete { _ in closeProxyChannel(channel) }
+                    return stream.eventLoop.makeCompletedFuture {
+                        try stream.pipeline.syncOperations.addHandlers(HTTP2FramePayloadToHTTP1ClientCodec(httpProtocol: .https), ReplayResponseDrain())
+                    }
+                }
+            }
+            ready.whenComplete { _ in deadline.cancel() }
+            return ready
+        }.get()
     }
 
     public func stop() async {

@@ -11,6 +11,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.103.0"),
+        .package(url: "https://github.com/apple/swift-nio-http2.git", from: "1.45.0"),
         .package(url: "https://github.com/apple/swift-certificates.git", from: "1.21.0"),
         .package(url: "https://github.com/apple/swift-asn1.git", from: "1.7.3"),
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.37.5")
@@ -24,6 +25,7 @@ let package = Package(
         ]),
         .target(name: "RequestmanProxy", dependencies: [
             "RequestmanCore", "RequestmanCertificates", .product(name: "NIOSSL", package: "swift-nio-ssl"),
+            .product(name: "NIOHTTP2", package: "swift-nio-http2"), .product(name: "NIOTLS", package: "swift-nio"),
             .product(name: "NIOCore", package: "swift-nio"),
             .product(name: "NIOPosix", package: "swift-nio"), .product(name: "NIOHTTP1", package: "swift-nio"),
             .product(name: "NIOWebSocket", package: "swift-nio")
@@ -32,6 +34,7 @@ let package = Package(
         .testTarget(name: "RequestmanCertificatesTests", dependencies: ["RequestmanCertificates"]),
         .testTarget(name: "RequestmanProxyTests", dependencies: [
             "RequestmanProxy", "RequestmanCertificates", .product(name: "NIOSSL", package: "swift-nio-ssl"),
+            .product(name: "NIOHTTP2", package: "swift-nio-http2"), .product(name: "NIOTLS", package: "swift-nio"),
             .product(name: "NIOEmbedded", package: "swift-nio")
         ])
     ]

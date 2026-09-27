@@ -133,6 +133,7 @@ final class RequestReplayEditor: NSViewController {
         } else { bytes = Data(body.string.utf8) }
         // Table edits preserve field order, duplicates, and untouched whitespace.
         var result = RequestReplayDraft(method: method.titleOfSelectedItem ?? "", url: url.stringValue, headers: headers.fields, body: bytes)
+        result.httpVersion = initial.httpVersion
         result.sourceRecordID = initial.sourceRecordID
         try result.validate()
         return result

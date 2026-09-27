@@ -68,6 +68,12 @@ public struct CaptureRecord: Identifiable, Sendable, Codable {
     public var matchedRules: [CaptureMatchedRule] = []
     public var executionTrace: [StepExecutionTrace] = []
     public var hasSentRequestHeaders = false
+    public var clientHTTPVersion: String?
+    public var upstreamHTTPVersion: String?
+    public var requestTrailers: [HTTPField]?
+    public var sentTrailers: [HTTPField]?
+    public var receivedTrailers: [HTTPField]?
+    public var responseTrailers: [HTTPField]?
     public var originalStatus: Int?
     public var status: Int?
     public var duration: Double = 0
@@ -96,6 +102,7 @@ public struct CaptureRecord: Identifiable, Sendable, Codable {
         case method, url, finalURL, sentMethod, project, workflow, environment, deviceSource, outcome
         case matchedWorkflowID, matchedRules, executionTrace, hasSentRequestHeaders
         case originalStatus, status, duration, requestBytes, responseBytes
+        case clientHTTPVersion, upstreamHTTPVersion, requestTrailers, sentTrailers, receivedTrailers, responseTrailers
         case requestHeaders, sentHeaders, responseHeaders, receivedHeaders
         case requestBody, sentBody, receivedBody, responseBody, urlWasTruncated, finalURLWasTruncated
         case requestHeadersInfo, sentHeadersInfo, receivedHeadersInfo, responseHeadersInfo, steps, error

@@ -1,6 +1,6 @@
 # macOS 开发约定
 
-- 先读 [README.md](README.md) 与 [Docs/Architecture.md](Docs/Architecture.md)。当前已有 HTTP/1.1 显式代理、HTTPS 解密与未配置证书时的 CONNECT 透传；不能将静态 UI 检查或回环测试表述为 Chrome 实测或性能验收通过。
+- 先读 [README.md](README.md) 与 [Docs/Architecture.md](Docs/Architecture.md)。当前已有 HTTP/1.1 显式代理、HTTP/2 同协议解密转发、HTTPS 解密与未配置证书时的 CONNECT 透传；不能将静态 UI 检查或回环测试表述为 Chrome 实测或性能验收通过。
 - 原生 UI 必须使用 AppKit，禁止使用 SwiftUI，包括通过 `NSHostingView` 或 `NSHostingController` 嵌入 SwiftUI 内容。采用 Swift 6 并发检查；UI 状态保持 `@MainActor`，按功能拆分视图与控制器。
 - 与 UI 无关的配置和服务契约放在 `Packages/RequestmanCore`。宿主状态通过 `CaptureService` 访问捕获实现，不在视图中直接操作 Network Extension、代理或证书。
 - `Extensions/TransparentProxy` 目前只有实现边界说明。引入真实 target 时同步补齐 provider、签名、entitlements、嵌入、安装/卸载与 IPC，不创建看似可用但吞掉流量的占位 provider。
@@ -10,6 +10,8 @@
 - 手机接入与来源契约见 [局域网手机抓取](Docs/Design/mobile-capture.md)。证书分发只读取公开 CA，不生成、安装、信任或访问私钥；设备来源基于连接 IP，别名以工作区映射统一更新，不能把 IP 当作永久硬件身份。
 - 核心逻辑变更运行相关 Swift package 测试；工程调整检查源文件引用、共享 scheme 和配置。构建、静态检查与真实网络行为分别报告。
 - 遵守上级规则：禁止通过 Xcode / `xcodebuild` 编译 App 并部署真机运行测试，不通过拆分命令绕过。
+
+- HTTP/2 范围与同协议契约见 [HTTP/2 捕获与修改](Docs/Design/http2.md)。不跨协议转换、不降级、不自动重发请求；流取消不能关闭共享连接。
 
 ## 原生控件约束
 

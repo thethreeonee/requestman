@@ -1,7 +1,9 @@
 import Foundation
 import NIOCore
 import NIOHTTP1
+import NIOHTTP2
 import NIOSSL
+import NIOTLS
 import RequestmanCertificates
 import RequestmanCore
 
@@ -45,23 +47,52 @@ extension ProxyConnection {
         return identity.futureResult.flatMap { [self] identity in
             certificateTask = nil
             guard isProcessing, client.isActive else { return client.eventLoop.makeFailedFuture(WorkflowError.invalid("CONNECT 已取消")) }
-            if kind == .http || identity != nil {
+            if let identity {
                 return client.eventLoop.makeCompletedFuture {
-                    var encoder = HTTPResponseEncoder.Configuration(); encoder.automaticallySetFramingHeaders = false
-                    if let identity { try client.pipeline.syncOperations.addHandler(NIOSSLServerHandler(context: self.shared.tlsContexts.server(identity))) }
-                    try client.pipeline.syncOperations.addHandlers([
-                        HTTPResponseEncoder(configuration: encoder),
-                        ByteToMessageHandler(HTTPRequestDecoder(leftOverBytesStrategy: .forwardBytes, limitConfiguration: proxyDecoderLimits())),
-                        ProxyConnection(configuration: self.configuration, shared: self.shared, records: self.records,
-                                        tlsAuthority: identity == nil ? nil : authority, plainAuthority: identity == nil ? authority : nil)
-                    ])
-                    self.finished = true; self.timer?.cancel(); self.pending.removeAll()
-                }
+                    try client.pipeline.syncOperations.addHandlers(NIOSSLServerHandler(context: self.shared.tlsContexts.server(identity)),
+                        DownstreamTLSHandshake(authority: authority, records: self.records))
+                }.flatMap {
+                    client.configureHTTP2SecureUpgrade(h2ChannelConfigurator: { channel in
+                        let session = ProxyHTTP2Session(downstream: channel, configuration: self.configuration, shared: self.shared)
+                        return channel.setOption(ChannelOptions.autoRead, value: true).flatMap {
+                            channel.configureHTTP2Pipeline(mode: .server,
+                                connectionConfiguration: proxyHTTP2Configuration(server: true), streamConfiguration: .init(),
+                                inboundStreamInitializer: { stream in
+                                    session.accept(stream)
+                                    return stream.setOption(ChannelOptions.autoRead, value: false).flatMap {
+                                        stream.eventLoop.makeCompletedFuture {
+                                            let owner = ProxyConnection(configuration: self.configuration, shared: self.shared, records: self.records,
+                                                                        tlsAuthority: authority, http2Session: session)
+                                            try stream.pipeline.syncOperations.addHandlers(ProxyHTTP2Headers(owner: owner, response: false),
+                                                HTTP2FramePayloadToHTTP1ServerCodec(), owner)
+                                        }
+                                    }
+                                }).flatMap { _ in channel.pipeline.addHandler(HTTP2ServerLifecycle()) }
+                        }
+                    }, http1ChannelConfigurator: { channel in
+                        self.installTunnelHTTP1(channel, tlsAuthority: authority, plainAuthority: nil)
+                    })
+                }.map { self.finished = true; self.timer?.cancel(); self.pending.removeAll() }
+            }
+            if kind == .http {
+                return installTunnelHTTP1(client, tlsAuthority: nil, plainAuthority: authority)
+                    .map { self.finished = true; self.timer?.cancel(); self.pending.removeAll() }
             }
             return connectOpaqueTunnel(host: host, port: port, authority: authority)
         }.flatMapError { [self] error in
             finish(error: "CONNECT 建立失败：" + error.localizedDescription)
             return client.eventLoop.makeFailedFuture(error)
+        }
+    }
+    private func installTunnelHTTP1(_ channel: Channel, tlsAuthority: String?, plainAuthority: String?) -> EventLoopFuture<Void> {
+        channel.eventLoop.makeCompletedFuture {
+            var encoder = HTTPResponseEncoder.Configuration(); encoder.automaticallySetFramingHeaders = false
+            try channel.pipeline.syncOperations.addHandlers([
+                HTTPResponseEncoder(configuration: encoder),
+                ByteToMessageHandler(HTTPRequestDecoder(leftOverBytesStrategy: .forwardBytes, limitConfiguration: proxyDecoderLimits())),
+                ProxyConnection(configuration: self.configuration, shared: self.shared, records: self.records,
+                                tlsAuthority: tlsAuthority, plainAuthority: plainAuthority)
+            ])
         }
     }
     func connectOpaqueTunnel(host: String, port: Int, authority: String) -> EventLoopFuture<Void> {
@@ -96,5 +127,54 @@ extension ProxyConnection {
                 }
             }
         }
+    }
+}
+
+private final class HTTP2ServerLifecycle: ChannelInboundHandler, @unchecked Sendable {
+    typealias InboundIn = HTTP2Frame
+    func errorCaught(context: ChannelHandlerContext, error: Error) {
+        if !(error is NIOHTTP2Errors.StreamError) { context.close(promise: nil) }
+    }
+}
+
+/// Bounds the TLS handshake before ALPN installs an HTTP/1 connection or HTTP/2 streams.
+private final class DownstreamTLSHandshake: ChannelInboundHandler, RemovableChannelHandler, @unchecked Sendable {
+    typealias InboundIn = ByteBuffer
+    let authority: String
+    let records: CaptureRecordBuffer
+    let generation: UInt64
+    var timer: Scheduled<Void>?
+    var complete = false
+    init(authority: String, records: CaptureRecordBuffer) {
+        self.authority = authority; self.records = records; self.generation = records.generation
+    }
+    func handlerAdded(context: ChannelHandlerContext) {
+        let channel = context.channel
+        timer = channel.eventLoop.scheduleTask(in: .seconds(30)) { [self] in
+            recordFailure("客户端 TLS 握手超时", channel: channel); channel.close(promise: nil)
+        }
+    }
+    func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+        if case .handshakeCompleted = event as? TLSUserEvent {
+            complete = true; timer?.cancel(); timer = nil
+            context.fireUserInboundEventTriggered(event)
+            context.pipeline.removeHandler(self, promise: nil)
+        } else { context.fireUserInboundEventTriggered(event) }
+    }
+    func channelReadComplete(context: ChannelHandlerContext) {
+        if !complete { context.read() }
+        context.fireChannelReadComplete()
+    }
+    func channelInactive(context: ChannelHandlerContext) { timer?.cancel(); timer = nil; context.fireChannelInactive() }
+    func errorCaught(context: ChannelHandlerContext, error: Error) {
+        recordFailure("客户端 TLS 连接失败：" + ProxyTLS.errorDescription(error), channel: context.channel)
+        context.close(promise: nil)
+    }
+    private func recordFailure(_ message: String, channel: Channel) {
+        guard !complete else { return }; complete = true; timer?.cancel(); timer = nil
+        var record = CaptureRecord(method: "CONNECT", url: "https://" + authority)
+        record.outcome = .failed; record.connectionState = .failed; record.error = message
+        record.deviceSource = channel.remoteAddress?.ipAddress.map(DeviceSource.identifier(for:))
+        records.append(record, generation: generation)
     }
 }

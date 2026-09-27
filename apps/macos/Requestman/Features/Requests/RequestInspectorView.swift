@@ -20,6 +20,7 @@ final class RequestInspectorViewController: ObservedViewController {
     private let method = RequestMethodTag()
     private let status = NativeUI.label("", size: 12)
     private let duration = NativeUI.label("", size: 12, secondary: true)
+    private let protocolLabel = NativeUI.label("", size: 12, secondary: true)
     private let bytes = NativeUI.label("", size: 12, secondary: true)
     private let rule = MatchedRulePathControl()
     private let replayStatus = NativeUI.label("", size: 12)
@@ -72,7 +73,7 @@ final class RequestInspectorViewController: ObservedViewController {
                                    NativeUI.label("│", size: 12, secondary: true), bytes], vertical: false, spacing: 10)
         device.onRename = { [weak self] in self?.onDeviceAliasChange($0, $1) }
         let deviceRow = NativeUI.stack([NativeUI.label("设备来源", size: 12, secondary: true), device], vertical: false, spacing: 8)
-        let summary = NativeUI.stack([urlRow, stats, deviceRow, replayRow, rule, error], spacing: 10)
+        let summary = NativeUI.stack([urlRow, stats, protocolLabel, deviceRow, replayRow, rule, error], spacing: 10)
         summary.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
         for child in [urlRow, replayRow, rule, error] { child.widthAnchor.constraint(equalTo: summary.widthAnchor, constant: -32).isActive = true }
         let size: NSControl.ControlSize
@@ -115,6 +116,9 @@ final class RequestInspectorViewController: ObservedViewController {
         replaySource.isHidden = record.replaySourceID == nil
         replaySource.isEnabled = record.replaySourceID.map { id in history.records.contains { $0.id == id } } ?? false
         replaySource.toolTip = replaySource.isEnabled ? "查看此次重放基于的原请求" : "原请求已不在日志中"
+        protocolLabel.isHidden = record.clientHTTPVersion == nil
+        protocolLabel.stringValue = "客户端 " + (record.clientHTTPVersion ?? "未知") + " · 上游 " + (record.upstreamHTTPVersion ?? "未建立")
+        protocolLabel.toolTip = protocolLabel.stringValue
         method.setMethod(record.method)
         status.stringValue = record.status.map(String.init) ?? "—"
         status.textColor = RequestStatusStyle.color(record.status)

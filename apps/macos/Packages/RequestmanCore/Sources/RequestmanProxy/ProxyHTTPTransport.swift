@@ -6,6 +6,10 @@ import RequestmanCore
 
 extension ProxyConnection {
     func connectHTTP(endpoint: ProxyEndpoint, targetHost: String, targetPort: Int, secure: Bool, on loop: EventLoop) -> EventLoopFuture<Channel> {
+        if let http2Session {
+            guard secure else { return loop.makeFailedFuture(WorkflowError.invalid("HTTP/2 请求目标必须使用 HTTPS；不转换为 HTTP/1.1")) }
+            return http2Session.stream(host: targetHost, port: targetPort, endpoint: endpoint, owner: self)
+        }
         // One reusable origin per downstream connection, including its TLS session.
         // Never share a socket across targets, routes or concurrent transactions.
         let key = "\(secure)-\(targetHost.lowercased()):\(targetPort)-\(endpoint.host):\(endpoint.port)"
@@ -37,17 +41,14 @@ extension ProxyConnection {
                 }
             } else { ready = loop.makeSucceededFuture(()) }
             return ready.flatMap { [self] in
-                loop.makeCompletedFuture {
-                    guard self.isProcessing else { throw WorkflowError.invalid("连接已取消") }
-                    if secure {
-                        try channel.pipeline.syncOperations.addHandler(ProxyTLS.client(host: targetHost, testTrustRoots: self.shared.upstreamTrustRoots))
-                    }
+                guard self.isProcessing else { return loop.makeFailedFuture(WorkflowError.invalid("连接已取消")) }
+                let configure: @Sendable () -> EventLoopFuture<Channel> = {
+                    channel.pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes, decoderLimitConfiguration: proxyDecoderLimits())
+                        .flatMap { channel.pipeline.addHandler(ProxyResponseHandler(owner: self)) }.map { channel }
                 }
-            }.flatMap {
-                channel.pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes, decoderLimitConfiguration: proxyDecoderLimits())
-            }.flatMap {
-                channel.pipeline.addHandler(ProxyResponseHandler(owner: self))
-            }.map { channel }
+                if secure { return ProxyTLS.negotiateClient(channel: channel, host: targetHost, http2: false, shared: self.shared, configure: configure) }
+                return configure()
+            }
         }
     }
 
@@ -71,7 +72,9 @@ extension ProxyConnection {
     func cleanHeaders(_ fields: [HTTPField]) -> HTTPHeaders {
         let connectionTokens = fields.filter { $0.name.lowercased() == "connection" }.flatMap { $0.value.lowercased().split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } }
         let removed = Set(connectionTokens + ["connection", "proxy-connection", "proxy-authorization", "proxy-authenticate", "keep-alive", "te", "trailer", "upgrade", "transfer-encoding"])
-        return HTTPHeaders(fields.filter { !removed.contains($0.name.lowercased()) }.map { ($0.name, $0.value) })
+        var headers = HTTPHeaders(fields.filter { !removed.contains($0.name.lowercased()) }.map { (isHTTP2 ? $0.name.lowercased() : $0.name, $0.value) })
+        if isHTTP2, fields.contains(where: { $0.name.lowercased() == "te" && $0.value.lowercased() == "trailers" }) { headers.add(name: "te", value: "trailers") }
+        return headers
     }
 
     func headerTokens(_ headers: HTTPHeaders, name: String) -> [String] {

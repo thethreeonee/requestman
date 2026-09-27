@@ -65,6 +65,7 @@ final class ProxyReplaySession: Sendable {
         guard let cancelled else { return }
         var record = CaptureRecord(id: request.id, method: request.method, url: request.url)
         record.deviceSource = "local"
+        record.clientHTTPVersion = request.httpVersion
         record.replayID = request.id; record.replaySourceID = request.sourceRecordID
         record.replayCancelled = cancelled
         record.connectionState = cancelled ? .closed : .failed

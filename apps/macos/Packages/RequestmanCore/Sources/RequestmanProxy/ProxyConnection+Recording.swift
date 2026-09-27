@@ -17,15 +17,16 @@ extension ProxyConnection {
         record?.status = status
         responseStarted = true
         let body = "Requestman: \(message)"
-        let headers = HTTPHeaders([("Connection", "close"), ("Content-Type", "text/plain; charset=utf-8"), ("Content-Length", String(body.utf8.count))])
+        var headers = HTTPHeaders([("Connection", "close"), ("Content-Type", "text/plain; charset=utf-8"), ("Content-Length", String(body.utf8.count))])
+        if isHTTP2 { headers.remove(name: "Connection") }
         record?.responseHeaders = fields(headers)
         responseBodyCollector = CaptureBodyCollector(headers: fields(headers))
-        trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .init(statusCode: status), headers: headers))))
+        trackResponseWrite(client.write(HTTPServerResponsePart.head(HTTPResponseHead(version: messageVersion, status: .init(statusCode: status), headers: headers))))
         if originalMethod != "HEAD" {
             responseBodyCollector?.append(body.utf8)
             trackResponseWrite(client.write(HTTPServerResponsePart.body(.byteBuffer(client.allocator.buffer(string: body)))))
         }
-        client.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { [self] result in
+        writeResponseEnd(nil).whenComplete { [self] result in
             if case .success = result { responseWriteComplete = !responseWriteFailed }
             finish(error: message)
             closeProxyChannel(client)

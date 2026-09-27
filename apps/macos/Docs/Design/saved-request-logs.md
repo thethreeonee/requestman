@@ -23,6 +23,8 @@
 
 `record.requestHeaders / requestBody` 是客户端原始请求，`sentHeaders / sentBody` 是代理发往上游的请求；`receivedHeaders / receivedBody` 是上游原始响应，`responseHeaders / responseBody` 是最终返回客户端的响应。Header 使用名称和值的数组，保留重复项、顺序和实际值。
 
+协议版本与请求/响应 trailers 作为可选字段保存在 record 中，旧文件没有这些字段时继续兼容。
+
 Body 保留采集状态、观察到的字节数、Content-Type 和 Content-Encoding。`payload.text` 保存可阅读的 UTF-8 原文；其他字节使用 `payload.base64`，两者只保存一种。JSON Body 仍保留原始文本，避免重新解析导致字段顺序或数字精度变化。完整 gzip / deflate 正文可解码为 UTF-8 时另附 `decodedText`，供外部阅读；打开文件以原始 `payload` 恢复，不以阅读副本替换原始字节。SSE/WS 消息的 `payload` 使用同样表示。
 
 保存的是已采集的内容：未完成、未采集、不可用与完整 Body 保持区别，不将部分数据伪装为完整请求。SSE 保留尚未形成完整事件的原始尾部，不受界面当前页限制；WS 保留已经记录的消息。文件不包含可执行规则、工作区环境变量配置、证书或浏览器配置。
