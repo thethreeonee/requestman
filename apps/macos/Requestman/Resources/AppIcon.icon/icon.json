@@ -1,8 +1,8 @@
 {
   "fill" : {
     "linear-gradient" : [
-      "extended-gray:0.25000,1.00000",
-      "display-p3:0.00000,0.00000,0.00000,1.00000"
+      "srgb:0.12549,0.74118,0.91373,1.00000",
+      "srgb:0.09020,0.35294,0.90980,1.00000"
     ]
   },
   "groups" : [
@@ -29,6 +29,31 @@
       "translucency" : {
         "enabled" : true,
         "value" : 0.3
+      }
+    },
+    {
+      "layers" : [
+        {
+          "glass" : false,
+          "hidden" : false,
+          "image-name" : "BlueprintBackground.png",
+          "name" : "Blueprint Background",
+          "position" : {
+            "scale" : 0.8165869218500797,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0
+      },
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0
       }
     }
   ],
