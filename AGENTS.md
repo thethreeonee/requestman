@@ -56,7 +56,7 @@ Release packaging may also create versioned zip files such as:
 
 Run these commands at the repository root. The root `package.json` forwards commands to the npm workspace in `apps/browser-extension`; it has no release version. Browser artifacts remain under root `dist/`, so CI packaging paths are unchanged.
 
-For the macOS core, run `swift test --package-path apps/macos/Packages/RequestmanCore`. The native Xcode entrypoint is `apps/macos/Requestman.xcodeproj`. Do not compile and deploy an App to a physical device through Xcode or `xcodebuild`, including by splitting those actions into separate commands.
+For targeted macOS core tests, use `swift test --package-path apps/macos/Packages/RequestmanCore --filter <test-filter>` and select only tests relevant to the change. The native Xcode entrypoint is `apps/macos/Requestman.xcodeproj`. Do not compile and deploy an App to a physical device through Xcode or `xcodebuild`, including by splitting those actions into separate commands.
 
 - `npm install`: install dependencies
 - `npm run dev`: watch build
@@ -87,6 +87,8 @@ For the macOS core, run `swift test --package-path apps/macos/Packages/Requestma
 
 ## Validation And Completion
 
+- 不要每次修改代码后默认运行全量测试；只执行与本次改动直接相关且必要的静态检查或非 UI 定向测试。只有用户明确要求，或相关失败与未解决问题确实需要时，才扩大非 UI 测试范围。
+- 不运行界面 UI 测试，包括隐藏窗口 AppKit 组件检查、UI fixture 脚本、自动化点击和截图验收；不得以“隐藏窗口”或“组件检查”为名绕过此约束。UI 改动通过源码审阅和必要静态检查验证，并如实说明界面运行效果未验证。
 - Browser source, CSS, dependency, manifest, or build-configuration changes require `npm run build:chrome`; also build Firefox when Firefox-specific behavior or packaging is affected. Release-related changes require `npm run build`.
 - Documentation-only changes require checking links and `git diff --check`, not an extension build.
 - Complete the requested implementation, update affected documentation, and fix failures introduced by the change. Repeat affected checks after fixes; broaden validation only for new failures or unresolved concerns.
