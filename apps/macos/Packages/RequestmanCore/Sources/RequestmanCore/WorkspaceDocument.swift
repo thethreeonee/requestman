@@ -317,7 +317,20 @@ public struct WorkspaceDocument: Codable, Equatable, Sendable {
     public var environments: [WorkspaceEnvironment] = []
     public var selectedEnvironmentID: UUID?
     public var proxy = ExplicitProxyConfiguration()
+    public var httpsDecryption = HTTPSDecryptionConfiguration()
     public init() {}
+    private enum CodingKeys: String, CodingKey {
+        case version, projects, environments, selectedEnvironmentID, proxy, httpsDecryption
+    }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decode(Int.self, forKey: .version)
+        projects = try values.decode([WorkflowProject].self, forKey: .projects)
+        environments = try values.decode([WorkspaceEnvironment].self, forKey: .environments)
+        selectedEnvironmentID = try values.decodeIfPresent(UUID.self, forKey: .selectedEnvironmentID)
+        proxy = try values.decode(ExplicitProxyConfiguration.self, forKey: .proxy)
+        httpsDecryption = try values.decodeIfPresent(HTTPSDecryptionConfiguration.self, forKey: .httpsDecryption) ?? .init()
+    }
     public var environment: WorkspaceEnvironment? { environments.first { $0.id == selectedEnvironmentID } }
 }
 

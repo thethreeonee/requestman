@@ -16,6 +16,7 @@ final class GeneralSettingsViewController: ObservedViewController {
         Task { @MainActor in await self.model.refreshBrowsers() }
     }
     private lazy var connection = ConnectionSettingsView(model: model)
+    private lazy var decryption = HTTPSDecryptionSettingsView(model: model)
     private let certificateStatus = NativeUI.label("未配置", secondary: true)
     private let certificateError = SettingsUI.note("")
     private lazy var setupButton = ActionButton(title: "设置证书…") { [weak self] in self?.showCertificateSetup() }
@@ -58,6 +59,7 @@ final class GeneralSettingsViewController: ObservedViewController {
             SettingsUI.section("浏览器", rows: [browserRow, browserStatus, refreshRow], footer: "列出已安装的 Chrome 及同类 Chromium 浏览器。"),
             connection,
             SettingsUI.section("HTTPS 证书", rows: [SettingsUI.row("证书状态", statusRow), certificateError], footer: "配置并信任本机调试证书后，新建 HTTPS 连接可解密、修改并记录。"),
+            decryption,
             SettingsUI.section("导入导出", rows: [NativeUI.stack([importButton, exportButton], vertical: false)],
                                footer: "导出所有项目、请求修改、环境及设置，不含证书。导入会添加项目与请求修改；全量备份中的环境、设置和列宽将覆盖当前数据。")
         ]
@@ -99,6 +101,7 @@ final class GeneralSettingsViewController: ObservedViewController {
         browserStatus.stringValue = model.isDiscoveringBrowsers ? "正在查找浏览器…" : "未找到已安装的 Chromium 浏览器。"
         refreshButton.isEnabled = !model.isTransitioning && !model.isDiscoveringBrowsers
         connection.refresh()
+        decryption.refresh()
         certificateStatus.stringValue = model.certificateSetup.isConfigured ? "✓ 已完成配置" : "未配置"
         certificateStatus.textColor = model.certificateSetup.isConfigured ? .systemGreen : .secondaryLabelColor
         setupButton.isHidden = model.certificateSetup.isConfigured
@@ -130,6 +133,83 @@ final class GeneralSettingsViewController: ObservedViewController {
         let controller = CertificateSetupViewController(model: model.certificateSetup)
         certificateSheet = controller
         presentAsSheet(controller)
+    }
+}
+
+@MainActor
+private final class HTTPSDecryptionSettingsView: NSView, NSTextViewDelegate {
+    private let model: WorkspaceModel
+    private let allRequests = NSSwitch()
+    private let domains = NSTextView()
+    private let errorLabel = SettingsUI.note("")
+    private var displayedDomains: [String]?
+
+    init(model: WorkspaceModel) {
+        self.model = model
+        super.init(frame: .zero)
+        allRequests.target = self
+        allRequests.action = #selector(toggleAllRequests)
+        allRequests.setAccessibilityLabel("解密所有请求")
+        domains.delegate = self
+        domains.isRichText = false
+        domains.allowsUndo = true
+        domains.isAutomaticQuoteSubstitutionEnabled = false
+        domains.isAutomaticDashSubstitutionEnabled = false
+        domains.isAutomaticSpellingCorrectionEnabled = false
+        domains.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        domains.textContainerInset = NSSize(width: 6, height: 6)
+        domains.isVerticallyResizable = true
+        domains.isHorizontallyResizable = false
+        domains.autoresizingMask = [.width]
+        domains.textContainer?.widthTracksTextView = true
+        domains.setAccessibilityLabel("HTTPS 解密域名")
+        let scroll = NSScrollView()
+        scroll.borderType = .bezelBorder
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = domains
+        scroll.heightAnchor.constraint(equalToConstant: 110).isActive = true
+        errorLabel.textColor = .systemRed
+        errorLabel.isHidden = true
+        let section = SettingsUI.section("HTTPS 解密", rows: [
+            SettingsUI.row("解密所有请求", allRequests),
+            NativeUI.label("指定域名"), scroll, errorLabel
+        ], footer: "关闭开关后，仅解密列表中的域名；留空则全部透传。每行一个域名，例如 api.example.com；*.example.com 匹配所有层级的子域名，不包含 example.com 本身。需先配置 HTTPS 证书；修改对新连接生效。")
+        NativeUI.pin(section, to: self)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func refresh() {
+        let configuration = model.document.httpsDecryption
+        allRequests.state = configuration.decryptAllRequests ? .on : .off
+        allRequests.isEnabled = model.loaded && !model.isTransitioning
+        domains.isEditable = allRequests.isEnabled && !configuration.decryptAllRequests
+        domains.textColor = domains.isEditable ? .textColor : .secondaryLabelColor
+        if displayedDomains != configuration.domains {
+            domains.string = configuration.domains.joined(separator: "\n")
+            domains.undoManager?.removeAllActions()
+            displayedDomains = configuration.domains
+            errorLabel.isHidden = true
+        }
+    }
+
+    func textDidChange(_ notification: Notification) {
+        guard domains.isEditable, !domains.hasMarkedText() else { return }
+        do {
+            let values = try HTTPSDecryptionConfiguration.parseDomains(domains.string)
+            displayedDomains = values
+            model.document.httpsDecryption.domains = values
+            errorLabel.isHidden = true
+        } catch {
+            errorLabel.stringValue = "未保存：" + error.localizedDescription
+            errorLabel.isHidden = false
+        }
+    }
+
+    @objc private func toggleAllRequests() {
+        model.document.httpsDecryption.decryptAllRequests = allRequests.state == .on
+        refresh()
     }
 }
 

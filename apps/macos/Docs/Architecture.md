@@ -209,3 +209,11 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 `Packages/RequestmanEditor` 由 Body 与 JavaScript 表单共用。文本编辑、布局和撤销使用 CodeEditTextView 0.12.1；语法颜色由 HighlighterSwift 3.1.0 在独立 actor 中计算，80 ms 合并输入，回到主线程前检查文本和版本，忽略过时结果与输入法组字期。仅更新颜色属性，不重写正文、选择或撤销记录；明暗主题使用 atom-one-light / atom-one-dark。行号复用 CodeEditSourceEditor 0.15.2 的 MIT GutterView，移除折叠和控制器依赖，直接使用同一个 TextLayoutManager 的行几何；不引入其 SwiftUI 界面。正文与行号共用 8 pt 外层裁切。短文本把滚轮传给外层表单，长文本保留内部滚动。
 
 Body 中完整的模板表达式用浅色背景标识。格式化继续使用 BodyJSONPresentation 保留数值原始拼写和模板，通过编辑器的替换接口形成可撤销操作。Header 等普通模板字段仍用 RulesTextArea；移除旧 BodyLineRuler 与 JavaScriptSyntax。依赖许可证随编辑器资源包提供，来源与改动见 [编辑器说明](../Packages/RequestmanEditor/README.md)。
+
+## HTTPS 域名解密范围
+
+`WorkspaceDocument.httpsDecryption` 保存 `HTTPSDecryptionConfiguration`：`decryptAllRequests` 默认开启，缺少配置的旧工作区保持全部解密；关闭时由 `domains` 决定，空列表全部透传。精确域名和 `*.` 子域名通配符按 DNS 标签边界匹配，忽略大小写与单个末尾点；通配符不含根域。设置编辑器校验域名，错误草稿不写入工作区，未校验的无效模式在匹配时也不扩大解密范围。
+
+代理在新 CONNECT 连接中读取最新工作区范围，只有范围命中时才调用证书提供方；未命中直接沿既有 `beginPassthrough` 路径转发，不读取 CA、不签发叶证书，也不进入 HTTP 规则与内容采集。证书不可用仍沿原有透传或错误路径处理，普通 HTTP 的既有行为不变。范围通过原工作区保存/更新通道应用，不属于需重配监听的 `ExplicitProxyConfiguration`，现有连接保持原模式。全量归档包含该配置，项目/请求归档合并不覆盖当前配置。
+
+验证覆盖旧工作区解码、保存与归档、域名边界、空列表和全部开关；本地 TCP/TLS 测试通过客户端仅信任预期签发方确认透传没有 MITM，并检查证书提供方调用次数、规则是否执行、日志内容以及 HTTP 上游串联。设置采用原生 `NSSwitch` 与 `NSTextView`，隐藏窗口检查覆盖开关、有效输入、错误草稿与导入刷新；不等同于完整 App 的浏览器运行验收。

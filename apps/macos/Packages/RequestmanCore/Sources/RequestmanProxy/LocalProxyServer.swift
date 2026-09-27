@@ -810,7 +810,8 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         }
         guard head.headers["transfer-encoding"].isEmpty,
               head.headers["content-length"].allSatisfy({ $0 == "0" }) else { return fail("CONNECT 不接受 HTTP Body", status: 400) }
-        if let provider = shared.certificateProvider {
+        let shouldDecrypt = shared.document.withLock { $0.httpsDecryption.shouldDecrypt(host: host) }
+        if shouldDecrypt, let provider = shared.certificateProvider {
             let identity = client.eventLoop.makePromise(of: TLSCertificateIdentity?.self)
             certificateTask = Task {
                 do { identity.succeed(try await provider.serverIdentity(for: host)) }

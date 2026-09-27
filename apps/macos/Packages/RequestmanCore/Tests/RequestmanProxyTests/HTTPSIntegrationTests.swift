@@ -15,6 +15,37 @@ import RequestmanCore
 /// Real TCP/TLS tests. All certificates and trust anchors live only in memory.
 @Suite(.serialized)
 struct HTTPSIntegrationTests {
+    @Test(arguments: [false, true])
+    func domainSelectionAndAllRequestsSwitchApplyToNewConnections(useHTTPUpstream: Bool) async throws {
+        try await withHTTPSHarness { h in
+            try await h.start(useHTTPUpstream: useHTTPUpstream)
+            var document = WorkspaceDocument()
+            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var response = ModificationStep(kind: .replaceBody); response.value = "decrypted-and-modified"
+            workflow.responseSteps = [response]
+            var project = WorkflowProject(); project.workflows = [workflow]
+            document.projects = [project]
+            var identityCount = 0
+            for (all, domains, decrypt) in [(false, ["other.test"], false), (false, ["localhost"], true),
+                                             (false, [], false), (true, ["other.test"], true)] {
+                document.httpsDecryption.decryptAllRequests = all
+                document.httpsDecryption.domains = domains
+                await h.proxy.update(document)
+                // Each client trusts only the expected signer, so an unintended MITM fails TLS.
+                let reply = try await h.exchange(path: "/selection", coalesceClientHello: true, passthrough: !decrypt)
+                #expect(reply.status == 200)
+                #expect(reply.body == (decrypt ? "decrypted-and-modified" : "secure-origin-body"))
+                if decrypt { identityCount += 1 }
+                #expect(h.identityRequests.withLock { $0 } == identityCount)
+                let record = try #require(await h.firstRecord())
+                #expect(record.outcome == (decrypt ? .modified : .tunnel))
+                #expect(record.method == (decrypt ? "GET" : "CONNECT"))
+                #expect(record.responseBody.state == (decrypt ? .complete : .unavailable))
+                #expect(decrypt || record.matchedWorkflowID == nil)
+            }
+        }
+    }
+
     @Test func idleTLSCloseDoesNotCreateHandshakeFailure() throws {
         // Swift's NSError bridge exposes this enum case as the reported error 12.
         #expect((NIOSSLError.uncleanShutdown as NSError).code == 12)
@@ -375,8 +406,10 @@ private struct EphemeralTLSAuthority: Sendable {
 
 private struct EphemeralTLSProvider: TLSCertificateProviding {
     let authority: EphemeralTLSAuthority
+    let requests: OSAllocatedUnfairLock<Int>
     func serverIdentity(for host: String) async throws -> TLSCertificateIdentity? {
-        try authority.identity(for: host)
+        requests.withLock { $0 += 1 }
+        return try authority.identity(for: host)
     }
 }
 
@@ -406,6 +439,7 @@ private final class HTTPSHarness: @unchecked Sendable {
     let observation = OSAllocatedUnfairLock(initialState: HTTPSOriginObservation())
     let originConnections = OSAllocatedUnfairLock(initialState: [Channel]())
     let coalescedClientHello = OSAllocatedUnfairLock(initialState: false)
+    let identityRequests = OSAllocatedUnfairLock(initialState: 0)
     let proxyAuthority: EphemeralTLSAuthority
     let originAuthority: EphemeralTLSAuthority
     let originCertificateHost: String
@@ -421,7 +455,7 @@ private final class HTTPSHarness: @unchecked Sendable {
         originAuthority = try EphemeralTLSAuthority()
         self.originCertificateHost = originCertificateHost
         proxy = LocalProxyServer(
-            certificateProvider: EphemeralTLSProvider(authority: proxyAuthority),
+            certificateProvider: EphemeralTLSProvider(authority: proxyAuthority, requests: identityRequests),
             upstreamTrustRoots: [try (trustOrigin ? originAuthority : proxyAuthority).trustRoot()]
         )
     }
@@ -474,10 +508,10 @@ private final class HTTPSHarness: @unchecked Sendable {
         throw HTTPSFixtureError.connectionClosed
     }
 
-    func exchange(path: String, method: HTTPMethod = .GET, headers: [(String, String)] = [], body: String = "", coalesceClientHello: Bool = false) async throws -> HTTPSReply {
+    func exchange(path: String, method: HTTPMethod = .GET, headers: [(String, String)] = [], body: String = "", coalesceClientHello: Bool = false, passthrough: Bool = false) async throws -> HTTPSReply {
         var configuration = TLSConfiguration.makeClientConfiguration()
         configuration.certificateVerification = .fullVerification
-        configuration.trustRoots = .certificates([try proxyAuthority.trustRoot()])
+        configuration.trustRoots = .certificates([try (passthrough ? originAuthority : proxyAuthority).trustRoot()])
         configuration.applicationProtocols = ["http/1.1"]
         let context = try NIOSSLContext(configuration: configuration)
         let promise = group.next().makePromise(of: HTTPSReply.self)

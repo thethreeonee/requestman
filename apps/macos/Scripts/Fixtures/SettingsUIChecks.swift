@@ -76,6 +76,35 @@ struct SettingsUIChecks {
         model.isTransitioning = false
 
         let general = controller.children.first as! GeneralSettingsViewController
+        let decryptAll = descendants(general.view).compactMap { $0 as? NSSwitch }.first { $0.accessibilityLabel() == "解密所有请求" }!
+        let domains = descendants(general.view).compactMap { $0 as? NSTextView }.first { $0.accessibilityLabel() == "HTTPS 解密域名" }!
+        precondition(decryptAll.state == .on && !domains.isEditable)
+        decryptAll.state = .off
+        NSApplication.shared.sendAction(decryptAll.action!, to: decryptAll.target, from: decryptAll)
+        precondition(!model.document.httpsDecryption.decryptAllRequests && domains.isEditable)
+        general.view.layoutSubtreeIfNeeded()
+        precondition(domains.bounds.width > 500 && domains.enclosingScrollView!.contentSize.height >= 100,
+                     "The multiline domain editor must fill its native scroll view")
+        window.makeFirstResponder(domains)
+        domains.insertText("api.example.com\n*.example.test", replacementRange: NSRange(location: 0, length: 0))
+        precondition(model.document.httpsDecryption.domains == ["api.example.com", "*.example.test"])
+        domains.insertText("https://invalid.test", replacementRange: NSRange(location: 0, length: domains.string.utf16.count))
+        general.refresh()
+        precondition(model.document.httpsDecryption.domains == ["api.example.com", "*.example.test"])
+        precondition(domains.string == "https://invalid.test", "Invalid domain drafts must remain available for correction")
+        precondition(descendants(general.view).compactMap { $0 as? NSTextField }.contains { !$0.isHidden && $0.stringValue.hasPrefix("未保存：域名格式无效") })
+        checkFormGeometry(in: general.view)
+        domains.insertText("localhost", replacementRange: NSRange(location: 0, length: domains.string.utf16.count))
+        precondition(model.document.httpsDecryption.domains == ["localhost"])
+        window.makeFirstResponder(nil)
+        decryptAll.state = .on
+        NSApplication.shared.sendAction(decryptAll.action!, to: decryptAll.target, from: decryptAll)
+        precondition(model.document.httpsDecryption.decryptAllRequests && !domains.isEditable)
+        precondition(model.document.httpsDecryption.domains == ["localhost"], "The all-requests switch must preserve the domain list")
+        model.document.httpsDecryption.domains = ["imported.test"]
+        general.refresh()
+        precondition(domains.string == "imported.test", "Imported settings must refresh the domain editor")
+        checkFormGeometry(in: general.view)
         model.captureMode = .browser
         model.installedBrowsers = [ChromiumBrowser(id: "test.browser", name: "Chromium Test Browser", applicationURL: URL(fileURLWithPath: "/System/Applications/Safari.app"))]
         model.selectedBrowserID = "test.browser"
@@ -209,7 +238,7 @@ struct SettingsUIChecks {
         precondition(certificate.view.fittingSize.width == 480)
         precondition(!model.certificateSetup.isRunning)
         checkOutsideClickEditing()
-        print("Settings AppKit checks OK: form containment and non-overlap, browser/certificate states, upstream expansion and wrapped errors, scrolling, window, toolbar, proxy binding, environment name/typed variables/validation/delete, split geometry, read-only state and certificate construction (no App or certificate changes)")
+        print("Settings AppKit checks OK: form containment and non-overlap, browser/certificate states, HTTPS decryption switch/domain validation/import refresh, upstream expansion and wrapped errors, scrolling, window, toolbar, proxy binding, environment name/typed variables/validation/delete, split geometry, read-only state and certificate construction (no App or certificate changes)")
     }
 
     private static func checkOutsideClickEditing() {
@@ -278,7 +307,7 @@ struct SettingsUIChecks {
     private static func snapshotForm(in view: NSView, name: String) throws {
         guard let prefix = ProcessInfo.processInfo.environment["REQUESTMAN_SETTINGS_SNAPSHOT"],
               let root = view.window?.contentView,
-              let scroll = descendants(view).compactMap({ $0 as? NSScrollView }).last,
+              let scroll = descendants(view).compactMap({ $0 as? NSScrollView }).last(where: { !($0.documentView is NSTextView) }),
               let document = scroll.documentView else { return }
         // Include the window backing when capturing transparent native controls.
         root.wantsLayer = true
