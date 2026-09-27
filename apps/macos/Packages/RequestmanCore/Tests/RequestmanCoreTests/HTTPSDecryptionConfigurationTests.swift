@@ -6,7 +6,7 @@ struct HTTPSDecryptionConfigurationTests {
     @Test func selectedDomainsRespectLabelBoundaries() throws {
         var configuration = HTTPSDecryptionConfiguration()
         configuration.decryptAllRequests = false
-        configuration.domains = try HTTPSDecryptionConfiguration.parseDomains("API.Example.COM.\n*.service.test,localhost，127.0.0.1 api.example.com")
+        configuration.domains = try HTTPSDecryptionConfiguration.parseDomains(" API.Example.COM. ; *.service.test ; localhost ; 127.0.0.1 ; api.example.com ")
         #expect(configuration.domains == ["api.example.com", "*.service.test", "localhost", "127.0.0.1"])
         for host in ["api.example.com", "API.EXAMPLE.COM.", "a.service.test", "a.b.service.test", "localhost", "127.0.0.1"] {
             #expect(configuration.shouldDecrypt(host: host))
@@ -20,7 +20,12 @@ struct HTTPSDecryptionConfigurationTests {
         #expect(configuration.shouldDecrypt(host: "any.test"))
     }
 
-    @Test(arguments: ["*", "https://example.com", "example.com:443", "example.com/path", "foo.*.com", "*example.com", "example..com", "-example.com", "example.com.."])
+    @Test func semicolonEntriesTrimWhitespaceAndIgnoreEmptyEntries() throws {
+        #expect(try HTTPSDecryptionConfiguration.parseDomains(" ; \tAPI.Example.COM. \n; \n*.example.test\t ; ; ") == ["api.example.com", "*.example.test"])
+        #expect(try HTTPSDecryptionConfiguration.parseDomains(" \n; \t; ").isEmpty)
+    }
+
+    @Test(arguments: ["*", "https://example.com", "example.com:443", "example.com/path", "foo.*.com", "*example.com", "example..com", "-example.com", "example.com..", "a.test b.test", "a.test\nb.test", "a.test,b.test", "a.test；b.test"])
     func invalidPatternsAreRejectedAndCannotExpandDecryption(pattern: String) {
         #expect(throws: WorkflowError.self) { try HTTPSDecryptionConfiguration.parseDomains(pattern) }
         var configuration = HTTPSDecryptionConfiguration()

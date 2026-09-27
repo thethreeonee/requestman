@@ -10,6 +10,8 @@ import RequestmanEditor
     private var stepID: UUID?
     private var displayedLiteralValues = false
     private var displayedBodySource: BodySource = .text
+    private var displayedURLRewriteTarget: URLRewriteTarget = .fullURL
+    private var urlRewriteTarget: NSSegmentedControl?
     private var bodyFilePath: NSTextField?
     private var bodySource: NSSegmentedControl?
     private var chooseBodyFile: NSButton?
@@ -66,6 +68,7 @@ import RequestmanEditor
     override func refresh() {
         let selected = model.selectedStep
         if stepID != selected?.id || displayedBodySource != (selected?.bodySource ?? .text) || displayedLiteralValues != (selected?.literalValues == true) || view.subviews.isEmpty ||
+            (selected?.kind == .rewriteURL && displayedURLRewriteTarget != selected?.effectiveURLRewriteTarget) ||
             (selected.map { [.setHeader, .removeHeader].contains($0.kind) } == true && headerEditors.map(\.entryID) != selected?.headerEntries.map(\.id)) ||
             (selected?.kind == .setQueryParameter && queryEditors.map(\.entryID) != selected?.queryParameterEntries.map(\.id)) ||
             (selected?.kind == .replaceURLString && replacementEditors.map(\.entryID) != selected?.urlReplacementEntries.map(\.id)) { rebuild(selected) }
@@ -86,12 +89,13 @@ import RequestmanEditor
         value?.string = selected.value
         bodyValue?.string = selected.value
         bodySource?.isEnabled = model.loaded
+        urlRewriteTarget?.isEnabled = model.loaded
         chooseBodyFile?.isEnabled = model.loaded
         bodyFilePath?.stringValue = selected.bodyFilePath ?? "尚未选择文件"
         bodyFilePath?.toolTip = selected.bodyFilePath
         if delay?.stringValue != selected.value { delay?.stringValue = selected.value }
         delay?.isEnabled = model.loaded
-        delayError?.isHidden = (try? WorkflowEngine.delayMilliseconds(selected.value)) != nil
+        delayError?.isHidden = (try? ModificationExecutionEngine.delayMilliseconds(selected.value)) != nil
         updateMethod(selected.value)
         removeButton.isEnabled = model.loaded
         enabled.isEnabled = model.loaded; status?.isEnabled = model.loaded
@@ -122,11 +126,13 @@ import RequestmanEditor
         deletion.close(); headerEditors = []; queryEditors = []; replacementEditors = []
         queryDescription = nil; bodyFilePath = nil; bodySource = nil; chooseBodyFile = nil
         status = nil; delay = nil; delayError = nil; value = nil; bodyValue = nil; method = nil; formatBody = nil
+        urlRewriteTarget = nil
         view.subviews.forEach { $0.removeFromSuperview() }; stepID = selected?.id
         for accessory in [topAccessory, bottomAccessory] { accessory?.view.subviews.forEach { $0.removeFromSuperview() } }
         updateAccessoryVisibility()
         displayedLiteralValues = selected?.literalValues == true
         displayedBodySource = selected?.bodySource ?? .text
+        displayedURLRewriteTarget = selected?.effectiveURLRewriteTarget ?? .fullURL
         guard let selected else {
             let empty = NativeUI.stack([NativeUI.label("选择一个步骤", size: 20, weight: .semibold), NativeUI.label("配置请求或响应的修改动作。", secondary: true)], spacing: 10)
             view.addSubview(empty); empty.translatesAutoresizingMaskIntoConstraints = false
@@ -145,6 +151,23 @@ import RequestmanEditor
             controller.isPresented = isPresented; addChild(controller); script = controller; content = controller.view
         } else {
             let fields = NativeUI.stack([], spacing: 14)
+            if selected.kind == .rewriteURL {
+                let targets = URLRewriteTarget.allCases
+                let control = NSSegmentedControl(labels: targets.map(\.title), trackingMode: .selectOne, target: self, action: #selector(changeURLRewriteTarget(_:)))
+                control.segmentStyle = .automatic
+                control.segmentDistribution = .fit
+                control.controlSize = .large
+                if #available(macOS 26.0, *) { control.borderShape = .capsule }
+                if #available(macOS 27.0, *) { control.role = .tabs }
+                control.setContentHuggingPriority(.required, for: .vertical)
+                control.setContentCompressionResistancePriority(.required, for: .vertical)
+                control.selectedSegment = targets.firstIndex(of: selected.effectiveURLRewriteTarget) ?? 0
+                control.identifier = .init("rules.urlRewriteTarget")
+                control.setAccessibilityLabel("修改目标")
+                urlRewriteTarget = control
+                fields.addArrangedSubview(NativeUI.label("修改目标"))
+                fields.addArrangedSubview(control)
+            }
             let isBodyStep = [.replaceBody, .mock].contains(selected.kind)
             if isBodyStep {
                 let source = NSSegmentedControl(labels: ["文本", "本地文件"], trackingMode: .selectOne, target: self, action: #selector(changeBodySource(_:)))
@@ -258,7 +281,7 @@ import RequestmanEditor
             }
             if ![.setHeader, .removeHeader, .setStatus, .setQueryParameter, .replaceURLString, .setMethod, .delay].contains(selected.kind) && !selected.usesBodyFile {
                 let body = [.replaceBody, .mock].contains(selected.kind)
-                let label = body ? (selected.bodyEncoding == .base64 ? "Body · Base64" : "Body · 文本") : (selected.kind == .rewriteURL ? "目标 URL" :
+                let label = body ? (selected.bodyEncoding == .base64 ? "Body · Base64" : "Body · 文本") : (selected.kind == .rewriteURL ? urlRewriteValueLabel(selected.effectiveURLRewriteTarget) :
                     (selected.kind == .redirect ? "重定向目标" : "值"))
                 let area: NSView
                 if body {
@@ -276,6 +299,7 @@ import RequestmanEditor
                         message.isHidden = editor?.formatJSON() == true
                         message.stringValue = message.isHidden ? "" : "无法格式化：请检查 JSON 语法。原文已保留。"
                     }
+                    MatchingControls.glass(format)
                     format.controlSize = .small; format.toolTip = "支持无引号 key 和末尾逗号；格式化为 JSON，保留字段顺序与变量，可撤销。"
                     formatBody = format
                     format.isHidden = selected.bodyEncoding == .base64
@@ -296,6 +320,14 @@ import RequestmanEditor
                 }
                 fields.addArrangedSubview(area)
                 area.widthAnchor.constraint(equalTo: fields.widthAnchor).isActive = true
+                if selected.kind == .rewriteURL, let description = urlRewriteInputDescription(selected.effectiveURLRewriteTarget) {
+                    let hint = NativeUI.label(description, size: 11, secondary: true)
+                    hint.identifier = .init("rules.urlRewriteInputDescription")
+                    hint.maximumNumberOfLines = 0; hint.lineBreakMode = .byWordWrapping
+                    hint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                    fields.addArrangedSubview(hint)
+                    hint.widthAnchor.constraint(equalTo: fields.widthAnchor).isActive = true
+                }
                 if body {
                     area.heightAnchor.constraint(greaterThanOrEqualToConstant: 360).isActive = true
                     area.setContentHuggingPriority(.init(1), for: .vertical)
@@ -401,10 +433,11 @@ import RequestmanEditor
         }
         if [.rewriteURL, .redirect].contains(selected.kind) {
             let hint = NativeUI.label(selected.kind == .rewriteURL
-                ? "修改代理实际访问的地址，保留请求方法和 Body。"
+                ? "修改代理实际访问的 URL，可改写完整地址、主机或路径，保留请求方法和 Body。"
                 : "返回 3xx 状态码和目标地址，由客户端发起新请求。", size: 11, secondary: true)
             hint.identifier = .init("rules.stepDescription")
             hint.maximumNumberOfLines = 0; hint.lineBreakMode = .byWordWrapping
+            hint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             sections.append(hint)
         }
         if selected.kind == .delay {
@@ -439,12 +472,33 @@ import RequestmanEditor
         NSLayoutConstraint.activate(bodySizingConstraints)
         content.setContentHuggingPriority(.defaultLow, for: .vertical)
     }
+    private func urlRewriteValueLabel(_ target: URLRewriteTarget) -> String {
+        switch target {
+        case .fullURL: "目标 URL"
+        case .host: "目标主机（可含端口）"
+        case .path: "目标路径"
+        }
+    }
+    private func urlRewriteInputDescription(_ target: URLRewriteTarget) -> String? {
+        switch target {
+        case .fullURL: nil
+        case .host: "修改当前 URL 的主机，保留协议、路径和查询参数。不填端口时保留当前端口；可填写 example.com:8080，IPv6 使用 [::1]。"
+        case .path: "修改当前 URL 的路径，保留协议、主机、端口和查询参数。路径以 / 开头，支持中文及百分号编码；字面 ? 和 # 使用 %3F 和 %23。"
+        }
+    }
     private func fieldBox(_ content: NSView) -> NSBox {
         let box = NSBox(); box.titlePosition = .noTitle
         box.contentViewMargins = .zero; box.contentView = NSView()
         NativeUI.pin(box.contentView!, to: box, insets: NSEdgeInsets(top: 14, left: 12, bottom: 14, right: 12))
         NativeUI.pin(content, to: box.contentView!)
         return box
+    }
+    @objc private func changeURLRewriteTarget(_ sender: NSSegmentedControl) {
+        let targets = URLRewriteTarget.allCases
+        guard targets.indices.contains(sender.selectedSegment) else { return }
+        view.window?.makeFirstResponder(nil)
+        modify { $0.urlRewriteTarget = targets[sender.selectedSegment] }
+        refresh()
     }
     @objc private func changeBodySource(_ sender: NSSegmentedControl) {
         view.window?.makeFirstResponder(nil)
@@ -571,7 +625,7 @@ import RequestmanEditor
         if removes && value.textView === window?.firstResponder { window?.makeFirstResponder(operation) }
         value.isHidden = removes
         name.isEnabled = editable; value.textView.isEditable = editable; remove.isEnabled = editable
-        warning.isHidden = !WorkflowEngine.managedHeaders.contains(entry.name.lowercased())
+        warning.isHidden = !HTTPMessageValidation.managedHeaders.contains(entry.name.lowercased())
     }
 }
 

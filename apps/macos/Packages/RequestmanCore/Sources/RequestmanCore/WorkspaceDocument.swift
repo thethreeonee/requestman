@@ -156,6 +156,18 @@ public enum BodySource: String, Codable, Sendable { case text, file }
 
 public enum BodyValueEncoding: String, Codable, Sendable { case text, base64 }
 
+public enum URLRewriteTarget: String, Codable, CaseIterable, Sendable {
+    case fullURL, host, path
+
+    public var title: String {
+        switch self {
+        case .fullURL: "完整 URL"
+        case .host: "主机"
+        case .path: "路径"
+        }
+    }
+}
+
 public struct ModificationStep: Codable, Equatable, Identifiable, Sendable {
     public var id = UUID()
     public var kind: ModificationKind
@@ -176,6 +188,9 @@ public struct ModificationStep: Codable, Equatable, Identifiable, Sendable {
     public var headers: [HeaderEntry]?
     public var queryParameters: [QueryParameterEntry]?
     public var urlReplacements: [URLReplacementEntry]?
+    /// Missing in older configurations keeps the complete URL rewrite behavior.
+    public var urlRewriteTarget: URLRewriteTarget?
+    public var effectiveURLRewriteTarget: URLRewriteTarget { urlRewriteTarget ?? .fullURL }
     public var urlReplacementEntries: [URLReplacementEntry] {
         get {
             if let urlReplacements { return urlReplacements }
@@ -223,15 +238,8 @@ public struct RequestWorkflow: Codable, Equatable, Identifiable, Sendable {
     public var id = UUID()
     public var name: String
     public var enabled = true
-    public var method = "*"
-    public var matchTarget: WorkflowMatchTarget = .url
-    public var matchRule: WorkflowMatchRule = .wildcard
+    public var matchConditions = WorkflowMatchGroup(conditions: [MatchCondition(field: .url, operation: .wildcard, value: "http://localhost:3000/*")])
     public var isSSE = false
-    public var matchHeaderEnabled = false
-    public var matchHeaderName = ""
-    public var matchHeaderRule: WorkflowMatchRule = .equals
-    public var matchHeaderPattern = ""
-    public var matchPattern = "http://localhost:3000/*"
     public var requestSteps: [ModificationStep] = []
     public var responseSteps: [ModificationStep] = []
     public init(name: String = "新的请求修改") { self.name = name }
@@ -255,54 +263,8 @@ public struct RequestWorkflow: Codable, Equatable, Identifiable, Sendable {
         responseSteps.append(step)
     }
 
-    /// Compatibility for existing callers. Persisted v1 prefixes migrate without widening matches.
-    public var urlPrefix: String {
-        get { matchPattern }
-        set {
-            matchTarget = .url; matchRule = .regex
-            matchPattern = newValue.isEmpty ? "" : "\\A" + NSRegularExpression.escapedPattern(for: newValue)
-        }
-    }
     public func matches(method: String, url: String, headers: [HTTPField] = []) -> Bool {
-        enabled && (self.method == "*" || self.method.caseInsensitiveCompare(method) == .orderedSame)
-            && WorkflowMatcher.matches(target: matchTarget, rule: matchRule, pattern: matchPattern, url: url)
-            && (!matchHeaderEnabled || WorkflowMatcher.matchesHeader(name: matchHeaderName, rule: matchHeaderRule,
-                                                                      pattern: matchHeaderPattern, headers: headers))
-    }
-    private enum CodingKeys: String, CodingKey {
-        case id, name, enabled, method, isSSE, matchTarget, matchRule, matchPattern, matchHeaderEnabled, matchHeaderName, matchHeaderRule, matchHeaderPattern, requestSteps, responseSteps
-    }
-    private enum LegacyKeys: String, CodingKey { case urlPrefix }
-    public init(from decoder: any Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        id = try values.decode(UUID.self, forKey: .id)
-        name = try values.decode(String.self, forKey: .name)
-        enabled = try values.decode(Bool.self, forKey: .enabled)
-        method = try values.decode(String.self, forKey: .method)
-        requestSteps = try values.decode([ModificationStep].self, forKey: .requestSteps)
-        responseSteps = try values.decode([ModificationStep].self, forKey: .responseSteps)
-        isSSE = try values.decodeIfPresent(Bool.self, forKey: .isSSE) ?? false
-        matchHeaderEnabled = try values.decodeIfPresent(Bool.self, forKey: .matchHeaderEnabled) ?? false
-        matchHeaderRule = try values.decodeIfPresent(WorkflowMatchRule.self, forKey: .matchHeaderRule) ?? .equals
-        matchHeaderPattern = try values.decodeIfPresent(String.self, forKey: .matchHeaderPattern) ?? ""
-        matchHeaderName = try values.decodeIfPresent(String.self, forKey: .matchHeaderName) ?? ""
-        if values.contains(.matchPattern) {
-            let target = try values.decode(String.self, forKey: .matchTarget)
-            if target == "header" {
-                // Preserve previously saved Header-only rules as an unrestricted URL plus Header condition.
-                matchTarget = .url; matchRule = .wildcard; matchPattern = "*"
-                matchHeaderEnabled = true
-                matchHeaderRule = try values.decode(WorkflowMatchRule.self, forKey: .matchRule)
-                matchHeaderPattern = try values.decode(String.self, forKey: .matchPattern)
-                return
-            }
-            matchTarget = try values.decode(WorkflowMatchTarget.self, forKey: .matchTarget)
-            matchRule = try values.decode(WorkflowMatchRule.self, forKey: .matchRule)
-            matchPattern = try values.decode(String.self, forKey: .matchPattern)
-        } else {
-            let legacy = try decoder.container(keyedBy: LegacyKeys.self)
-            urlPrefix = try legacy.decode(String.self, forKey: .urlPrefix)
-        }
+        RuleMatchingEngine.matches(self, method: method, url: url, headers: headers)
     }
 }
 
@@ -312,7 +274,7 @@ public struct WorkflowProject: Codable, Equatable, Identifiable, Sendable {
     public var workflows: [RequestWorkflow] = []
     public var enabled = true
     public var symbol = "folder"
-    public init(name: String = "新项目") { self.name = name }
+    public init(name: String = "新规则组") { self.name = name }
     private enum CodingKeys: String, CodingKey { case id, name, workflows, enabled, symbol }
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -346,7 +308,7 @@ public struct ExplicitProxyConfiguration: Codable, Equatable, Sendable {
 }
 
 public struct WorkspaceDocument: Codable, Equatable, Sendable {
-    public var version = 2
+    public var version = 3
     public var projects: [WorkflowProject] = []
     public var environments: [WorkspaceEnvironment] = []
     public var selectedEnvironmentID: UUID?
@@ -379,9 +341,8 @@ public actor WorkspaceDocumentStore {
     public init(url: URL) { self.url = url }
     public func load() throws -> WorkspaceDocument {
         guard FileManager.default.fileExists(atPath: url.path) else { return WorkspaceDocument() }
-        var document = try JSONDecoder().decode(WorkspaceDocument.self, from: Data(contentsOf: url))
-        guard [1, 2].contains(document.version) else { throw WorkflowError.invalid("不支持此工作区版本，未覆盖原文件") }
-        document.version = 2
+        let document = try JSONDecoder().decode(WorkspaceDocument.self, from: Data(contentsOf: url))
+        guard document.version == 3 else { throw WorkflowError.invalid("不支持此工作区版本，未覆盖原文件") }
         return document
     }
     public func save(_ document: WorkspaceDocument) throws {
@@ -397,6 +358,7 @@ extension RequestWorkflow {
     public func duplicated() -> RequestWorkflow {
         var copy = self
         copy.id = UUID()
+        copy.matchConditions = matchConditions.duplicated()
         copy.requestSteps = requestSteps.map { var step = $0; step.id = UUID(); return step }
         copy.responseSteps = responseSteps.map { var step = $0; step.id = UUID(); return step }
         return copy

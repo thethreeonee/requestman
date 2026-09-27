@@ -26,6 +26,8 @@ try:
         str(root / "Requestman/Features/Workspace/AppKitSupport.swift"),
         str(root / "Requestman/Features/Requests/RequestFilterControls.swift"),
         str(root / "Requestman/Features/Requests/RequestRecordsTable.swift"),
+        str(root / "Requestman/Features/Requests/RequestCURL.swift"),
+        str(root / "Requestman/Features/Requests/RequestActionsMenu.swift"),
         str(root / "Scripts/Fixtures/RequestFilterChecks.swift"), "-o", str(executable),
     ], check=True)
     try:

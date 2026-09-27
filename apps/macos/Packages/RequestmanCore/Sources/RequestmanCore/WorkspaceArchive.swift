@@ -3,7 +3,7 @@ import Foundation
 /// Portable configuration only. Certificates, browser profiles and proxy recovery journals
 /// belong to the local machine and are never part of an archive.
 public struct WorkspaceArchive: Codable, Sendable {
-    public enum Scope: String, Codable, Sendable { case workspace, project, workflow }
+    public enum Scope: String, Codable, Sendable { case workspace, rules, project, workflow }
     public let format: String
     public let version: Int
     public let scope: Scope
@@ -14,6 +14,19 @@ public struct WorkspaceArchive: Codable, Sendable {
     public init(document: WorkspaceDocument, preferences: Data) {
         format = "requestman.archive"; version = 1; scope = .workspace
         self.document = document; self.preferences = preferences
+    }
+
+    public init(projects: [WorkflowProject]) {
+        format = "requestman.archive"; version = 1; scope = .rules
+        var document = WorkspaceDocument()
+        document.projects = projects
+        self.document = document; preferences = nil
+    }
+
+    /// File-menu imports only append rules, even when given a complete workspace backup.
+    public func rulesArchive() throws -> WorkspaceArchive {
+        try validate()
+        return scope == .workspace ? WorkspaceArchive(projects: document.projects) : self
     }
 
     public init(project: WorkflowProject, workflowID: UUID? = nil) {
@@ -29,14 +42,14 @@ public struct WorkspaceArchive: Codable, Sendable {
     }
 
     public func validate() throws {
-        guard format == "requestman.archive", version == 1, [1, 2].contains(document.version) else {
+        guard format == "requestman.archive", version == 1, document.version == 3 else {
             throw WorkflowError.invalid("不支持此导出文件版本")
         }
         if scope == .workspace {
             _ = try preferenceValues()
         } else {
             guard preferences == nil, document.environments.isEmpty,
-                  document.projects.count == 1,
+                  (scope == .rules || document.projects.count == 1),
                   scope != .workflow || document.projects[0].workflows.count == 1 else {
                 throw WorkflowError.invalid("导出文件的条目范围不正确")
             }
@@ -56,12 +69,21 @@ public struct WorkspaceArchive: Codable, Sendable {
         return values
     }
 
-    public func merging(into current: WorkspaceDocument) throws -> WorkspaceDocument {
+    public func merging(into current: WorkspaceDocument, importedAt: Date = Date(), timeZone: TimeZone = .current) throws -> WorkspaceDocument {
         try validate()
         var result = scope == .workspace ? document : current
-        result.version = 2
+        result.version = 3
         // Every import appends a fresh project tree, even when importing the same file twice.
-        result.projects = current.projects + document.projects.map { $0.duplicated() }
+        var imported = document.projects.map { $0.duplicated() }
+        if scope == .workflow {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.timeZone = timeZone
+            formatter.dateFormat = "yyyy/MM/dd HH:mm:ss"
+            imported[0].name = "导入 \(formatter.string(from: importedAt))"
+        }
+        result.projects = current.projects + imported
         return result
     }
 

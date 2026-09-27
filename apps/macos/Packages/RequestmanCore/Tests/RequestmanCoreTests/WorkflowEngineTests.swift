@@ -8,7 +8,7 @@ struct WorkflowEngineTests {
         var env = WorkspaceEnvironment(name: "dev")
         env.variables = [NamedValue(name: "token", value: "old")]
         doc.environments = [env]; doc.selectedEnvironmentID = env.id
-        var first = RequestWorkflow(name: "first"); first.urlPrefix = "http://localhost/api"; first.method = "POST"
+        var first = RequestWorkflow(name: "first"); first.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: "http://localhost/api"); first.matchConditions.conditions.append(MatchCondition(field: .method, operation: .equals, value: "POST"))
         var second = first; second.name = "second"; second.id = UUID()
         var project = WorkflowProject(); project.workflows = [first, second]; doc.projects = [project]
         let match = try #require(WorkflowEngine.match(doc, method: "POST", url: "http://localhost/api/test"))
@@ -16,7 +16,7 @@ struct WorkflowEngineTests {
         #expect(match.workflow.name == "first")
         #expect(match.environment?.values["token"] == "old")
         #expect(WorkflowEngine.match(doc, method: "GET", url: "http://localhost/api") == nil)
-        doc.projects[0].workflows[0].urlPrefix = ""
+        doc.projects[0].workflows[0].matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: "")
         #expect(WorkflowEngine.match(doc, method: "POST", url: "http://localhost/api")?.workflow.name == "second")
     }
     @Test func dynamicValuesAreSinglePassAndMissingValuesFail() throws {

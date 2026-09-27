@@ -4,6 +4,42 @@ import RequestmanCore
 
 @MainActor
 struct CaptureLifecycleTests {
+    @Test func transitionRejectsConcurrentStartAndStopWhileRecoveryIsSuspended() async throws {
+        let fixture = CaptureFixture()
+        fixture.system.suspendRestore = true
+        let starting = Task { try await fixture.service.start(configuration: .init(), document: .init(), mode: .systemProxy) }
+        while fixture.system.restoreContinuation == nil { await Task.yield() }
+        #expect(fixture.service.state == .starting)
+        await #expect(throws: (any Error).self) {
+            try await fixture.service.start(configuration: .init(), document: .init(), mode: .browser)
+        }
+        await #expect(throws: (any Error).self) { try await fixture.service.stop() }
+        #expect(fixture.server.configuration == nil)
+        fixture.system.suspendRestore = false
+        fixture.system.restoreContinuation?.resume()
+        fixture.system.restoreContinuation = nil
+        _ = try await starting.value
+        #expect(fixture.service.state == .running)
+        #expect(fixture.server.events.drain().events.map(\.kind) == [.sessionStarted])
+        try await fixture.service.stop()
+        #expect(fixture.service.state == .stopped)
+        #expect(fixture.server.events.drain().events.map(\.kind) == [.sessionStopped])
+    }
+
+    @Test func failedRecoveryHasExplicitStateWithoutClaimingAListeningPort() async throws {
+        let fixture = CaptureFixture()
+        fixture.system.failRestore = true
+        await #expect(throws: (any Error).self) { try await fixture.service.recoverSystemProxy() }
+        #expect(fixture.service.state == .recoveryRequired)
+        #expect(fixture.service.activePort == nil)
+        await #expect(throws: (any Error).self) {
+            try await fixture.service.start(configuration: .init(), document: .init(), mode: .browser)
+        }
+        fixture.system.failRestore = false
+        try await fixture.service.recoverSystemProxy()
+        #expect(fixture.service.state == .stopped)
+    }
+
     @Test(arguments: CaptureMode.allCases)
     func ruleNotificationsFollowCaptureSessionAndResetOnStopAndFailedStart(mode: CaptureMode) async throws {
         let fixture = CaptureFixture()
@@ -222,6 +258,7 @@ private final class CaptureTrace {
 
 @MainActor
 private final class TestLocalProxyServer: LocalProxyServing {
+    nonisolated let events = CaptureEventBuffer()
     nonisolated let records = CaptureRecordBuffer()
     nonisolated let ruleHitNotifications = RuleHitNotificationBuffer()
     let trace: CaptureTrace
@@ -252,6 +289,8 @@ private final class TestSystemProxyManager: SystemProxyManaging {
     var failEnable = false
     var failRestore = false
     var failRestoreAfterEnable = false
+    var suspendRestore = false
+    var restoreContinuation: CheckedContinuation<Void, Never>?
 
     init(trace: CaptureTrace) { self.trace = trace }
     func enable(port: Int) async throws {
@@ -263,6 +302,7 @@ private final class TestSystemProxyManager: SystemProxyManaging {
     func restore() async throws {
         calls.append("restore")
         trace.events.append("restore")
+        if suspendRestore { await withCheckedContinuation { restoreContinuation = $0 } }
         if failRestore { throw WorkflowError.invalid("恢复失败") }
     }
 }

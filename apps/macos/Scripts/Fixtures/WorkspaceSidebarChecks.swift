@@ -23,6 +23,16 @@ enum RequestClipboard {
     static func copy(_ value: String) { copied = value }
 }
 
+@MainActor
+enum WorkspaceTransfer {
+    static var importedRules = false
+    static var exportedRules = false
+    static func importFile(model: WorkspaceModel, window: NSWindow?, rulesOnly: Bool = false) {
+        importedRules = rulesOnly
+    }
+    static func exportRules(model: WorkspaceModel, window: NSWindow?) { exportedRules = true }
+}
+
 /// Only model and unrelated page content are fixtures. The split controller, toolbar,
 /// transitions and snapshot adapter are compiled directly from the production source.
 @MainActor @Observable
@@ -49,11 +59,18 @@ final class WorkspaceModel {
     func toggleCapture() async { isCapturing.toggle() }
     func setRecordingPaused(_ paused: Bool) { history.paused = paused }
     func clearHistory() { history.clear() }
+    var replayUnavailableReason: String? { isCapturing ? nil : "请先启动捕获" }
+    var cancelledReplayID: UUID?
+    func cancelReplay(_ id: UUID) { cancelledReplayID = id }
+    var replayed: (CaptureRecord, Bool)?
+    func replay(_ record: CaptureRecord, editing: Bool, presenter: NSViewController) { replayed = (record, editing) }
     func addMockWorkflow(from: CaptureRecord) {}
 }
 
 @MainActor @Observable
 final class SidebarHistoryFixture {
+    var latestReplay: CaptureRecord? { records.first { $0.replayID != nil } }
+    func reveal(_ id: UUID) { selectedID = id }
     var paused = false
     var dropped = 0
     var filtered: [CaptureRecord] { records.filter { filter.matches($0) } }
@@ -104,6 +121,9 @@ enum WorkspaceSettingsSection { case general, environments }
     private let text = NSTextView()
     init(history: SidebarHistoryFixture, mode: RequestInspectionMode) {
         self.history = history; self.mode = mode; super.init()
+    }
+    func makeContentCopyMenuItem() -> NSMenuItem {
+        RequestActionsMenu.item("复制请求头", reason: "Fixture has no payload") {}
     }
     required init?(coder: NSCoder) { nil }
     override func loadView() {
@@ -172,7 +192,7 @@ struct WorkspaceSidebarChecks {
             RunLoop.main.run(until: Date().addingTimeInterval(0.12))
             window.contentView?.layoutSubtreeIfNeeded()
         }
-        for width: CGFloat in [1440, 600, 420, 1440] {
+        for width: CGFloat in [1440, 600, filters.minimumContentWidth, 1440] {
             window.setContentSize(NSSize(width: width, height: 800)); settle()
             host.requests.refresh(); settle()
             precondition(item.allowsFullHeightLayout && !accessory.isHidden)
@@ -199,6 +219,25 @@ struct WorkspaceSidebarChecks {
         precondition(accessory.view.bounds.height > normalHeight, "Paused status must expand the native accessory")
         model.history.paused = false; host.requests.refresh(); settle()
         precondition(abs(accessory.view.bounds.height - normalHeight) < 1)
+        var replay = CaptureRecord(method: "GET", url: "https://example.test/replay")
+        replay.replayID = replay.id; replay.connectionState = .open
+        model.history.records.insert(replay, at: 0)
+        host.requests.refresh(); settle()
+        precondition(accessory.view.bounds.height > normalHeight)
+        func replayViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(replayViews) }
+        let replayButtons = replayViews(accessory.view).compactMap { $0 as? NSButton }
+        let cancelReplay = replayButtons.first { $0.title == "取消此次重放" }!
+        precondition(!cancelReplay.isHiddenOrHasHiddenAncestor)
+        cancelReplay.performClick(nil)
+        precondition(model.cancelledReplayID == replay.id)
+        replayButtons.first { $0.title == "查看重放结果" }!.performClick(nil)
+        precondition(model.history.selectedID == replay.id)
+        replay.connectionState = .closed; replay.status = 201
+        model.history.records[0] = replay
+        host.requests.refresh(); settle()
+        precondition(cancelReplay.isHiddenOrHasHiddenAncestor)
+        precondition(replayViews(accessory.view).compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains("重放已完成 · HTTP 201") })
+        model.history.records.removeFirst(); host.requests.refresh(); settle()
         if let directory = ProcessInfo.processInfo.environment["REQUESTMAN_SCROLL_CHROME_SNAPSHOTS"] {
             window.center(); window.orderFrontRegardless(); settle()
             for (name, offset) in [("top", -scroll.contentInsets.top - table.headerView!.bounds.height), ("scrolled", CGFloat(300))] {
@@ -246,7 +285,7 @@ struct WorkspaceSidebarChecks {
         var keys = Set<String>()
         for command in WorkspaceCommand.allCases {
             let item = command.menuItem(target: controller)
-            precondition(keys.insert("\(item.keyEquivalent):\(item.keyEquivalentModifierMask.rawValue)").inserted,
+            precondition(item.keyEquivalent.isEmpty || keys.insert("\(item.keyEquivalent):\(item.keyEquivalentModifierMask.rawValue)").inserted,
                          "Shortcuts must be unique")
             commands.addItem(item)
         }
@@ -267,15 +306,21 @@ struct WorkspaceSidebarChecks {
         }
         let receiver = KeyboardCommandReceiver()
         for item in commands.items { item.target = receiver }
-        for command in WorkspaceCommand.allCases {
+        for command in WorkspaceCommand.allCases where !command.key.isEmpty {
             receiver.command = nil
             invoke(command)
             precondition(receiver.command == command, "Key combination must invoke only \(command)")
         }
         for item in commands.items { item.target = controller }
+        for command in [WorkspaceCommand.importRules, .exportRules] {
+            precondition(controller.canPerform(command), "Rule transfer works from the requests page")
+            commands.performActionForItem(at: commands.items.firstIndex { $0.tag == command.rawValue }!)
+        }
+        precondition(WorkspaceTransfer.importedRules && WorkspaceTransfer.exportedRules)
         precondition(controller.canPerform(.capture) && controller.canPerform(.clear))
         model.isTransitioning = true
         precondition(!controller.canPerform(.capture))
+        precondition(!controller.canPerform(.importRules) && !controller.canPerform(.exportRules))
         model.isTransitioning = false
         invoke(.copyURL)
         precondition(RequestClipboard.copied == record.url)
@@ -297,10 +342,12 @@ struct WorkspaceSidebarChecks {
         invoke(.requests)
         precondition(model.selection == .requests)
         window.hasKeyboardFocus = false
+        precondition(!controller.canPerform(.importRules) && !controller.canPerform(.exportRules))
         precondition(!controller.canPerform(.capture) && !controller.canPerform(.newWorkflow),
                      "Workspace commands must not act behind another key window")
         window.hasKeyboardFocus = true
         model.loaded = false
+        precondition(!controller.canPerform(.importRules) && !controller.canPerform(.exportRules))
         precondition(!controller.canPerform(.newWorkflow))
         print("Keyboard commands passed: native menu dispatch, unique bindings, recording/clear/copy, page changes and key-window/state validation")
     }
@@ -731,38 +778,29 @@ struct WorkspaceSidebarChecks {
                                                    inspector: NSSplitViewItem) {
         let root = inspector.viewController as! WorkspaceInspectorController
         let mode = root.requests.mode
-        let item = window.toolbar!.items.first { $0.itemIdentifier == inspectorModeIdentifier }!
-        let control = item.view as! NSSegmentedControl
-        precondition(mode.version == .final && control.selectedSegment == 1,
-                     "Each workspace starts with the modified request selected")
-        precondition(control.segmentCount == 3 && control.trackingMode == .selectOne)
-        precondition((0..<control.segmentCount).map { control.label(forSegment: $0) } == ["修改前", "修改后", "修改对比"])
-        // AppKit may promote the configured .large size when installing the native toolbar.
-        log("Hosted native mode style: style=\(control.segmentStyle.rawValue), distribution=\(control.segmentDistribution.rawValue), size=\(control.controlSize.rawValue)")
-        precondition(control.segmentStyle == .automatic && control.segmentDistribution == .fit)
-        if #available(macOS 26.0, *) { precondition(control.borderShape == .capsule) }
-        if #available(macOS 27.0, *) { precondition(control.role == .tabs) }
-        precondition(control.target === findController(in: host))
+        precondition(mode.version == .difference, "Each workspace starts with modification comparison")
+        let more = window.toolbar!.items.first { $0.itemIdentifier == inspectorMoreIdentifier } as! NSMenuToolbarItem
         for (index, version) in InspectionVersion.allCases.enumerated() {
-            control.selectedSegment = index
-            precondition(control.sendAction(control.action, to: control.target), "Use the actual segmented-control action")
-            precondition(mode.version == version, "The native mode action must update the shared production state")
+            more.menu.delegate?.menuNeedsUpdate?(more.menu)
+            let submenu = more.menu.items.last!.submenu!
+            precondition(submenu.items.map(\.title) == ["修改前", "修改后", "修改对比"])
+            precondition(submenu.items.filter { $0.state == .on }.count == 1)
+            let item = submenu.items[index]
+            precondition(NSApp.sendAction(item.action!, to: item.target, from: item))
+            precondition(mode.version == version)
             waitFor(host) { findView(NSTextView.self, in: root.view)?.string == version.title }
-            precondition(root.requests.mode === mode, "The hosting root must keep the same shared mode object")
         }
-        precondition(mode.version == .difference)
-        log("Inspector mode actions passed: three native segments update the same observable production mode and its hosted consumer; default is modified.")
+        log("Inspector mode submenu checks passed: native checkmarks, all three actions, default comparison.")
     }
 
     private static func expectInspectionMode(_ window: NSWindow, root: WorkspaceInspectorController,
                                              mode: RequestInspectionMode, visible: Bool) {
-        precondition(root.requests.mode === mode && mode.version == .difference,
-                     "Display mode must survive record changes, hosted-content updates and collapse/reopen")
-        let items = window.toolbar!.items.filter { $0.itemIdentifier == inspectorModeIdentifier }
-        precondition(items.count == (visible ? 1 : 0), "Collapsed details must remove their sole display-mode entry")
+        precondition(root.requests.mode === mode && mode.version == .difference)
+        precondition(!window.toolbar!.items.contains { $0.itemIdentifier == inspectorModeIdentifier })
         if visible {
-            precondition((items[0].view as! NSSegmentedControl).selectedSegment == 2,
-                         "Reopened mode control must preserve the selected segment")
+            let more = window.toolbar!.items.first { $0.itemIdentifier == inspectorMoreIdentifier } as! NSMenuToolbarItem
+            more.menu.delegate?.menuNeedsUpdate?(more.menu)
+            precondition(more.menu.items.last!.submenu!.items[2].state == .on)
         }
     }
 
@@ -770,7 +808,7 @@ struct WorkspaceSidebarChecks {
                                                        inspector: NSSplitViewItem) {
         let initialWidth = inspector.viewController.view.bounds.width
         let windowWidth = window.frame.width
-        let identifiers = [inspectorTitleIdentifier, inspectorModeIdentifier, inspectorMoreIdentifier, inspectorToggleIdentifier]
+        let identifiers = [inspectorTitleIdentifier, inspectorMoreIdentifier, inspectorToggleIdentifier]
         for targetWidth: CGFloat in [400, 520] {
             controller.splitView.setPosition(controller.splitView.bounds.maxX - targetWidth - controller.splitView.dividerThickness,
                                              ofDividerAt: 1)
@@ -851,6 +889,8 @@ struct WorkspaceSidebarChecks {
     }
 
     private static func checkRequestMenu(_ controller: WorkspaceSplitController, model: WorkspaceModel, window: NSWindow) {
+        let wasCapturing = model.isCapturing
+        defer { model.isCapturing = wasCapturing }
         let savedRecords = model.history.records
         let selectedID = model.history.selectedID
         defer {
@@ -869,9 +909,26 @@ struct WorkspaceSidebarChecks {
         precondition(item.view == nil && item.isBordered, "AppKit must own the menu button's appearance")
         let menu = item.menu
         menu.delegate?.menuNeedsUpdate?(menu)
-        precondition(menu.items.map(\.title) == ["复制完整 URL", "复制原始请求为 cURL", "复制修改后请求为 cURL"])
-        precondition(menu.items.allSatisfy(\.isEnabled))
-        for (index, menuItem) in menu.items.enumerated() {
+        precondition(menu.items.map(\.title) == ["重放", "编辑后重放…", "", "复制", "", "显示选项"])
+        precondition(menu.items[2].isSeparatorItem && menu.items[4].isSeparatorItem)
+        func copyItems() -> [NSMenuItem] {
+            let items = menu.items[3].submenu!.items
+            precondition(items.map(\.title) == ["复制 URL", "复制请求头", "复制原始请求 cURL", "复制修改后请求 cURL"])
+            return [items[0], items[2], items[3]]
+        }
+        precondition(copyItems().allSatisfy(\.isEnabled))
+        model.isCapturing = false
+        menu.delegate?.menuNeedsUpdate?(menu)
+        precondition(!menu.items[0].isEnabled && !menu.items[1].isEnabled)
+        model.isCapturing = true
+        menu.delegate?.menuNeedsUpdate?(menu)
+        for (index, editing) in [false, true].enumerated() {
+            let action = menu.items[index]
+            precondition(action.isEnabled)
+            precondition(NSApp.sendAction(action.action!, to: action.target, from: action))
+            precondition(model.replayed?.0.id == record.id && model.replayed?.1 == editing)
+        }
+        for (index, menuItem) in copyItems().enumerated() {
             RequestClipboard.copied = nil
             precondition(NSApp.sendAction(menuItem.action!, to: menuItem.target, from: menuItem))
             let copied = RequestClipboard.copied!
@@ -886,13 +943,13 @@ struct WorkspaceSidebarChecks {
         model.history.selectedID = next.id
         update(controller, model: model)
         menu.delegate?.menuNeedsUpdate?(menu)
-        precondition(NSApp.sendAction(menu.items[0].action!, to: menu.items[0].target, from: menu.items[0]))
+        precondition(NSApp.sendAction(copyItems()[0].action!, to: copyItems()[0].target, from: copyItems()[0]))
         precondition(RequestClipboard.copied == next.url, "Opening the menu again must use the new selected request")
-        precondition(!menu.items[1].isEnabled && !menu.items[2].isEnabled, "Uncollected requests cannot export cURL")
+        precondition(!copyItems()[1].isEnabled && !copyItems()[2].isEnabled, "Uncollected requests cannot export cURL")
         next.urlWasTruncated = true
         model.history.records = [next]
         menu.delegate?.menuNeedsUpdate?(menu)
-        precondition(!menu.items[0].isEnabled, "A truncated URL cannot be copied as complete")
+        precondition(!copyItems()[0].isEnabled, "A truncated URL cannot be copied as complete")
         log("Inspector menu checks passed: native toolbar menu, correct copy actions, fresh selection and incomplete-data restrictions; user pasteboard untouched.")
     }
 
@@ -1001,7 +1058,7 @@ struct WorkspaceSidebarChecks {
         precondition(!items.contains { $0.itemIdentifier == .toggleInspector || $0.itemIdentifier == .toggleSidebar },
                      "AppKit's reserved nil-target toggles must not duplicate the explicit-target native items")
         precondition(items.filter { $0.itemIdentifier == inspectorTitleIdentifier }.count == (inspectorVisible ? 1 : 0))
-        precondition(items.filter { $0.itemIdentifier == inspectorModeIdentifier }.count == (inspectorVisible && requests ? 1 : 0))
+        precondition(!items.contains { $0.itemIdentifier == inspectorModeIdentifier })
         precondition(items.filter { $0.itemIdentifier == inspectorMoreIdentifier }.count == (inspectorVisible && requests ? 1 : 0))
         let infoIdentifier = NSToolbarItem.Identifier("workspace.templateInfo")
         precondition(items.filter { $0.itemIdentifier == infoIdentifier }.count == (inspectorVisible && !requests ? 1 : 0))
@@ -1018,8 +1075,8 @@ struct WorkspaceSidebarChecks {
         }
         if inspectorVisible && requests {
             let moreIndex = items.firstIndex { $0.itemIdentifier == inspectorMoreIdentifier }!
-            precondition(items[moreIndex - 1].itemIdentifier == inspectorModeIdentifier,
-                         "The only display-mode control belongs immediately before More")
+            precondition(items[moreIndex - 1].itemIdentifier == .flexibleSpace,
+                         "More is aligned to the trailing edge of the inspector toolbar")
             precondition(items[moreIndex + 1].itemIdentifier == inspectorToggleIdentifier,
                          "More belongs immediately before the inspector toggle")
         }

@@ -30,12 +30,14 @@ public struct EnvironmentSnapshot: Sendable {
     }
 }
 
-/// Prepared outside the traffic hot path. Does not execute or interpret scripts.
+/// Immutable execution requirements. Planning does not execute or interpret scripts.
 public struct FlowExecutionPlan: Sendable {
     public let version: UUID
     public let environment: EnvironmentSnapshot
     public let requestBodyMode: BodyPreparationMode
     public let responseBodyMode: BodyPreparationMode
+    private let requestRequirements: PhaseExecutionRequirements
+    private let responseRequirements: PhaseExecutionRequirements
 
     public init(
         version: UUID = UUID(),
@@ -47,6 +49,22 @@ public struct FlowExecutionPlan: Sendable {
         self.environment = environment
         requestBodyMode = requestInputs.contains(.completeBody) ? .buffered : .streaming
         responseBodyMode = responseInputs.contains(.completeBody) ? .buffered : .streaming
+        requestRequirements = PhaseExecutionRequirements(needsCompleteBody: requestBodyMode == .buffered)
+        responseRequirements = PhaseExecutionRequirements(needsCompleteBody: responseBodyMode == .buffered)
+    }
+
+    public init(version: UUID = UUID(), environment: EnvironmentSnapshot,
+                requestSteps: [ModificationStep], responseSteps: [ModificationStep]) {
+        self.version = version
+        self.environment = environment
+        requestRequirements = PhaseExecutionRequirements(steps: requestSteps, phase: .request)
+        responseRequirements = PhaseExecutionRequirements(steps: responseSteps, phase: .response)
+        requestBodyMode = requestRequirements.needsCompleteBody ? .buffered : .streaming
+        responseBodyMode = responseRequirements.needsCompleteBody ? .buffered : .streaming
+    }
+
+    public func requirements(for phase: FlowPhase) -> PhaseExecutionRequirements {
+        phase == .request ? requestRequirements : responseRequirements
     }
 
     public func bodyMode(for phase: FlowPhase) -> BodyPreparationMode {

@@ -24,10 +24,12 @@ public struct HTTPSDecryptionConfiguration: Codable, Equatable, Sendable {
     public static func parseDomains(_ text: String) throws -> [String] {
         var result: [String] = []
         var seen = Set<String>()
-        for entry in text.split(whereSeparator: { $0.isWhitespace || $0 == "," || $0 == "，" }) {
-            let pattern = normalized(String(entry))
+        for component in text.split(separator: ";") {
+            let entry = component.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !entry.isEmpty else { continue }
+            let pattern = normalized(entry)
             guard isValid(pattern) else {
-                throw WorkflowError.invalid("域名格式无效：\(entry)。请输入域名或 *.example.com，不包含协议、端口或路径。")
+                throw WorkflowError.invalid("域名格式无效：\(entry)。多个域名请用英文分号 ; 分隔；请输入域名或 *.example.com，不包含协议、端口或路径。")
             }
             if seen.insert(pattern).inserted { result.append(pattern) }
         }

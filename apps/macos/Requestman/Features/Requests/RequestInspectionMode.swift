@@ -15,5 +15,5 @@ enum InspectionVersion: String, CaseIterable, Sendable {
 /// The toolbar and all request/response panes share one display mode.
 @MainActor @Observable
 final class RequestInspectionMode {
-    var version: InspectionVersion = .final
+    var version: InspectionVersion = .difference
 }

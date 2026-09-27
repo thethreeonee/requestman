@@ -15,12 +15,28 @@ import RequestmanCore
 /// Real TCP/TLS tests. All certificates and trust anchors live only in memory.
 @Suite(.serialized)
 struct HTTPSIntegrationTests {
+    @Test(arguments: [false, true]) func requestReplayHTTPSUsesTLSAndConfiguredUpstream(upstream: Bool) async throws {
+        try await withHTTPSHarness { h in
+            try await h.start(useHTTPUpstream: upstream)
+            try await h.proxy.replay(RequestReplayDraft(method: "GET", url: h.originURL + "replay", headers: [], body: Data()))
+            var completed: CaptureRecord?
+            for _ in 0..<200 {
+                if let record = h.proxy.records.drain().records.last(where: { $0.connectionState == .closed }) { completed = record; break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let record = try #require(completed)
+            #expect(record.status == 200 && record.responseBody.data == Data("secure-origin-body".utf8))
+            #expect(record.url == h.originURL + "replay" && record.error == nil)
+            #expect(h.identityRequests.withLock { $0 } == 0)
+        }
+    }
+
     @Test(arguments: [false, true])
     func domainSelectionAndAllRequestsSwitchApplyToNewConnections(useHTTPUpstream: Bool) async throws {
         try await withHTTPSHarness { h in
             try await h.start(useHTTPUpstream: useHTTPUpstream)
             var document = WorkspaceDocument()
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var response = ModificationStep(kind: .replaceBody); response.value = "decrypted-and-modified"
             workflow.responseSteps = [response]
             var project = WorkflowProject(); project.workflows = [workflow]
@@ -78,7 +94,7 @@ struct HTTPSIntegrationTests {
         let records = CaptureRecordBuffer()
         let shared = ProxySharedState()
         var workflow = RequestWorkflow()
-        workflow.urlPrefix = "https://example.test/"
+        workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: "https://example.test/")
         // Hold the request until its full body arrives; no script or upstream is started.
         workflow.requestSteps = [ModificationStep(kind: .script)]
         var project = WorkflowProject(); project.workflows = [workflow]
@@ -146,7 +162,7 @@ struct HTTPSIntegrationTests {
 
     @Test func reusedConnectionResetsWorkflowAndBodyState() async throws {
         try await withHTTPSHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL + "modify"
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL + "modify")
             var header = ModificationStep(kind: .setHeader)
             header.name = "X-Modified"; header.value = "yes"
             var body = ModificationStep(kind: .replaceBody); body.value = "replacement"
@@ -235,7 +251,7 @@ struct HTTPSIntegrationTests {
 
     @Test func requestAndResponseWorkflowsModifyDecryptedHTTPS() async throws {
         try await withHTTPSHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var requestHeader = ModificationStep(kind: .setHeader)
             requestHeader.name = "X-Key"; requestHeader.value = "https-workflow"
             var requestBody = ModificationStep(kind: .replaceBody); requestBody.value = "changed-request"
@@ -263,7 +279,7 @@ struct HTTPSIntegrationTests {
 
     @Test func HTTPSMockSkipsOriginAndStillAppliesResponseWorkflow() async throws {
         try await withHTTPSHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var mock = ModificationStep(kind: .mock); mock.status = 201; mock.value = "secure-local-mock"
             var header = ModificationStep(kind: .setHeader); header.name = "X-Mock-Flow"; header.value = "yes"
             workflow.requestSteps = [mock]; workflow.responseSteps = [header]
@@ -287,7 +303,7 @@ struct HTTPSIntegrationTests {
 
     @Test func HTTPSRedirectCapturesAnEmptyFinalBodyWithoutOriginResponse() async throws {
         try await withHTTPSHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var redirect = ModificationStep(kind: .redirect); redirect.status = 302; redirect.value = "https://example.test/next"
             workflow.requestSteps = [redirect]
             try await h.start(workflow: workflow)

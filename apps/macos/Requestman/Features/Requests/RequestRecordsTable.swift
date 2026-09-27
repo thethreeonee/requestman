@@ -5,6 +5,11 @@ import RequestmanCore
 final class RequestRecordsTable: NSView {
     static let columnWidthsKey = "requestLog.columnWidths.v1"
     var onSelectionChange: (UUID?) -> Void = { _ in }
+    var replayUnavailableReason: () -> String? = { nil }
+    var onCancelReplay: (UUID) -> Void = { _ in }
+    var revealSource: ((UUID) -> Void)?
+    var sourceExists: (UUID) -> Bool = { _ in false }
+    var onReplay: (CaptureRecord, Bool) -> Void = { _, _ in }
     var onMockRequest: (CaptureRecord) -> Void = { _ in }
     private let coordinator: Coordinator
     private let scrollView: NSScrollView
@@ -14,6 +19,11 @@ final class RequestRecordsTable: NSView {
         scrollView = RecordsScrollView()
         super.init(frame: .zero)
         coordinator.onSelectionChange = { [weak self] in self?.onSelectionChange($0) }
+        coordinator.replayUnavailableReason = { [weak self] in self?.replayUnavailableReason() }
+        coordinator.onCancelReplay = { [weak self] in self?.onCancelReplay($0) }
+        coordinator.revealSource = { [weak self] in self?.revealSource?($0) }
+        coordinator.sourceExists = { [weak self] in self?.sourceExists($0) ?? false }
+        coordinator.onReplay = { [weak self] in self?.onReplay($0, $1) }
         coordinator.onMockRequest = { [weak self] in self?.onMockRequest($0) }
         configure()
     }
@@ -76,6 +86,11 @@ final class RequestRecordsTable: NSView {
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         var selection: UUID?
         var onSelectionChange: (UUID?) -> Void = { _ in }
+        var replayUnavailableReason: () -> String? = { nil }
+        var onCancelReplay: (UUID) -> Void = { _ in }
+        var revealSource: ((UUID) -> Void)?
+        var sourceExists: (UUID) -> Bool = { _ in false }
+        var onReplay: (CaptureRecord, Bool) -> Void = { _, _ in }
         var onMockRequest: (CaptureRecord) -> Void = { _ in }
         weak var table: NSTableView?
         private var rows: [RecordRow] = []
@@ -165,6 +180,7 @@ final class RequestRecordsTable: NSView {
             let indexes = selectedRow.map { IndexSet(integer: $0) } ?? IndexSet()
             if table.selectedRowIndexes != indexes {
                 table.selectRowIndexes(indexes, byExtendingSelection: false)
+                if let selectedRow { table.scrollRowToVisible(selectedRow) }
             }
         }
 
@@ -265,6 +281,10 @@ final class RequestRecordsTable: NSView {
             item.representedObject = record
             item.toolTip = CapturedMockWorkflow.unavailableReason(for: record)
             item.isEnabled = item.toolTip == nil
+            RequestActionsMenu.append(to: menu, record: record, replayUnavailable: replayUnavailableReason(),
+                                      cancelReplay: onCancelReplay,
+                                      revealSource: record.replaySourceID.map(sourceExists) == true ? revealSource : nil, replay: onReplay)
+            menu.addItem(.separator())
             menu.addItem(item)
             return menu
         }
@@ -342,6 +362,7 @@ private struct RecordRow: Equatable {
     let duration: String
     let result: String
     let failure: String?
+    let replay: String?
 
     init(record: CaptureRecord, timeFormatter: DateFormatter, workflowName: String?) {
         id = record.id
@@ -356,7 +377,8 @@ private struct RecordRow: Equatable {
         status = record.status
         let seconds = max(0, record.duration)
         duration = record.connectionState.isActive ? record.connectionState.rawValue : seconds >= 1 ? String(format: "%.1f s", seconds) : String(format: "%.0f ms", seconds * 1000)
-        result = record.error.map { "\(record.outcome.rawValue) · \($0)" } ?? record.outcome.rawValue
+        result = record.replaySummary ?? record.error.map { "\(record.outcome.rawValue) · \($0)" } ?? record.outcome.rawValue
+        replay = record.replaySummary
         failure = record.error ?? (record.outcome == .failed ? record.outcome.rawValue : nil)
     }
 }
@@ -430,9 +452,9 @@ private final class RecordCell: NSTableCellView {
             primaryColor = RequestStatusStyle.color(row.status)
         case .request:
             primary.stringValue = row.url
-            secondary.stringValue = row.failure ?? ""
-            secondary.isHidden = row.failure == nil
-            secondaryColor = .systemRed
+            secondary.stringValue = row.replay ?? row.failure ?? ""
+            secondary.isHidden = row.replay == nil && row.failure == nil
+            secondaryColor = row.failure == nil ? .secondaryLabelColor : .systemRed
             methodTag.setMethod(row.method)
         case .rules:
             primary.stringValue = row.project

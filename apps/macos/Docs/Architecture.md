@@ -1,5 +1,7 @@
 # macOS 架构边界
 
+当前模块与执行契约见 [捕获与规则执行架构](EngineArchitecture.md)：AppKit MVC → CaptureEngine → 事务协调、规则匹配与修改执行；每种步骤由独立 Processor 实现。
+
 ## 产品方向与接入顺序
 
 主要场景是辅助 Chrome Web 开发，通过请求出站与响应回站两条流程执行自动修改、动态取值、脚本、辅助请求、Mock 和可选人工断点。完整范围、执行语义建议、模块选型及验收见 [产品与技术设计草案](ProductDesign.md)。当前已接入原生工作区、HTTP/1.1 显式代理、HTTPS 解密与未配置证书时的 CONNECT 透传。
@@ -14,13 +16,15 @@
 
 | 组件 | 职责 | 当前状态 |
 | --- | --- | --- |
-| Requestman 宿主 App | 项目、双向流程、全局记录、环境与连接配置 | 纯 AppKit 窗口、页面与配置持久化已接入；运行效果待人工验收 |
+| Requestman 宿主 App | 规则组、双向流程、全局记录、环境与连接配置 | 纯 AppKit 窗口、页面与配置持久化已接入；运行效果待人工验收 |
 | RequestmanCore | 工作区模型、模板与动作、捕获契约、资源边界 | 已实现基础动作与测试 |
-| LocalCaptureService / LocalProxyCaptureService | 宿主捕获边界与代理生命周期 | 宿主提供恢复记录路径，包内服务持有会话模式；不放宽透明捕获的空选择校验 |
+| CaptureEngine / CaptureSession | 捕获会话、代理重配与恢复 | 实现 CaptureService；旧 LocalProxyCaptureService 保留兼容别名 |
 | SystemProxyController | 系统 HTTP/HTTPS 代理接管、原配置保存与恢复 | SystemConfiguration + Authorization Services；设置策略与失败恢复已有替身测试，系统授权待人工验收 |
 | TransparentProxy 系统扩展 | 按来源筛选 TCP/UDP 流，转交代理引擎 | 待实现 |
 | RequestmanProxy | HTTP/CONNECT、双向修改、Mock、上游连接 | SwiftNIO + NIOSSL 实现 HTTP/1.1、HTTPS 解密与加密透传 |
-| WorkflowEngine | 有序双向动作、动态模板、环境快照 | 基础动作与隔离同步脚本已接入；异步脚本、辅助请求、断点待实现 |
+| RuleMatchingEngine | 规则选择与条件诊断 | 真实捕获和匹配测试共用 |
+| ModificationExecutionEngine / StepProcessor | 有序双向修改、每步原子提交、执行 trace | 模板与脚本运行时独立；WorkflowEngine 仅保留兼容委托 |
+| TransactionCoordinator | 固定匹配、环境、计划与取消上下文 | 网络传输通过协调器调用执行引擎 |
 | 存储 | 工作区持久化、全局记录 | JSON 配置保存及有界内存记录已实现；数据库待实现 |
 | RequestmanCertificates | 本机 CA、钥匙串安装、SSL 信任与校验 | 原生引导和可重试流程已实现；系统授权与浏览器实测待验收 |
 
@@ -28,7 +32,7 @@
 
 `ProxyTLS` 使用 Apple NIOSSL 处理 TLS，出站验证异步交给 macOS `SecTrust`，同时检查真实目标的主机名和系统/用户信任；关闭网络证书补取避免系统代理递归，不关闭证书校验。仅 internal 测试构造器允许内存测试锚点。CONNECT 建立、升级后等待内层请求分别限时 30 秒；HTTP 请求头收到后取消等待计时器，事务不设总时限；升级时先安装 TLS 处理器，再释放 CONNECT decoder 缓冲的首包数据。解密记录完整保留 URL、方法、双向 Header 和旁路采集的 Body；网络线程不等待完整内容、不解压。回环测试不安装或信任本机 CA。
 
-依赖方向：`Features → WorkspaceModel → CaptureService / RequestmanCore`。本轮本地代理库运行在宿主进程的独立 NIO 事件循环。未来系统扩展和代理核心需要明确的 IPC 协议，不直接跨进程共享 UI 状态。`CaptureConfiguration` 目前只是 Swift 模块间的数据契约，还不是稳定 IPC 协议。
+依赖方向：`Features → WorkspaceModel → CaptureService / RequestmanCore`。`AppComposition` 统一创建并注入服务；工作区模型不再自行创建证书和捕获实现。本轮本地代理库运行在宿主进程的独立 NIO 事件循环。未来系统扩展和代理核心需要明确的 IPC 协议，不直接跨进程共享 UI 状态。`CaptureConfiguration` 目前只是 Swift 模块间的数据契约，还不是稳定 IPC 协议。
 
 CA 材料和实际信任结果使用最多 5 秒的固定期限缓存，命中不会续期；状态刷新、生成、安装、信任操作先失效旧缓存，应用重新激活也刷新状态。刷新失败不能沿用旧的可信结果。站点 TLS 服务端 context 按叶证书 DER 缓存最多 128 个，复用前仍须经过证书提供方的信任检查；出站共用 TLS context，但每次新连接的目标与信任验证独立执行。
 
@@ -38,17 +42,17 @@ CA 材料和实际信任结果使用最多 5 秒的固定期限缓存，命中�
 
 HTTP/1.1 顺序请求复用下游连接，每条下游最多保留一个同目标、同出口的上游连接，HTTPS 同时复用 TLS 会话。上游主动关闭后，下次请求重新建连；不重试已发送请求。每个事务完成后清空规则匹配、Body 采集器和内存租约，保留独立记录；闲置 30 秒关闭且不生成虚假失败记录，停止监听关闭在用和闲置连接。仍限制最多 256 个下游连接，不支持流水线和跨客户端连接池。 浏览器预连接或请求完成后的空闲 TLS 连接收到 `uncleanShutdown`（未发送 `close_notify`）时只关闭连接，不新增失败 CONNECT；真实握手中断和进行中的请求仍记录失败与不完整 Body。TLS 错误保留 NIOSSL 枚举及底层 BoringSSL 原因，避免 NSError 桥接只显示数字错误码。
 
-主窗口由 `WorkspaceWindowController` 创建 `NSWindow`，直接将 `WorkspaceSplitController` 作为 contentViewController；窗口与分栏尺寸全部由 AppKit 管理。项目侧栏、主内容和 Inspector 使用保留的 `NSViewController`，交互内容约束到各栏的系统 safe area；macOS 26+ 请求日志的滚动视图延伸到主栏顶部，由系统自动为标题栏和筛选附件留出内容 inset。两侧分别使用 `NSSplitViewItem(sidebarWithViewController:)` 与 `NSSplitViewItem(inspectorWithViewController:)`，启用 `allowsFullHeightLayout` 与窗口 `.fullSizeContentView`，由系统提供贯穿窗口高度的侧栏材质。左栏范围 260–400 pt，初始 320 pt；主内容最小 420 pt；右栏范围 400–760 pt，初始 520 pt。之后由分栏保留用户宽度，拖动分隔线不改变工作区外框。`ObservedViewController` 用 `withObservationTracking` 注册一次性依赖并在变更后重新注册，在主线程更新既有控件；不轮询模型，不因每次输入重建编辑器。窗口工具栏使用独立 `WorkspaceToolbarSnapshot` 跳过相同状态的重复更新。
+主窗口由 `WorkspaceWindowController` 创建 `NSWindow`，直接将 `WorkspaceSplitController` 作为 contentViewController；窗口与分栏尺寸全部由 AppKit 管理。规则组侧栏、主内容和 Inspector 使用保留的 `NSViewController`，交互内容约束到各栏的系统 safe area；macOS 26+ 请求日志的滚动视图延伸到主栏顶部，由系统自动为标题栏和筛选附件留出内容 inset。两侧分别使用 `NSSplitViewItem(sidebarWithViewController:)` 与 `NSSplitViewItem(inspectorWithViewController:)`，启用 `allowsFullHeightLayout` 与窗口 `.fullSizeContentView`，由系统提供贯穿窗口高度的侧栏材质。左栏范围 260–400 pt，初始 320 pt；主内容最小 420 pt；右栏范围 400–760 pt，初始 520 pt。之后由分栏保留用户宽度，拖动分隔线不改变工作区外框。`ObservedViewController` 用 `withObservationTracking` 注册一次性依赖并在变更后重新注册，在主线程更新既有控件；不轮询模型，不因每次输入重建编辑器。窗口工具栏使用独立 `WorkspaceToolbarSnapshot` 跳过相同状态的重复更新。
 
-项目树使用 `ProjectOutlineView` 原生选择与展开事件，`RulesSidebarCell` 分别约束箭头后的图标、名称、数量和固定操作栏，文件夹与规则同为 30 pt，名称对齐到同一竖线。底部恢复左加号、右搜索的原有布局。单击选择、双击文件夹整行展开收起；双击使用原生 `doubleAction`；鼠标和键盘展开同步更新原生状态，再用显式 Core Animation 处理行位移、淡入淡出与固定 SF Symbol 的居中箭头旋转，减少动态效果时直接切换。过时动画按代次取消，结束、reload 和脱离窗口时清理快照。步骤列表复用未变更的卡片并保留 `NSBox` 自有内容视图，切换规则时停止旧编辑器观察。`ProjectIconMenu` 以原生 palette 菜单组成六列图标网格，仅展示预览并保留辅助功能名称。`ProjectSidebarRowView` 仅为用户指定的悬停反馈增加浅灰装饰层，用 `CABasicAnimation` 动画 `opacity`（移入 120 ms、移出 160 ms）；model layer 保存终值、presentation layer 用于中途反转，选中、移除与窗口失焦时清理反馈，颜色随有效外观更新。选择、焦点、展开箭头和右键菜单继续由 AppKit 提供。设计与验收范围见 [项目侧栏](Design/project-sidebar.md)。
+规则组树使用 `ProjectOutlineView` 原生选择与展开事件，`RulesSidebarCell` 分别约束箭头后的图标、名称、数量和固定操作栏，文件夹与规则同为 30 pt，名称对齐到同一竖线。底部恢复左加号、右搜索的原有布局。单击选择、双击文件夹整行展开收起；双击使用原生 `doubleAction`；鼠标和键盘展开同步更新原生状态，再用显式 Core Animation 处理行位移、淡入淡出与固定 SF Symbol 的居中箭头旋转，减少动态效果时直接切换。过时动画按代次取消，结束、reload 和脱离窗口时清理快照。步骤列表复用未变更的卡片并保留 `NSBox` 自有内容视图，切换规则时停止旧编辑器观察。`ProjectIconMenu` 以原生 palette 菜单组成六列图标网格，仅展示预览并保留辅助功能名称。`ProjectSidebarRowView` 仅为用户指定的悬停反馈增加浅灰装饰层，用 `CABasicAnimation` 动画 `opacity`（移入 120 ms、移出 160 ms）；model layer 保存终值、presentation layer 用于中途反转，选中、移除与窗口失焦时清理反馈，颜色随有效外观更新。选择、焦点、展开箭头和右键菜单继续由 AppKit 提供。设计与验收范围见 [规则组侧栏](Design/project-sidebar.md)。
 
 主窗口仅安装一条 `.unified` 原生 `NSToolbar`，工作区切换直接使用 `NSSegmentedControl`。`WorkspaceSettingsWindowController` 持有独立设置窗口，使用 `ToolbarSectionControl` 原生分段控件切换“通用 / 环境管理”，保留 `.large` 尺寸与系统胶囊形状。两个窗口隐藏标题文字，设置内容固定 800 × 540 pt，切换页面不改变窗口大小。通用页在同一个 `NSScrollView` 中用系统 `NSBox` 分组，收纳启动方式、浏览器、本地代理、上游代理、协议支持和 HTTPS 证书。浏览器使用带应用图标的 `NSPopUpButton`；设置内的环境列表与编辑页采用 `NSSplitViewController`、`NSTableView` 和 AppKit 字段。设置不另装第二条导航栏。
 
-请求日志使用原生 `NSTableView`，按“时间 / 状态码 / 请求 / 命中的规则 / 环境 / 耗时”展示。行高 56 pt，主文字 13 pt。请求列将有同色边框和浅背景的方法标签与 URL 单行居中，仅失败时显示第二行说明；列表与详情共用 `RequestMethodTag`，按与实际文字相同配置的 `NSTextFieldCell.cellSize` 计算完整宽度，包含系统截断留白；请求列的最小宽度沿用同一测量，优先完整展示方法名。状态码按 1xx/2xx/3xx/4xx–5xx 分别使用系统蓝/绿/橙/红色。规则列上行以次级颜色展示项目名称，下行以主颜色按捕获的工作流 ID 展示当前名称，改名同步刷新、删除后回退到捕获名称；同一工作流的多个执行步骤不计作多条命中，不显示 +N，不再单设项目列。列宽支持原生表头拖动，按稳定列标识保存到 `UserDefaults`（`requestLog.columnWidths.v1`），重新打开页面或 App 时恢复。通过 `NSTableColumn.width` 的变化在原生鼠标跟踪过程中同步调整相邻列及表格边界，松手通知仅保存最终列宽，窗口或详情栏改变可用宽度时按保存比例适配并保留最小宽度；记录刷新不重置列宽，自动适配不覆盖偏好。保持无横向滚动、禁止列重排；耗时固定在最右列，标题与数值右对齐。长文本截断并提供完整提示。
+请求日志使用原生 `NSTableView`，按“时间 / 状态码 / 请求 / 命中的规则 / 环境 / 耗时”展示。行高 56 pt，主文字 13 pt。请求列将有同色边框和浅背景的方法标签与 URL 单行居中，仅失败时显示第二行说明；列表与详情共用 `RequestMethodTag`，按与实际文字相同配置的 `NSTextFieldCell.cellSize` 计算完整宽度，包含系统截断留白；请求列的最小宽度沿用同一测量，优先完整展示方法名。状态码按 1xx/2xx/3xx/4xx–5xx 分别使用系统蓝/绿/橙/红色。规则列上行以次级颜色展示规则组名称，下行以主颜色按捕获的工作流 ID 展示当前名称，改名同步刷新、删除后回退到捕获名称；同一工作流的多个执行步骤不计作多条命中，不显示 +N，不再单设规则组列。列宽支持原生表头拖动，按稳定列标识保存到 `UserDefaults`（`requestLog.columnWidths.v1`），重新打开页面或 App 时恢复。通过 `NSTableColumn.width` 的变化在原生鼠标跟踪过程中同步调整相邻列及表格边界，松手通知仅保存最终列宽，窗口或详情栏改变可用宽度时按保存比例适配并保留最小宽度；记录刷新不重置列宽，自动适配不覆盖偏好。保持无横向滚动、禁止列重排；耗时固定在最右列，标题与数值右对齐。长文本截断并提供完整提示。
 
 macOS 26+ 主内容栏启用 `allowsFullHeightLayout`，请求日志筛选栏与暂停/丢弃状态使用 `NSSplitViewItemAccessoryViewController` 顶部附件；macOS 26.1+ 指定 `.soft` 滚动边缘样式。原生 `NSScrollView` 自动避让附件和标题栏，表头保持在筛选栏下方，滚动内容延伸到两层顶部栏背后；附件仅在日志页挂载，切回请求修改时从共享分栏移除并恢复安全区布局，返回日志页复用原附件与筛选条件。macOS 14/15 保留内联筛选栏。
 
-`RequestFilterControls` 在列表顶部提供暂停/清空、资源类型和筛选 Popover，常规宽度单行显示，窄窗口将全部类型分段独立放在第二行。搜索使用 `WorkspaceSplitController` 管理的原生 `NSSearchToolbarItem`，位于标题栏环境选择右侧，仅请求日志页显示；通过 `WorkspaceToolbarSnapshot` 同步 `history.filter.search`，支持输入、清除、Popover 重置与切换页签保留条件。九项资源类型以原生胶囊分段控件平铺，macOS 26+ 采用 `.extraLarge`、旧系统采用 `.large`，直接按固有尺寸布局，两侧按钮匹配其原生高度；frame 与 bounds 保持相同尺寸，不缩放文字；每段增加 16 pt 横向留白，始终保留完整自然宽度；筛选入口使用 `line.3.horizontal.decrease` 原生玻璃圆形按钮，不显示“更多”或类型下拉菜单。请求行右键“Mock 当前请求”冻结点击时的完整 `CaptureRecord`，交给 `WorkspaceModel.addMockWorkflow(from:)` 在后台通过 `CapturedMockWorkflow` 和既有正文解码器生成规则。匹配原始方法与完整 URL，请求阶段预填原始方法、URL、Body 和 Header；生成的 Header 操作统一为 `.modify`，只修改已有同名项，不生成添加、覆盖、删除项或静态 Mock。有完整上游响应时，响应阶段从 `originalStatus`、`receivedBody` 和 `receivedHeaders` 依次预填状态码、Body、Header，缺少完整原始响应则留空；创建后插入首个命中项目的规则首位并跳转选中。原始请求完整性检查在菜单和生成器两层执行，不依赖响应成功或完整；详细数据与不可用边界见 [macOS README](../README.md#从日志创建-mock)。`ModificationStep.literalValues` 缺省继续解析模板，捕获生成步骤设为字面值；`bodyEncoding` 缺省文本，二进制使用 Base64，执行时解码为 `HTTPMessageDraft.replacementBodyData`；未解码的原始压缩正文同时保存 `bodyContentEncoding`，文本 Body 步骤发送 Base64 原始实体字节时恢复该编码，使 Header 的“修改”不会因编码已被清除而跳过。代理以 `replacementBytes` 统一发送文本与二进制，长度按字节计算，脚本编辑正文会清除旧二进制替换。`ExecutionHistoryModel.filter` 持有 `CaptureRecordFilter`，Core 统一处理搜索、MIME/扩展名分类、最终响应状态码、原始 URL 包含、原始域名精确匹配、项目/环境/结果/方法以及原始/修改后请求 Header 条件。Header 使用全部/任一组合和三值逻辑，缺失证据不因反向匹配产生假命中。`WorkflowEngine.apply` 每步成功后回调，代理记录有界 `CaptureMatchedRule` 快照；未执行、禁用和失败步骤不混入成功规则。具体语义及验收见 [请求日志筛选设计](Design/request-log-filters.md)。
+`RequestFilterControls` 在列表顶部提供暂停/清空、资源类型和筛选 Popover，常规宽度单行显示，窄窗口将全部类型分段独立放在第二行。搜索使用 `WorkspaceSplitController` 管理的原生 `NSSearchToolbarItem`，位于标题栏环境选择右侧，仅请求日志页显示；通过 `WorkspaceToolbarSnapshot` 同步 `history.filter.search`，支持输入、清除、Popover 重置与切换页签保留条件。九项资源类型以原生胶囊分段控件平铺，macOS 26+ 采用 `.extraLarge`、旧系统采用 `.large`，直接按固有尺寸布局，两侧按钮匹配其原生高度；frame 与 bounds 保持相同尺寸，不缩放文字；每段增加 16 pt 横向留白，始终保留完整自然宽度；筛选入口使用 `line.3.horizontal.decrease` 原生玻璃圆形按钮，不显示“更多”或类型下拉菜单。请求行右键“Mock 当前请求”冻结点击时的完整 `CaptureRecord`，交给 `WorkspaceModel.addMockWorkflow(from:)` 在后台通过 `CapturedMockWorkflow` 和既有正文解码器生成规则。匹配原始方法与完整 URL，请求阶段预填原始方法、URL、Body 和 Header；生成的 Header 操作统一为 `.modify`，只修改已有同名项，不生成添加、覆盖、删除项或静态 Mock。有完整上游响应时，响应阶段从 `originalStatus`、`receivedBody` 和 `receivedHeaders` 依次预填状态码、Body、Header，缺少完整原始响应则留空；创建后插入首个命中规则组的规则首位并跳转选中。原始请求完整性检查在菜单和生成器两层执行，不依赖响应成功或完整；详细数据与不可用边界见 [macOS README](../README.md#从日志创建-mock)。`ModificationStep.literalValues` 缺省继续解析模板，捕获生成步骤设为字面值；`bodyEncoding` 缺省文本，二进制使用 Base64，执行时解码为 `HTTPMessageDraft.replacementBodyData`；未解码的原始压缩正文同时保存 `bodyContentEncoding`，文本 Body 步骤发送 Base64 原始实体字节时恢复该编码，使 Header 的“修改”不会因编码已被清除而跳过。代理以 `replacementBytes` 统一发送文本与二进制，长度按字节计算，脚本编辑正文会清除旧二进制替换。`ExecutionHistoryModel.filter` 持有 `CaptureRecordFilter`，Core 统一处理搜索、MIME/扩展名分类、最终响应状态码、原始 URL 包含、原始域名精确匹配、规则组/环境/结果/方法以及原始/修改后请求 Header 条件。Header 使用全部/任一组合和三值逻辑，缺失证据不因反向匹配产生假命中。`ModificationExecutionEngine.execute` 每步成功后回调，代理记录有界 `CaptureMatchedRule` 快照；未执行、禁用和失败步骤不混入成功规则。具体语义及验收见 [请求日志筛选设计](Design/request-log-filters.md)。
 
 请求日志页使用原生 `NSToolbarItem` 作为唯一详情开关，创建时显式连接分栏控制器的 `toggleInspector` 动作；左栏按钮同样连接 `toggleSidebar`。这些工具栏项使用应用自己的标识，保持 `view = nil`，由 AppKit 显示 SF Symbol 和默认按钮外观，不依赖当前焦点转发动作。详情按钮在展开和收起后均保留，未选中有效记录时禁用；请求修改页复用该项展开步骤详情，详情标题与选择状态随页面切换。`NSTrackingSeparatorToolbarItem` 跟随右侧分栏边界，其后仅在展开时显示左对齐的“请求详情”标题；标题使用原生 `NSTextField`，字号取 `NSFont.preferredFont(forTextStyle: .title2).pointSize`，字重为 `.semibold`，工具栏项 `isBordered = false`，不额外添加玻璃背景。`RequestInspectorViewController` 不另建工具栏，`RequestsViewController` 不提供第二个详情按钮。选中记录自动展开，手动收起保留选择及 Tab 状态；原生 `isCollapsed` 是可见性的唯一来源，KVO 将其同步到详情的 `isPresented`，关闭隐藏内容及 Popover 的交互而保留宿主。清空或记录淘汰关闭详情，进入请求日志页仍从未选择状态开始。整个窗口与详情均不设底部状态栏；详情上方保留方向、数量、“仅显示变更”和内容提示，数据区域延伸至底部操作区上方。控件层依据 [Apple AppKit Inspector 与工具栏说明](https://developer.apple.com/videos/play/wwdc2023/10054/)，此次原生窗口布局仍待真实 App 运行验收。
 
@@ -60,7 +64,7 @@ macOS 26+ 主内容栏启用 `allowsFullHeightLayout`，请求日志筛选栏与
 
 详情内容复用 `ToolbarSectionControl`，直接使用 `NSSegmentedControl` 展示请求头、查询参数、请求体、响应头、响应体五项；macOS 26+ 用控件自身的 `borderShape = .capsule` 配置胶囊形状，macOS 27+ 设 `.tabs` 语义，继续使用 `.automatic` 分段样式；主工作区和设置保留其既有布局。内容 Tab 使用 `.fillProportionally` 按标签自然宽度分配可用空间，保证查询参数四字标签和 400 pt 窄栏完整展示，macOS 26+ 采用原生 `.extraLarge` 尺寸，旧系统使用 `.large`，不再以 `.fit` 紧凑居中；同一行右侧放置原生复制按钮。该行使用固有高度；分段与复制按钮均配置垂直 hugging/compression 优先级，复制桥接实现 `sizeThatFits`，防止其抢占内容区高度并将 Tab 推到侧栏中间。当前可见 Payload 通过 Preference 提供复制内容及其 Tab、版本，切换中或数据不可用时禁用复制，防止复制上一页内容。形状与绘制均由 AppKit 提供，不添加 `NSGlassEffectView` 包装。
 
-显示模式“修改前 / 修改后 / 修改对比”使用展开右栏顶部标题工具栏中的原生 `NSSegmentedControl`，紧邻更多按钮左侧；采用 `.automatic` 分段样式、`.large` 尺寸、macOS 26+ 的原生 `.capsule` 形状及 macOS 27+ 的 `.tabs` 语义。Inspector 级状态统一持有显示模式，默认修改后；五个内容 Tab 共用该值，收起重开或选择不同记录时保留。各 `RequestPayloadView` 独立保留搜索、树展开、滚动和树形/原始数据格式，不再各自保存版本选择。
+显示模式“修改前 / 修改后 / 修改对比”位于详情更多菜单的“显示选项”子菜单，以原生菜单勾选当前项。Inspector 级状态默认修改对比；五个内容 Tab 共用该值，收起重开或选择不同记录时保留。各 `RequestPayloadView` 独立保留搜索、树展开、滚动和树形/原始数据格式。
 
 `RequestPayloadControls` 底部只保留搜索和 JSON 原始数据切换，横向 12 pt、纵向 10 pt 留白与左栏一致。底部格式切换与 Tab 右侧复制使用原生 `NSButton`，macOS 26+ 采用控件自身的 `.glass` bezel 样式，分别为 `.capsule` 与 `.circle` 形状，不叠加玻璃容器；旧系统采用对应的原生圆角或圆形按钮。`NSSearchField` 使用 `.large` 系统搜索外观，不额外添加玻璃包装。请求体、响应体的 JSON 格式在“原始数据”与“树形视图”之间切换，不改变当前显示模式。`RequestInspectorView` 固定摘要，方法标签与状态码复用列表样式和着色；14 pt 的原生 `NSPathControl` 按“规则组 > 规则”展示捕获名称，点击后按捕获的工作流 ID 直接跳转请求修改，已删除目标禁用。查询参数作为请求头后面的 Tab，来自原始/最终 URL，支持显示模式、搜索与复制，不混入 Body；`RequestDataOutline` 通过 `NSOutlineView` 提供 Header 和 JSON 字段树。原始数据使用只读 `NSTextView`，保留文本缩进、换行和字段顺序，不重新格式化；非 JSON 直接显示文本或十六进制，不提供无效切换。Payload、Outline 和 Source 不再设置独立白背景，由系统 Inspector 背景贯穿；字段仍仅用系统色的低透明度背景表达变更。原生按钮在行悬停时以 0.15 秒淡入淡出并复制值或完整子树，遵循减少动态效果设置；提供右键与键盘替代。`RequestInspectionData` 在后台构造差异和节点，隐藏/不完整数据不产生推测性差异。系统侧栏建议宽度 520 pt，可在 400–760 pt 调整。外观与鼠标交互仍待 App 运行验收。
 
@@ -74,19 +78,19 @@ macOS 26+ 主内容栏启用 `allowsFullHeightLayout`，请求日志筛选栏与
 
 统一启动由 `WorkspaceModel.toggleCapture` 编排。全局模式通过 `CaptureService.start(..., mode: .systemProxy)` 监听并接管系统代理，不启动浏览器；浏览器模式先发现并校验所选应用，再通过 `.browser` 仅启动监听，最后由 `BrowserLauncher` 使用 NSWorkspace 和代理参数启动应用。浏览器启动失败关闭本次监听并在主窗口提示；没有浏览器也不影响全局模式启动。偏好保存在 UserDefaults，默认维持全局接管；实际会话固定 `activeMode` 和浏览器快照，运行中修改偏好不改变当前流量范围。停止与退出依据实际会话执行。
 
-`ChromiumBrowserCatalog` 合并系统注册的 HTTP/HTTPS 应用与系统、用户 Applications 目录，在后台检查网页声明及 Chromium 框架资源，兼容带版本的 Framework 目录，排除更新缓存、废纸篓与 App Translocation 副本，按 Bundle ID 去重并优先使用系统推荐安装，不依赖浏览器名称白名单。启动前重新校验应用，专用数据目录按 Bundle ID 与端口隔离，保留既有 Google Chrome 目录。发现或启动成功不等同于已观察到代理流量，各 Chromium 衍生浏览器对启动参数的支持仍待逐一运行验收。
+`ChromiumBrowserCatalog` 合并系统注册的 HTTP/HTTPS 应用与系统、用户 Applications 目录，在后台检查网页声明及 Chromium 框架资源，兼容带版本的 Framework 目录，排除更新缓存、废纸篓与 App Translocation 副本，按 Bundle ID 去重并优先使用系统推荐安装，不依赖浏览器名称白名单。启动前重新校验应用，专用数据目录按 Bundle ID 与端口隔离，保留既有 Google Chrome 目录。`BrowserLauncher` 在宿主生命周期内持有按应用路径与专用数据目录区分的 `NSRunningApplication`，独立于捕获会话；停止捕获不清理浏览器记录。再次启动先校验应用并移除已退出进程，同浏览器、同端口的存活实例只激活原窗口，不重复发送 `--new-window`；没有存活记录时带原代理参数重新启动，继续使用原数据目录。切换后返回先前浏览器或端口也可复用对应的存活实例。记录仅在内存中保存，不跨 Requestman 重启恢复，不保证恢复用户已关闭的标签页。浏览器替身检查覆盖复用、隔离、退出、失败重试及目录保留，不启动真实浏览器。发现或启动成功不等同于已观察到代理流量，各 Chromium 衍生浏览器对启动参数的支持仍待逐一运行验收。
 
 两种启动方式共用 `CaptureStartupPreflight`：先校验配置，启用上游时经 `CaptureService.checkUpstream` 调用 `UpstreamProxyProbe`，使用 Network.framework 尝试 TCP 连接，设置 3 秒总时限并支持取消。成功或超时后关闭探测连接，不访问外部测试网站，不验证代理协议、认证或目标可达性。检查失败由 AppKit sheet 提供“关闭上游并启动 / 继续使用上游 / 取消启动”；只有明确选择关闭才修改并保存上游配置。检查与选择都在监听、系统代理接管之前完成；期间禁用重复启动和连接配置编辑。探测遵循 [NWConnection 状态](https://developer.apple.com/documentation/network/nwconnection/state-swift.enum)，不读取系统 HTTP 代理来建立到上游的连接。
 
-连接配置停止输入约 350 ms 后由 `WorkspaceModel` 串行应用，期间与启停、浏览器启动和退出互斥；防抖取消不取消已经开始的系统设置事务。上游配置经 `LocalProxyServer.updateConfiguration` 更新，新连接读取独立配置快照，现有请求与隧道保持原路由。端口变更通过 `CaptureService.restart` 自动先停止再启动，显式传递当前 `activeMode`，失败回滚也保留模式。停止恢复失败时保留原监听，新配置启动失败且没有必须保留的监听时尝试恢复旧配置。浏览器会话切换端口后，自动为当前会话浏览器打开新端口调试窗口，不使用可能已改动的下次启动偏好；旧窗口不自动关闭。设置页显示错误并同步实际监听状态。
+连接配置停止输入约 350 ms 后由 `WorkspaceModel` 串行应用，期间与启停、浏览器启动和退出互斥；防抖取消不取消已经开始的系统设置事务。上游配置经 `LocalProxyServer.updateConfiguration` 更新，新连接读取独立配置快照，现有请求与隧道保持原路由。端口变更通过 `CaptureService.restart` 自动先停止再启动，显式传递当前 `activeMode`，失败回滚也保留模式。停止恢复失败时保留原监听，新配置启动失败且没有必须保留的监听时尝试恢复旧配置。浏览器会话切换端口后，为当前会话浏览器复用新端口上的存活调试实例，无可复用记录时打开新窗口，不使用可能已改动的下次启动偏好；旧窗口不自动关闭。设置页显示错误并同步实际监听状态。
 
-`LocalProxyCaptureService` 的全局会话先监听再调用 `SystemProxyController` 接管，先恢复系统设置再关闭监听；浏览器会话的正常启动、重配、回滚和停止不调用系统代理服务。全局恢复失败保留监听与恢复文件，并阻止正常退出；UI 同步仍在运行的监听端口。上次异常退出的系统代理恢复由 App 载入时独立执行，失败时记录待恢复状态，阻止新浏览器会话沿用残留全局代理；下次启动动作先重试旧会话恢复，退出也会重试。`SystemProxyController` 在独立 actor 中锁定网络偏好会话，按服务 ID 保存原配置后统一 commit/apply。接管当前网络位置中已启用且支持代理协议的服务，临时关闭 PAC、自动发现、SOCKS 和绕过列表；恢复仅覆盖仍与接管值一致的字段组，保留其他工具的新设置。恢复文件写入成功后才能设置代理，恢复 commit/apply 成功后才清空记录。没有常驻恢复 helper；新增网络服务或切换网络位置后需重新开始全局接管。API 的持久化与运行时应用是两个步骤，见 [Apple SCPreferences 文档](https://developer.apple.com/documentation/systemconfiguration/scpreferences-ft8)。
+`CaptureEngine` 的全局会话先监听再调用 `SystemProxyController` 接管，先恢复系统设置再关闭监听；浏览器会话的正常启动、重配、回滚和停止不调用系统代理服务。全局恢复失败保留监听与恢复文件，并阻止正常退出；UI 同步仍在运行的监听端口。上次异常退出的系统代理恢复由 App 载入时独立执行，失败时记录待恢复状态，阻止新浏览器会话沿用残留全局代理；下次启动动作先重试旧会话恢复，退出也会重试。`SystemProxyController` 在独立 actor 中锁定网络偏好会话，按服务 ID 保存原配置后统一 commit/apply。接管当前网络位置中已启用且支持代理协议的服务，临时关闭 PAC、自动发现、SOCKS 和绕过列表；恢复仅覆盖仍与接管值一致的字段组，保留其他工具的新设置。恢复文件写入成功后才能设置代理，恢复 commit/apply 成功后才清空记录。没有常驻恢复 helper；新增网络服务或切换网络位置后需重新开始全局接管。API 的持久化与运行时应用是两个步骤，见 [Apple SCPreferences 文档](https://developer.apple.com/documentation/systemconfiguration/scpreferences-ft8)。
 
 `RequestmanCore` 已提供 `FlowExecutionRuntime`：不可变计划/环境版本、按需 Body 读取、有界准入、可批量读取的元数据环形缓冲。它与 UI、数据库和代理框架无关，详细容量、取消与接入契约见 [性能与资源边界](Performance.md)。基础代理在 NIO 事件循环直接执行 metadata/static-body 动作，使用连接准入和写完成后的拉取背压；不把每个网络块转成 Swift Task，也没有把两套准入队列叠加。`FlowExecutionRuntime` 为后续需要完整 Body 的异步动作保留，尚未包裹 NIO 转发。
 
 ## 规则命中通知
 
-捕获会话的规则命中通知通过独立的 `RuleHitNotificationBuffer` 传递。`LocalProxyServer` 在 `WorkflowEngine.match` 成功后、步骤执行与请求正文等待之前写入工作流 ID 和名称；它表示匹配成功，不表示后续步骤或网络请求成功。通知不依赖完成记录，因此慢请求、脚本等待、日志暂停和日志清空不会抑制命中提示。`LocalProxyCaptureService` 为全局接管和浏览器两种会话启用该缓冲，启动失败、停止或监听重启时重置，并通过会话 ID 阻止旧批次继续发送。
+捕获会话的规则命中通知通过独立的 `RuleHitNotificationBuffer` 传递。`ProxyConnection` 在事务协调器调用 `RuleMatchingEngine.match` 成功后、步骤执行与请求正文等待之前写入工作流 ID 和名称；它表示匹配成功，不表示后续步骤或网络请求成功。通知不依赖完成记录，因此慢请求、脚本等待、日志暂停和日志清空不会抑制命中提示。`CaptureEngine` 为全局接管和浏览器两种会话启用该缓冲，启动失败、停止或监听重启时重置，并通过会话 ID 阻止旧批次继续发送。
 
 聚合使用 `ContinuousClock` 单调时间，每轮固定为首次命中起的 `[0, 3s)`，新命中不续期。轮内以工作流 ID 去重，名称采用首次命中的快照；每轮独立 UUID 作为系统通知标识。缓冲合并尚未读取的同轮更新，最多保留 64 轮待发送快照；宿主独立于历史记录每 200 ms 串行消费，避免通知服务等待影响请求转发或日志读取。首条在下一次消费时提交，不等满 3 秒。达到边界后的命中新建标识；到期本身不触发动作，已送达通知不主动删除。
 
@@ -112,7 +116,7 @@ macOS 26+ 主内容栏启用 `allowsFullHeightLayout`，请求日志筛选栏与
 
 按应用透明接管模式中，应用列表的 Bundle ID 是用户选择键，不能等同于网络流的签名身份。实际接管必须解析签名信息、审计令牌及辅助进程归属，避免误捕获。空选择必须拒绝启动，不能退化为全局捕获。未来显式代理入口需要独立的配置与校验契约，不通过放宽现有 CaptureConfiguration 的空选择校验实现。
 
-请求流程在主请求发往上游前执行，响应流程在对应内容返回客户端前执行。Mock 跳过主上游请求并进入响应流程；辅助 HTTP 请求独立标记，默认跳过普通流程匹配。响应的“添加延迟”以 ms 保存，`WorkflowEngine.applyAsync` 按步骤异步等待，结束后才继续，保留阶段入口的模板快照。含延迟的响应复用完整 Body 后台流程，纯延迟不进行文本解码、不占用脚本名额；取消随流程传递，HTTP 事务和流程预览不设总时限；单次脚本超时独立保留。客户端仍可主动断开或按自身策略超时。完整 Body 编辑、头部处理与流式透传的边界见产品设计文档。
+请求流程在主请求发往上游前执行，响应流程在对应内容返回客户端前执行。Mock 跳过主上游请求并进入响应流程；辅助 HTTP 请求独立标记，默认跳过普通流程匹配。响应的“添加延迟”以 ms 保存，`ModificationExecutionEngine.executeAsync` 按步骤异步等待，结束后才继续，保留阶段入口的模板快照。含延迟的响应复用完整 Body 后台流程，纯延迟不进行文本解码、不占用脚本名额；取消随流程传递，HTTP 事务和流程预览不设总时限；单次脚本超时独立保留。客户端仍可主动断开或按自身策略超时。完整 Body 编辑、头部处理与流式透传的边界见产品设计文档。
 
 ## Surge 共存
 
@@ -161,11 +165,11 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 ## 请求修改配置与同步脚本（2026-09-26）
 
-匹配配置改为 URL / Host 与四类规则，并支持独立 Header 条件与地址、方法同时匹配，旧前缀按转义正则迁移，工作区保存版本为 2。步骤详情接入同一个窗口级 Inspector，Header 使用插件候选列表的原生可编辑组合框。同步 JavaScript 通过可终止的独立进程执行，具有脚本的阶段在后台读取完整 Body、解码文本后执行；未带脚本的阶段保留 NIO 流式路径。取消沿脚本流程传递，单次脚本限时独立于无总时限的事务；输入/输出没有新增载荷尺寸上限。完整 API、并发和时限、验收范围见[请求修改配置](Design/request-modification.md)。
+匹配配置统一为 `WorkflowMatchGroup`，支持全部 / 任一嵌套组、方法集合、URL / Host / Path、协议、端口、Query、多 Header、Cookie 和 Content-Type。工作区保存版本为 3，不迁移旧匹配配置；真实代理和测试匹配共用组逻辑，保持修改前匹配与首个启用流程优先。步骤详情接入同一个窗口级 Inspector，Header 使用插件候选列表的原生可编辑组合框。同步 JavaScript 通过可终止的独立进程执行，具有脚本的阶段在后台读取完整 Body、解码文本后执行；未带脚本的阶段保留 NIO 流式路径。取消沿脚本流程传递，单次脚本限时独立于无总时限的事务；输入/输出没有新增载荷尺寸上限。完整 API、并发和时限、验收范围见[请求修改配置](Design/request-modification.md)。
 
 ## AppKit 界面迁移（2026-09-26）
 
-`FlowEditorViewController` 的匹配条件首行提供“测试匹配”，通过 `WorkflowMatchTestViewController` 原生 Sheet 输入请求方法、URL 和示例 Header。`WorkflowMatchTest` 在独立后台任务中复用 Core 匹配器，输出条件级诊断及首次匹配范围；不触发代理、步骤或脚本执行。规则摘要是打开时的快照，示例不持久化，输入变更及关闭对话框使旧任务结果失效。匹配测试只检查条件，启用状态、项目状态及规则顺序仍由实际捕获处理。
+`FlowEditorViewController` 的匹配条件首行提供“测试匹配”，通过 `WorkflowMatchTestViewController` 原生 Sheet 输入请求方法、URL 和示例 Header。`WorkflowMatchTest` 在独立后台任务中复用 Core 匹配器，输出条件级诊断及首次匹配范围；不触发代理、步骤或脚本执行。规则摘要是打开时的快照，示例不持久化，输入变更及关闭对话框使旧任务结果失效。匹配测试只检查条件，启用状态、规则组状态及规则顺序仍由实际捕获处理。
 
 `RequestmanEntry` 在处理脚本 worker 参数后创建 `NSApplication`。`WorkspaceAppDelegate` 安装系统菜单、持有主窗口和设置窗口，负责启动加载、前台证书状态刷新、后台保存及退出前恢复代理。所有界面与测试替身移除 SwiftUI 和 Hosting 桥接，核心 Observation 模型、代理、证书及脚本契约保留。`check-native-sources.py` 同时检查工程源引用及 AppKit-only 约束，阻止重新引入声明式桥接。工作区、请求详情、筛选、Header、规则编辑和设置使用隐藏 AppKit 窗口回归；完整 App 的系统外观、真实鼠标体验与浏览器网络验收仍单独报告。
 
@@ -176,27 +180,31 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 环境编辑中的“删除环境”按钮直接放在表单底部，不再使用独立分组或底部说明。环境名称输入时检查其他环境的名称（忽略首尾空白，区分大小写）；重名时显示字段错误、保留待修改输入，并阻止该名称写入工作区，修正后继续自动保存。
 
-## 项目与配置归档（2026-09-26）
+## 规则组与配置归档（2026-09-26）
 
-`WorkflowProject` 增加持久化的 `enabled` 和 SF Symbol 名称 `symbol`，旧工作区默认启用并使用文件夹图标。`WorkflowEngine.match` 跳过禁用项目，不修改请求自身的启用状态。项目树使用原生 `NSOutlineView` 和 `NSMenu`，项目/请求统一 40 pt；项目鼠标点击整行切换展开，名称通过菜单编辑，请求行不展示匹配摘要。右键菜单交给 `NSOutlineView.menu(for:)` 的系统实现跟踪目标行，为未选中项显示原生边框并在菜单关闭后清理，不改变当前请求选择。
+`WorkflowProject` 增加持久化的 `enabled` 和 SF Symbol 名称 `symbol`，旧工作区默认启用并使用文件夹图标。`RuleMatchingEngine.match` 跳过禁用规则组，不修改请求自身的启用状态。规则组树使用原生 `NSOutlineView` 和 `NSMenu`，规则组/请求统一 40 pt；规则组鼠标点击整行切换展开，名称通过菜单编辑，请求行不展示匹配摘要。右键菜单交给 `NSOutlineView.menu(for:)` 的系统实现跟踪目标行，为未选中项显示原生边框并在菜单关闭后清理，不改变当前请求选择。
 
-`WorkspaceArchive` 定义 `requestman.archive` v1，区分 workspace/project/workflow 三种范围；单条保留完整 `RequestWorkflow`，两阶段步骤、脚本选项及 Header 匹配均按原数据编码。全量保存 `WorkspaceDocument` 与应用 UserDefaults 持久域的二进制 plist，JSON 以 Base64 承载该 plist。仅归档配置，不读取证书、钥匙串、浏览器 profile 或系统代理恢复文件。核心合并逻辑为所有导入项目及后代重新生成 ID，再追加到当前项目；仅全量范围替换环境和代理配置。
+`WorkspaceArchive` 定义 `requestman.archive` v1，区分 workspace/rules/project/workflow 四种范围；单条保留完整 `RequestWorkflow`，两阶段步骤、脚本选项及 Header 匹配均按原数据编码。全量保存 `WorkspaceDocument` 与应用 UserDefaults 持久域的二进制 plist，JSON 以 Base64 承载该 plist。仅归档配置，不读取证书、钥匙串、浏览器 profile 或系统代理恢复文件。核心合并逻辑为所有导入规则组及后代重新生成 ID，再追加到当前规则组；仅设置页导入全量范围时替换环境和代理配置。文件菜单的独立分组提供“导入规则…”与“导出全部规则…”，`rules` 范围保存所有规则组（包括空组）及完整规则，不保存应用偏好；文件菜单导入完整备份时先转换为规则范围，沿原持久化通道追加，保留当前环境、代理与偏好。单条 `workflow` 导入创建使用本地导入时间命名的“导入 yyyy/MM/dd HH:mm:ss”规则组，整组和全部规则保留组名与顺序。
 
 `WorkspaceTransfer` 使用原生文件面板和后台文件 I/O。宿主完成校验后暂时禁用编辑、取消待保存任务，先通过串行 `WorkspaceDocumentStore` 保存合并快照，再发布模型和恢复偏好；文件写入失败保留原模型。偏好恢复通知使已有 `RequestRecordsTable` 立即重新读取列宽。捕获服务收到新工作区快照，代理配置变化仍走现有串行重配，不复制捕获运行状态或触发证书操作。
 
-`WorkspaceArchiveTests` 覆盖完整内容往返、三种导出范围、重复追加和 ID 隔离、环境覆盖、未知版本/坏文件拒绝、旧项目默认值与项目禁用匹配。规则 UI 检查覆盖行高、隐藏副标题、空白区/箭头整行点击与菜单动作；请求列表检查覆盖已存在表格的列宽恢复。隐藏窗口回归与完整 App 的文件面板和视觉验收分别报告。
+`WorkspaceArchiveTests` 覆盖完整内容往返、三种导出范围、重复追加和 ID 隔离、环境覆盖、未知版本/坏文件拒绝、旧规则组默认值与规则组禁用匹配。规则 UI 检查覆盖行高、隐藏副标题、空白区/箭头整行点击与菜单动作；请求列表检查覆盖已存在表格的列宽恢复。隐藏窗口回归与完整 App 的文件面板和视觉验收分别报告。
 
 带边框的单行表单输入框由 `ActionTextField` 统一使用原生 `.squareBezel`、浅色控件外观和白底黑字；`HeaderNameField` 可编辑组合框不绘制背景，不固定外观和文字颜色，跟随系统原生样式。不添加背景容器或自绘控件。普通单行输入框在浅色和深色窗口中均保持白色输入区域，请求名称平时显示无边框标题，仅在编辑时显示原生圆角输入框；按系统文字内边距补偿布局，使两种状态的文字都与下方条件标题左对齐。文字布局宽度优先为 450 pt、窄窗口可收缩，编辑框高度至少 40 pt，跟随窗口外观；编辑前后保留文字位置；单行文字与原生 field editor 使用同一块按字体实际行高垂直居中的区域。规则隐藏窗口回归对匹配值、查询参数、URL 查找、状态码、延迟及脚本备注进行聚焦前后像素与输入检查，Header 组合框保留编辑行为检查。
 
 ## 工作区键盘命令
 
-`WorkspaceCommand` 定义固定映射，由 `WorkspaceAppDelegate` 安装到原生菜单，由 App delegate 转交 `WorkspaceSplitController`（即使没有文本或列表焦点也能使用）。菜单校验与执行共用 `canPerform`，检查当前 key window、sheet、加载状态、捕获过渡状态、页面、选中记录完整性和列表焦点；不安装全局键盘监听。启停捕获复用 `WorkspaceModel.toggleCapture`，暂停记录和清空复用既有 history 接口。侧栏上下文菜单和快捷键共用项目 / 规则动作，步骤动作按实际聚焦的阶段列表定位，文本编辑器保留原生编辑按键。
+通用设置在全部分组下方提供“清除工作区…”原生按钮，使用 `NSAlert` Sheet 二次确认，默认按钮为“取消”。`canClearWorkspace` 允许已加载或读取失败后的工作区执行清除，首次加载及操作进行中禁用；读取失败后的清除若再失败，继续禁用编辑且不自动保存未加载的空快照。`WorkspaceModel.clearWorkspace` 与捕获启停、导入和重配互斥，暂时禁用工作区编辑；等待已开始的自动保存结束后，先停止捕获并完成系统代理恢复，再保存空 `WorkspaceDocument`，成功后才发布模型并清空日志、选择、筛选及暂停状态。失败保留配置和日志，已停止的捕获不自动重启。清除不删除证书、浏览器数据或 UserDefaults；工作区代次防止之前的异步 Mock 创建结果重新插入规则。`check-settings-ui.py` 覆盖按钮位置、取消/确认以及使用真实宿主模型和临时文件的失败、持久化与过时自动保存检查，不操作真实代理和证书。
 
-项目行支持原生键盘选择，刷新时保留项目选择与现有流程上下文；新请求优先放入侧栏所选项目。环境弹层的搜索框和列表分别处理方向键、回车和 Escape，候选移动不立即切换环境，关闭后恢复工作区焦点。`check-workspace-sidebar.py` 验证原生菜单派发和窗口 / 状态限制，`check-rules-ui.py` 验证焦点与删除边界；这些隐藏组件窗口检查不等同于完整 App 的真实键盘验收。
+`WorkspaceCommand` 定义固定映射，由 `WorkspaceAppDelegate` 安装到原生菜单，由 App delegate 转交 `WorkspaceSplitController`（即使没有文本或列表焦点也能使用）。菜单校验与执行共用 `canPerform`，检查当前 key window、sheet、加载状态、捕获过渡状态、页面、选中记录完整性和列表焦点；不安装全局键盘监听。启停捕获复用 `WorkspaceModel.toggleCapture`，暂停记录和清空复用既有 history 接口。侧栏上下文菜单和快捷键共用规则组 / 规则动作，步骤动作按实际聚焦的阶段列表定位，文本编辑器保留原生编辑按键。
+
+规则组行支持原生键盘选择，刷新时保留规则组选择与现有流程上下文；新请求优先放入侧栏所选规则组。环境弹层的搜索框和列表分别处理方向键、回车和 Escape，候选移动不立即切换环境，关闭后恢复工作区焦点。`check-workspace-sidebar.py` 验证原生菜单派发和窗口 / 状态限制，`check-rules-ui.py` 验证焦点与删除边界；这些隐藏组件窗口检查不等同于完整 App 的真实键盘验收。
+
+侧栏删除规则组与单条规则时，菜单和快捷键统一弹出原生 `NSAlert` Sheet 二次确认，默认按钮为“取消”。弹窗显示目标名称，删除规则组还显示组内规则数量；仅明确点击删除后按原目标 ID 执行，确认前重新检查工作区可编辑且目标仍存在。取消不修改数据，也不改变当前规则选择。
 
 ## 多 Header 与动态模板编辑（2026-09-26）
 
-`ModificationStep.headers` 为统一“修改 Header”步骤保存可增删条目及各自的 `add` / `modify` / `remove` / `set` 操作，同一步可按顺序添加、修改、删除及添加或覆盖。添加始终追加，修改只更新已有同名项的值并保留其名称、数量和顺序；没有匹配时跳过。`set` 在详情中以“添加或覆盖”提供选择，先移除所有同名项再添加新值，无匹配时直接添加；旧配置保留原有语义；Header 条目下方不展示操作说明或旧配置兼容说明。旧条目缺少操作时按 `setHeader` / `removeHeader` 类型读取，缺省数组时读取旧 `name/value`；显式空数组表示不操作。`WorkflowEngine` 在整组解析与校验通过后才应用，保证后续条目失败不会留下半组修改。删除只校验名称；删除和未匹配的修改忽略保存的值。编辑器逐条提供原生修改方法下拉框，删除时隐藏值、切回保留值；添加菜单仅保留统一入口。区块显式约束内容边距，滚动文档固定顶部与水平起点。`$env.` 是新的环境引用前缀，旧 `env.` 保持兼容，单次替换语义不变。
+`ModificationStep.headers` 为统一“修改 Header”步骤保存可增删条目及各自的 `add` / `modify` / `remove` / `set` 操作，同一步可按顺序添加、修改、删除及添加或覆盖。添加始终追加，修改只更新已有同名项的值并保留其名称、数量和顺序；没有匹配时跳过。`set` 在详情中以“添加或覆盖”提供选择，先移除所有同名项再添加新值，无匹配时直接添加；旧配置保留原有语义；Header 条目下方不展示操作说明或旧配置兼容说明。旧条目缺少操作时按 `setHeader` / `removeHeader` 类型读取，缺省数组时读取旧 `name/value`；显式空数组表示不操作。`HeaderProcessor` 在整组解析与校验通过后才应用，保证后续条目失败不会留下半组修改。删除只校验名称；删除和未匹配的修改忽略保存的值。编辑器逐条提供原生修改方法下拉框，删除时隐藏值、切回保留值；添加菜单仅保留统一入口。区块显式约束内容边距，滚动文档固定顶部与水平起点。`$env.` 是新的环境引用前缀，旧 `env.` 保持兼容，单次替换语义不变。
 
 步骤 Inspector 在 macOS 26+ 使用安装到右侧 `NSSplitViewItem` 的顶部、底部 `NSSplitViewItemAccessoryViewController` 承载标题和 footer（26.1+ 的边缘样式为 `.soft`），正文滚动视图铺满面板，系统内容 inset 保证首尾字段可达。footer 无分割线；附件栏随选中步骤和页面可见性隐藏，旧系统使用无分割线的固定布局。配置表单仅在内容超出可见高度时滚动，滚动条自动隐藏，外层表单关闭弹性回弹；底部移除排序按钮，红色删除按钮使用 transient `NSPopover` 确认，并检查原步骤、工作流和阶段仍匹配。Header、查询参数与 URL 模板文本继续使用原生 `NSTextView` 的纯文本编辑、撤销和复制；`TemplateLayoutManager` 只绘制完整表达式的浅蓝圆角背景和文字颜色，值编辑器裁切为 8 pt 圆角。脚本编辑器不启用模板标记。内置变量与格式见[内置变量](Design/request-modification.md#内置变量)。`WorkflowTemplateContext` 在代理匹配原始请求后生成时间、随机值和原始请求快照，流式执行与脚本后台执行显式传递同一 Sendable 值；本地预览同样共享上下文。响应状态码在响应流程入口固定，Mock 使用本地生成状态码。模板标记按 Core Text 的实际字形轮廓垂直居中，左右扩展 4 pt，背景围绕文字中心对称限制在实际行高内；排版基线居中，24 pt 行高为相邻 20 pt 标记保留至少 4 pt 间隔，短值编辑器可完整显示两行。
 
@@ -206,11 +214,11 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 ## HTTPS 域名解密范围
 
-`WorkspaceDocument.httpsDecryption` 保存 `HTTPSDecryptionConfiguration`：`decryptAllRequests` 默认开启，缺少配置的旧工作区保持全部解密；关闭时由 `domains` 决定，空列表全部透传。精确域名和 `*.` 子域名通配符按 DNS 标签边界匹配，忽略大小写与单个末尾点；通配符不含根域。设置编辑器校验域名，错误草稿不写入工作区，未校验的无效模式在匹配时也不扩大解密范围。
+`WorkspaceDocument.httpsDecryption` 保存 `HTTPSDecryptionConfiguration`：`decryptAllRequests` 默认开启，缺少配置的旧工作区保持全部解密；关闭时由 `domains` 决定，空列表全部透传。精确域名和 `*.` 子域名通配符按 DNS 标签边界匹配，忽略大小写与单个末尾点；通配符不含根域。设置编辑器以英文分号 `;` 分隔域名，逐项去除首尾空白后校验，空项忽略；回显同样使用英文分号。错误草稿不写入工作区，未校验的无效模式在匹配时也不扩大解密范围。
 
-代理在 CONNECT 协议识别后读取最新工作区范围，只有 TLS 且范围命中时才调用证书提供方；未命中直接沿既有 `connectOpaqueTunnel` 路径转发，不读取 CA、不签发叶证书，也不进入 HTTP 规则与内容采集。证书不可用仍沿原有透传或错误路径处理，普通 HTTP 与 CONNECT 内明文 HTTP 的既有行为不变。范围通过原工作区保存/更新通道应用，不属于需重配监听的 `ExplicitProxyConfiguration`，现有连接保持原模式。全量归档包含该配置，项目/请求归档合并不覆盖当前配置。
+代理在 CONNECT 协议识别后读取最新工作区范围，只有 TLS 且范围命中时才调用证书提供方；未命中直接沿既有 `connectOpaqueTunnel` 路径转发，不读取 CA、不签发叶证书，也不进入 HTTP 规则与内容采集。证书不可用仍沿原有透传或错误路径处理，普通 HTTP 与 CONNECT 内明文 HTTP 的既有行为不变。范围通过原工作区保存/更新通道应用，不属于需重配监听的 `ExplicitProxyConfiguration`，现有连接保持原模式。全量归档包含该配置，规则组/请求归档合并不覆盖当前配置。
 
-验证覆盖旧工作区解码、保存与归档、域名边界、空列表和全部开关；本地 TCP/TLS 测试通过客户端仅信任预期签发方确认透传没有 MITM，并检查证书提供方调用次数、规则是否执行、日志内容以及 HTTP 上游串联。设置采用原生 `NSSwitch` 与 `NSTextView`，隐藏窗口检查覆盖开关、有效输入、错误草稿与导入刷新；不等同于完整 App 的浏览器运行验收。
+验证覆盖旧工作区解码、保存与归档、域名边界、空列表和全部开关；本地 TCP/TLS 测试通过客户端仅信任预期签发方确认透传没有 MITM，并检查证书提供方调用次数、规则是否执行、日志内容以及 HTTP 上游串联。设置采用原生 `NSSwitch` 与 `NSTextView`；域名输入区裁切为 8 pt 圆角，文本未超出可见高度时将滚轮事件传给外层设置页，超出时保留内部滚动。开启全部解密或工作区不可编辑时，域名输入区禁用编辑与选择、取消焦点，并使用系统禁用文字色，并在文本背景色中混入 10% 标签色形成随明暗外观变化的不透明灰底；避免窗口背景色与输入背景色同为纯白时没有禁用区别。隐藏窗口检查覆盖开关、有效输入、错误草稿、导入刷新及短文本/长文本/缩短后的滚轮分发；不等同于完整 App 的浏览器运行验收。
 
 ## 本地 Body 文件映射
 
@@ -224,4 +232,17 @@ Body 解析模板开启时，完整表达式用浅色背景标识；字面值和
 
 ## SSE 与 WebSocket 持续记录
 
-`CaptureRecordBuffer` 按稳定 ID 合并活动快照，`ExecutionHistoryModel` 更新原行；清空通过代次隔离旧连接。SSE/WS 载荷由 `CaptureStreamStore` 在后台串行写入会话临时文件，界面按页读取。SSE 可自动识别，也可通过请求修改的 `isSSE` 启用；有限 Body 替换取消上游，延迟不等待 EOF。WebSocket 基于 NIOWebSocket，CONNECT 区分明文与 TLS，握手完成后切换双向帧管线。具体协议边界、规则兼容和存储生命周期见 [持续捕获](Design/streaming-capture.md)。
+`CaptureRecordBuffer` 按稳定 ID 合并活动快照，`ExecutionHistoryModel` 更新原行；清空通过代次隔离旧连接。SSE/WS 载荷由 `CaptureStreamStore` 在后台串行写入会话临时文件，界面按页读取。SSE 根据上游原始响应 Content-Type 自动识别，`isSSE` 配置标记及手动 Header 修改不触发协议转换；有限 Body 替换取消上游，延迟不等待 EOF。WebSocket 基于 NIOWebSocket，CONNECT 区分明文与 TLS，握手完成后切换双向帧管线。具体协议边界、规则兼容和存储生命周期见 [持续捕获](Design/streaming-capture.md)。
+
+
+## 请求重放
+
+详情更多菜单与日志右键菜单共用 `RequestActionsMenu`，依次提供重放分组、复制子菜单；详情复制子菜单额外提供随当前 Tab 和显示模式变化的内容复制项，打开菜单时固定内容快照。URL 与字段右侧保留快捷复制按钮。详情末尾单独提供显示选项，列表末尾单独保留 Mock。菜单冻结打开时的记录，不追随随后变化的选中行。
+
+`RequestReplayDraft` 从完整原始请求提取方法、URL、重复 Header 和原始 Body 字节；原始记录不被覆盖。编辑后重放使用原生 AppKit sheet 和既有 RequestmanEditor，可编辑方法、URL、Header 和 UTF-8 正文；压缩或二进制正文以 Base64 编辑，保留 Content-Encoding，不执行模板解析。输入实时校验，Host、Content-Length 与逐跳字段由传输重建。
+
+`WorkspaceModel → CaptureService.replay → CaptureEngine → LocalProxyServer` 仅在捕获运行期间发送，通过 NIO 向当前回环监听提交绝对 HTTP/HTTPS URL，复用代理规则、上游出口、TLS 校验和日志记录。HTTPS 由代理直接连接真实上游 TLS，无需建立客户端 MITM。重放不修改系统代理或证书设置、不跟随重定向、不读取浏览器 Cookie 存储。接收端流式丢弃响应字节，内容由代理记录，SSE 可持续观察，也可单独取消或随停止捕获关闭。每次发送分配独立重放 ID，并保留来源记录 ID；身份通过回环连接的端口关联，不添加 HTTP 元数据 Header。代理终态驱动完成、失败、取消反馈，提交成功不等同于响应完成。取消只关闭指定重放的客户端与下游连接，由既有事务清理关闭上游并取消规则执行。
+
+手动重放的记录绕过日志暂停，普通捕获仍暂停；清空记录继续通过代次隔离阻止旧连接重新出现在日志。发送时定位新记录，当前筛选临时放行该记录，下一次修改筛选即结束放行，不改写筛选条件。日志顶部保留最近重放的状态、查看结果与取消按钮；每条活动重放的右键和详情菜单可独立取消。列表与详情显示重放状态，来源按钮可定位原请求；原记录已清空或淘汰时禁用来源入口。
+
+WebSocket、加密隧道、未完整采集的请求及 CONNECT/TRACE 不提供 HTTP 重放；停止捕获或状态切换期间禁用入口并显示原因。发送失败走工作区错误提示，代理执行和上游错误记录到新日志。

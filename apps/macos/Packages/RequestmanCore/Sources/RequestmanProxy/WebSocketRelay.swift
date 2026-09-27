@@ -93,6 +93,8 @@ final class WebSocketSession: @unchecked Sendable {
         if error != nil { record.outcome = .failed }
         let elapsed = started.duration(to: .now).components
         record.duration = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18; record.revision &+= 1
+        shared.events.append(.init(shared.isStopping ? .cancelled : (error == nil ? .completed : .failed),
+            transactionID: record.id, workflowID: record.matchedWorkflowID, message: error))
         let snapshot = record, records = records, generation = generation
         if let store { store.flush { records.append(snapshot, generation: generation) } }
         else { records.append(snapshot, generation: generation) }

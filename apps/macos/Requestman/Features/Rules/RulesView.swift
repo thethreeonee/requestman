@@ -32,7 +32,7 @@ import RequestmanCore
         outline.indentationPerLevel = 20
         outline.intercellSpacing = NSSize(width: 0, height: 2)
         outline.dataSource = self; outline.delegate = self
-        outline.setAccessibilityLabel("项目与请求修改")
+        outline.setAccessibilityLabel("规则组与请求修改")
         outline.contextMenu = { [weak self] row in self?.menu(forRow: row) }
         outline.target = self; outline.doubleAction = #selector(doubleClickProject)
         let scroll = NSScrollView(); scroll.documentView = outline; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
@@ -71,12 +71,12 @@ import RequestmanCore
         displayedWorkflowID = model.selectedWorkflowID
         if selectionChanged, let workflow = model.workflow {
             if !search.isEmpty && !workflow.name.localizedCaseInsensitiveContains(search)
-                && !workflow.matchPattern.localizedCaseInsensitiveContains(search) { search = "" }
+                && !workflow.matchingSummary.localizedCaseInsensitiveContains(search) { search = "" }
             if let project = projects.first(where: { $0.workflows.contains { $0.id == workflow.id } }) {
                 collapsedProjects.remove(project.id)
             }
         }
-        let filtered = projects.map { project in (project, project.workflows.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || $0.matchPattern.localizedCaseInsensitiveContains(search) }) }
+        let filtered = projects.map { project in (project, project.workflows.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || $0.matchingSummary.localizedCaseInsensitiveContains(search) }) }
         let ids = filtered.flatMap { [$0.0.id] + $0.1.map(\.id) }
         if structure != ids || displayedSearch != search {
             structure = ids; displayedSearch = search
@@ -173,13 +173,41 @@ import RequestmanCore
                 workflow.enabled.toggle(); model.updateWorkflow(workflow)
             }
         case .delete:
-            if item.isProject {
-                model.document.projects.removeAll { $0.id == item.id }
-                if model.workflow == nil { model.selectedWorkflowID = nil; model.selectedStepID = nil }
-            } else { model.deleteWorkflow(item.id) }
+            confirmDeletion(item)
         default: return
         }
         refresh()
+    }
+
+    private func confirmDeletion(_ item: Item) {
+        guard let window = view.window, window.attachedSheet == nil,
+              let project = model.document.projects.first(where: { $0.id == item.projectID }) else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        if item.isProject {
+            alert.messageText = "删除规则组“\(project.name)”？"
+            alert.informativeText = "将同时删除组内的 \(project.workflows.count) 条规则及其所有步骤。此操作无法撤销。"
+        } else {
+            guard let workflow = project.workflows.first(where: { $0.id == item.id }) else { return }
+            alert.messageText = "删除规则“\(workflow.name)”？"
+            alert.informativeText = "将删除该规则及其请求、响应阶段的所有步骤。此操作无法撤销。"
+        }
+        alert.addButton(withTitle: "取消").keyEquivalent = "\r"
+        let delete = alert.addButton(withTitle: item.isProject ? "删除规则组" : "删除规则")
+        delete.hasDestructiveAction = true
+        delete.keyEquivalent = ""
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertSecondButtonReturn, let self, model.loaded,
+                  let currentProject = model.document.projects.first(where: { $0.id == item.projectID }) else { return }
+            if item.isProject {
+                model.document.projects.removeAll { $0.id == item.id }
+                if model.workflow == nil { model.selectedWorkflowID = nil; model.selectedStepID = nil }
+            } else {
+                guard currentProject.workflows.contains(where: { $0.id == item.id }) else { return }
+                model.deleteWorkflow(item.id)
+            }
+            refresh()
+        }
     }
 
     func createProject() {
@@ -207,10 +235,10 @@ import RequestmanCore
                 search = ""; collapsedProjects.remove(item.id); model.addWorkflow(projectID: item.id)
             })
             menu.addItem(.separator())
-            menu.addItem(RulesMenuItem(project.enabled ? "禁用整个项目" : "启用整个项目") { [weak self] in
+            menu.addItem(RulesMenuItem(project.enabled ? "禁用整个规则组" : "启用整个规则组") { [weak self] in
                 self?.perform(.toggleEnabled, item: item)
             })
-            menu.addItem(RulesMenuItem("复制整个项目") { [weak self] in self?.perform(.duplicate, item: item) })
+            menu.addItem(RulesMenuItem("复制整个规则组") { [weak self] in self?.perform(.duplicate, item: item) })
             menu.addItem(RulesMenuItem("重命名") { [weak self] in self?.perform(.rename, item: item) })
             let icons = ProjectIconMenu.make(selected: project.symbol) { [weak self] symbol in
                 self?.updateProject(item.id) { $0.symbol = symbol }
@@ -221,7 +249,7 @@ import RequestmanCore
                 WorkspaceTransfer.export(WorkspaceArchive(project: current), name: current.name, window: view.window)
             })
             menu.addItem(.separator())
-            menu.addItem(RulesMenuItem("删除项目") { [weak self] in
+            menu.addItem(RulesMenuItem("删除规则组") { [weak self] in
                 self?.perform(.delete, item: item)
             })
         } else if let workflow = project.workflows.first(where: { $0.id == item.id }) {
@@ -251,9 +279,9 @@ import RequestmanCore
         let name = item.isProject ? project.name : project.workflows.first { $0.id == item.id }?.name ?? ""
         let field = NSTextField(string: name)
         field.frame = NSRect(x: 0, y: 0, width: 300, height: 24)
-        field.setAccessibilityLabel(item.isProject ? "项目名称" : "请求修改名称")
+        field.setAccessibilityLabel(item.isProject ? "规则组名称" : "请求修改名称")
         let alert = NSAlert()
-        alert.messageText = item.isProject ? "重命名项目" : "重命名请求修改"
+        alert.messageText = item.isProject ? "重命名规则组" : "重命名请求修改"
         alert.addButton(withTitle: "保存"); alert.addButton(withTitle: "取消")
         alert.accessoryView = field; alert.window.initialFirstResponder = field
         let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
@@ -271,8 +299,8 @@ import RequestmanCore
     private func showAddMenu() {
         guard model.loaded else { return }
         let menu = NSMenu()
-        menu.addItem(RulesMenuItem("添加请求", symbol: "doc.badge.plus") { [weak self] in self?.addRequest() })
-        menu.addItem(RulesMenuItem("添加项目", symbol: "folder.badge.plus") { [weak self] in self?.model.addProject() })
+        menu.addItem(RulesMenuItem("添加规则", symbol: "doc.badge.plus") { [weak self] in self?.addRequest() })
+        menu.addItem(RulesMenuItem("添加规则组", symbol: "folder.badge.plus") { [weak self] in self?.model.addProject() })
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: addButton.bounds.maxY + 3), in: addButton)
     }
     func addRequest() {
@@ -310,9 +338,9 @@ import RequestmanCore
                 addChild(controller); NativeUI.pin(controller.view, to: content)
             } else {
                 let title = NativeUI.label("编排一次，自动处理每次请求", size: 20, weight: .semibold)
-                let description = NativeUI.label("在项目中创建请求修改，设置匹配条件，再添加请求和响应步骤。", secondary: true)
+                let description = NativeUI.label("在规则组中创建请求修改，设置匹配条件，再添加请求和响应步骤。", secondary: true)
                 description.maximumNumberOfLines = 0
-                let add = ActionButton(title: "新建项目") { [weak self] in self?.model.addProject() }; add.isEnabled = model.loaded
+                let add = ActionButton(title: "新建规则组") { [weak self] in self?.model.addProject() }; add.isEnabled = model.loaded
                 let stack = NativeUI.stack([title, description, add], spacing: 12)
                 content.addSubview(stack); stack.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate([stack.centerXAnchor.constraint(equalTo: content.centerXAnchor), stack.centerYAnchor.constraint(equalTo: content.centerYAnchor), stack.widthAnchor.constraint(lessThanOrEqualTo: content.widthAnchor, constant: -48)])

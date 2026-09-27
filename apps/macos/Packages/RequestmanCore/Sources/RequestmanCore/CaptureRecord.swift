@@ -31,6 +31,16 @@ public struct CaptureHeadersInfo: Sendable {
 public struct CaptureRecord: Identifiable, Sendable {
     public enum Outcome: String, CaseIterable, Sendable { case forwarded = "已转发", modified = "已修改", mocked = "Mock", tunnel = "加密隧道", failed = "失败" }
     public let id: UUID
+    public var replayID: UUID?
+    public var replaySourceID: UUID?
+    public var replayCancelled = false
+    public var replaySummary: String? {
+        guard replayID != nil else { return nil }
+        if replayCancelled { return "重放已取消" }
+        if connectionState.isActive { return captureProtocol == .sse ? "重放进行中 · 正在接收事件流" : "重放进行中" }
+        if let error { return "重放失败：" + error }
+        return "重放已完成" + (status.map { " · HTTP \($0)" } ?? "")
+    }
     public var captureProtocol: CaptureProtocol = .http
     public var connectionState: CaptureConnectionState = .closed
     public var revision: UInt64 = 0
@@ -48,6 +58,7 @@ public struct CaptureRecord: Identifiable, Sendable {
     public var outcome: Outcome = .forwarded
     public var matchedWorkflowID: UUID?
     public var matchedRules: [CaptureMatchedRule] = []
+    public var executionTrace: [StepExecutionTrace] = []
     public var hasSentRequestHeaders = false
     public var originalStatus: Int?
     public var status: Int?
@@ -107,7 +118,7 @@ public final class CaptureRecordBuffer: Sendable {
         let bounded = record.bounded()
         state.withLock {
             guard generation == nil || generation == $0.generation else { return }
-            if $0.paused {
+            if $0.paused && record.replayID == nil {
                 // An already visible stream may close while history is paused.
                 // Retain its latest state so resuming cannot leave a stale active row.
                 if $0.publishedActive.contains(record.id) { $0.pausedUpdates[record.id] = bounded }

@@ -463,7 +463,7 @@ import RequestmanCore
             window.makeFirstResponder(nil)
         }
         var workflow = model.workflow!
-        workflow.matchHeaderEnabled = true
+        workflow.matchConditions.conditions.append(.init(field: .header, operation: .equals, name: "X-Test", value: "test"))
         model.updateWorkflow(workflow)
         check(flow)
         for kind in [ModificationKind.setHeader, .setQueryParameter, .replaceURLString, .mock, .delay, .script] {
@@ -471,6 +471,104 @@ import RequestmanCore
             check(inspector)
         }
         print("Single-line inputs: \(checked) rendered background and editing checks passed")
+    }
+
+    static func checkURLRewriteSplitWidth() {
+        guard #available(macOS 26.0, *) else { return }
+        let model = WorkspaceModel(); model.addProject(); model.addStep(.rewriteURL, response: false)
+        let inspector = StepInspectorViewController(model: model)
+        let split = NSSplitViewController(); split.splitView.isVertical = true
+        let main = NSViewController(); main.view = NSView()
+        let mainItem = NSSplitViewItem(viewController: main); mainItem.minimumThickness = 420
+        split.addSplitViewItem(mainItem)
+        let item = NSSplitViewItem(inspectorWithViewController: inspector)
+        item.minimumThickness = 400; item.maximumThickness = 760; item.allowsFullHeightLayout = true
+        split.addSplitViewItem(item); inspector.installAccessories(on: item)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800), styleMask: [.titled, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window.contentMinSize = NSSize(width: 900, height: 800)
+        window.isReleasedWhenClosed = false; window.contentViewController = split
+        defer { window.close() }
+        func settle() {
+            inspector.refresh()
+            for _ in 0..<3 { window.contentView?.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        }
+        settle()
+        for width: CGFloat in [400, 520, 640] {
+            split.splitView.setPosition(split.splitView.bounds.width - split.splitView.dividerThickness - width, ofDividerAt: 0)
+            settle()
+            let baseline = inspector.view.frame.width, windowFrame = window.frame
+            let header = item.topAlignedAccessoryViewControllers.first!.view
+            let headerHeight = header.frame.height
+            let description = (descendants(header).first { $0.identifier?.rawValue == "rules.stepDescription" } as! NSTextField).stringValue
+            for index in [1, 2, 0, 2, 1, 0] {
+                let control = descendants(inspector.view).first { $0.identifier?.rawValue == "rules.urlRewriteTarget" } as! NSSegmentedControl
+                control.selectedSegment = index; control.sendAction(control.action, to: control.target); settle()
+                precondition(abs(inspector.view.frame.width - baseline) < 1 && window.frame == windowFrame,
+                             "URL target must not resize the inspector or window: target=\(index), before=\(baseline), after=\(inspector.view.frame.width)")
+                let top = item.topAlignedAccessoryViewControllers.first!.view
+                let hint = descendants(top).first { $0.identifier?.rawValue == "rules.stepDescription" } as! NSTextField
+                // NSTextField's frame extends beyond its alignment rect for native text insets.
+                let hintRect = hint.convert(hint.bounds, to: top)
+                precondition(hintRect.minX >= 0 && hintRect.maxX <= baseline && hintRect.height > 0,
+                             "Description must fit the inspector: target=\(index), baseline=\(baseline), hint=\(hintRect)")
+                precondition(hint.stringValue == description && abs(top.frame.height - headerHeight) < 1,
+                             "The top description and accessory height remain unchanged when switching targets")
+                let inputHint = descendants(inspector.view).first { $0.identifier?.rawValue == "rules.urlRewriteInputDescription" } as? NSTextField
+                if index == 0 { precondition(inputHint == nil) }
+                else {
+                    let inputHint = inputHint!
+                    let area = descendants(inspector.view).compactMap { $0 as? RulesTextArea }.first!
+                    let fields = area.superview as! NSStackView
+                    let areaIndex = fields.arrangedSubviews.firstIndex(of: area)!
+                    precondition(fields.arrangedSubviews[areaIndex + 1] === inputHint,
+                                 "Target-specific guidance follows the URL input")
+                    let inputRect = inputHint.convert(inputHint.bounds, to: inspector.view)
+                    precondition(inputRect.minX >= 0 && inputRect.maxX <= baseline && inputHint.frame.height > 20)
+                }
+            }
+        }
+        print("URL rewrite split width passed: native accessories, resizable inspector, repeated target switching and wrapping")
+    }
+
+    static func checkURLRewriteEditing() throws {
+        let model = WorkspaceModel(); model.addProject(); model.addStep(.rewriteURL, response: false)
+        let inspector = StepInspectorViewController(model: model)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 650), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentViewController = inspector
+        defer { window.close() }
+        func settle() { inspector.refresh(); window.contentView?.layoutSubtreeIfNeeded() }
+        func selector() -> NSSegmentedControl {
+            descendants(inspector.view).first { $0.identifier?.rawValue == "rules.urlRewriteTarget" } as! NSSegmentedControl
+        }
+        settle()
+        precondition((0..<selector().segmentCount).map { selector().label(forSegment: $0) } == ["完整 URL", "主机", "路径"] && selector().selectedSegment == 0)
+        precondition(selector().segmentStyle == .automatic && selector().controlSize == .large)
+        if #available(macOS 26.0, *) { precondition(selector().borderShape == .capsule) }
+        precondition(model.selectedStep?.urlRewriteTarget == nil)
+        for (index, label, text) in [(1, "目标主机（可含端口）", "{{$env.host}}:8080"), (2, "目标路径", "/api/中文%2f"), (0, "目标 URL", "https://example.test/")] {
+            let control = selector()
+            control.selectedSegment = index; control.sendAction(control.action, to: control.target); settle()
+            precondition(model.selectedStep?.effectiveURLRewriteTarget == URLRewriteTarget.allCases[index])
+            let area = descendants(inspector.view).compactMap { $0 as? RulesTextArea }.first!
+            precondition(area.textView.accessibilityLabel() == label)
+            area.string = text; area.textDidChange(Notification(name: NSText.didChangeNotification)); settle()
+            precondition(model.selectedStep?.value == text && descendants(inspector.view).contains { $0 === area })
+            let decoded = try JSONDecoder().decode(ModificationStep.self, from: JSONEncoder().encode(model.selectedStep!))
+            precondition(decoded == model.selectedStep)
+            for width: CGFloat in [360, 440, 640] {
+                window.setContentSize(NSSize(width: width, height: 650)); settle()
+                precondition(!selector().hasAmbiguousLayout && selector().bounds.width > 0)
+                let rect = selector().convert(selector().bounds, to: inspector.view)
+                precondition(rect.minX >= 0 && rect.maxX <= inspector.view.bounds.width)
+            }
+        }
+        let control = selector()
+        control.selectedSegment = 1; control.sendAction(control.action, to: control.target); settle()
+        precondition(model.selectedStep?.value == "https://example.test/", "Switching targets preserves the entered value")
+        model.loaded = false; settle()
+        precondition(!selector().isEnabled)
+        let area = descendants(inspector.view).compactMap { $0 as? RulesTextArea }.first!
+        precondition(!area.textView.isEditable)
     }
 
     static func checkURLReplacementEditing() throws {
@@ -957,8 +1055,7 @@ import RequestmanCore
         let model = WorkspaceModel(); model.addProject()
         var workflow = model.workflow!
         let value = "https://example.test/" + String(repeating: "long-path/", count: 30)
-        workflow.matchPattern = value
-        workflow.matchHeaderEnabled = true; workflow.matchHeaderName = "X-Route"; workflow.matchHeaderPattern = value
+        workflow.matchConditions.conditions = [.init(field: .url, operation: .contains, value: value), .init(field: .header, operation: .equals, name: "X-Route", value: value)]
         model.updateWorkflow(workflow)
         let controller = FlowEditorViewController(model: model)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 900), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -991,7 +1088,7 @@ import RequestmanCore
             }
             editor.insertText("x", replacementRange: editor.selectedRange())
             precondition(field.stringValue == value + "x")
-            precondition(field.accessibilityLabel() == "匹配值" ? model.workflow?.matchPattern == value + "x" : model.workflow?.matchHeaderPattern == value + "x")
+            precondition(model.workflow!.matchConditions.conditions.contains { $0.value == value + "x" })
             window.makeFirstResponder(nil)
         }
     }
@@ -1370,8 +1467,7 @@ import RequestmanCore
 
     static func checkMatchTesting() {
         var workflow = RequestWorkflow(name: "订单接口")
-        workflow.method = "GET"; workflow.matchRule = .regex; workflow.matchPattern = "/v1/orders/[0-9]+$"
-        workflow.matchHeaderEnabled = true; workflow.matchHeaderName = "X-Environment"; workflow.matchHeaderPattern = "staging"
+        workflow.matchConditions.conditions = [.init(field: .url, operation: .regex, value: "/v1/orders/[0-9]+$"), .init(field: .header, operation: .equals, name: "X-Environment", value: "staging")]
         let controller = WorkflowMatchTestViewController(workflow: workflow)
         let window = NSWindow(contentViewController: controller)
         window.appearance = NSAppearance(named: .aqua)
@@ -1404,7 +1500,7 @@ import RequestmanCore
         let details = descendants(controller.view).compactMap { $0 as? NSTextField }
         precondition(details.contains { $0.stringValue.contains("实际：production") })
         let headerDetail = details.first { $0.stringValue.contains("实际：production") }!
-        precondition(!descendants(controller.view).contains { $0 is NSScrollView }, "The dialog body must not scroll")
+        precondition(descendants(controller.view).contains { $0.identifier?.rawValue == "matchTest.scroll" }, "Long diagnostics must remain reachable in a native scroll view")
         let detailRect = headerDetail.convert(headerDetail.bounds, to: controller.view)
         precondition(controller.view.bounds.contains(detailRect), "Default result must be fully visible")
         precondition(url.bounds.width > 400 && header.bounds.width > 150)
@@ -1433,14 +1529,14 @@ import RequestmanCore
         RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         precondition(status.stringValue.contains("输入示例请求"))
         runTest(); precondition(status.stringValue.hasPrefix("无法测试"))
-        workflow.matchPattern = "["
+        workflow.matchConditions.conditions[0].value = "["
         let invalid = WorkflowMatchTestViewController(workflow: workflow)
         _ = invalid.view
         let invalidRun = descendants(invalid.view).first { $0.identifier?.rawValue == "matchTest.run" } as! NSButton
         precondition(!invalidRun.isEnabled)
         precondition(descendants(invalid.view).compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains("正则表达式无效") })
         var simpleWorkflow = workflow
-        simpleWorkflow.matchHeaderEnabled = false; simpleWorkflow.matchPattern = "/v1/orders/[0-9]+$"
+        simpleWorkflow.matchConditions.conditions.removeLast(); simpleWorkflow.matchConditions.conditions[0].value = "/v1/orders/[0-9]+$"
         let simple = WorkflowMatchTestViewController(workflow: simpleWorkflow)
         let simpleWindow = NSWindow(contentViewController: simple); simpleWindow.isReleasedWhenClosed = false
         simpleWindow.contentView?.layoutSubtreeIfNeeded()
@@ -1450,7 +1546,7 @@ import RequestmanCore
         simpleRun.performClick(nil)
         let deadline = Date().addingTimeInterval(3)
         while simpleRun.title == "测试中…" && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
-        precondition(!descendants(simple.view).contains { $0 is NSScrollView }, "The no-Header dialog must not scroll")
+        precondition(descendants(simple.view).contains { $0.identifier?.rawValue == "matchTest.scroll" })
         precondition(simple.view.bounds.height < 600, "No-Header result must not retain the fixed 700 pt height")
         let simpleStack = simple.view.subviews.first as! NSStackView
         precondition(abs(simple.view.bounds.height - simpleStack.fittingSize.height - 44) < 3,
@@ -1462,7 +1558,7 @@ import RequestmanCore
         let host = NSWindow(contentViewController: flow); host.isReleasedWhenClosed = false
         host.contentView?.layoutSubtreeIfNeeded()
         let button = descendants(flow.view).first { $0.identifier?.rawValue == "rules.testMatch" }!
-        precondition(button.superview?.identifier?.rawValue == "rules.matchMethodRow")
+        precondition(button.isDescendant(of: descendants(flow.view).first { $0.identifier?.rawValue == "rules.matching" }!))
         (button as! NSButton).performClick(nil)
         RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         let sheet = flow.presentedViewControllers?.first as? WorkflowMatchTestViewController
@@ -1472,30 +1568,151 @@ import RequestmanCore
         print("Match testing: native layout, success, Header mismatch, invalid pattern/input and stale-result checks passed")
     }
 
-    static func checkSSEConfiguration() {
+    static func checkFlowPresentation() {
         let model = WorkspaceModel(); model.addProject()
+        var workflow = model.workflow!
+        workflow.requestSteps = [ModificationStep(kind: .setHeader), ModificationStep(kind: .replaceBody)]
+        workflow.requestSteps[1].enabled = false
+        workflow.responseSteps = [ModificationStep(kind: .setStatus)]
+        model.updateWorkflow(workflow); model.selectedStepID = workflow.requestSteps[1].id
         let controller = FlowEditorViewController(model: model)
         let window = NSWindow(contentViewController: controller)
         window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 860, height: 720))
+        controller.view.wantsLayer = true
         defer { window.close() }
-        controller.refresh(); window.contentView?.layoutSubtreeIfNeeded()
-        let toggle = descendants(controller.view).first { $0.identifier?.rawValue == "rules.isSSE" } as! NSButton
-        precondition(toggle.state == .off && model.workflow?.isSSE == false)
-        toggle.performClick(nil); controller.refresh()
-        precondition(model.workflow?.isSSE == true && model.workflow?.responseSteps.count == 1)
-        precondition(model.workflow?.responseSteps.first?.headerEntries.map(\.name) == ["Content-Type", "Cache-Control"])
-        toggle.performClick(nil); controller.refresh(); toggle.performClick(nil); controller.refresh()
-        precondition(model.workflow?.responseSteps.count == 1, "Re-enabling SSE must not duplicate its Header step")
-        let stack = toggle.superview as! NSStackView
-        precondition(stack.arrangedSubviews.firstIndex(of: toggle) == 2, "SSE sits between matching conditions and step lanes")
-        print("SSE checkbox, editable response Header insertion, persistence model and placement passed")
+        func settle() {
+            controller.refresh()
+            for _ in 0..<3 { window.contentView?.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        }
+        settle()
+        precondition(!descendants(controller.view).contains { $0.identifier?.rawValue == "rules.isSSE" })
+        let toggle = descendants(controller.view).first { $0.identifier?.rawValue == "rules.enabled" } as! RulesSwitch
+        let label = descendants(controller.view).first { $0.identifier?.rawValue == "rules.enabledLabel" } as! NSTextField
+        precondition(label.stringValue == "已启用")
+        toggle.state = .off; toggle.onChange(false); settle()
+        precondition(model.workflow?.enabled == false && label.stringValue == "已关闭")
+        toggle.state = .on; toggle.onChange(true); settle()
+        precondition(label.stringValue == "已启用" && model.workflow?.responseSteps == workflow.responseSteps)
+        let table = descendants(controller.view).compactMap { $0 as? NSTableView }.first { $0.numberOfRows == 2 }!
+        let cell = table.view(atColumn: 0, row: 1, makeIfNecessary: true)!
+        let pause = descendants(cell).first { $0.identifier?.rawValue == "rules.stepPaused" }!
+        let pauseFrame = pause.convert(pause.bounds, to: cell)
+        precondition(abs(cell.bounds.maxX - pauseFrame.maxX - 12) < 1 && pauseFrame.width == 24,
+                     "Disabled step indicator stays enlarged and pinned to the trailing edge")
+        precondition(table.selectedRow == 1)
+        let badge = descendants(cell).first { $0.identifier?.rawValue == "rules.stepBadge" }!
+        precondition(badge.bounds.width == 28, "The step number badge must not stretch into the text area")
+        func checkStepAlignment() {
+            for lane in descendants(controller.view).filter({ $0.identifier?.rawValue == "rules.laneBorder" }) {
+                let separator = descendants(lane).first { $0.identifier?.rawValue == "rules.laneSeparator" }!
+                let left = separator.convert(separator.bounds, to: lane).minX
+                for badge in descendants(lane).filter({ $0.identifier?.rawValue == "rules.stepBadge" }) {
+                    precondition(abs(badge.convert(badge.bounds, to: lane).minX - left) < 0.5,
+                                 "Selected and unselected step badges align with the phase separator")
+                }
+                let table = descendants(lane).compactMap { $0 as? NSTableView }.first!
+                guard table.selectedRow >= 0, let row = table.rowView(atRow: table.selectedRow, makeIfNecessary: true) else { continue }
+                let bitmap = lane.bitmapImageRepForCachingDisplay(in: lane.bounds)!
+                lane.cacheDisplay(in: lane.bounds, to: bitmap)
+                let scale = CGFloat(bitmap.pixelsWide) / lane.bounds.width
+                let rowCenter = row.convert(NSPoint(x: 0, y: row.bounds.midY), to: lane).y
+                let y = Int((lane.isFlipped ? rowCenter : lane.bounds.height - rowCenter) * scale)
+                let bluePixels = (0..<bitmap.pixelsWide).filter { x in
+                    guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB), color.alphaComponent > 0.5 else { return false }
+                    return color.blueComponent > color.redComponent + 0.15 && color.blueComponent > color.greenComponent + 0.05
+                }
+                guard let first = bluePixels.first, let last = bluePixels.last else { preconditionFailure("Selection outline must render") }
+                let leftGap = (CGFloat(first) + 0.5) / scale
+                let rightGap = lane.bounds.width - (CGFloat(last) + 0.5) / scale
+                precondition(abs(leftGap - left / 2) <= 0.75, "Selection outline sits halfway between the outer border and badge")
+                precondition(abs(leftGap - rightGap) <= 0.75, "Selection outline has equal outer margins")
+            }
+        }
+        checkStepAlignment()
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            window.appearance = NSAppearance(named: appearance); settle()
+            window.appearance!.performAsCurrentDrawingAppearance {
+                controller.view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+            }
+            if let directory = ProcessInfo.processInfo.environment["REQUESTMAN_FLOW_SNAPSHOTS"],
+               let bitmap = controller.view.bitmapImageRepForCachingDisplay(in: controller.view.bounds) {
+                controller.view.cacheDisplay(in: controller.view.bounds, to: bitmap)
+                try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: directory).appendingPathComponent(appearance.rawValue + ".png"))
+            }
+        }
+        let add = descendants(controller.view).compactMap { $0 as? NSButton }.first { $0.identifier?.rawValue == "rules.addStep" }!
+        precondition(!(add is NSPopUpButton) && add.image != nil)
+        if #available(macOS 26.0, *) { precondition(add.bezelStyle == .glass && add.borderShape == .capsule) }
+        let count = model.workflow!.requestSteps.count
+        add.menu!.performActionForItem(at: 0); settle()
+        precondition(model.workflow!.requestSteps.count == count + 1, "Native add menu still executes its step action")
+        window.setContentSize(NSSize(width: 420, height: 720)); settle()
+        precondition(window.contentView!.bounds.width == 420)
+        checkStepAlignment()
+        print("Flow presentation: enabled labels, automatic SSE UI, trailing pause, native add action and narrow layout passed")
+    }
+
+    static func checkMatchingPresentation() {
+        let model = WorkspaceModel(); model.addProject()
+        var workflow = model.workflow!; workflow.name = "订单调试"
+        workflow.matchConditions = WorkflowMatchGroup(conditions: [
+            .init(field: .method, operation: .oneOf, value: "POST, PUT"),
+            .init(field: .path, operation: .beginsWith, value: "/v1/orders/"),
+            .init(field: .query, operation: .equals, name: "preview", value: "true"),
+            .init(field: .header, operation: .equals, name: "X-Environment", value: "staging"),
+            .init(field: .cookie, operation: .exists, name: "debug")], groups: [
+                WorkflowMatchGroup(mode: .any, conditions: [
+                    .init(field: .host, operation: .equals, value: "api.example.com"),
+                    .init(field: .host, operation: .equals, value: "staging.example.com")])])
+        var header = ModificationStep(kind: .setHeader); header.headers = [HeaderEntry(name: "X-Debug", value: "true")]
+        workflow.requestSteps = [header]; workflow.responseSteps = [ModificationStep(kind: .replaceBody)]
+        model.updateWorkflow(workflow)
+        let controller = FlowEditorViewController(model: model)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 950), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentViewController = controller
+        window.appearance = NSAppearance(named: .aqua)
+        window.setContentSize(NSSize(width: 1120, height: 950))
+        controller.view.wantsLayer = true
+        controller.view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        defer { window.close() }
+        func settle() { controller.refresh(); for _ in 0..<4 { window.contentView?.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.02)) } }
+        func button(_ id: String) -> NSButton { descendants(controller.view).first { $0.identifier?.rawValue == id } as! NSButton }
+        func snapshot(_ name: String) {
+            guard let directory = ProcessInfo.processInfo.environment["REQUESTMAN_MATCHING_SNAPSHOTS"],
+                  let bitmap = controller.view.bitmapImageRepForCachingDisplay(in: controller.view.bounds) else { return }
+            controller.view.cacheDisplay(in: controller.view.bounds, to: bitmap)
+            try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: directory).appendingPathComponent(name + ".png"))
+        }
+        settle(); snapshot("matching-expanded")
+        button("rules.collapseGroup").performClick(nil); settle(); snapshot("matching-group-collapsed")
+        button("rules.collapseMatching").performClick(nil); settle(); snapshot("matching-collapsed")
+        button("rules.collapseMatching").performClick(nil); button("rules.collapseGroup").performClick(nil); settle()
+        let before = model.workflow!.matchConditions
+        (descendants(controller.view).last { $0.identifier?.rawValue == "rules.addConditionGroup" } as! NSButton).performClick(nil); settle()
+        precondition(model.workflow!.matchConditions.groups.count == before.groups.count + 1)
+        let lastGroup = descendants(controller.view).filter { $0.identifier?.rawValue == "rules.conditionGroup" }.last!
+        let removeGroup = descendants(lastGroup).compactMap { $0 as? ActionButton }.first { $0.accessibilityLabel() == "移除条件" }!
+        removeGroup.performClick(nil); settle()
+        precondition(model.workflow!.matchConditions == before)
+        let queryRow = descendants(controller.view).filter { $0.identifier?.rawValue == "rules.conditionRow" }[2]
+        let operation = queryRow.subviews.compactMap { $0 as? ActionPopUpButton }.first { $0.accessibilityLabel() == "匹配运算符" }!
+        operation.selectItem(withTitle: "不存在"); operation.onChange(operation.indexOfSelectedItem); settle()
+        let value = queryRow.subviews.compactMap { $0 as? ActionTextField }.first { $0.accessibilityLabel() == "匹配值" }!
+        precondition(value.isHidden && model.workflow!.matchConditions.conditions[2].operation == .notExists)
+        operation.selectItem(withTitle: "等于"); operation.onChange(operation.indexOfSelectedItem); settle()
+        precondition(!value.isHidden && value.stringValue == "true")
+        window.setContentSize(NSSize(width: 420, height: 950)); settle(); snapshot("matching-narrow")
+        precondition(window.contentView!.bounds.width == 420)
+        print("Matching presentation: group add/remove, operator changes, retained values, folding, wide/narrow native layouts passed")
     }
 
     static func main() {
         NSApplication.shared.setActivationPolicy(.prohibited)
         if ProcessInfo.processInfo.environment["REQUESTMAN_GUTTER_ONLY"] == "1" { checkEmptyGutterRendering(); checkGutterBaselineRendering(); return }
-        if ProcessInfo.processInfo.environment["REQUESTMAN_SSE_ONLY"] == "1" { checkSSEConfiguration(); return }
-        checkSSEConfiguration()
+        if ProcessInfo.processInfo.environment["REQUESTMAN_MATCHING_ONLY"] == "1" { checkMatchingPresentation(); return }
+        if ProcessInfo.processInfo.environment["REQUESTMAN_FLOW_PRESENTATION_ONLY"] == "1" { checkFlowPresentation(); return }
+        checkFlowPresentation()
         if ProcessInfo.processInfo.environment["REQUESTMAN_NUMBERED_EDITORS_ONLY"] == "1" {
             checkNumberedEditorGeometry(); checkCodeEditorBehavior(); checkBodyEditing(); checkScriptEditing(); print("Body and script editing passed"); return
         }
@@ -1530,11 +1747,11 @@ import RequestmanCore
             precondition(model.selectedStep?.headerEntries.first?.operation == .set && model.selectedStep?.headerEntries.first?.value == "old")
             let flow = FlowEditorViewController(model: model)
             _ = flow.view; flow.refresh()
-            let menus = descendants(flow.view).compactMap { $0 as? NSPopUpButton }.filter { $0.identifier?.rawValue == "rules.addStep" }
+            let menus = descendants(flow.view).compactMap { $0 as? NSButton }.filter { $0.identifier?.rawValue == "rules.addStep" }
             precondition(menus.count == 2)
             for menu in menus {
-                precondition(menu.itemTitles.filter { $0 == "修改 Header" }.count == 1)
-                precondition(!menu.itemTitles.contains("移除 Header") && !menu.itemTitles.contains("添加或覆盖 Header"))
+                precondition(menu.menu!.items.map(\.title).filter { $0 == "修改 Header" }.count == 1)
+                precondition(!menu.menu!.items.map(\.title).contains("移除 Header") && !menu.menu!.items.map(\.title).contains("添加或覆盖 Header"))
             }
             print("Header form: mixed operations, value retention, legacy editing, menu and layout checks passed")
             return
@@ -1542,6 +1759,12 @@ import RequestmanCore
         if ProcessInfo.processInfo.environment["REQUESTMAN_QUERY_FORM_ONLY"] == "1" {
             checkQueryParameterEditing()
             print("Query parameter form: editing, operations, persistence, layout and legacy checks passed")
+        }
+        if ProcessInfo.processInfo.environment["REQUESTMAN_URL_REWRITE_FORM_ONLY"] == "1" {
+            try! checkURLRewriteEditing()
+            checkURLRewriteSplitWidth()
+            print("URL rewrite form: target selection, value editing, persistence, legacy defaults and layout checks passed")
+            return
         }
         if ProcessInfo.processInfo.environment["REQUESTMAN_URL_REPLACEMENT_FORM_ONLY"] == "1" {
             try! checkURLReplacementEditing()
@@ -1567,6 +1790,8 @@ import RequestmanCore
             return
         }
         checkSingleLineBackgrounds()
+        try! checkURLRewriteEditing()
+        checkURLRewriteSplitWidth()
         try! checkURLReplacementEditing()
         checkBodyEditing()
         checkDelayEditing()
@@ -1601,7 +1826,7 @@ import RequestmanCore
         precondition(sidebar.outlineView(sidebar.outline, heightOfRowByItem: projectItem) == 30)
         precondition(sidebar.outlineView(sidebar.outline, heightOfRowByItem: flowItem) == 30)
         let flowCell = sidebar.outline.view(atColumn: 0, row: 1, makeIfNecessary: true)!
-        precondition(!descendants(flowCell).compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains(model.workflow!.matchPattern) })
+        precondition(!descendants(flowCell).compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains(model.workflow!.matchConditions.conditions[0].value) })
         let selectedBeforeCollapse = model.selectedWorkflowID
         // Native row selection must no longer toggle the project; disclosure remains independent.
         sidebar.outline.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
@@ -1686,12 +1911,12 @@ import RequestmanCore
         sidebar.outline.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
         projectRow.setHovered(false, animated: false)
         var projectMenu = sidebar.menu(forRow: 0)!
-        precondition(projectMenu.items.filter { !$0.isSeparatorItem }.map(\.title) == ["添加请求修改", "禁用整个项目", "复制整个项目", "重命名", "修改图标", "导出整组…", "删除项目"])
-        projectMenu.performActionForItem(at: projectMenu.indexOfItem(withTitle: "禁用整个项目")); sidebar.refresh()
+        precondition(projectMenu.items.filter { !$0.isSeparatorItem }.map(\.title) == ["添加请求修改", "禁用整个规则组", "复制整个规则组", "重命名", "修改图标", "导出整组…", "删除规则组"])
+        projectMenu.performActionForItem(at: projectMenu.indexOfItem(withTitle: "禁用整个规则组")); sidebar.refresh()
         precondition(!model.document.projects[0].enabled && model.workflow!.enabled)
         projectMenu = sidebar.menu(forRow: 0)!
-        precondition(projectMenu.item(withTitle: "启用整个项目") != nil)
-        projectMenu.performActionForItem(at: projectMenu.indexOfItem(withTitle: "启用整个项目"))
+        precondition(projectMenu.item(withTitle: "启用整个规则组") != nil)
+        projectMenu.performActionForItem(at: projectMenu.indexOfItem(withTitle: "启用整个规则组"))
         let icons = projectMenu.item(withTitle: "修改图标")!.submenu!
         let palettes = icons.items.compactMap(\.submenu)
         let iconChoices = palettes.flatMap(\.items)
@@ -1732,7 +1957,7 @@ import RequestmanCore
         precondition(descendants(rules.view).contains { $0 === titleField }, "Editing must retain the original field")
         let tables = descendants(rules.view).compactMap { $0 as? NSTableView }
         precondition(tables.count == 2 && tables.map(\.numberOfRows).sorted() == [0, 2])
-        precondition(tables.allSatisfy { $0.selectionHighlightStyle == .none }, "Selection styling belongs to the existing step card, without a second row backdrop")
+        precondition(tables.allSatisfy { $0.selectionHighlightStyle == .regular }, "Step selection uses the system table appearance")
         precondition(rules.view.bounds.width >= 420)
         let laneFrames = tables.map { $0.convert($0.bounds, to: rules.view) }.sorted { $0.minX < $1.minX }
         precondition(laneFrames[0].maxX < laneFrames[1].minX, "Request and response lanes must remain side by side")
@@ -1740,34 +1965,26 @@ import RequestmanCore
         precondition(abs(laneFrames[0].minY - laneFrames[1].minY) < 1, "Both lanes and their add buttons must share the bottom edge")
         precondition(tables.allSatisfy { $0.rowHeight == 56 + 4 * 2 }, "Step content preserves 56pt plus 4pt vertical insets")
         let editor = rules.children.first!.view
-        precondition(abs(editor.subviews.first!.frame.minX - 24) < 1, "Flow editor must preserve 24pt horizontal padding")
-        let pickers = descendants(rules.view).compactMap { $0 as? NSPopUpButton }
-        precondition(abs(pickers.first { $0.accessibilityLabel() == "地址匹配目标" }!.frame.width - 130) < 1)
-        precondition(abs(pickers.first { $0.accessibilityLabel() == "地址匹配规则" }!.frame.width - 90) < 1)
+        let editorScroll = descendants(editor).first { $0.identifier?.rawValue == "rules.editorScroll" } as! NSScrollView
+        precondition(abs(editorScroll.documentView!.subviews.first!.frame.minX - 24) < 1, "Flow editor must preserve 24pt horizontal padding")
+        let pickers = descendants(rules.view).compactMap { $0 as? NSButton }
         let boxes = descendants(rules.view).compactMap { $0 as? NSBox }
         let laneBorders = boxes.filter { $0.identifier?.rawValue == "rules.laneBorder" }
-        precondition(laneBorders.count == 2 && laneBorders.allSatisfy { $0.cornerRadius == 10 && $0.borderWidth == 1 && $0.fillColor.alphaComponent == 0 && $0.borderColor == .separatorColor }, "Lane borders must retain their original transparent 10pt outline")
-        let cards = boxes.filter { $0.identifier?.rawValue == "rules.stepCard" }
-        precondition(cards.count == 2 && cards.allSatisfy { $0.cornerRadius == 8 && $0.borderWidth == 1 && abs($0.frame.height - 56) < 1 }, "Step cards must retain their 56pt height and 8pt corners")
-        precondition(cards.contains { abs($0.fillColor.alphaComponent - 0.12) < 0.001 && abs($0.borderColor.alphaComponent - 0.55) < 0.001 }, "Selected card must retain its blue fill and outline")
-        precondition(cards.contains { abs($0.fillColor.alphaComponent - 0.045) < 0.001 && $0.borderColor.alphaComponent == 0 }, "Unselected card must retain its subtle fill")
-        let badges = boxes.filter { $0.identifier?.rawValue == "rules.stepNumber" }
-        precondition(badges.allSatisfy { abs($0.frame.width - 26) < 1 && abs($0.frame.height - 28) < 1 && $0.cornerRadius == 6 })
-        let accents = boxes.filter { $0.identifier?.rawValue == "rules.stepAccent" }
-        precondition(accents.filter { !$0.isHidden }.count == 1 && accents.allSatisfy { abs($0.frame.width - 3) < 1 })
-        precondition(accents.allSatisfy { accent in
-            guard let card = cards.first(where: { accent.isDescendant(of: $0) }) else { return false }
-            let frame = accent.convert(accent.bounds, to: card)
-            return abs(frame.minY - card.bounds.minY) < 0.5
-                && abs(frame.maxY - card.bounds.maxY) < 0.5
-                && card.layer?.masksToBounds == true && card.layer?.cornerRadius == card.cornerRadius
-        }, "Selection accents must span the card height and clip to its rounded corners")
+        precondition(laneBorders.count == 2)
+        precondition(!boxes.contains { ["rules.stepCard", "rules.stepAccent"].contains($0.identifier?.rawValue ?? "") }, "Step rows must not add a second custom selection surface")
+        for border in laneBorders {
+            let heading = descendants(border).first { $0.identifier?.rawValue == "rules.laneHeading" }!
+            let add = descendants(heading).first { $0.identifier?.rawValue == "rules.addStep" } as! NSButton
+            let table = descendants(border).compactMap { $0 as? NSTableView }.first!
+            precondition(add.convert(add.bounds, to: border).minY > table.convert(table.bounds, to: border).maxY)
+            if #available(macOS 26.0, *) { precondition(add.bezelStyle == .glass) }
+        }
         let addMenus = pickers.filter { $0.identifier?.rawValue == "rules.addStep" }
-        precondition(addMenus.count == 2 && addMenus.allSatisfy { $0.pullsDown && $0.itemTitle(at: 0) == "添加步骤" && $0.numberOfItems > 1 }, "Add step must use a native pull-down menu")
+        precondition(addMenus.count == 2 && addMenus.allSatisfy { !($0 is NSPopUpButton) && $0.title == "添加步骤" && ($0.menu?.numberOfItems ?? 0) > 0 }, "Add step uses a native glass button with a menu and no disclosure arrow")
         for menu in addMenus {
             let response = menu.accessibilityLabel() == "添加响应步骤"
             let kinds = ModificationKind.allCases.filter { $0 != .removeHeader && $0.supports(response: response) }
-            let items = Array(menu.itemArray.dropFirst())
+            let items = menu.menu!.items
             precondition(items.contains { $0.title == ModificationKind.delay.title } == response)
             precondition(items.map(\.title) == kinds.map(\.title))
             for item in items {
@@ -1817,78 +2034,55 @@ import RequestmanCore
         }
         inspector.isPresented = false
         let narrow = FlowEditorViewController(model: model)
+        let narrowWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 900), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        narrowWindow.isReleasedWhenClosed = false; narrowWindow.contentViewController = narrow
+        defer { narrowWindow.close() }
         narrow.view.frame = NSRect(x: 0, y: 0, width: 420, height: 700)
         narrow.view.layoutSubtreeIfNeeded()
 
         var headerFlow = model.workflow!
-        headerFlow.matchTarget = .url; headerFlow.matchRule = .equals; headerFlow.matchPattern = "https://example.test/"
-        headerFlow.matchHeaderEnabled = true; headerFlow.matchHeaderRule = .equals
-        headerFlow.matchHeaderName = "X-Environment"; headerFlow.matchHeaderPattern = "staging"
+        headerFlow.matchConditions = WorkflowMatchGroup(conditions: [
+            .init(field: .url, operation: .equals, value: "https://example.test/"),
+            .init(field: .header, operation: .equals, name: "X-Environment", value: "staging")], groups: [
+                WorkflowMatchGroup(mode: .any, conditions: [.init(field: .cookie, operation: .exists, name: "debug")])])
         model.updateWorkflow(headerFlow); narrow.refresh(); narrow.view.layoutSubtreeIfNeeded()
-        let matchHeader = descendants(narrow.view).compactMap { $0 as? HeaderNameField }.first { $0.accessibilityLabel() == "匹配 Header 名称" }!
-        precondition(!matchHeader.isHiddenOrHasHiddenAncestor && matchHeader.stringValue == "X-Environment")
+        func settleMatching() {
+            narrow.refresh()
+            for _ in 0..<4 { narrow.view.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        }
+        let matchHeader = descendants(narrow.view).compactMap { $0 as? ActionTextField }.first { $0.stringValue == "X-Environment" }!
         for width: CGFloat in [420, 680, 900, 420] {
-            narrow.view.setFrameSize(NSSize(width: width, height: 900))
-            for _ in 0..<5 {
-                narrow.view.layoutSubtreeIfNeeded()
-                RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+            narrowWindow.setContentSize(NSSize(width: width, height: 900)); settleMatching()
+            for row in descendants(narrow.view).filter({ $0.identifier?.rawValue == "rules.conditionRow" }) {
+                for control in row.subviews where !control.isHidden {
+                    let rect = control.convert(control.bounds, to: narrow.view)
+                    precondition(rect.minX >= 24 && rect.maxX <= width - 24 + 1, "Matching controls must fit narrow layouts: \(control), \(rect), row=\(row.bounds), root=\(narrow.view.bounds), width=\(width)")
+                }
             }
-            let controls = descendants(narrow.view)
-            let methodRow = controls.first { $0.identifier?.rawValue == "rules.matchMethodRow" }!
-            let addressRow = controls.first { $0.identifier?.rawValue == "rules.matchAddressRow" }!
-            let headerRow = controls.first { $0.identifier?.rawValue == "rules.matchHeaderRow" }!
-            let rows = [methodRow, addressRow, headerRow].map { $0.convert($0.bounds, to: narrow.view) }
-            precondition(rows[0].minY > rows[1].maxY && rows[1].minY > rows[2].maxY, "Method, address and Header occupy separate condition groups")
-            precondition(rows.allSatisfy { $0.minX >= 24 && $0.maxX <= width - 24 })
-            let method = controls.compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == "请求方法匹配" }!
-            let addressRule = controls.compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == "地址匹配规则" }!
-            precondition(abs(method.convert(method.bounds, to: narrow.view).minX - addressRule.convert(addressRule.bounds, to: narrow.view).minX) < 1)
-            let value = controls.compactMap { $0 as? ActionTextField }.first { $0.accessibilityLabel() == "Header 匹配值" }!
-            let nameRect = matchHeader.convert(matchHeader.bounds, to: narrow.view)
-            let valueRect = value.convert(value.bounds, to: narrow.view)
-            precondition(abs(nameRect.width - 240) < 1 && valueRect.width >= 100)
-            precondition(valueRect.maxX <= width - 24 && nameRect.maxX <= width - 24)
-            if width == 420 { precondition(valueRect.maxY < nameRect.minY, "Narrow Header group wraps internally") }
-            else { precondition(abs(valueRect.midY - nameRect.midY) < 3, "Wide Header controls stay on one line: width=\(width), name=\(nameRect), value=\(valueRect), group=\(headerRow.frame), parent=\(matchHeader.superview!.bounds)") }
         }
-        matchHeader.stringValue = "X-Custom"
-        matchHeader.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: matchHeader))
-        narrow.refresh(); precondition(model.workflow?.matchHeaderName == "X-Custom")
-        let target = descendants(narrow.view).compactMap { $0 as? NSPopUpButton }.first { $0.itemTitles == WorkflowMatchTarget.allCases.map(\.title) }!
-        precondition(target.itemTitles == ["URL 匹配", "Host 匹配"])
-        target.selectItem(at: 1); precondition(target.sendAction(target.action, to: target.target))
-        narrow.refresh(); precondition(!matchHeader.isHiddenOrHasHiddenAncestor && model.workflow?.matchHeaderName == "X-Custom")
-        let headerValue = descendants(narrow.view).compactMap { $0 as? ActionTextField }.first { $0.accessibilityLabel() == "Header 匹配值" }!
-        headerValue.stringValue = "prod"; headerValue.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: headerValue))
-        narrow.refresh(); precondition(model.workflow?.matchHeaderPattern == "prod" && model.workflow?.matchPattern == "https://example.test/")
-        let toggle = descendants(narrow.view).compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "同时匹配 Header" }!
-        for _ in 0..<5 {
-            window.contentView?.layoutSubtreeIfNeeded()
-            RunLoop.main.run(until: Date().addingTimeInterval(0.03))
-        }
-        let windowFrame = window.frame
-        let rulesWidth = rules.view.bounds.width
-        let narrowWidth = narrow.view.bounds.width
-        for active in [false, true, false, true] {
-            toggle.performClick(nil); narrow.refresh()
-            for _ in 0..<5 {
-                narrow.view.layoutSubtreeIfNeeded(); window.contentView?.layoutSubtreeIfNeeded()
-                RunLoop.main.run(until: Date().addingTimeInterval(0.03))
-            }
-            precondition(model.workflow!.matchHeaderEnabled == active && matchHeader.isHiddenOrHasHiddenAncestor == !active)
-            if !active {
-                let headerRow = descendants(narrow.view).first { $0.identifier?.rawValue == "rules.matchHeaderRow" }!
-                precondition(abs(headerRow.bounds.height - toggle.bounds.height) < 1,
-                             "Disabled Header matching must occupy only the checkbox height")
-                let box = descendants(narrow.view).compactMap { $0 as? NSBox }.first { toggle.isDescendant(of: $0) }!
-                let checkboxRect = toggle.convert(toggle.bounds, to: box)
-                precondition(abs(checkboxRect.minY - 12) < 1,
-                             "Matching box must keep only its bottom inset below the disabled Header checkbox")
-            }
-            precondition(window.frame == windowFrame && abs(rules.view.bounds.width - rulesWidth) < 1 && narrow.view.bounds.width == narrowWidth,
-                         "Toggling Header must preserve the window and split-pane widths")
-            precondition(headerValue.stringValue == "prod")
-        }
+        matchHeader.stringValue = "X-Custom"; matchHeader.onChange("X-Custom"); settleMatching()
+        precondition(model.workflow?.matchConditions.conditions[1].name == "X-Custom")
+        precondition(descendants(narrow.view).contains { $0 === matchHeader }, "Value editing retains field identity")
+        let collapse = descendants(narrow.view).first { $0.identifier?.rawValue == "rules.collapseMatching" } as! NSButton
+        let groupCollapse = descendants(narrow.view).first { $0.identifier?.rawValue == "rules.collapseGroup" } as! NSButton
+        let groupView = descendants(narrow.view).first { $0.identifier?.rawValue == "rules.conditionGroup" }!
+        let expandedGroupHeight = groupView.bounds.height
+        groupCollapse.performClick(nil); settleMatching()
+        precondition(groupView.bounds.height < expandedGroupHeight)
+        groupCollapse.performClick(nil); settleMatching()
+        let matching = descendants(narrow.view).first { $0.identifier?.rawValue == "rules.matching" }!
+        let expandedHeight = matching.bounds.height
+        let width = narrow.view.bounds.width
+        collapse.performClick(nil); settleMatching()
+        precondition(matching.bounds.height < expandedHeight && matchHeader.isHiddenOrHasHiddenAncestor)
+        precondition(narrow.view.bounds.width == width)
+        collapse.performClick(nil); settleMatching()
+        precondition(!matchHeader.isHiddenOrHasHiddenAncestor && matchHeader.stringValue == "X-Custom")
+        precondition(!descendants(narrow.view).contains { $0.identifier?.rawValue == "rules.isSSE" })
+        let rootAdd = descendants(matching).first { $0.identifier?.rawValue == "rules.addCondition" } as! NSButton
+        let previousCount = model.workflow!.matchConditions.conditionCount
+        rootAdd.performClick(nil); settleMatching()
+        precondition(model.workflow!.matchConditions.conditionCount == previousCount + 1)
         let preview = WorkflowPreviewViewController(workflow: model.workflow!, environment: nil)
         _ = preview.view; preview.view.layoutSubtreeIfNeeded()
         let input = ScriptPreviewInputViewController(input: ScriptPreviewInput(), response: true) { _ in }
@@ -1931,7 +2125,40 @@ import RequestmanCore
         precondition(model.document.projects.flatMap(\.workflows).count == workflowsBefore)
         window.makeFirstResponder(sidebar.outline)
         sidebar.perform(.delete)
+        precondition(model.document.projects.flatMap(\.workflows).count == workflowsBefore, "Opening confirmation must preserve the rule")
+        func respondToDeletion(_ title: String) {
+            guard let sheet = window.attachedSheet,
+                  let button = descendants(sheet.contentView!).compactMap({ $0 as? NSButton }).first(where: { $0.title == title }) else {
+                preconditionFailure("Expected native deletion confirmation: \(title)")
+            }
+            if title == "取消" { precondition(sheet.defaultButtonCell === button.cell, "Cancel must remain the native default button") }
+            else { precondition(button.hasDestructiveAction && button.keyEquivalent.isEmpty) }
+            button.performClick(nil)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        }
+        respondToDeletion("取消")
+        precondition(model.document.projects.flatMap(\.workflows).count == workflowsBefore)
+        window.makeFirstResponder(sidebar.outline)
+        sidebar.perform(.delete)
+        respondToDeletion("删除规则")
         precondition(model.document.projects.flatMap(\.workflows).count == workflowsBefore - 1)
+        // Context menus confirm the clicked group even when another rule is selected.
+        sidebar.refresh()
+        let groupID = model.document.projects.last!.id
+        let groupItem = sidebar.outlineView(sidebar.outline, child: model.document.projects.count - 1, ofItem: nil)
+        let groupRow = sidebar.outline.row(forItem: groupItem)
+        model.selectedWorkflowID = model.document.projects[0].workflows[0].id
+        let selectionBeforeDeletion = model.selectedWorkflowID
+        sidebar.refresh()
+        let groupMenu = sidebar.menu(forRow: groupRow)!
+        groupMenu.performActionForItem(at: groupMenu.items.firstIndex { $0.title == "删除规则组" }!)
+        precondition(model.document.projects.count == projectCount + 1)
+        respondToDeletion("取消")
+        precondition(model.document.projects.count == projectCount + 1)
+        groupMenu.performActionForItem(at: groupMenu.items.firstIndex { $0.title == "删除规则组" }!)
+        respondToDeletion("删除规则组")
+        precondition(model.document.projects.count == projectCount && !model.document.projects.contains { $0.id == groupID })
+        precondition(model.selectedWorkflowID == selectionBeforeDeletion, "Deleting a context-menu target preserves another selected rule")
         // Add a step in each lane and target the focused lane, independent of model selection.
         model.selectedWorkflowID = model.document.projects[0].workflows[0].id
         model.addStep(.setHeader, response: false)
@@ -2011,7 +2238,7 @@ import RequestmanCore
             var flow = RequestWorkflow(); flow.name = "规则 \(index)"
             flow.requestSteps = (0..<16).map { _ in ModificationStep(kind: .setHeader) }; return flow
         }
-        model.document.projects = [project, WorkflowProject(name: "第二个项目")]
+        model.document.projects = [project, WorkflowProject(name: "第二个规则组")]
         model.selectedWorkflowID = project.workflows[0].id
         let sidebar = ProjectSidebarViewController(model: model)
         let rules = RulesViewController(model: model)
@@ -2061,11 +2288,11 @@ import RequestmanCore
     }
     private static func checkSidebarWidths() {
         let model = WorkspaceModel()
-        var first = WorkflowProject(name: "新项目")
+        var first = WorkflowProject(name: "新规则组")
         var firstFlow = RequestWorkflow(); firstFlow.name = "test"
         var duplicate = RequestWorkflow(); duplicate.name = "test 副本"
         first.workflows = [firstFlow, duplicate]
-        var second = WorkflowProject(name: "商城项目")
+        var second = WorkflowProject(name: "商城规则组")
         second.workflows = ["创建订单", "获取订单详情", "用户信息 Mock"].map { name in
             var flow = RequestWorkflow(); flow.name = name; return flow
         }
@@ -2129,7 +2356,7 @@ import RequestmanCore
                 RunLoop.main.run(until: Date().addingTimeInterval(0.22))
             }
         }
-        model.document.projects[1].name = String(repeating: "很长的项目名称", count: 8)
+        model.document.projects[1].name = String(repeating: "很长的规则组名称", count: 8)
         sidebar.refresh(); sidebar.view.layoutSubtreeIfNeeded()
         let cell = sidebar.outline.view(atColumn: 0, row: 3, makeIfNecessary: true)!
         let title = descendants(cell).first { $0.identifier?.rawValue == "rules.sidebarTitle" } as! NSTextField

@@ -15,7 +15,14 @@ final class WorkspaceModel {
     var captureMode: CaptureMode = .systemProxy
     var document = WorkspaceDocument()
     func importArchive(_ archive: WorkspaceArchive) async throws { preconditionFailure("Unexpected file import") }
+    var clearCount = 0
+    func clearWorkspace() async throws {
+        guard canClearWorkspace else { return }
+        clearCount += 1
+    }
     var loaded = true
+    var loadFailed = false
+    var canClearWorkspace: Bool { !isTransitioning && (loaded || loadFailed) }
     var isTransitioning = false
     var installedBrowsers: [ChromiumBrowser] = []
     var selectedBrowserID = ""
@@ -65,6 +72,25 @@ struct SettingsUIChecks {
 
         precondition(button("导入…", in: controller.view).isEnabled)
         precondition(button("导出全部…", in: controller.view).isEnabled)
+        let clear = button("清除工作区…", in: controller.view)
+        precondition(clear.isEnabled && clear.hasDestructiveAction)
+        let clearRow = clear.superview as! NSStackView
+        let generalStack = clearRow.superview as! NSStackView
+        precondition(generalStack.arrangedSubviews.last === clearRow, "Clear workspace belongs at the very bottom")
+        clear.performClick(nil)
+        precondition(model.clearCount == 0, "Opening confirmation must not clear the workspace")
+        let cancelSheet = window.attachedSheet!
+        let cancel = button("取消", in: cancelSheet.contentView!)
+        precondition(cancelSheet.defaultButtonCell === cancel.cell)
+        cancel.performClick(nil)
+        try await Task.sleep(for: .milliseconds(300))
+        precondition(model.clearCount == 0)
+        clear.performClick(nil)
+        let confirm = button("清除工作区", in: window.attachedSheet!.contentView!)
+        precondition(confirm.hasDestructiveAction && confirm.keyEquivalent.isEmpty)
+        confirm.performClick(nil)
+        try await Task.sleep(for: .milliseconds(300))
+        precondition(model.clearCount == 1)
         let port = field("本地代理端口", in: controller.view)
         precondition(port.bounds.width == 140 && port.bounds.height > 0)
         port.onChange("9191")
@@ -73,20 +99,38 @@ struct SettingsUIChecks {
         try await Task.sleep(for: .milliseconds(50))
         precondition(!port.isEnabled)
         precondition(!button("导入…", in: controller.view).isEnabled)
+        precondition(!clear.isEnabled)
         model.isTransitioning = false
 
         let general = controller.children.first as! GeneralSettingsViewController
+        model.loaded = false
+        general.refresh()
+        precondition(!clear.isEnabled, "Initial loading must keep reset disabled")
+        model.loadFailed = true
+        general.refresh()
+        precondition(clear.isEnabled && !button("导入…", in: general.view).isEnabled)
+        clear.performClick(nil)
+        precondition(window.attachedSheet != nil, "Failed loading must still allow reset confirmation")
+        button("清除工作区", in: window.attachedSheet!.contentView!).performClick(nil)
+        try await Task.sleep(for: .milliseconds(300))
+        precondition(model.clearCount == 2)
+        model.loaded = true
+        model.loadFailed = false
+        general.refresh()
         let decryptAll = descendants(general.view).compactMap { $0 as? NSSwitch }.first { $0.accessibilityLabel() == "解密所有请求" }!
         let domains = descendants(general.view).compactMap { $0 as? NSTextView }.first { $0.accessibilityLabel() == "HTTPS 解密域名" }!
         precondition(decryptAll.state == .on && !domains.isEditable)
+        precondition(!domains.isSelectable && domains.textColor == .disabledControlTextColor)
+        precondition(domains.enclosingScrollView!.layer?.cornerRadius == 8 && domains.enclosingScrollView!.layer?.masksToBounds == true)
         decryptAll.state = .off
         NSApplication.shared.sendAction(decryptAll.action!, to: decryptAll.target, from: decryptAll)
         precondition(!model.document.httpsDecryption.decryptAllRequests && domains.isEditable)
+        precondition(domains.isSelectable && domains.backgroundColor == .textBackgroundColor)
         general.view.layoutSubtreeIfNeeded()
         precondition(domains.bounds.width > 500 && domains.enclosingScrollView!.contentSize.height >= 100,
                      "The multiline domain editor must fill its native scroll view")
         window.makeFirstResponder(domains)
-        domains.insertText("api.example.com\n*.example.test", replacementRange: NSRange(location: 0, length: 0))
+        domains.insertText("  api.example.com ;  *.example.test  ", replacementRange: NSRange(location: 0, length: 0))
         precondition(model.document.httpsDecryption.domains == ["api.example.com", "*.example.test"])
         domains.insertText("https://invalid.test", replacementRange: NSRange(location: 0, length: domains.string.utf16.count))
         general.refresh()
@@ -96,14 +140,17 @@ struct SettingsUIChecks {
         checkFormGeometry(in: general.view)
         domains.insertText("localhost", replacementRange: NSRange(location: 0, length: domains.string.utf16.count))
         precondition(model.document.httpsDecryption.domains == ["localhost"])
-        window.makeFirstResponder(nil)
         decryptAll.state = .on
         NSApplication.shared.sendAction(decryptAll.action!, to: decryptAll.target, from: decryptAll)
         precondition(model.document.httpsDecryption.decryptAllRequests && !domains.isEditable)
+        precondition(!domains.isSelectable && window.firstResponder !== domains,
+                     "Enabling all-request decryption must disable and unfocus the domain editor")
         precondition(model.document.httpsDecryption.domains == ["localhost"], "The all-requests switch must preserve the domain list")
-        model.document.httpsDecryption.domains = ["imported.test"]
+        model.document.httpsDecryption.domains = ["imported.test", "*.second.test"]
         general.refresh()
-        precondition(domains.string == "imported.test", "Imported settings must refresh the domain editor")
+        precondition(domains.string == "imported.test; *.second.test", "Imported settings must display semicolon-separated domains")
+        checkDomainScrolling(general, model: model, domains: domains)
+        try checkDomainBackground(general, model: model, domains: domains)
         checkFormGeometry(in: general.view)
         model.captureMode = .browser
         model.installedBrowsers = [ChromiumBrowser(id: "test.browser", name: "Chromium Test Browser", applicationURL: URL(fileURLWithPath: "/System/Applications/Safari.app"))]
@@ -239,6 +286,86 @@ struct SettingsUIChecks {
         precondition(!model.certificateSetup.isRunning)
         checkOutsideClickEditing()
         print("Settings AppKit checks OK: form containment and non-overlap, browser/certificate states, HTTPS decryption switch/domain validation/import refresh, upstream expansion and wrapped errors, scrolling, window, toolbar, proxy binding, environment name/typed variables/validation/delete, split geometry, read-only state and certificate construction (no App or certificate changes)")
+    }
+
+    private static func checkDomainBackground(_ general: GeneralSettingsViewController, model: WorkspaceModel,
+                                             domains: NSTextView) throws {
+        let scroll = domains.enclosingScrollView!
+        let window = general.view.window!
+        let originalAppearance = window.appearance
+        let original = model.document.httpsDecryption
+        defer {
+            window.appearance = originalAppearance
+            model.document.httpsDecryption = original
+            general.refresh()
+        }
+        model.document.httpsDecryption.domains = []
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            window.appearance = NSAppearance(named: appearance)
+            var samples: [CGFloat] = []
+            for disabled in [false, true] {
+                model.document.httpsDecryption.decryptAllRequests = disabled
+                general.refresh()
+                general.view.layoutSubtreeIfNeeded()
+                scroll.displayIfNeeded()
+                let bitmap = scroll.bitmapImageRepForCachingDisplay(in: scroll.bounds)!
+                scroll.cacheDisplay(in: scroll.bounds, to: bitmap)
+                let color = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)!.usingColorSpace(.sRGB)!
+                precondition(color.alphaComponent > 0.99, "Domain background must cover the viewport")
+                let brightness = (color.redComponent + color.greenComponent + color.blueComponent) / 3
+                samples.append(brightness)
+                if let prefix = ProcessInfo.processInfo.environment["REQUESTMAN_SETTINGS_SNAPSHOT"] {
+                    let style = appearance == .aqua ? "light" : "dark"
+                    let state = disabled ? "disabled" : "editable"
+                    try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: "\(prefix)-domain-\(style)-\(state).png"))
+                }
+            }
+            if appearance == .aqua {
+                precondition(samples[0] - samples[1] > 0.05, "Disabled field must render visibly gray, not white")
+            } else {
+                precondition(samples[1] - samples[0] > 0.05, "Disabled field must remain distinct in dark appearance")
+            }
+            print("Domain background pixels \(appearance.rawValue): editable=\(samples[0]), disabled=\(samples[1])")
+        }
+    }
+
+    private static func checkDomainScrolling(_ general: GeneralSettingsViewController, model: WorkspaceModel,
+                                            domains: NSTextView) {
+        let inner = domains.enclosingScrollView!
+        let outer = descendants(general.view).compactMap { $0 as? NSScrollView }.first { $0 !== inner }!
+        let original = model.document.httpsDecryption
+        let outerOrigin = outer.contentView.bounds.origin
+        defer {
+            model.document.httpsDecryption = original
+            general.refresh()
+            outer.contentView.scroll(to: outerOrigin)
+            outer.reflectScrolledClipView(outer.contentView)
+        }
+        // Exercise both disabled and editable fields, including shrink after overflow.
+        for disabled in [true, false] {
+            model.document.httpsDecryption.decryptAllRequests = disabled
+            for count in [0, 1, 80, 1] {
+                model.document.httpsDecryption.domains = (0..<count).map { "host\($0).example.test" }
+                general.refresh()
+                domains.layoutManager!.ensureLayout(for: domains.textContainer!)
+                general.view.layoutSubtreeIfNeeded()
+                outer.contentView.scroll(to: .zero)
+                outer.reflectScrolledClipView(outer.contentView)
+                inner.contentView.scroll(to: .zero)
+                inner.reflectScrolledClipView(inner.contentView)
+                let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
+                                    wheel1: -40, wheel2: 0, wheel3: 0)!
+                domains.scrollWheel(with: NSEvent(cgEvent: wheel)!)
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+                if count < 2 {
+                    precondition(outer.contentView.bounds.minY > 0 && abs(inner.contentView.bounds.minY) < 1,
+                                 "Fitting domain text must forward scrolling to settings, even when disabled")
+                } else {
+                    precondition(inner.contentView.bounds.minY > 0 && abs(outer.contentView.bounds.minY) < 1,
+                                 "Overflowing domain text must retain internal scrolling")
+                }
+            }
+        }
     }
 
     private static func checkOutsideClickEditing() {

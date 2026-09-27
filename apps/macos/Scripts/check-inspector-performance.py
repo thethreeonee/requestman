@@ -29,7 +29,7 @@ try:
         str(root / "Requestman/Features/Workspace/WorkspaceSplitView.swift"),
         str(root / "Requestman/Features/Rules/TemplateValuesView.swift"),
         str(root / "Requestman/Features/Workspace/WorkspaceSectionControl.swift"),
-        *map(str, sorted(p for p in (root / "Requestman/Features/Requests").glob("Request*.swift"))),
+        *map(str, sorted(p for p in (root / "Requestman/Features/Requests").glob("Request*.swift") if p.name != "RequestReplayEditor.swift")),
         str(root / "Requestman/Features/Workspace/JSONSyntax.swift"),
         str(root / "Scripts/Fixtures/InspectorPerformanceChecks.swift"), "-o", str(executable),
     ], check=True)

@@ -29,6 +29,18 @@ try:
     executable = temporary / "check"
     subprocess.run(["swiftc", *flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore", "-lRequestmanCertificates",
                     *map(str, files), str(root / "Scripts/Fixtures/SettingsUIChecks.swift"), "-o", str(executable)], check=True)
-    subprocess.run([str(executable)], check=True, timeout=30)
+    result = subprocess.run([str(executable)], timeout=30, capture_output=True, text=True)
+    print(result.stdout, end="", flush=True)
+    print(result.stderr, end="", flush=True)
+    result.check_returncode()
+    assert "Settings AppKit checks OK:" in result.stdout, "Settings fixture exited before completing its checks"
+    model_executable = temporary / "check-model"
+    subprocess.run(["swiftc", *flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore", "-lRequestmanCertificates",
+                    *map(str, sorted((source / "App").glob("WorkspaceModel*.swift"))),
+                    str(source / "Features/Requests/ExecutionHistoryModel.swift"),
+                    str(source / "Features/Workspace/WorkspaceSection.swift"),
+                    str(source / "Features/Requests/RequestBodyDecoding.swift"),
+                    str(root / "Scripts/Fixtures/WorkspaceResetChecks.swift"), "-o", str(model_executable)], check=True)
+    subprocess.run([str(model_executable), str(temporary)], check=True, timeout=30)
 finally:
     subprocess.run(["trash", str(temporary)], check=True)

@@ -12,7 +12,7 @@ private final class FilterFixture {
         let methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT"]
         let statuses: [Int?] = [101, 200, 302, 404, 500, nil, 204, 200]
         var record = CaptureRecord(method: methods[index], url: "https://example.test/very/long/path/\(index)")
-        record.project = "商城项目"; record.environment = "dev"; record.status = statuses[index]
+        record.project = "商城规则组"; record.environment = "dev"; record.status = statuses[index]
         record.duration = index == 4 ? 3.2 : 0.128
         if index == 7 { record.outcome = .failed; record.error = "响应传输中断" }
         record.requestHeaders = [HTTPField("Content-Type", "application/json")]
@@ -89,7 +89,7 @@ private enum RequestFilterChecks {
             precondition(!descendants(ruleCell).contains { $0 is NSButton },
                          "Four executed steps must not produce a +3 rule count")
         }
-        precondition(cell(4).toolTip == "商城项目\n未命中规则", "Unmatched requests must not gain a workflow")
+        precondition(cell(4).toolTip == "商城规则组\n未命中规则", "Unmatched requests must not gain a workflow")
         precondition(cell(3).toolTip!.contains("添加调试标记"), "Resolve by workflow ID, not a shared old name")
         precondition(table.selectedRow == 1 && table.tableColumns.map(\.width) == widths)
         precondition(model.records[0].matchedRules == originalRecords[0].matchedRules,
@@ -116,7 +116,7 @@ private enum RequestFilterChecks {
         let window = makeWindow(host)
         defer { window.close() }
         checkRuleRename(model: model, host: host)
-        for width in [1440.0, 820, 600, 569, 567, 420, 600] {
+        for width in [1440.0, 820, 600, 569, 567, host.controls.minimumContentWidth, 820] {
             window.setContentSize(NSSize(width: width, height: 620))
             settle(host.view)
             precondition(abs(host.view.bounds.width - width) < 2, "Content must remain at requested width \(width), got \(host.view.bounds.width)")
@@ -132,9 +132,11 @@ private enum RequestFilterChecks {
             let actions = views.compactMap { $0 as? NSButton }
                 .filter { $0.action == NSSelectorFromString("performAction:") }
             precondition(actions.count == 3)
-            let types = views.compactMap { $0 as? NSSegmentedControl }.first!
-            precondition(types.segmentCount == CaptureResourceType.allCases.filter { $0 != .sse && $0 != .webSocket }.count && !types.isHidden)
-            precondition((0..<types.segmentCount).map { types.label(forSegment: $0)! } == CaptureResourceType.allCases.filter { $0 != .sse && $0 != .webSocket }.map(\.rawValue))
+            let segments = views.compactMap { $0 as? NSSegmentedControl }
+            precondition(segments.count == 1, "Resource types, SSE and WS share one segmented control")
+            let types = segments[0]
+            precondition(types.segmentCount == CaptureResourceType.allCases.count && !types.isHidden)
+            precondition((0..<types.segmentCount).map { types.label(forSegment: $0)! } == CaptureResourceType.allCases.map(\.rawValue))
             precondition(!descendants(host.controls).contains { $0 is NSPopUpButton }, "All resource types stay inline")
             if #available(macOS 26.0, *) { precondition(types.controlSize == .extraLarge) }
             else { precondition(types.controlSize == .large) }
@@ -142,23 +144,25 @@ private enum RequestFilterChecks {
             precondition(types.frame.width > 0 && types.frame.height == nativeHeight)
             precondition(types.bounds.size == types.frame.size, "Native text must never be stretched by a bounds/frame scale")
             precondition(types.frame.width >= types.intrinsicContentSize.width,
-                         "All nine resource labels must fit at \(width) pt: frame=\(types.frame), natural=\(types.intrinsicContentSize), segments=\((0..<types.segmentCount).map { types.width(forSegment: $0) })")
+                         "All eleven resource labels must fit at \(width) pt: frame=\(types.frame), natural=\(types.intrinsicContentSize), segments=\((0..<types.segmentCount).map { types.width(forSegment: $0) })")
             if #available(macOS 26.0, *) { precondition(types.borderShape == .capsule) }
             let filterButton = actions.first { $0.accessibilityLabel() == "筛选" }!
             precondition(filterButton.title.isEmpty && filterButton.image != nil)
             precondition(types.frame.height == filterButton.frame.height)
-            precondition(host.controls.bounds.contains(types.frame))
+            let typesFrame = types.frame
+            precondition(host.controls.bounds.contains(typesFrame), "All categories fit at their natural minimum width")
             for index in 0..<types.segmentCount {
                 let textWidth = (types.label(forSegment: index)! as NSString).size(withAttributes: [.font: types.font!]).width
                 precondition(types.width(forSegment: index) >= ceil(textWidth) + 16,
-                             "Every resource segment must retain its wider horizontal padding")
+                             "Every resource segment keeps its full label and 16 pt horizontal padding")
             }
-            if width < types.intrinsicContentSize.width + (descendants(host.controls).compactMap { $0 as? NSSegmentedControl }.first { $0.accessibilityLabel() == "协议类型" }!.intrinsicContentSize.width) + nativeHeight * 3 + 73 {
-                precondition(host.controls.bounds.height == nativeHeight * 2 + 24 && types.frame.maxY < filterButton.frame.minY,
-                             "Narrow layouts move all nine full-width segments onto their own row: width=\(width), controls=\(host.controls.bounds), frame=\(host.controls.frame), heights=\(host.controls.constraints.filter { $0.firstAttribute == .height }.map { $0.constant }), segments=\(types.frame), filter=\(filterButton.frame)")
+            let preferredWidth = types.intrinsicContentSize.width
+            if width < preferredWidth + nativeHeight * 3 + 73 {
+                precondition(host.controls.bounds.height == nativeHeight * 2 + 24 && typesFrame.maxY < filterButton.frame.minY,
+                             "Narrow layouts move all eleven segments onto their own row: width=\(width), controls=\(host.controls.bounds), frame=\(host.controls.frame), heights=\(host.controls.constraints.filter { $0.firstAttribute == .height }.map { $0.constant }), segments=\(types.frame), filter=\(filterButton.frame)")
             } else {
-                precondition(host.controls.bounds.height == nativeHeight + 16 && types.frame.maxX < filterButton.frame.minX)
-                precondition(types.frame.midY == filterButton.frame.midY)
+                precondition(host.controls.bounds.height == nativeHeight + 16 && typesFrame.maxX < filterButton.frame.minX)
+                precondition(typesFrame.midY == filterButton.frame.midY)
             }
             let rect = actions[0].convert(actions[0].bounds, to: host.view)
             for button in actions {
@@ -210,18 +214,13 @@ private enum RequestFilterChecks {
         settle(host.view)
         precondition(table.numberOfRows == 8)
         let types = descendants(host.controls).compactMap { $0 as? NSSegmentedControl }.first!
-        for (index, type) in CaptureResourceType.allCases.filter({ $0 != .sse && $0 != .webSocket }).enumerated() {
+        for (index, type) in CaptureResourceType.allCases.enumerated() {
             types.selectedSegment = index
             precondition(NSApp.sendAction(types.action!, to: types.target, from: types))
             settle(host.view)
             precondition(model.filter.resource == type)
         }
-        let protocols = descendants(host.controls).compactMap { $0 as? NSSegmentedControl }.first { $0.accessibilityLabel() == "协议类型" }!
-        for (index, type) in [CaptureResourceType.sse, .webSocket].enumerated() {
-            protocols.selectedSegment = index
-            precondition(NSApp.sendAction(protocols.action!, to: protocols.target, from: protocols))
-            settle(host.view); precondition(model.filter.resource == type && types.selectedSegment == -1)
-        }
+        precondition(types.selectedSegment == CaptureResourceType.allCases.firstIndex(of: model.filter.resource))
         model.filter = CaptureRecordFilter()
         settle(host.view)
         window.setContentSize(NSSize(width: 1440, height: 620))
@@ -277,7 +276,7 @@ private enum RequestFilterChecks {
         checkMetadataFilters(panel, window: panelWindow, model: model)
         precondition(!panelWindow.isVisible)
         panelWindow.close()
-        print("Request filter CLI checks passed: 420–1440 pt layout, six columns, status colors and selection restoration, single-line request/reuse, no horizontal scrolling, filter model search/reset, table selection, Header suggestions and editing. Hidden component windows only; no App or visual acceptance.")
+        print("Request filter CLI checks passed: content-sized minimum–1440 pt layout, six columns, status colors and selection restoration, single-line request/reuse, no horizontal scrolling, filter model search/reset, table selection, Header suggestions and editing. Hidden component windows only; no App or visual acceptance.")
     }
     private static func checkResourceSegmentPaint(_ controls: NSView, segments: NSSegmentedControl) {
         guard #available(macOS 26.0, *) else { return }
@@ -288,10 +287,10 @@ private enum RequestFilterChecks {
         controls.layer?.backgroundColor = NSColor.white.cgColor
         defer { controls.appearance = appearance; controls.layer?.backgroundColor = background }
         controls.displayIfNeeded()
-        // On two rows, protocol tabs can also cross the resource tabs' midpoint.
-        // Inspect this control's rectangle rather than unrelated controls above it.
-        let bitmap = controls.bitmapImageRepForCachingDisplay(in: segments.frame)!
-        controls.cacheDisplay(in: segments.frame, to: bitmap)
+        // Inspect the unified category control without including the action row.
+        let rect = segments.convert(segments.bounds, to: controls).intersection(controls.bounds)
+        let bitmap = controls.bitmapImageRepForCachingDisplay(in: rect)!
+        controls.cacheDisplay(in: rect, to: bitmap)
         let scale = CGFloat(bitmap.pixelsHigh) / segments.frame.height
         let x = bitmap.pixelsWide / 2
         let rows = (0..<bitmap.pixelsHigh).filter { y in
@@ -348,7 +347,7 @@ private enum RequestFilterChecks {
         precondition(domain.stringValue.isEmpty && url.stringValue.isEmpty && popup("状态码").indexOfSelectedItem == 0)
     }
 
-    private static func checkColumnWidths(_ table: NSTableView, host: NSViewController,
+    private static func checkColumnWidths(_ table: NSTableView, host: FilterFixtureView,
                                           window: NSWindow, model: FilterFixture, defaults: UserDefaults) {
         let key = RequestRecordsTable.columnWidthsKey
         precondition(table.allowsColumnResizing && !table.allowsColumnReordering)
@@ -388,7 +387,7 @@ private enum RequestFilterChecks {
         settle(host.view)
         precondition(zip(widths, table.tableColumns).allSatisfy { abs($0 - $1.width) < 1 },
                      "Incoming records and filtering must preserve manual widths")
-        for width in [420.0, 820, 1440] {
+        for width in [host.controls.minimumContentWidth, 820, 1440] {
             window.setContentSize(NSSize(width: width, height: 620))
             settle(host.view)
             precondition(abs(table.tableColumns.reduce(0) { $0 + $1.width } - table.enclosingScrollView!.contentSize.width) < 2)
@@ -445,9 +444,9 @@ private enum RequestFilterChecks {
             precondition(statusCell.textField?.textColor == expected[row], "Selection must restore status color")
             let rulesCell = table.view(atColumn: 3, row: row, makeIfNecessary: true) as! NSTableCellView
             let ruleLabels = rulesCell.subviews.compactMap { $0 as? NSTextField }.filter { !$0.isHidden }
-            precondition(ruleLabels.map(\.stringValue) == ["商城项目", "添加调试标记"], "Rules column must show project above the first rule name")
+            precondition(ruleLabels.map(\.stringValue) == ["商城规则组", "添加调试标记"], "Rules column must show project above the first rule name")
             precondition(!rulesCell.subviews.contains { $0 is NSButton }, "Steps must not be counted as matched workflows")
-            precondition(rulesCell.toolTip?.contains("商城项目") == true)
+            precondition(rulesCell.toolTip?.contains("商城规则组") == true)
             let requestCell = table.view(atColumn: 2, row: row, makeIfNecessary: true) as! NSTableCellView
             requestCell.layoutSubtreeIfNeeded()
             let labels = requestCell.subviews.compactMap { $0 as? NSTextField }.filter { !$0.isHidden }
@@ -500,6 +499,25 @@ private enum RequestFilterChecks {
         }
     }
     private static func checkRequestMenu(_ table: NSTableView, host: FilterFixtureView, model: FilterFixture) {
+        var active = CaptureRecord(method: "GET", url: "https://example.test/replay")
+        active.replayID = active.id; active.replaySourceID = UUID(); active.connectionState = .open
+        var cancelledID: UUID?
+        var sourceID: UUID?
+        let actions = NSMenu(); actions.autoenablesItems = false
+        RequestActionsMenu.append(to: actions, record: active, replayUnavailable: nil,
+                                  cancelReplay: { cancelledID = $0 }, revealSource: { sourceID = $0 }, replay: { _, _ in })
+        let cancel = actions.items.first { $0.title == "取消此次重放" }!
+        let source = actions.items.first { $0.title == "查看原请求" }!
+        precondition(NSApp.sendAction(cancel.action!, to: cancel.target, from: cancel))
+        precondition(NSApp.sendAction(source.action!, to: source.target, from: source))
+        precondition(cancelledID == active.replayID && sourceID == active.replaySourceID)
+        active.connectionState = .closed
+        let completedActions = NSMenu(); completedActions.autoenablesItems = false
+        RequestActionsMenu.append(to: completedActions, record: active, replayUnavailable: nil, replay: { _, _ in })
+        precondition(!completedActions.items.contains { $0.title == "取消此次重放" })
+        precondition(completedActions.items.first { $0.title == "查看原请求" }?.isEnabled == false)
+        var replayed: (CaptureRecord, Bool)?
+        host.table.onReplay = { replayed = ($0, $1) }
         var requestedRecord: CaptureRecord?
         host.table.onMockRequest = { requestedRecord = $0 }
         table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
@@ -511,14 +529,21 @@ private enum RequestFilterChecks {
         }
         let row = table.rect(ofRow: 2)
         let clickedMenu = menu(at: NSPoint(x: row.midX, y: row.midY))!
-        precondition(clickedMenu.items.map(\.title) == ["Mock 当前请求"])
-        let item = clickedMenu.items[0]
+        precondition(clickedMenu.items.map(\.title) == ["重放", "编辑后重放…", "", "复制", "", "Mock 当前请求"])
+        precondition(clickedMenu.items[2].isSeparatorItem && clickedMenu.items[4].isSeparatorItem)
+        let item = clickedMenu.items[5]
         precondition(item.isEnabled)
         let original = model.records
         let clickedURL = original[2].url
         model.records.insert(CaptureRecord(method: "GET", url: "https://new.test"), at: 0)
         settle(host.view)
         precondition(NSApp.sendAction(item.action!, to: item.target, from: item))
+        for (index, editing) in [false, true].enumerated() {
+            let action = clickedMenu.items[index]
+            precondition(action.isEnabled)
+            precondition(NSApp.sendAction(action.action!, to: action.target, from: action))
+            precondition(replayed?.0.url == clickedURL && replayed?.1 == editing)
+        }
         precondition(requestedRecord?.url == clickedURL, "The context action uses the clicked row even after a new log arrives")
         model.records.removeAll()
         settle(host.view)
@@ -530,7 +555,7 @@ private enum RequestFilterChecks {
         settle(host.view)
         let invalid = table.rect(ofRow: 7)
         let invalidMenu = menu(at: NSPoint(x: invalid.midX, y: invalid.midY))!
-        precondition(!invalidMenu.items[0].isEnabled && invalidMenu.items[0].toolTip != nil)
+        precondition(!invalidMenu.items[5].isEnabled && invalidMenu.items[5].toolTip != nil)
         model.selectedID = nil
         settle(host.view)
     }
@@ -616,3 +641,5 @@ private final class LiveColumnDragCheck: NSObject {
         }
     }
 }
+
+@MainActor enum RequestClipboard { static func copy(_ value: String) {} }

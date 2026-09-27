@@ -5,6 +5,22 @@
 	};
 	"objectVersion" = "60";
 	"objects" = {
+        "A10927AB0000000000000003" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestReplayEditor.swift"; "sourceTree" = "<group>"; };
+        "A10927AB0000000000000004" = { "isa" = "PBXBuildFile"; "fileRef" = "A10927AB0000000000000003"; };
+        "A10927AB0000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestActionsMenu.swift"; "sourceTree" = "<group>"; };
+        "A10927AB0000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10927AB0000000000000001"; };
+        "99C842F8858DB36AE7188F49" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/App/AppComposition.swift"; "sourceTree" = "<group>"; };
+        "C44D9B6189A245003E35886F" = { "isa" = "PBXBuildFile"; "fileRef" = "99C842F8858DB36AE7188F49"; };
+        "028EF8DC4598117C55B92372" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/App/WorkspaceModel+Capture.swift"; "sourceTree" = "<group>"; };
+        "D8FC8813FCB26CAE00624661" = { "isa" = "PBXBuildFile"; "fileRef" = "028EF8DC4598117C55B92372"; };
+        "12E8F317411CCC948AB2089E" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/App/WorkspaceModel+Persistence.swift"; "sourceTree" = "<group>"; };
+        "55AA0D46FD2691834A177EFA" = { "isa" = "PBXBuildFile"; "fileRef" = "12E8F317411CCC948AB2089E"; };
+        "7462B155995E50B320F72A65" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/App/WorkspaceModel+Editing.swift"; "sourceTree" = "<group>"; };
+        "F050DFA43F608FA6C5A97E1F" = { "isa" = "PBXBuildFile"; "fileRef" = "7462B155995E50B320F72A65"; };
+        "5B2309CD972EDCEF3A5E3DAD" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/ExecutionHistoryModel.swift"; "sourceTree" = "<group>"; };
+        "CB7B14A9FE67B6E05AD212CE" = { "isa" = "PBXBuildFile"; "fileRef" = "5B2309CD972EDCEF3A5E3DAD"; };
+        "A10927AA0000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/WorkflowMatchingView.swift"; "sourceTree" = "<group>"; };
+        "A10927AA0000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10927AA0000000000000001"; };
         "A10927ED0000000000000001" = { "isa" = "XCLocalSwiftPackageReference"; "relativePath" = "Packages/RequestmanEditor"; };
         "A10927ED0000000000000002" = { "isa" = "XCSwiftPackageProductDependency"; "package" = "A10927ED0000000000000001"; "productName" = "RequestmanEditor"; };
         "A10927ED0000000000000003" = { "isa" = "PBXBuildFile"; "productRef" = "A10927ED0000000000000002"; };
@@ -405,6 +421,14 @@
 				"4C3A75160F26468EA29D5061",
 				"A8CE98D3D53D32C769A516B8",
                 "A10926F01000000000000001",
+                "A10927AA0000000000000001",
+                "99C842F8858DB36AE7188F49",
+                "028EF8DC4598117C55B92372",
+                "12E8F317411CCC948AB2089E",
+                "7462B155995E50B320F72A65",
+                "5B2309CD972EDCEF3A5E3DAD",
+                "A10927AB0000000000000003",
+                "A10927AB0000000000000001",
                 "BEB4E525F48603DE12666E8E",
                 "F38B4ECE2819FC9E4240EE95",
                 "A10926B0D000000000000001",
@@ -477,6 +501,14 @@
 				"4C3A75160F26468EA29D5062",
 				"977963FF90440603C012F5DC",
                 "A10926F01000000000000002",
+                "A10927AA0000000000000002",
+                "C44D9B6189A245003E35886F",
+                "D8FC8813FCB26CAE00624661",
+                "55AA0D46FD2691834A177EFA",
+                "F050DFA43F608FA6C5A97E1F",
+                "CB7B14A9FE67B6E05AD212CE",
+                "A10927AB0000000000000004",
+                "A10927AB0000000000000002",
                 "3FE625F0ED4E4732804874D9",
                 "22372EBFC3A8E041A25BF830",
                 "A10926B0D000000000000002",

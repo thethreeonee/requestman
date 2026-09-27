@@ -18,10 +18,15 @@ final class RequestInspectorViewController: ObservedViewController {
     private let duration = NativeUI.label("", size: 12, secondary: true)
     private let bytes = NativeUI.label("", size: 12, secondary: true)
     private let rule = MatchedRulePathControl()
+    private let replayStatus = NativeUI.label("", size: 12)
+    private lazy var replaySource = ActionButton(title: "查看原请求") { [weak self] in
+        guard let self, let id = record?.replaySourceID else { return }
+        history.reveal(id)
+    }
+    private lazy var replayRow = NativeUI.stack([replayStatus, replaySource], vertical: false, spacing: 8)
     private let error = NativeUI.label("", size: 11)
     private let content = NSView()
     private let streamView = RequestStreamView()
-    private let copyButton = NSButton(title: "", target: nil, action: nil)
     private var tabs: ToolbarSectionControl!
     private var rootStack: NSStackView!
 
@@ -38,14 +43,15 @@ final class RequestInspectorViewController: ObservedViewController {
         url.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         copyURLButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
         copyURLButton.imagePosition = .imageOnly; copyURLButton.controlSize = .large
+        copyURLButton.symbolConfiguration = .init(pointSize: 13, weight: .regular)
         copyURLButton.target = self; copyURLButton.action = #selector(copyURL)
         copyURLButton.setAccessibilityLabel("复制完整 URL")
         if #available(macOS 26.0, *) { copyURLButton.bezelStyle = .glass; copyURLButton.borderShape = .circle }
         else { copyURLButton.bezelStyle = .circular }
-        for orientation in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
-            copyURLButton.setContentHuggingPriority(.required, for: orientation)
-            copyURLButton.setContentCompressionResistancePriority(.required, for: orientation)
-        }
+        NSLayoutConstraint.activate([
+            copyURLButton.widthAnchor.constraint(equalToConstant: 32),
+            copyURLButton.heightAnchor.constraint(equalToConstant: 32),
+        ])
         let urlRow = NativeUI.stack([url, copyURLButton], vertical: false, spacing: 10)
         urlRow.distribution = .fill
         status.font = RequestStatusStyle.font
@@ -56,40 +62,29 @@ final class RequestInspectorViewController: ObservedViewController {
         rule.focusRingType = .none
         rule.backgroundColor = .clear; rule.font = .systemFont(ofSize: 14)
         rule.target = self; rule.action = #selector(openMatchedWorkflow)
-        rule.setAccessibilityLabel("命中的规则与项目")
+        rule.setAccessibilityLabel("命中的规则与规则组")
         error.textColor = .systemRed; error.maximumNumberOfLines = 2
         let stats = NativeUI.stack([method, status, NativeUI.label("│", size: 12, secondary: true), duration,
                                    NativeUI.label("│", size: 12, secondary: true), bytes], vertical: false, spacing: 10)
-        let summary = NativeUI.stack([urlRow, stats, rule, error], spacing: 10)
+        let summary = NativeUI.stack([urlRow, stats, replayRow, rule, error], spacing: 10)
         summary.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
-        for child in [urlRow, rule, error] { child.widthAnchor.constraint(equalTo: summary.widthAnchor, constant: -32).isActive = true }
+        for child in [urlRow, replayRow, rule, error] { child.widthAnchor.constraint(equalTo: summary.widthAnchor, constant: -32).isActive = true }
         let size: NSControl.ControlSize
         if #available(macOS 26.0, *) { size = .extraLarge } else { size = .large }
         tabs = ToolbarSectionControl(labels: RequestDetailTab.allCases.map(\.title), accessibilityLabel: "请求数据",
                                      fillsAvailableWidth: true, controlSize: size) { [weak self] in self?.selectTab($0) }
         tabs.segmentDistribution = .fillProportionally
         tabs.selectedSegment = 0
-        copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
-        copyButton.imagePosition = .imageOnly; copyButton.controlSize = size
-        copyButton.target = self; copyButton.action = #selector(copyContent(_:))
-        if #available(macOS 26.0, *) { copyButton.bezelStyle = .glass; copyButton.borderShape = .circle }
-        else { copyButton.bezelStyle = .circular }
-        for orientation in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
-            copyButton.setContentHuggingPriority(.required, for: orientation)
-            copyButton.setContentCompressionResistancePriority(.required, for: orientation)
-        }
-        let tabRow = NativeUI.stack([tabs, copyButton], vertical: false, spacing: 10)
+        let tabRow = NativeUI.stack([tabs], vertical: false, spacing: 10)
         tabRow.distribution = .fill
         tabRow.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 10, right: 16)
         tabs.heightAnchor.constraint(equalToConstant: tabs.intrinsicContentSize.height).isActive = true
-        copyButton.heightAnchor.constraint(equalToConstant: copyButton.intrinsicContentSize.height).isActive = true
         rootStack = NativeUI.stack([summary, tabRow, content], spacing: 0)
         NativeUI.pin(rootStack, to: view)
         for child in [summary, tabRow, content] { child.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true }
         content.setContentHuggingPriority(.defaultLow, for: .vertical)
         NativeUI.pin(streamView, to: content)
         streamView.isHidden = true
-        streamView.onCopyChange = { [weak self] in self?.updateCopy() }
     }
     override func refresh() {
         let next = history.selected
@@ -105,6 +100,13 @@ final class RequestInspectorViewController: ObservedViewController {
         url.setAccessibilityLabel("请求 URL"); url.setAccessibilityValue(record.url)
         copyURLButton.isEnabled = !record.urlWasTruncated
         copyURLButton.toolTip = record.urlWasTruncated ? "URL 记录已截断，无法复制完整地址" : "复制完整 URL"
+        replayRow.isHidden = record.replayID == nil
+        replayStatus.stringValue = record.replaySummary ?? ""
+        replayStatus.lineBreakMode = .byTruncatingTail
+        replayStatus.toolTip = replayStatus.stringValue
+        replaySource.isHidden = record.replaySourceID == nil
+        replaySource.isEnabled = record.replaySourceID.map { id in history.records.contains { $0.id == id } } ?? false
+        replaySource.toolTip = replaySource.isEnabled ? "查看此次重放基于的原请求" : "原请求已不在日志中"
         method.setMethod(record.method)
         status.stringValue = record.status.map(String.init) ?? "—"
         status.textColor = RequestStatusStyle.color(record.status)
@@ -131,14 +133,12 @@ final class RequestInspectorViewController: ObservedViewController {
         }
         if !showsStream, panes[tab] == nil {
             let pane = RequestPayloadViewController(record: record, tab: tab, version: version)
-            pane.onCopyChange = { [weak self] in self?.updateCopy() }
             panes[tab] = pane; addChild(pane); NativeUI.pin(pane.view, to: content)
         }
         for (item, pane) in panes {
             pane.view.isHidden = item != tab || showsStream
             pane.update(record: record, version: version, isActive: isPresented && item == tab && !showsStream)
         }
-        updateCopy()
     }
     private func selectTab(_ index: Int) {
         guard RequestDetailTab.allCases.indices.contains(index) else { return }
@@ -147,17 +147,23 @@ final class RequestInspectorViewController: ObservedViewController {
         refresh()
     }
     private var currentCopy: RequestPayloadCopyContent? {
-        if isPresented, tab == .responseBody, record?.captureProtocol != .http, !streamView.copyText.isEmpty {
+        guard isPresented, let record else { return nil }
+        if tab == .responseBody, record.captureProtocol != .http {
+            guard !streamView.copyText.isEmpty else { return nil }
             return .init(tab: tab, version: mode.version, text: streamView.copyText)
         }
         guard isPresented, let copy = panes[tab]?.copyContent, copy.tab == tab, copy.version == mode.version, !copy.text.isEmpty else { return nil }
         return copy
     }
-    private func updateCopy() {
-        copyButton.isEnabled = currentCopy != nil
-        copyButton.toolTip = "复制当前\(tab.title)"; copyButton.setAccessibilityLabel("复制当前\(tab.title)")
+    func makeContentCopyMenuItem() -> NSMenuItem {
+        loadViewIfNeeded()
+        refresh()
+        let text = currentCopy?.text
+        let title = tabs.label(forSegment: tabs.selectedSegment) ?? tab.title
+        return RequestActionsMenu.item("复制\(title)", reason: text == nil ? "当前内容尚未加载或无可复制内容" : nil) {
+            if let text { RequestClipboard.copy(text) }
+        }
     }
-    @objc private func copyContent(_ sender: NSButton) { if let currentCopy { RequestClipboard.copy(currentCopy.text) } }
     @objc private func copyURL() {
         guard let record, !record.urlWasTruncated else { return }
         RequestClipboard.copy(record.url)

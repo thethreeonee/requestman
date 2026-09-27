@@ -193,12 +193,12 @@ public enum WorkflowScript {
     private static func validated(_ message: ScriptMessage, original: HTTPMessageDraft, response: Bool) throws -> HTTPMessageDraft {
         var result = original
         for field in message.headers {
-            guard WorkflowEngine.isToken(field.name), !field.value.utf8.contains(where: { $0 < 32 && $0 != 9 || $0 == 127 }) else {
+            guard HTTPMessageValidation.isToken(field.name), !field.value.utf8.contains(where: { $0 < 32 && $0 != 9 || $0 == 127 }) else {
                 throw WorkflowError.invalid("脚本返回了无效 Header")
             }
         }
         // Framing headers may be read, but are owned by the proxy and cannot be changed by a script.
-        for name in WorkflowEngine.managedHeaders {
+        for name in HTTPMessageValidation.managedHeaders {
             guard message.headers.filter({ $0.name.lowercased() == name }) == original.headers.filter({ $0.name.lowercased() == name }) else {
                 throw WorkflowError.invalid("\(name) 由代理自动维护，请修改 url 或 body")
             }
@@ -208,7 +208,7 @@ public enum WorkflowScript {
             guard let status = message.status, (200...599).contains(status) else { throw WorkflowError.invalid("response.status 需在 200–599 之间") }
             result.status = status
         } else {
-            guard let method = message.method, WorkflowEngine.isToken(method), !["CONNECT", "TRACE"].contains(method.uppercased()),
+            guard let method = message.method, HTTPMessageValidation.isToken(method), !["CONNECT", "TRACE"].contains(method.uppercased()),
                   let url = message.url, let parts = URLComponents(string: url), ["http", "https"].contains(parts.scheme),
                   parts.host != nil, parts.user == nil, parts.fragment == nil,
                   !url.utf8.contains(where: { $0 < 32 || $0 == 127 }) else { throw WorkflowError.invalid("脚本请求方法或 URL 无效") }
@@ -218,7 +218,7 @@ public enum WorkflowScript {
             if original.replacementBodyData != nil || body != (original.replacementBody ?? original.bodyText) {
                 result.replacementBody = body
                 result.replacementBodyData = nil
-                WorkflowEngine.clearBodyEncoding(&result)
+                HTTPMessageValidation.clearBodyEncoding(&result)
             }
         }
         return result

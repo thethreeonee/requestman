@@ -3,6 +3,61 @@ import Testing
 @testable import RequestmanCore
 
 struct URLModificationTests {
+    @Test func rewriteTargetsPreserveCurrentComponentsAndRoundTrip() throws {
+        var full = ModificationStep(kind: .rewriteURL)
+        full.value = "https://first.test:8443/a%2fb?keep=%2f+%20&flag&&tail="
+        let legacy = try JSONDecoder().decode(ModificationStep.self, from: JSONEncoder().encode(full))
+        #expect(legacy.urlRewriteTarget == nil && legacy.effectiveURLRewriteTarget == .fullURL)
+        var host = ModificationStep(kind: .rewriteURL)
+        host.urlRewriteTarget = .host; host.value = "{{$env.host}}"
+        var path = ModificationStep(kind: .rewriteURL)
+        path.urlRewriteTarget = .path; path.value = "/中文/next%2fpart%3F%23"
+        let steps = try JSONDecoder().decode([ModificationStep].self, from: JSONEncoder().encode([legacy, host, path]))
+        #expect(steps == [legacy, host, path])
+        let result = try apply(steps, url: "http://original.test/old?discard=1", environment: ["host": "next.test"])
+        #expect(result.url ==
+            "https://next.test:8443/%E4%B8%AD%E6%96%87/next%2fpart%3F%23?keep=%2f+%20&flag&&tail=")
+        full.urlRewriteTarget = .fullURL
+        #expect(try apply([full], url: "http://original.test/").url == full.value)
+        #expect(try apply([host], url: full.value, environment: ["host": "[::1]:8080"]).url ==
+            "https://[::1]:8080/a%2fb?keep=%2f+%20&flag&&tail=")
+        #expect(try apply([host], url: "https://old.test?", environment: ["host": "127.0.0.1"]).url == "https://127.0.0.1?")
+        #expect(try apply([host], url: full.value, environment: ["host": "[::1]"]).url.hasPrefix("https://[::1]:8443/"))
+    }
+
+    @Test func componentRewritesPreserveBodyAndComposeWithQueryEdits() throws {
+        var query = ModificationStep(kind: .setQueryParameter); query.name = "version"; query.value = "2"
+        var path = ModificationStep(kind: .rewriteURL); path.urlRewriteTarget = .path; path.value = "{{$env.path}}"
+        var host = ModificationStep(kind: .rewriteURL); host.urlRewriteTarget = .host; host.value = "next.test:9443"
+        var draft = HTTPMessageDraft(method: "POST", url: "https://old.test:8443/a?keep=%2f")
+        draft.bodyData = Data("payload".utf8)
+        _ = try WorkflowEngine.apply([query, path, host], response: false, to: &draft, environment: ["path": "/new path"], id: UUID(), date: Date())
+        #expect(draft.url == "https://next.test:9443/new%20path?keep=%2f&version=2")
+        #expect(draft.method == "POST" && draft.bodyData == Data("payload".utf8))
+        for value in ["/", "//double/slash", "/a%2Fb"] {
+            path.value = value
+            #expect(try apply([path], url: "https://old.test:443/old?").url == "https://old.test:443" + value + "?")
+        }
+    }
+
+    @Test func invalidComponentRewritesAreAtomic() {
+        let invalid: [(URLRewriteTarget, [String])] = [
+            (.host, ["", "https://next.test", "next.test/path", "next.test?x=1", "next.test#x", "user@next.test", "next.test:", "next.test:0", "next.test:65536", "next.test:-1", "next.test:abc", "::1", "bad host", "next.test\n", "next%2ftest", "next\\test", "{{$env.missing}}"]),
+            (.path, ["", "relative", "https://next.test/path", "/path?x=1", "/path#hash", "/bad%", "/bad%xy", "/bad\npath", "{{$env.missing}}"])
+        ]
+        for (target, values) in invalid {
+            for value in values {
+                var step = ModificationStep(kind: .rewriteURL); step.urlRewriteTarget = target; step.value = value
+                var draft = HTTPMessageDraft(method: "GET", url: "https://old.test:8443/old?keep=1")
+                var applied: [ModificationKind] = []
+                #expect(throws: WorkflowError.self) {
+                    try WorkflowEngine.apply([step], response: false, to: &draft, environment: [:], id: UUID(), date: Date(), onApplied: { applied.append($0) })
+                }
+                #expect(draft.url == "https://old.test:8443/old?keep=1" && applied.isEmpty)
+            }
+        }
+    }
+
     private func apply(_ steps: [ModificationStep], url: String, environment: [String: String] = [:]) throws -> HTTPMessageDraft {
         var draft = HTTPMessageDraft(method: "GET", url: url)
         _ = try WorkflowEngine.apply(steps, response: false, to: &draft, environment: environment, id: UUID(), date: Date())

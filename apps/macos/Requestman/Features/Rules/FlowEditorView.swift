@@ -23,21 +23,8 @@ extension ModificationKind {
     let model: WorkspaceModel
     private lazy var name = WorkflowNameTextField(placeholder: "请求修改名称") { [weak self] value in self?.modify { $0.name = value } }
     private lazy var enabled = RulesSwitch { [weak self] value in self?.modify { $0.enabled = value } }
-    private lazy var target = ActionPopUpButton(items: WorkflowMatchTarget.allCases.map(\.title)) { [weak self] index in self?.modify { $0.matchTarget = WorkflowMatchTarget.allCases[index] } }
-    private lazy var rule = ActionPopUpButton(items: WorkflowMatchRule.allCases.map(\.title)) { [weak self] index in self?.modify { $0.matchRule = WorkflowMatchRule.allCases[index] } }
-    private let methods = ["*", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
-    private lazy var method = ActionPopUpButton(items: methods.map { $0 == "*" ? "全部" : $0 }) { [weak self] index in guard let self else { return }; modify { $0.method = methods[index] } }
-    private lazy var pattern = ActionTextField(placeholder: "匹配值") { [weak self] value in self?.modify { $0.matchPattern = value } }
-    private lazy var headerName = HeaderNameField { [weak self] value in self?.modify { $0.matchHeaderName = value } }
-    private let sseEnabled = NSButton(checkboxWithTitle: "SSE（服务器发送事件）", target: nil, action: nil)
-    private let headerEnabled = NSButton(checkboxWithTitle: "Header", target: nil, action: nil)
-    private lazy var headerRule = ActionPopUpButton(items: WorkflowMatchRule.allCases.map(\.title)) { [weak self] index in self?.modify { $0.matchHeaderRule = WorkflowMatchRule.allCases[index] } }
-    private lazy var headerPattern = ActionTextField(placeholder: "Header 匹配值") { [weak self] value in self?.modify { $0.matchHeaderPattern = value } }
-    private var headerFields: NSStackView!
-    private var headerFieldsBottom: NSLayoutConstraint!
-    private var collapsedHeaderHeight: NSLayoutConstraint!
-    private let headerExplanation = NativeUI.label("", size: 11, secondary: true)
-    private let explanation = NativeUI.label("", size: 11, secondary: true)
+    private let enabledLabel = NativeUI.label("已启用")
+    private lazy var matching = WorkflowMatchingView(model: model)
     private lazy var requestLane = RulesStepLane(model: model, response: false)
     private lazy var responseLane = RulesStepLane(model: model, response: true)
     init(model: WorkspaceModel) { self.model = model; super.init() }
@@ -58,94 +45,27 @@ extension ModificationKind {
                                      nameLayout.heightAnchor.constraint(equalToConstant: 32)])
         let titleSpacer = NSView()
         titleSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let title = NativeUI.stack([nameLayout, titleSpacer, NativeUI.label("已启用"), enabled], vertical: false)
-        method.setAccessibilityLabel("请求方法匹配")
-        target.setAccessibilityLabel("地址匹配目标")
-        rule.setAccessibilityLabel("地址匹配规则")
-        pattern.setAccessibilityLabel("匹配值")
-        headerName.setAccessibilityLabel("匹配 Header 名称")
-        headerName.placeholderString = "Header 名称"
-        headerEnabled.target = self; headerEnabled.action = #selector(toggleHeaderMatching)
-        headerEnabled.setAccessibilityLabel("同时匹配 Header")
-        headerRule.setAccessibilityLabel("Header 匹配规则")
-        headerPattern.setAccessibilityLabel("Header 匹配值")
-        for field in [pattern, headerPattern] {
-            field.cell?.usesSingleLineMode = true
-            field.cell?.wraps = false
-            field.cell?.isScrollable = true
-            field.lineBreakMode = .byClipping
-            field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            field.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        }
-        let targetWidth: CGFloat = 130
-        target.widthAnchor.constraint(equalToConstant: targetWidth).isActive = true
-        for picker in [rule, headerRule] { picker.widthAnchor.constraint(equalToConstant: 90).isActive = true }
-        method.widthAnchor.constraint(equalToConstant: 105).isActive = true
-        headerName.widthAnchor.constraint(equalToConstant: 240).isActive = true
-        headerEnabled.widthAnchor.constraint(equalToConstant: 90).isActive = true
-        let methodLabel = NativeUI.label("请求方法")
-        methodLabel.widthAnchor.constraint(equalToConstant: targetWidth).isActive = true
-        let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let testMatch = ActionButton(title: "测试匹配") { [weak self] in
-            guard let self else { return }
-            view.window?.makeFirstResponder(nil)
-            guard let workflow = model.workflow else { return }
-            presentAsSheet(WorkflowMatchTestViewController(workflow: workflow))
-        }
-        testMatch.identifier = .init("rules.testMatch")
-        let methodRow = NativeUI.stack([methodLabel, method, spacer, testMatch], vertical: false, spacing: 8)
-        methodRow.identifier = .init("rules.matchMethodRow")
-        let addressRow = NativeUI.stack([target, rule, pattern], vertical: false, spacing: 8)
-        addressRow.identifier = .init("rules.matchAddressRow")
-        let addressGroup = NativeUI.stack([addressRow, explanation], spacing: 6)
-        addressRow.widthAnchor.constraint(equalTo: addressGroup.widthAnchor).isActive = true
-        explanation.widthAnchor.constraint(equalTo: addressGroup.widthAnchor).isActive = true
-        let headerInputs = HeaderMatchInputRow(name: headerName, rule: headerRule, pattern: headerPattern)
-        headerFields = NativeUI.stack([headerInputs, headerExplanation], spacing: 6)
-        for child in [headerInputs, headerExplanation] { child.widthAnchor.constraint(equalTo: headerFields.widthAnchor).isActive = true }
-        let headerFieldsContainer = NSView()
-        headerFields.translatesAutoresizingMaskIntoConstraints = false
-        headerFieldsContainer.addSubview(headerFields)
-        NSLayoutConstraint.activate([
-            headerFields.leadingAnchor.constraint(equalTo: headerFieldsContainer.leadingAnchor),
-            headerFields.trailingAnchor.constraint(equalTo: headerFieldsContainer.trailingAnchor),
-            headerFields.topAnchor.constraint(equalTo: headerFieldsContainer.topAnchor)
-        ])
-        headerFieldsBottom = headerFields.bottomAnchor.constraint(equalTo: headerFieldsContainer.bottomAnchor)
-        headerFieldsBottom.isActive = true
-        collapsedHeaderHeight = headerFieldsContainer.heightAnchor.constraint(equalToConstant: 0)
-        let headerRow = NativeUI.stack([headerEnabled, headerFieldsContainer], vertical: false, spacing: 8)
-        headerRow.identifier = .init("rules.matchHeaderRow")
-        headerRow.alignment = .top; headerRow.distribution = .fill
-        // Preserve horizontal sizing while collapsing only the hidden fields' container height.
-        headerFieldsContainer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        headerFields.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        for note in [explanation, headerExplanation] {
-            note.maximumNumberOfLines = 0; note.lineBreakMode = .byWordWrapping
-            note.textColor = .systemRed
-        }
-        let conditionRows: [NSView] = [methodRow, NativeUI.separator(), addressGroup, NativeUI.separator(), headerRow]
-        let conditions = NativeUI.stack(conditionRows, spacing: 10)
-        conditions.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
-        for row in conditionRows { row.widthAnchor.constraint(equalTo: conditions.widthAnchor, constant: -24).isActive = true }
-        let box = NSBox(); box.titlePosition = .noTitle; box.contentViewMargins = .zero
-        box.contentView = NSView()
-        NativeUI.pin(box.contentView!, to: box)
-        NativeUI.pin(conditions, to: box.contentView!)
-        let matching = NativeUI.stack([NativeUI.label("满足以下所有条件", weight: .medium), box], spacing: 8)
-        box.widthAnchor.constraint(equalTo: matching.widthAnchor).isActive = true
-        sseEnabled.target = self; sseEnabled.action = #selector(toggleSSE)
-        sseEnabled.identifier = .init("rules.isSSE")
-        sseEnabled.toolTip = "添加 SSE 响应 Header；替换响应 Body 时取消上游并返回替代响应。"
+        enabledLabel.identifier = .init("rules.enabledLabel")
+        enabled.identifier = .init("rules.enabled")
+        enabled.setAccessibilityLabel("启用请求修改")
+        let title = NativeUI.stack([nameLayout, titleSpacer, enabledLabel, enabled], vertical: false)
         let lanes = NativeUI.stack([requestLane, responseLane], vertical: false, spacing: 20)
         lanes.alignment = .top; lanes.distribution = .fillEqually
         let preview = ActionButton(title: "预览流程") { [weak self] in
             guard let self, let workflow = model.workflow else { return }
             presentAsSheet(WorkflowPreviewViewController(workflow: workflow, environment: model.document.environment))
         }
+        MatchingControls.glass(preview)
         preview.image = NSImage(systemSymbolName: "play", accessibilityDescription: nil); preview.imagePosition = .imageLeading
-        let stack = NativeUI.stack([title, matching, sseEnabled, lanes, preview], spacing: 22)
-        NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 24, left: 24, bottom: 24, right: 24))
+        let stack = NativeUI.stack([title, matching, lanes, preview], spacing: 22)
+        let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
+        scroll.drawsBackground = false; scroll.horizontalScrollElasticity = .none; scroll.verticalScrollElasticity = .none
+        scroll.identifier = .init("rules.editorScroll")
+        let document = FlippedView(); scroll.documentView = document
+        NativeUI.pin(scroll, to: view)
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
+        NativeUI.pin(stack, to: document, insets: NSEdgeInsets(top: 24, left: 24, bottom: 24, right: 24))
         for wide in [title, matching, lanes] { wide.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         lanes.setContentHuggingPriority(.defaultLow, for: .vertical)
         lanes.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
@@ -161,48 +81,12 @@ extension ModificationKind {
     override func refresh() {
         guard let workflow = model.workflow else { return }
         if name.stringValue != workflow.name { name.stringValue = workflow.name }
-        sseEnabled.state = workflow.isSSE ? .on : .off
+        enabledLabel.stringValue = workflow.enabled ? "已启用" : "已关闭"
         enabled.state = workflow.enabled ? .on : .off
-        target.selectItem(at: WorkflowMatchTarget.allCases.firstIndex(of: workflow.matchTarget) ?? 0)
-        rule.selectItem(at: WorkflowMatchRule.allCases.firstIndex(of: workflow.matchRule) ?? 0)
-        method.selectItem(at: methods.firstIndex(of: workflow.method) ?? 0)
-        if pattern.stringValue != workflow.matchPattern { pattern.stringValue = workflow.matchPattern }
-        if headerName.stringValue != workflow.matchHeaderName { headerName.stringValue = workflow.matchHeaderName }
-        headerEnabled.state = workflow.matchHeaderEnabled ? .on : .off
-        headerFields.isHidden = !workflow.matchHeaderEnabled
-        if workflow.matchHeaderEnabled {
-            collapsedHeaderHeight.isActive = false
-            headerFieldsBottom.isActive = true
-        } else {
-            headerFieldsBottom.isActive = false
-            collapsedHeaderHeight.isActive = true
-        }
-        headerRule.selectItem(at: WorkflowMatchRule.allCases.firstIndex(of: workflow.matchHeaderRule) ?? 0)
-        if headerPattern.stringValue != workflow.matchHeaderPattern { headerPattern.stringValue = workflow.matchHeaderPattern }
-        let headerError = WorkflowMatcher.headerValidationError(name: workflow.matchHeaderName, rule: workflow.matchHeaderRule,
-                                                               pattern: workflow.matchHeaderPattern)
-        headerExplanation.stringValue = headerError ?? ""
-        headerExplanation.isHidden = headerError == nil
-        headerEnabled.toolTip = "与地址和请求方法同时满足才命中"
-        headerName.toolTip = "Header 名称不区分大小写，值区分大小写；同名任一项满足即可"
-        let help: String
-        switch workflow.matchTarget {
-        case .url:
-            pattern.placeholderString = "https://api.example.com/orders/*"
-            help = "匹配完整 URL，区分大小写。"
-        case .host:
-            pattern.placeholderString = "*.example.com"
-            help = "仅匹配域名，不包含协议、端口和路径；不区分大小写。"
-        }
-        let error = WorkflowMatcher.validationError(rule: workflow.matchRule, pattern: workflow.matchPattern)
-        explanation.stringValue = error ?? ""
-        explanation.isHidden = error == nil
-        target.toolTip = help; pattern.toolTip = help
+        matching.refresh()
         requestLane.refresh(); responseLane.refresh()
-        for control in [name, enabled, target, rule, method, pattern, headerName, headerEnabled, headerRule, headerPattern, sseEnabled] as [NSControl] { control.isEnabled = model.loaded }
+        for control in [name, enabled] as [NSControl] { control.isEnabled = model.loaded }
     }
-    @objc private func toggleSSE() { modify { $0.setSSE(sseEnabled.state == .on) } }
-    @objc private func toggleHeaderMatching() { modify { $0.matchHeaderEnabled = headerEnabled.state == .on } }
     private func modify(_ update: (inout RequestWorkflow) -> Void) { guard model.loaded, var workflow = model.workflow else { return }; update(&workflow); model.updateWorkflow(workflow) }
 }
 
@@ -303,67 +187,50 @@ extension ModificationKind {
 }
 
 /// Only changes native control layout; fields retain their identity and editing state.
-@MainActor private final class HeaderMatchInputRow: NSStackView {
-    private let valueRow: NSStackView
-    private var valueWidth: NSLayoutConstraint!
-    private var isCompact = false
-
-    init(name: NSView, rule: NSView, pattern: NSView) {
-        valueRow = NativeUI.stack([rule, pattern], vertical: false, spacing: 8)
-        super.init(frame: .zero)
-        orientation = .horizontal; alignment = .centerY; spacing = 8; distribution = .fill
-        valueRow.distribution = .fill
-        addArrangedSubview(name); addArrangedSubview(valueRow)
-        valueRow.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        valueWidth = valueRow.widthAnchor.constraint(equalTo: widthAnchor)
-        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    }
-    required init?(coder: NSCoder) { nil }
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        let compact = newSize.width < 446
-        guard newSize.width > 0, compact != isCompact else { return }
-        isCompact = compact
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            valueWidth.isActive = false
-            orientation = isCompact ? .vertical : .horizontal
-            alignment = isCompact ? .leading : .centerY
-            valueWidth.isActive = isCompact
-            superview?.needsLayout = true
-        }
-    }
-}
-
 @MainActor private final class RulesStepLane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
     let model: WorkspaceModel
     let response: Bool
-    let table = NSTableView()
+    let table = RulesStepsTableView()
     private var steps: [ModificationStep] = []
     // Accessibility may request offscreen rows repeatedly. Keep the same cell for
     // unchanged steps instead of rebuilding its NSBox view hierarchy each time.
     private var stepCells: [UUID: (step: ModificationStep, cell: RulesStepCell)] = [:]
     private var updating = false
     private var tableHeight: NSLayoutConstraint!
-    private let addButton = NSPopUpButton(frame: .zero, pullsDown: true)
+    private var headingRow: NSStackView!
+    private lazy var addButton: ActionButton = ActionButton(title: "添加步骤") { [weak self] in
+        guard let self, model.loaded else { return }
+        addMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: addButton.bounds.minY - 4), in: addButton)
+    }
+    private let addMenu = NSMenu()
     private static let dragType = NSPasteboard.PasteboardType("app.requestman.rule-step")
     init(model: WorkspaceModel, response: Bool) {
         self.model = model; self.response = response; super.init(frame: .zero)
-        let heading = NativeUI.label(response ? "←  响应阶段" : "→  请求阶段", weight: .semibold)
+        let headingTitle = NativeUI.label(response ? "响应阶段" : "请求阶段", size: 16, weight: .semibold)
+        let direction = NSImageView(image: NSImage(systemSymbolName: response ? "arrow.left" : "arrow.right", accessibilityDescription: nil)!)
+        direction.symbolConfiguration = .init(pointSize: 16, weight: .semibold)
+        direction.contentTintColor = response ? .systemGreen : .systemBlue
+        direction.setAccessibilityElement(false)
+        direction.widthAnchor.constraint(equalToConstant: 20).isActive = true
+        let heading = NativeUI.stack([direction, headingTitle], vertical: false, spacing: 6)
         let subtitle = NativeUI.label(response ? "服务器 → 客户端" : "客户端 → 服务器", size: 11, secondary: true)
         let column = NSTableColumn(identifier: .init("step")); table.addTableColumn(column)
         table.headerView = nil; table.rowHeight = 64; table.intercellSpacing = NSSize(width: 0, height: 0)
-        table.style = .fullWidth; table.selectionHighlightStyle = .none; table.backgroundColor = .clear; table.dataSource = self; table.delegate = self
+        table.style = .fullWidth; table.selectionHighlightStyle = .regular; table.backgroundColor = .clear; table.dataSource = self; table.delegate = self
         table.allowsEmptySelection = true; table.setAccessibilityLabel(response ? "响应步骤" : "请求步骤")
         table.target = self; table.action = #selector(activateStep(_:))
         table.registerForDraggedTypes([Self.dragType]); table.setDraggingSourceOperationMask(.move, forLocal: true)
         let menu = NSMenu(); menu.delegate = self; table.menu = menu
         let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         tableHeight = scroll.heightAnchor.constraint(equalToConstant: 64); tableHeight.isActive = true
+        let stepList = NSView()
+        // Keep the selection background outside the content alignment shared with the separator.
+        NativeUI.pin(scroll, to: stepList, insets: NSEdgeInsets(top: 0, left: -8, bottom: 0, right: -8))
         addButton.identifier = .init("rules.addStep")
-        addButton.bezelStyle = .rounded; addButton.autoenablesItems = false
-        addButton.addItem(withTitle: "添加步骤")
-        addButton.item(at: 0)?.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+        MatchingControls.glass(addButton)
+        addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+        addButton.imagePosition = .imageLeading
+        addButton.menu = addMenu; addMenu.autoenablesItems = false
         addButton.setAccessibilityLabel(response ? "添加响应步骤" : "添加请求步骤")
         for kind in ModificationKind.allCases where kind != .removeHeader && kind.supports(response: response) {
             let item = RulesMenuItem(kind.title, symbol: kind.symbolName) { [weak self] in
@@ -371,33 +238,33 @@ extension ModificationKind {
             }
             // macOS 27 hides menu images by default, even when an image is assigned.
             if #available(macOS 27.0, *) { item.preferredImageVisibility = .visible }
-            addButton.menu?.addItem(item)
+            addMenu.addItem(item)
         }
-        let addRow = NSView()
-        addRow.addSubview(addButton); addButton.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            addButton.leadingAnchor.constraint(equalTo: addRow.leadingAnchor, constant: 16),
-            addButton.topAnchor.constraint(equalTo: addRow.topAnchor),
-            addButton.bottomAnchor.constraint(equalTo: addRow.bottomAnchor),
-            addButton.trailingAnchor.constraint(lessThanOrEqualTo: addRow.trailingAnchor, constant: -16)
-        ])
-        let contents = NativeUI.stack([scroll, addRow], spacing: 10)
-        scroll.widthAnchor.constraint(equalTo: contents.widthAnchor).isActive = true
-        addRow.widthAnchor.constraint(equalTo: contents.widthAnchor).isActive = true
+        headingRow = NativeUI.stack([heading, MatchingControls.spacer(), addButton], vertical: false, spacing: 8)
+        headingRow.identifier = .init("rules.laneHeading")
+        let separator = NativeUI.separator(); separator.identifier = .init("rules.laneSeparator")
+        let contents = NativeUI.stack([headingRow, subtitle, separator, stepList], spacing: 10)
+        for child in contents.arrangedSubviews { child.widthAnchor.constraint(equalTo: contents.widthAnchor).isActive = true }
         let box = NSBox(); box.identifier = .init("rules.laneBorder")
-        box.boxType = .custom; box.titlePosition = .noTitle
-        box.borderWidth = 1; box.borderColor = .separatorColor; box.fillColor = .clear; box.cornerRadius = 10
-        box.contentViewMargins = .zero
+        box.titlePosition = .noTitle; box.contentViewMargins = .zero
+        box.boxType = .custom; box.borderWidth = 1; box.borderColor = .separatorColor
+        box.fillColor = .clear; box.cornerRadius = 8
         box.contentView = NSView()
-        // Keep the native scrollbar against the border; horizontal padding belongs to the rows.
-        NativeUI.pin(box.contentView!, to: box, insets: NSEdgeInsets(top: 10, left: 1, bottom: 10, right: 1))
-        NativeUI.pin(contents, to: box.contentView!)
-        let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
-        let stack = NativeUI.stack([heading, subtitle, box, spacer], spacing: 12)
-        NativeUI.pin(stack, to: self)
-        box.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        NativeUI.pin(box, to: self)
+        NativeUI.pin(box.contentView!, to: box)
+        NativeUI.pin(contents, to: box.contentView!, insets: NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12))
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func layout() {
+        let compact = bounds.width < 240
+        let orientation: NSUserInterfaceLayoutOrientation = compact ? .vertical : .horizontal
+        if headingRow.orientation != orientation {
+            headingRow.orientation = orientation
+            headingRow.alignment = compact ? .leading : .centerY
+            headingRow.arrangedSubviews[1].isHidden = compact
+        }
+        super.layout()
+    }
     func refresh() {
         let current = response ? model.workflow?.responseSteps ?? [] : model.workflow?.requestSteps ?? []
         updating = true; defer { updating = false }
@@ -425,14 +292,14 @@ extension ModificationKind {
         let cell: RulesStepCell
         if let cached = stepCells[step.id], cached.cell.number == row + 1 { cell = cached.cell }
         else {
-            cell = RulesStepCell(step: step, number: row + 1)
+            cell = RulesStepCell(step: step, number: row + 1, response: response)
             stepCells[step.id] = (step, cell)
         }
         cell.setSelected(model.editingResponse == response && steps[row].id == model.selectedStepID)
         return cell
     }
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        let view = NSTableRowView(); view.selectionHighlightStyle = .none; return view
+        RulesStepRowView()
     }
     @objc private func activateStep(_ sender: NSTableView) {
         guard !updating, model.loaded, steps.indices.contains(sender.selectedRow) else { return }
@@ -483,29 +350,49 @@ extension ModificationKind {
     }
 }
 
-/// Keeps the existing workflow-card content while NSTableView owns selection, keyboard and drag behavior.
+/// Remove AppKit's extra cell inset so the lane controls its content alignment explicitly.
+@MainActor private final class RulesStepsTableView: NSTableView {
+    override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
+        var frame = super.frameOfCell(atColumn: column, row: row)
+        frame.size.width += frame.minX
+        frame.origin.x = 0
+        return frame
+    }
+}
+
+/// The table retains native selection and input behavior with the requested blue selection treatment.
+@MainActor private final class RulesStepRowView: NSTableRowView {
+    override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+    override func drawSelection(in dirtyRect: NSRect) {
+        // The lane has 12 pt content insets and the table extends 8 pt on both sides:
+        // a 2 pt drawing inset puts the border halfway to the aligned number badge.
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 3), xRadius: 8, yRadius: 8)
+        NSColor.systemBlue.withAlphaComponent(0.12).setFill(); path.fill()
+        NSColor.systemBlue.withAlphaComponent(0.7).setStroke()
+        path.lineWidth = 1; path.stroke()
+    }
+}
+
 @MainActor private final class RulesStepCell: NSTableCellView {
-    private let card = NSBox()
-    private let accent = NSBox()
     let number: Int
-    private var selected: Bool?
-    init(step: ModificationStep, number: Int) {
+    init(step: ModificationStep, number: Int, response: Bool) {
         self.number = number
         super.init(frame: .zero)
-        card.identifier = .init("rules.stepCard")
-        card.boxType = .custom; card.titlePosition = .noTitle
-        card.borderWidth = 1; card.cornerRadius = 8; card.contentViewMargins = .zero
-        card.wantsLayer = true; card.layer?.cornerRadius = card.cornerRadius; card.layer?.masksToBounds = true
-        NativeUI.pin(card, to: self, insets: NSEdgeInsets(top: 4, left: 16, bottom: 4, right: 16))
-        let badge = NSBox(); badge.identifier = .init("rules.stepNumber")
-        badge.boxType = .custom; badge.titlePosition = .noTitle; badge.borderWidth = 0; badge.borderColor = .clear
-        badge.fillColor = NSColor.labelColor.withAlphaComponent(0.045); badge.cornerRadius = 6
-        badge.contentViewMargins = .zero
-        let numberLabel = NativeUI.label(String(number)); numberLabel.alignment = .center
-        numberLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        let numberLabel = NativeUI.label(String(number), secondary: true)
+        numberLabel.identifier = .init("rules.stepNumber")
+        numberLabel.alignment = .center
+        numberLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        let numberColor: NSColor = response ? .systemGreen : .systemBlue
+        numberLabel.textColor = numberColor
+        let badge = NSBox(); badge.identifier = .init("rules.stepBadge")
+        badge.boxType = .custom; badge.titlePosition = .noTitle; badge.borderWidth = 0
+        badge.cornerRadius = 7; badge.fillColor = numberColor.withAlphaComponent(0.12)
+        badge.contentViewMargins = .zero; badge.contentView = NSView()
         badge.contentView!.addSubview(numberLabel); numberLabel.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([badge.widthAnchor.constraint(equalToConstant: 26), badge.heightAnchor.constraint(equalToConstant: 28),
-            numberLabel.centerXAnchor.constraint(equalTo: badge.contentView!.centerXAnchor), numberLabel.centerYAnchor.constraint(equalTo: badge.contentView!.centerYAnchor)])
+        NSLayoutConstraint.activate([badge.widthAnchor.constraint(equalToConstant: max(28, ceil(numberLabel.intrinsicContentSize.width) + 12)),
+                                     badge.heightAnchor.constraint(equalToConstant: 28),
+                                     numberLabel.centerXAnchor.constraint(equalTo: badge.centerXAnchor),
+                                     numberLabel.centerYAnchor.constraint(equalTo: badge.centerYAnchor)])
         let title = NativeUI.label(step.kind.title); title.toolTip = step.kind.title
         let icon = NSImageView()
         icon.image = NSImage(systemSymbolName: step.kind.symbolName, accessibilityDescription: nil)
@@ -535,26 +422,23 @@ extension ModificationKind {
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let row = NativeUI.stack([badge, texts], vertical: false, spacing: 10)
+        texts.widthAnchor.constraint(greaterThanOrEqualToConstant: 0).isActive = true
+        detail.widthAnchor.constraint(equalTo: texts.widthAnchor).isActive = true
         if !step.enabled {
             let pause = NSImageView(image: NSImage(systemSymbolName: "pause.circle", accessibilityDescription: "已停用")!)
+            pause.identifier = .init("rules.stepPaused")
+            pause.symbolConfiguration = .init(pointSize: 20, weight: .regular)
+            NSLayoutConstraint.activate([pause.widthAnchor.constraint(equalToConstant: 24), pause.heightAnchor.constraint(equalToConstant: 24)])
             pause.contentTintColor = .secondaryLabelColor; row.addArrangedSubview(pause)
+            pause.trailingAnchor.constraint(equalTo: row.trailingAnchor).isActive = true
+        } else {
+            texts.trailingAnchor.constraint(equalTo: row.trailingAnchor).isActive = true
         }
-        NativeUI.pin(row, to: card.contentView!, insets: NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10))
-        accent.identifier = .init("rules.stepAccent")
-        accent.boxType = .custom; accent.titlePosition = .noTitle; accent.borderWidth = 0; accent.borderColor = .clear
-        accent.fillColor = .systemBlue; accent.cornerRadius = 2
-        accent.translatesAutoresizingMaskIntoConstraints = false; card.addSubview(accent)
-        NSLayoutConstraint.activate([accent.leadingAnchor.constraint(equalTo: card.leadingAnchor), accent.widthAnchor.constraint(equalToConstant: 3),
-            accent.topAnchor.constraint(equalTo: card.topAnchor), accent.bottomAnchor.constraint(equalTo: card.bottomAnchor)])
+        NativeUI.pin(row, to: self, insets: NSEdgeInsets(top: 12, left: 8, bottom: 12, right: 12))
         setAccessibilityElement(true); setAccessibilityLabel("第 \(number) 步，\(step.kind.title)，\(summary)")
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func setSelected(_ selected: Bool) {
-        guard self.selected != selected else { return }
-        self.selected = selected
-        card.fillColor = selected ? NSColor.systemBlue.withAlphaComponent(0.12) : NSColor.labelColor.withAlphaComponent(0.045)
-        card.borderColor = selected ? NSColor.systemBlue.withAlphaComponent(0.55) : .clear
-        accent.isHidden = !selected
         setAccessibilitySelected(selected)
     }
 }

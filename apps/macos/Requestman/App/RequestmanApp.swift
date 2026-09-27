@@ -20,15 +20,15 @@ final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVal
     private var workspaceWindow: WorkspaceWindowController?
     private var settingsWindow: WorkspaceSettingsWindowController?
     private var recordsTask: Task<Void, Never>?
-    private var ruleHitNotifications: SystemRuleHitNotifications?
+    private var composition: AppComposition!
     private var notificationsTask: Task<Void, Never>?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        ruleHitNotifications = SystemRuleHitNotifications()
+        composition = AppComposition()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        model = WorkspaceModel(ruleHitNotifications: ruleHitNotifications)
+        model = composition.makeWorkspace()
         installMenus()
         let controller = WorkspaceWindowController(model: model) { [weak self] in self?.showSettings(nil) }
         workspaceWindow = controller
@@ -103,6 +103,8 @@ final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVal
         let fileItem = NSMenuItem(); menu.addItem(fileItem)
         let file = NSMenu(title: "文件"); fileItem.submenu = file
         for command in [WorkspaceCommand.newWorkflow, .newProject] { file.addItem(command.menuItem(target: self)) }
+        file.addItem(.separator())
+        for command in [WorkspaceCommand.importRules, .exportRules] { file.addItem(command.menuItem(target: self)) }
 
         let editItem = NSMenuItem(); menu.addItem(editItem)
         let edit = NSMenu(title: "编辑"); editItem.submenu = edit

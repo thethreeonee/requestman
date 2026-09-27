@@ -63,9 +63,7 @@ struct CaptureStreamTests {
         #expect(workflow.responseSteps.count == 1)
         let data = try JSONEncoder().encode(workflow)
         #expect(try JSONDecoder().decode(RequestWorkflow.self, from: data).isSSE)
-        var old = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        old.removeValue(forKey: "isSSE")
-        #expect(try JSONDecoder().decode(RequestWorkflow.self, from: JSONSerialization.data(withJSONObject: old)).isSSE == false)
+        #expect(RequestWorkflow().isSSE == false)
     }
     @Test func resumePublishesClosedStateOfPreviouslyVisibleStream() {
         let buffer = CaptureRecordBuffer()

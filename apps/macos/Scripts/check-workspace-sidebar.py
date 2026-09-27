@@ -33,6 +33,7 @@ try:
         str(root / "Requestman/Features/Rules/TemplateValuesView.swift"),
         str(root / "Requestman/Features/Requests/RequestInspectionMode.swift"),
         str(root / "Requestman/Features/Requests/RequestCURL.swift"),
+        str(root / "Requestman/Features/Requests/RequestActionsMenu.swift"),
         str(root / "Scripts/Fixtures/WorkspaceSidebarChecks.swift"), "-o", str(executable),
     ], check=True)
     try:

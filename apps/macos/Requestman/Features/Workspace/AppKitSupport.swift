@@ -11,11 +11,12 @@ enum WorkspaceCommand: Int, CaseIterable {
     case newWorkflow, newProject, duplicate, rename, delete, toggleEnabled
     case rules, requests, search, filters, sidebar, inspector, environment
     case capture, recording, clear, copyURL, copyCURL
+    case importRules, exportRules
 
     var title: String {
         switch self {
         case .newWorkflow: "新建请求修改"
-        case .newProject: "新建项目"
+        case .newProject: "新建规则组"
         case .duplicate: "复制选中项"
         case .rename: "重命名"
         case .delete: "删除选中项"
@@ -24,7 +25,7 @@ enum WorkspaceCommand: Int, CaseIterable {
         case .requests: "请求日志"
         case .search: "搜索当前页面"
         case .filters: "日志筛选…"
-        case .sidebar: "显示 / 隐藏项目侧栏"
+        case .sidebar: "显示 / 隐藏规则组侧栏"
         case .inspector: "显示 / 隐藏详情"
         case .environment: "切换环境…"
         case .capture: "开始捕获"
@@ -32,6 +33,8 @@ enum WorkspaceCommand: Int, CaseIterable {
         case .clear: "清空请求日志"
         case .copyURL: "复制完整 URL"
         case .copyCURL: "复制原始请求为 cURL"
+        case .importRules: "导入规则…"
+        case .exportRules: "导出全部规则…"
         }
     }
     var key: String {
@@ -50,11 +53,12 @@ enum WorkspaceCommand: Int, CaseIterable {
         case .capture, .recording: "r"
         case .clear: "k"
         case .copyURL, .copyCURL: "c"
+        case .importRules, .exportRules: ""
         }
     }
     var modifiers: NSEvent.ModifierFlags {
         switch self {
-        case .rename: []
+        case .rename, .importRules, .exportRules: []
         case .newProject, .toggleEnabled, .environment, .recording, .copyURL: [.command, .shift]
         case .filters, .sidebar, .inspector, .copyCURL: [.command, .option]
         default: [.command]

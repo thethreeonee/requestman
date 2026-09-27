@@ -10,13 +10,170 @@ import RequestmanCore
 
 @Suite(.serialized)
 struct ProxyIntegrationTests {
+    @Test func requestReplayCancellationBeforeAttachmentClosesLaterTransport() throws {
+        let records = CaptureRecordBuffer()
+        records.setPaused(true)
+        var request = RequestReplayDraft(method: "GET", url: "http://example.test/", headers: [], body: Data())
+        request.sourceRecordID = UUID()
+        let session = ProxyReplaySession(request: request, records: records)
+        session.cancel()
+        let channel = EmbeddedChannel()
+        try channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 80)).wait()
+        session.attach(channel)
+        #expect(!channel.isActive)
+        session.clientClosed()
+        let record = try #require(records.drain().records.first)
+        #expect(record.replayID == request.id && record.replaySourceID == request.sourceRecordID)
+        #expect(record.replayCancelled && record.error == nil && !record.connectionState.isActive)
+        session.clientClosed()
+        #expect(records.drain().records.isEmpty)
+    }
+
+    @Test func requestReplayCancellationIsIsolatedAndVisibleWhilePaused() async throws {
+        try await withHarness { h in
+            try await h.start()
+            h.proxy.records.setPaused(true)
+            var first = RequestReplayDraft(method: "GET", url: h.originURL + "events", headers: [], body: Data())
+            first.sourceRecordID = UUID()
+            let second = RequestReplayDraft(method: "GET", url: h.originURL + "events", headers: [], body: Data())
+            try await h.proxy.replay(first)
+            try await h.proxy.replay(second)
+            var latest: [UUID: CaptureRecord] = [:]
+            for _ in 0..<200 {
+                for record in h.proxy.records.drain().records { latest[record.id] = record }
+                if latest[first.id]?.stream?.summary.count == 1 && latest[second.id]?.stream?.summary.count == 1 { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(latest[first.id]?.replaySourceID == first.sourceRecordID)
+            #expect(latest[second.id]?.connectionState.isActive == true)
+            await h.proxy.cancelReplay(first.id)
+            for _ in 0..<200 {
+                for record in h.proxy.records.drain().records { latest[record.id] = record }
+                if latest[first.id]?.replayCancelled == true { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let cancelled = try #require(latest[first.id])
+            #expect(cancelled.replayCancelled)
+            #expect(!cancelled.connectionState.isActive)
+            #expect(cancelled.error == nil)
+            #expect(latest[second.id]?.connectionState.isActive == true)
+            // Normal requests and the listener survive individual replay cancellation.
+            let reply = try await h.exchange("GET \(h.originURL) HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            #expect(reply.contains("200 OK"))
+            #expect(h.proxy.records.drain().records.allSatisfy { $0.replayID != nil })
+            await h.proxy.stop()
+            for _ in 0..<200 {
+                for record in h.proxy.records.drain().records { latest[record.id] = record }
+                if latest[second.id]?.replayCancelled == true { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(latest[second.id]?.replayCancelled == true)
+        }
+    }
+
+    @Test func requestReplayFailurePublishesTerminalResultWithIdentity() async throws {
+        try await withHarness { h in
+            try await h.start()
+            // Deterministic proxy-loop rejection happens after local submission succeeds.
+            let request = RequestReplayDraft(method: "GET", url: "http://127.0.0.1:\(h.proxyPort)/", headers: [], body: Data())
+            try await h.proxy.replay(request)
+            var terminal: CaptureRecord?
+            for _ in 0..<200 {
+                terminal = h.proxy.records.drain().records.last { $0.id == request.id && !$0.connectionState.isActive } ?? terminal
+                if terminal != nil { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let record = try #require(terminal)
+            #expect(record.replayID == request.id && record.error != nil && !record.replayCancelled)
+            #expect(record.replaySummary?.hasPrefix("重放失败：") == true)
+        }
+    }
+
+    @Test(arguments: ["HEAD", "headers", "SSE"]) func requestReplayDrainsResponsesAndStopsStreams(kind: String) async throws {
+        try await withHarness { h in
+            try await h.start()
+            let path = kind == "SSE" ? "events" : "large-headers"
+            try await h.proxy.replay(RequestReplayDraft(method: kind == "HEAD" ? "HEAD" : "GET", url: h.originURL + path, headers: [], body: Data()))
+            var observed: CaptureRecord?
+            for _ in 0..<200 {
+                for record in h.proxy.records.drain().records {
+                    if kind == "SSE" ? record.stream?.summary.count == 1 : record.connectionState == .closed { observed = record }
+                }
+                if observed != nil { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let record = try #require(observed)
+            #expect(record.error == nil && record.status == 200)
+            if kind == "HEAD" { #expect(record.responseBody.data.isEmpty && record.responseBody.isComplete) }
+            if kind == "headers" { #expect(record.responseHeaders.contains { $0.name == "Set-Cookie" && $0.value.count > 100_000 }) }
+            if kind == "SSE" {
+                #expect(record.captureProtocol == .sse && record.connectionState.isActive)
+                await h.proxy.stop()
+                #expect(h.proxy.records.drain().records.last?.connectionState.isActive == false)
+            }
+        }
+    }
+
+    @Test func requestReplayUsesProxyRulesAndPublishesANewRecord() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow()
+            workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
+            var header = ModificationStep(kind: .setHeader); header.name = "X-Replayed"; header.value = "yes"
+            workflow.requestSteps = [header]
+            workflow.responseSteps = []
+            try await h.start(workflow: workflow)
+            let bytes = Data([0, 255, 65, 10])
+            let draft = RequestReplayDraft(method: "POST", url: h.originURL + "replay?q=1", headers: [HTTPField("X-Duplicate", "a"), HTTPField("X-Duplicate", "b")], body: bytes)
+            try await h.proxy.replay(draft)
+            var completed: CaptureRecord?
+            for _ in 0..<200 {
+                if let record = h.proxy.records.drain().records.last(where: { $0.connectionState == .closed }) { completed = record; break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let record = try #require(completed)
+            #expect(record.method == "POST" && record.url == draft.url)
+            #expect(record.requestBody.data == bytes && record.sentBody.data == bytes)
+            #expect(record.requestHeaders.filter { $0.name == "X-Duplicate" }.map(\.value) == ["a", "b"])
+            #expect(record.sentHeaders.contains { $0.name == "X-Replayed" && $0.value == "yes" })
+            #expect(record.status == 200 && record.responseBody.isComplete)
+            #expect(record.matchedWorkflowID == workflow.id && record.error == nil)
+            #expect(h.observation.withLock { $0.requests } == 1)
+            await h.proxy.stop()
+            await #expect(throws: (any Error).self) { try await h.proxy.replay(draft) }
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func mockBeforeUnreachableBodyWorkRespondsWithoutWaitingForUpload(file: Bool) async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow()
+            workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
+            var mock = ModificationStep(kind: .mock); mock.status = 201; mock.value = "immediate-local-response"
+            var unreachable = ModificationStep(kind: file ? .replaceBody : .script)
+            if file {
+                unreachable.bodySource = .file
+                unreachable.bodyFilePath = "/missing/requestman-unreachable-body-file"
+            } else { unreachable.value = "throw new Error('unreachable script executed');" }
+            workflow.requestSteps = [mock, unreachable]
+            try await h.start(workflow: workflow)
+            let started = ContinuousClock.now
+            let reply = try await h.exchange("POST \(h.originURL) HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1000000\r\n\r\n", timeout: .seconds(2))
+            #expect(started.duration(to: .now) < .seconds(1))
+            #expect(reply.contains("201 Created") && reply.contains("immediate-local-response"))
+            #expect(h.observation.withLock { $0.requests } == 0)
+            let record = try #require(h.proxy.records.drain().records.last)
+            #expect(record.outcome == .mocked)
+            #expect(record.executionTrace.map(\.stepID) == [mock.id])
+            #expect(record.executionTrace.allSatisfy { $0.status == .applied })
+        }
+    }
+
     @Test(arguments: [false, true]) func SSEReplacementCancelsEndlessOriginAndDelayDoesNotWaitForEOF(file: Bool) async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("requestman-sse-test-\(UUID())")
         if file { try Data("data: replacement\n\n".utf8).write(to: url) }
         defer { if file { _ = try? FileManager.default.trashItem(at: url, resultingItemURL: nil) } }
         try await withHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
-            workflow.setSSE(true)
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var body = ModificationStep(kind: .replaceBody); body.value = "data: replacement\n\n"
             if file { body.bodySource = .file; body.bodyFilePath = url.path }
             var delay = ModificationStep(kind: .delay); delay.value = "20"
@@ -34,12 +191,72 @@ struct ProxyIntegrationTests {
     }
     @Test func SSEDelayForwardsTheFirstEventWithoutWaitingForEOF() async throws {
         try await withHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL; workflow.setSSE(true)
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var delay = ModificationStep(kind: .delay); delay.value = "20"
-            workflow.responseSteps.insert(delay, at: 0)
+            var header = ModificationStep(kind: .setHeader); header.name = "X-SSE-Modified"; header.value = "yes"
+            var status = ModificationStep(kind: .setStatus); status.status = 202
+            workflow.responseSteps = [delay, header, status]
             try await h.start(workflow: workflow)
             let reply = try await h.exchange("GET \(h.originURL)events HTTP/1.1\r\nHost: localhost\r\n\r\n", until: "data: origin")
             #expect(reply.contains("data: origin") && reply.contains("text/event-stream"))
+            #expect(reply.contains("202 Accepted") && reply.lowercased().contains("x-sse-modified: yes"))
+        }
+    }
+    @Test(arguments: [false, true]) func SSERequestHintsAndLegacyFlagDoNotConvertOrdinaryResponses(legacyFlag: Bool) async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow()
+            workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
+            workflow.isSSE = legacyFlag
+            var accept = ModificationStep(kind: .setHeader); accept.name = "Accept"; accept.value = "text/event-stream"
+            var type = ModificationStep(kind: .setHeader); type.name = "Content-Type"; type.value = "text/event-stream"
+            workflow.requestSteps = [accept, type]
+            workflow.responseSteps = [type]
+            try await h.start(workflow: workflow)
+            let reply = try await h.exchange("GET \(h.originURL)ordinary HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(record.sentHeaders.contains { $0.name.lowercased() == "accept" && $0.value == "text/event-stream" })
+            #expect(reply.contains("origin-body") && reply.lowercased().contains("content-type: text/event-stream"))
+            #expect(record.captureProtocol == .http && record.stream == nil && record.receivedStream == nil)
+            #expect(record.responseBody.data == Data("origin-body".utf8) && record.responseBody.isComplete)
+            #expect(record.error == nil && record.closeReason == nil)
+        }
+    }
+    @Test(arguments: [false, true]) func SSEAutomaticDetectionPreservesBodyScriptBoundary(replaceFirst: Bool) async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow()
+            workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
+            var body = ModificationStep(kind: .replaceBody); body.value = "data: replacement\n\n"
+            var script = ModificationStep(kind: .script)
+            script.value = "response.headers.push({name:'X-Script',value:'applied'}); return response;"
+            workflow.responseSteps = replaceFirst ? [body, script] : [script, body]
+            try await h.start(workflow: workflow)
+            let reply = try await h.exchange("POST \(h.originURL)events HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n")
+            try await Task.sleep(for: .milliseconds(80))
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(record.captureProtocol == .sse)
+            if replaceFirst {
+                #expect(record.error == nil && reply.lowercased().contains("x-script: applied"))
+                #expect(try await record.stream?.read(from: 0).first?.text == "replacement")
+            } else {
+                #expect(reply.contains("502") && record.error?.contains("替换 Body 之后") == true)
+            }
+        }
+    }
+    @Test func SSEReplacementKeepsLiteralBodyWhenContentTypeChanges() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow()
+            workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
+            var body = ModificationStep(kind: .replaceBody); body.value = "{\"ok\":true}"
+            var type = ModificationStep(kind: .setHeader); type.name = "Content-Type"; type.value = "application/json"
+            workflow.responseSteps = [body, type]
+            try await h.start(workflow: workflow)
+            let reply = try await h.exchange("GET \(h.originURL)events HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            try await Task.sleep(for: .milliseconds(80))
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(reply.hasSuffix(body.value) && reply.lowercased().contains("content-type: application/json"))
+            #expect(!reply.contains("data:") && record.closeReason?.contains("取消上游") == true)
+            #expect(try await record.stream?.readRaw(from: 0) == Data(body.value.utf8))
+            #expect(record.error == nil && record.stream?.summary.count == 0)
         }
     }
     @Test func SSEPublishesEventsBeforeOriginCloses() async throws {
@@ -64,7 +281,7 @@ struct ProxyIntegrationTests {
         defer { _ = try? FileManager.default.trashItem(at: url, resultingItemURL: nil) }
         for mode in 0..<4 {
             try await withHarness { h in
-                var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+                var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
                 var file = ModificationStep(kind: mode == 2 ? .mock : .replaceBody)
                 file.bodySource = .file; file.bodyFilePath = url.path
                 if mode == 0 || mode == 2 { workflow.requestSteps = [file] }
@@ -137,7 +354,7 @@ struct ProxyIntegrationTests {
             for mocked in [false, true] {
                 group.addTask {
                     try await withHarness { h in
-                        var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+                        var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
                         if mocked { workflow.requestSteps = [ModificationStep(kind: .mock)] }
                         var delay = ModificationStep(kind: .delay); delay.value = "31000"
                         var status = ModificationStep(kind: .setStatus); status.status = 202
@@ -162,7 +379,7 @@ struct ProxyIntegrationTests {
     @Test func activeHTTPAndDecryptedHTTPSUploadsHaveNoTotalDeadline() throws {
         for secure in [false, true] {
             let shared = ProxySharedState(), records = CaptureRecordBuffer()
-            var workflow = RequestWorkflow(); workflow.urlPrefix = "\(secure ? "https" : "http")://example.test/"
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: "\(secure ? "https" : "http")://example.test/")
             // Keep the body pending, without starting an upstream connection or script process.
             workflow.requestSteps = [ModificationStep(kind: .script)]
             var project = WorkflowProject(); project.workflows = [workflow]
@@ -196,7 +413,7 @@ struct ProxyIntegrationTests {
     @Test func responseDelayWaitsForOriginAndMockBeforeFollowingSteps() async throws {
         for mocked in [false, true] {
             try await withHarness { h in
-                var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+                var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
                 if mocked { workflow.requestSteps = [ModificationStep(kind: .mock)] }
                 var delay = ModificationStep(kind: .delay); delay.value = "100"
                 var status = ModificationStep(kind: .setStatus); status.status = 202
@@ -217,7 +434,7 @@ struct ProxyIntegrationTests {
 
     @Test func concurrentDelaysDoNotUseScriptSlotsOrBlockOtherRequests() async throws {
         try await withHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL + "delay"
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL + "delay")
             var delay = ModificationStep(kind: .delay); delay.value = "500"
             workflow.responseSteps = [delay]
             try await h.start(workflow: workflow)
@@ -244,10 +461,11 @@ struct ProxyIntegrationTests {
 
     @Test func stoppingCaptureCancelsDelayAndSkipsFollowingSteps() async throws {
         try await withHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var delay = ModificationStep(kind: .delay); delay.value = "10000"
             var status = ModificationStep(kind: .setStatus); status.status = 201
-            workflow.responseSteps = [delay, status]
+            var header = ModificationStep(kind: .setHeader); header.name = "X-Before-Delay"; header.value = "yes"
+            workflow.responseSteps = [header, delay, status]
             try await h.start(workflow: workflow)
             let request = Task { try await h.exchange("GET \(h.originURL)delay HTTP/1.1\r\nHost: localhost\r\n\r\n") }
             let readyDeadline = ContinuousClock.now.advanced(by: .seconds(2))
@@ -260,15 +478,24 @@ struct ProxyIntegrationTests {
             let reply = try await request.value
             #expect(start.duration(to: .now) < .seconds(1))
             #expect(!reply.contains("201 Created"))
-            let record = try #require(h.proxy.records.drain().records.first)
-            #expect(record.matchedRules.isEmpty)
+            var final = h.proxy.records.drain().records.last
+            let traceDeadline = ContinuousClock.now.advanced(by: .seconds(2))
+            while final?.executionTrace.last?.status != .cancelled && ContinuousClock.now < traceDeadline {
+                try await Task.sleep(for: .milliseconds(5))
+                if let update = h.proxy.records.drain().records.last { final = update }
+            }
+            let record = try #require(final)
+            #expect(record.executionTrace.map(\.stepID) == [header.id, delay.id])
+            #expect(record.executionTrace.map(\.status) == [.applied, .cancelled])
+            #expect(record.matchedRules.map(\.kind) == [.setHeader])
+            #expect(h.proxy.events.drain().events.map(\.kind) == [.matched, .cancelled])
         }
     }
 
     @Test func delayPreservesEncodedBytesAndWorksWithScripts() async throws {
         for scripted in [false, true] {
             try await withHarness { h in
-                var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+                var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
                 var delay = ModificationStep(kind: .delay); delay.value = "50"
                 workflow.responseSteps = [delay]
                 if scripted {
@@ -298,7 +525,7 @@ struct ProxyIntegrationTests {
         shared.ruleHitNotifications.startSession(enabled: true)
         var workflow = RequestWorkflow()
         workflow.name = "慢请求规则"
-        workflow.urlPrefix = "http://example.test/"
+        workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: "http://example.test/")
         var script = ModificationStep(kind: .script)
         script.value = "return request;"
         workflow.requestSteps = [script]
@@ -319,7 +546,7 @@ struct ProxyIntegrationTests {
         try await withHarness { h in
             var workflow = RequestWorkflow()
             workflow.name = "本地 Mock"
-            workflow.urlPrefix = h.originURL + "matched"
+            workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL + "matched")
             var mock = ModificationStep(kind: .mock); mock.value = "mock-body"
             workflow.requestSteps = [mock]
             try await h.start(workflow: workflow)
@@ -332,10 +559,34 @@ struct ProxyIntegrationTests {
         }
     }
 
+    @Test(arguments: [false, true])
+    func componentRewritesRouteToNewHostAndPreserveQuery(scripted: Bool) async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow()
+            workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: "http://unresolved.test/")
+            var host = ModificationStep(kind: .rewriteURL); host.urlRewriteTarget = .host
+            host.value = "127.0.0.1:\(h.originPort)"
+            var path = ModificationStep(kind: .rewriteURL); path.urlRewriteTarget = .path; path.value = "/after%2fpart"
+            workflow.requestSteps = [host, path]
+            if scripted {
+                var script = ModificationStep(kind: .script); script.value = "return request;"
+                workflow.requestSteps.insert(script, at: 0)
+            }
+            try await h.start(workflow: workflow)
+            let reply = try await h.exchange("POST http://unresolved.test/before?keep=%2f+%20&flag HTTP/1.1\r\nHost: unresolved.test\r\nContent-Length: 7\r\n\r\npayload")
+            #expect(reply.contains("origin-body"))
+            #expect(h.observation.withLock { $0.uri } == "/after%2fpart?keep=%2f+%20&flag")
+            #expect(h.observation.withLock { $0.bodyBytes } == 7)
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(record.error == nil && record.method == "POST")
+            #expect(record.sentHeaders.contains { $0.name.lowercased() == "host" && $0.value == "127.0.0.1:\(h.originPort)" })
+        }
+    }
+
     @Test func templateSnapshotSpansStreamingAndScriptStages() async throws {
         for scripted in [false, true] {
             try await withHarness { h in
-                var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+                var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
                 var rewrite = ModificationStep(kind: .rewriteURL); rewrite.value = h.originURL + "after"
                 var header = ModificationStep(kind: .setHeader); header.name = "X-Key"; header.value = "{{$randomHex}}"
                 var responseHeader = ModificationStep(kind: .setHeader)
@@ -389,7 +640,7 @@ struct ProxyIntegrationTests {
     @Test func modifiesRealRequestAndResponseWithoutBufferingBody() async throws {
         try await withHarness { h in
             var env = WorkspaceEnvironment(name: "dev"); env.variables = [NamedValue(name: "key", value: "test-key")]
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var reqHeader = ModificationStep(kind: .setHeader); reqHeader.name = "X-Key"; reqHeader.value = "{{env.key}}"
             var respHeader = ModificationStep(kind: .setHeader); respHeader.name = "X-Debug"; respHeader.value = "true"
             var status = ModificationStep(kind: .setStatus); status.status = 202
@@ -418,14 +669,19 @@ struct ProxyIntegrationTests {
             #expect(record.matchedRules.map(\.kind) == [.setHeader, .setHeader, .setStatus])
             #expect(record.matchedRules.map(\.response) == [false, true, true])
             #expect(record.matchedRules.allSatisfy { $0.name == workflow.name })
+            #expect(record.executionTrace.map(\.stepID) == [reqHeader.id, respHeader.id, status.id])
+            #expect(record.executionTrace.map(\.phase) == [.request, .response, .response])
+            #expect(record.executionTrace.allSatisfy { $0.status == .applied })
+            let events = h.proxy.events.drain().events
+            #expect(events.map(\.kind) == [.matched, .completed])
+            #expect(events.allSatisfy { $0.transactionID == record.id && $0.workflowID == workflow.id })
         }
     }
     @Test func headerMatchingUsesOriginalRequestValues() async throws {
         try await withHarness { h in
             var workflow = RequestWorkflow()
-            workflow.matchTarget = .url; workflow.matchRule = .equals; workflow.matchPattern = "\(h.originURL)headers"
-            workflow.matchHeaderEnabled = true; workflow.matchHeaderName = "X-Environment"
-            workflow.matchHeaderRule = .equals; workflow.matchHeaderPattern = "staging"
+            workflow.matchConditions.conditions[0].field = .url; workflow.matchConditions.conditions[0].operation = .equals; workflow.matchConditions.conditions[0].value = "\(h.originURL)headers"
+            workflow.matchConditions.conditions.append(MatchCondition(field: .header, operation: .equals, name: "X-Environment", value: "staging"))
             var header = ModificationStep(kind: .setHeader); header.name = "X-Environment"; header.value = "changed"
             var status = ModificationStep(kind: .setStatus); status.status = 202
             workflow.requestSteps = [header]; workflow.responseSteps = [status]
@@ -444,9 +700,35 @@ struct ProxyIntegrationTests {
             }
         }
     }
+    @Test func groupedQueryCookieAndHeaderConditionsSelectBeforeModification() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow()
+            workflow.matchConditions = WorkflowMatchGroup(conditions: [
+                .init(field: .path, operation: .equals, value: "/orders"),
+                .init(field: .query, operation: .equals, name: "preview", value: "true"),
+                .init(field: .header, operation: .exists, name: "X-Test")], groups: [
+                    WorkflowMatchGroup(mode: .any, conditions: [
+                        .init(field: .cookie, operation: .equals, name: "debug", value: "1"),
+                        .init(field: .header, operation: .equals, name: "X-Env", value: "staging")])])
+            var status = ModificationStep(kind: .setStatus); status.status = 202
+            workflow.responseSteps = [status]
+            try await h.start(workflow: workflow)
+            for (query, headers, matched) in [
+                ("preview=true", "X-Test: 1\r\nCookie: debug=1\r\n", true),
+                ("preview=false&preview=true", "X-Test: 1\r\nX-Env: staging\r\n", true),
+                ("preview=false", "X-Test: 1\r\nCookie: debug=1\r\n", false),
+                ("preview=true", "Cookie: debug=1\r\n", false),
+                ("preview=true", "X-Test: 1\r\nCookie: debug=0\r\n", false)] {
+                let reply = try await h.exchange("GET \(h.originURL)orders?\(query) HTTP/1.1\r\nHost: localhost\r\n\(headers)\r\n")
+                #expect(reply.contains(matched ? "202 Accepted" : "200 OK"))
+                let record = try #require(h.proxy.records.drain().records.first)
+                #expect(record.matchedWorkflowID == (matched ? workflow.id : nil))
+            }
+        }
+    }
     @Test func queryAndURLReplacementReachOriginAndCaptureFinalURL() async throws {
         try await withHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var query = ModificationStep(kind: .setQueryParameter)
             query.name = "q"; query.value = "中文 & value"
             var replacement = ModificationStep(kind: .replaceURLString)
@@ -470,8 +752,8 @@ struct ProxyIntegrationTests {
     }
     @Test func scriptStepsModifyRealRequestAndResponseBodies() async throws {
         try await withHarness { h in
-            var workflow = RequestWorkflow(); workflow.matchTarget = .host
-            workflow.matchRule = .equals; workflow.matchPattern = "127.0.0.1"
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0].field = .host
+            workflow.matchConditions.conditions[0].operation = .equals; workflow.matchConditions.conditions[0].value = "127.0.0.1"
             var request = ModificationStep(kind: .script)
             request.value = "request.body = request.body.toUpperCase(); request.headers.push({name:'X-Key',value:'script-key'}); return request;"
             var response = ModificationStep(kind: .script)
@@ -492,7 +774,7 @@ struct ProxyIntegrationTests {
     }
     @Test func scriptTimeoutFailsBeforeForwardingAndMockScriptsStillRun() async throws {
         try await withHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var script = ModificationStep(kind: .script); script.value = "while(true) {}"
             var options = ScriptOptions(); options.timeoutMilliseconds = 150; script.scriptOptions = options
             workflow.requestSteps = [script]
@@ -515,7 +797,7 @@ struct ProxyIntegrationTests {
     }
     @Test func scriptKeepsCompressedBytesAndBuffersChunkedInput() async throws {
         try await withHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var request = ModificationStep(kind: .script); request.value = "request.body += '-script'; return request;"
             var response = ModificationStep(kind: .script); response.value = "response.headers.push({name:'X-Script', value:String(response.body)}); return response;"
             workflow.requestSteps = [request]; workflow.responseSteps = [response]
@@ -538,7 +820,7 @@ struct ProxyIntegrationTests {
     }
     @Test func mockSkipsOriginAndResponseLaneStillRuns() async throws {
         try await withHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var mock = ModificationStep(kind: .mock); mock.value = "local-static"; mock.status = 201
             var header = ModificationStep(kind: .setHeader); header.name = "X-Response-Flow"; header.value = "yes"
             workflow.requestSteps = [mock]; workflow.responseSteps = [header]
@@ -556,7 +838,7 @@ struct ProxyIntegrationTests {
     }
     @Test func responseReplacementRepairsEncodingAndHeadHasNoBody() async throws {
         try await withHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var body = ModificationStep(kind: .replaceBody); body.value = "replacement"
             workflow.responseSteps = [body]
             try await h.start(workflow: workflow)
@@ -578,14 +860,19 @@ struct ProxyIntegrationTests {
     }
     @Test func invalidDynamicValueFailsBeforeOriginAndStopReleasesPort() async throws {
         try await withHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var step = ModificationStep(kind: .setHeader); step.name = "X-Key"; step.value = "{{env.missing}}"
-            workflow.requestSteps = [step]
+            var first = ModificationStep(kind: .setHeader); first.name = "X-First"; first.value = "ok"
+            workflow.requestSteps = [first, step]
             try await h.start(workflow: workflow)
             let reply = try await h.exchange("GET \(h.originURL) HTTP/1.1\r\nHost: localhost\r\n\r\n")
             #expect(reply.contains("400 Bad Request")); #expect(h.observation.withLock { $0.requests } == 0)
             let record = try #require(h.proxy.records.drain().records.first)
             #expect(record.outcome == .failed)
+            #expect(record.executionTrace.map(\.stepID) == [first.id, step.id])
+            #expect(record.executionTrace.map(\.status) == [.applied, .failed])
+            #expect(record.steps == [first.kind.title])
+            #expect(h.proxy.events.drain().events.map(\.kind) == [.matched, .failed])
             #expect(record.responseBody.isComplete)
             #expect(String(data: record.responseBody.data, encoding: .utf8)?.contains("未找到变量") == true)
             #expect(record.responseHeaders.contains { $0.name.lowercased() == "content-type" && $0.value == "text/plain; charset=utf-8" })
@@ -613,7 +900,7 @@ struct ProxyIntegrationTests {
     }
     @Test func chunkedRequestAndReplacementUseValidFraming() async throws {
         try await withHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var replacement = ModificationStep(kind: .replaceBody); replacement.value = "changed"
             workflow.requestSteps = [replacement]
             try await h.start(workflow: workflow)
@@ -649,7 +936,7 @@ struct ProxyIntegrationTests {
     }
     @Test func largeHeadersURLsAndGeneratedBodiesRemainComplete() async throws {
         try await withHarness { h in
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             let body = String(repeating: "b", count: 2 * 1_048_576)
             var mock = ModificationStep(kind: .mock); mock.value = body
             var header = ModificationStep(kind: .setHeader); header.name = "X-Large"; header.value = String(repeating: "h", count: 100_000)
@@ -690,7 +977,7 @@ struct ProxyIntegrationTests {
             let reply = try await h.exchange("GET \(h.originURL)large HTTP/1.1\r\nHost: localhost\r\n\r\n")
             #expect(reply.filter { $0 == "z" }.count == 1_048_576)
             #expect(h.proxy.records.drain().records.first?.responseBytes == 1_048_576)
-            var workflow = RequestWorkflow(); workflow.urlPrefix = h.originURL
+            var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
             var redirect = ModificationStep(kind: .redirect); redirect.value = "https://example.test/new"
             workflow.requestSteps = [redirect]
             var project = WorkflowProject(); project.workflows = [workflow]
@@ -729,7 +1016,7 @@ struct ProxyIntegrationTests {
     @Test func bodyWriteFailureCannotBecomeACompleteSnapshotWhenEndSucceeds() throws {
         let records = CaptureRecordBuffer()
         let shared = ProxySharedState()
-        var workflow = RequestWorkflow(); workflow.urlPrefix = "http://example.test/"
+        var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: "http://example.test/")
         var mock = ModificationStep(kind: .mock); mock.status = 201; mock.value = "not-written"
         workflow.requestSteps = [mock]
         var project = WorkflowProject(); project.workflows = [workflow]

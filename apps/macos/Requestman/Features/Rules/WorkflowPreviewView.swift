@@ -47,12 +47,17 @@ import RequestmanCore
             let output = await Task.detached(priority: .userInitiated) {
                 do {
                     var request = try input.request()
-                    guard workflow.matches(method: request.method, url: request.url, headers: request.headers) else { return "此输入未命中匹配条件。" }
-                    let id = UUID(), date = Date()
-                    let context = WorkflowTemplateContext(id: id, date: date, request: request)
-                    var trace = try WorkflowEngine.apply(workflow.requestSteps, response: false, to: &request, environment: environment?.values ?? [:], id: id, date: date, control: control, templateContext: context, environmentTypes: environment?.valueTypes ?? [:])
-                    var response = request.isMock ? request : try input.response()
-                    trace += try await WorkflowEngine.applyAsync(workflow.responseSteps, response: true, to: &response, environment: environment?.values ?? [:], id: id, date: date, request: request, control: control, templateContext: context, environmentTypes: environment?.valueTypes ?? [:])
+                    guard RuleMatchingEngine.matches(workflow, method: request.method, url: request.url, headers: request.headers) else { return "此输入未命中匹配条件。" }
+                    let context = TransactionContext(id: UUID(), date: Date(), originalRequest: request,
+                        match: WorkflowMatch(project: "预览", workflow: workflow, environment: environment), control: control)
+                    let outgoing = try await ModificationExecutionEngine.executeAsync(workflow.requestSteps,
+                        to: &request, context: context.executionContext(for: .request))
+                    var response = outgoing.disposition == .localResponse ? request : try input.response()
+                    let responseContext = context.executionContext(for: .response, request: request,
+                        originalResponseStatus: response.status)
+                    let incoming = try await ModificationExecutionEngine.executeAsync(workflow.responseSteps,
+                        to: &response, context: responseContext)
+                    let trace = (outgoing.trace + incoming.trace).map { $0.kind.title }
                     let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
                     return trace.joined(separator: " → ") + "\n\n请求\n" + String(decoding: try encoder.encode(ScriptMessage(request, response: false)), as: UTF8.self)
                         + "\n\n响应\n" + String(decoding: try encoder.encode(ScriptMessage(response, response: true)), as: UTF8.self)

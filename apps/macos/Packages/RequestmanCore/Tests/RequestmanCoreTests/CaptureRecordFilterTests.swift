@@ -92,7 +92,7 @@ struct CaptureRecordFilterTests {
         #expect(filter.matches(record()))
         filter.inverted = true
         #expect(!filter.matches(record()))
-        filter.project = "其他项目"
+        filter.project = "其他规则组"
         #expect(filter.matches(record()))
         filter = CaptureRecordFilter(); filter.inverted = true
         #expect(filter.matches(record()), "Inversion alone must not hide the entire log")

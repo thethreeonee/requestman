@@ -5,44 +5,40 @@ import Testing
 struct WorkflowConfigurationTests {
     @Test func targetsAndFourRules() {
         var flow = RequestWorkflow()
-        flow.matchTarget = .host
-        flow.matchRule = .equals; flow.matchPattern = "API.Example.COM"
+        flow.matchConditions.conditions[0].field = .host
+        flow.matchConditions.conditions[0].operation = .equals; flow.matchConditions.conditions[0].value = "API.Example.COM"
         #expect(flow.matches(method: "GET", url: "https://api.example.com:8443/path?x=1"))
         #expect(!flow.matches(method: "GET", url: "https://api.example.com.attacker.test/"))
         #expect(!flow.matches(method: "GET", url: "https://other.test/api.example.com"))
-        flow.matchRule = .wildcard; flow.matchPattern = "*.example.com"
+        flow.matchConditions.conditions[0].operation = .wildcard; flow.matchConditions.conditions[0].value = "*.example.com"
         #expect(flow.matches(method: "GET", url: "https://api.example.com/"))
         #expect(!flow.matches(method: "GET", url: "https://example.com/"))
-        flow.matchRule = .contains; flow.matchPattern = "EXAMPLE"
+        flow.matchConditions.conditions[0].operation = .contains; flow.matchConditions.conditions[0].value = "EXAMPLE"
         #expect(flow.matches(method: "GET", url: "https://api.example.com/"))
-        flow.matchRule = .regex; flow.matchPattern = #"^api\d+\.example\.com$"#
+        flow.matchConditions.conditions[0].operation = .regex; flow.matchConditions.conditions[0].value = #"^api\d+\.example\.com$"#
         #expect(flow.matches(method: "GET", url: "https://api2.example.com:444/path"))
         #expect(!flow.matches(method: "GET", url: "https://api.example.com/"))
-        flow.matchPattern = "["
+        flow.matchConditions.conditions[0].value = "["
         #expect(!flow.matches(method: "GET", url: "https://api.example.com/"))
-        flow.matchTarget = .url; flow.matchRule = .wildcard; flow.matchPattern = "https://example.com/a?/*"
+        flow.matchConditions.conditions[0].field = .url; flow.matchConditions.conditions[0].operation = .wildcard; flow.matchConditions.conditions[0].value = "https://example.com/a?/*"
         #expect(flow.matches(method: "GET", url: "https://example.com/ab/test"))
         #expect(!flow.matches(method: "GET", url: "https://example.com/abc/test"))
-        flow.matchRule = .equals; flow.matchPattern = "https://example.com/Test"
+        flow.matchConditions.conditions[0].operation = .equals; flow.matchConditions.conditions[0].value = "https://example.com/Test"
         #expect(!flow.matches(method: "GET", url: "https://example.com/test"))
-        flow.matchRule = .contains; flow.matchPattern = "/Test"
+        flow.matchConditions.conditions[0].operation = .contains; flow.matchConditions.conditions[0].value = "/Test"
         #expect(flow.matches(method: "GET", url: "https://example.com/Test?id=1"))
-        flow.matchPattern = ""
+        flow.matchConditions.conditions[0].value = ""
         #expect(!flow.matches(method: "GET", url: "https://example.com/"))
     }
 
-    @Test func legacyPrefixMigrationAndNewRoundTrip() throws {
-        let prefix = "https://example.com/a?value=*"
-        let data = try JSONSerialization.data(withJSONObject: ["id": UUID().uuidString, "name": "legacy", "enabled": true,
-            "method": "*", "urlPrefix": prefix, "requestSteps": [], "responseSteps": []])
-        let flow = try JSONDecoder().decode(RequestWorkflow.self, from: data)
-        #expect(flow.matchRule == .regex)
-        #expect(flow.matches(method: "GET", url: prefix + "suffix"))
-        #expect(!flow.matches(method: "GET", url: "https://example.com/aXvalue=other"))
+    @Test func conditionGroupRoundTrip() throws {
+        var flow = RequestWorkflow()
+        flow.matchConditions.groups = [WorkflowMatchGroup(mode: .any, conditions: [MatchCondition(field: .host, operation: .equals, value: "api.test")])]
         let encoded = try JSONEncoder().encode(flow)
-        #expect(!String(decoding: encoded, as: UTF8.self).contains("urlPrefix"))
         #expect(try JSONDecoder().decode(RequestWorkflow.self, from: encoded) == flow)
+        #expect(!String(decoding: encoded, as: UTF8.self).contains("matchPattern"))
     }
+
 }
 
 @Suite(.serialized)

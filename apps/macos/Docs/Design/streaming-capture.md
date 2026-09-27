@@ -6,11 +6,11 @@ macOS 显式 HTTP/1.1 代理支持 SSE 事件观察和 WebSocket 基础消息观
 
 ## SSE 配置与执行
 
-请求修改的匹配条件和两列步骤之间提供「SSE（服务器发送事件）」复选框。`RequestWorkflow.isSSE` 缺省为 false，随工作区、复制和归档保存。启用时添加普通、可编辑的响应 Header 步骤，使用添加或覆盖操作设置 `Content-Type: text/event-stream; charset=utf-8` 与 `Cache-Control: no-cache`。重复启用不重复添加未改动的条目；关闭 SSE 保留用户可编辑步骤。Connection、Content-Length、Transfer-Encoding 仍由代理负责。
+界面不再提供 SSE 复选框。旧配置的 `RequestWorkflow.isSSE` 继续随工作区、复制和归档保存，但不参与代理执行路径判断；已有响应 Header 步骤保持可编辑。Connection、Content-Length、Transfer-Encoding 仍由代理负责。
 
-响应声明 text/event-stream 时自动观察事件；显式 SSE 标记也会选择流式执行路径。Header 和状态步骤在发出响应前执行。延迟在头部阶段等待，不等待整个流结束。启用的替换 Body（文本、Base64、本地文件）或重定向步骤会取消主上游，执行响应流程并生成有限的替代响应；旧上游不再被消费到 EOF，取消原因写入记录，不能把旧流误标为完整。
+收到上游原始响应头后，依据 `Content-Type: text/event-stream` 自动选择 SSE 执行路径，不要求勾选开关或请求携带 Accept。请求 Accept、请求 Content-Type、配置标记及后续响应 Header 修改均不将普通上游响应自动转换为 SSE；普通响应仍按原流程执行，Body 内容不自动包装为事件。Header 和状态步骤在发出响应前执行。延迟在头部阶段等待，不等待整个流结束。启用的替换 Body（文本、Base64、本地文件）或重定向步骤会取消主上游，执行响应流程并生成有限的替代响应；旧上游不再被消费到 EOF，取消原因写入记录，不能把旧流误标为完整。
 
-整流响应脚本只有放在替换 Body 之后才可执行，此时处理的是有限替代内容。需要读取原始完整响应的脚本明确返回不兼容错误，避免无限等待；本轮不执行逐事件脚本。请求阶段及本地 Mock 沿用现有步骤语义。
+整流响应脚本只有放在替换 Body 之后才可执行，此时处理的是有限替代内容。需要读取原始完整响应的脚本明确返回不兼容错误，避免无限等待；本轮不执行逐事件脚本。请求阶段及本地 Mock 沿用现有步骤语义。本地 Mock 声明 SSE Content-Type 时仍可记录其预设事件内容，但不因配置标记自动转换 Body。已识别的上游 SSE 经 Body 替换后，即使步骤更改 Content-Type，也保留替代内容的原始字节记录。
 
 `SSEParser` 按 UTF-8 字节增量解析，覆盖 BOM、CR/LF/CRLF、跨块字符、多行 data、事件类型、持续 id、retry 和注释心跳。只有空行结束的完整事件进入事件列表，未完成片段保留在原始数据中。旁路解压支持 gzip/deflate，不改写转发字节；不支持的编码或损坏压缩流显示记录错误，网络仍原样转发。客户端负责重连，代理不主动重放请求或修改 Last-Event-ID。
 
@@ -36,6 +36,6 @@ macOS 显式 HTTP/1.1 代理支持 SSE 事件观察和 WebSocket 基础消息观
 
 ## 验证
 
-Swift package 测试覆盖 SSE 分块 UTF-8、行结束、ID、gzip/deflate、分页后继续写入、旧配置读取、Header 步骤幂等、记录合并、暂停后终态恢复与清空隔离，以及真实 TCP 上的无限 SSE、文本/文件 Body 替换、上游取消和首包延迟。WebSocket 回环覆盖普通 Upgrade、明文 CONNECT、wss、HTTP 上游、握手首包、分片文本、二进制、控制帧、大于 16 KiB 的帧、关闭握手、无效 UTF-8、异常断开和主动停止。TLS 测试使用内存证书与测试锚点，不安装或信任本机证书。
+Swift package 测试覆盖 SSE 分块 UTF-8、行结束、ID、gzip/deflate、分页后继续写入、旧配置读取、Header 步骤幂等、记录合并、暂停后终态恢复与清空隔离，以及真实 TCP 上的无限 SSE、文本/文件 Body 替换、上游取消和首包延迟，并验证无需 SSE 开关的 Header/状态修改、POST 响应脚本边界、请求与响应 Header 不触发自动转换、替代 Body 保持字面内容。WebSocket 回环覆盖普通 Upgrade、明文 CONNECT、wss、HTTP 上游、握手首包、分片文本、二进制、控制帧、大于 16 KiB 的帧、关闭握手、无效 UTF-8、异常断开和主动停止。TLS 测试使用内存证书与测试锚点，不安装或信任本机证书。
 
 隐藏 AppKit 窗口检查复选框、Header 插入、协议筛选、实时详情及原有界面回归。上述证据不代表完整 App 外观、Chrome 或 Surge 真实流量验收。

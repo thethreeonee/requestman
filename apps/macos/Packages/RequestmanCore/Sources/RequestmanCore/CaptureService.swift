@@ -1,3 +1,5 @@
+import Foundation
+
 /// Host boundary for the explicit proxy. Transparent capture remains a separate configuration contract.
 @MainActor
 public protocol CaptureService {
@@ -8,15 +10,22 @@ public protocol CaptureService {
     func reconfigure(configuration: ExplicitProxyConfiguration, document: WorkspaceDocument) async throws -> Int
     var recordBuffer: CaptureRecordBuffer? { get }
     var ruleHitNotificationBuffer: RuleHitNotificationBuffer? { get }
+    var captureEvents: CaptureEventBuffer? { get }
     /// Retained if system settings could not be restored after a failed start/stop.
     var activePort: Int? { get }
     var activeMode: CaptureMode? { get }
     func recoverSystemProxy() async throws
     func checkUpstream(_ endpoint: ProxyEndpoint) async throws
+    func replay(_ request: RequestReplayDraft) async throws
+    func cancelReplay(_ id: UUID) async
     func stop() async throws
 }
 
 public extension CaptureService {
+    func cancelReplay(_ id: UUID) async {}
+    func replay(_ request: RequestReplayDraft) async throws {
+        throw WorkflowError.invalid("此捕获服务不支持请求重放")
+    }
     func start(configuration: ExplicitProxyConfiguration, document: WorkspaceDocument, mode: CaptureMode) async throws -> Int {
         throw WorkflowError.invalid("此捕获服务不支持显式代理")
     }
@@ -46,6 +55,7 @@ public extension CaptureService {
     }
     var recordBuffer: CaptureRecordBuffer? { nil }
     var ruleHitNotificationBuffer: RuleHitNotificationBuffer? { nil }
+    var captureEvents: CaptureEventBuffer? { nil }
     var activePort: Int? { nil }
     var activeMode: CaptureMode? { nil }
     func recoverSystemProxy() async throws {}

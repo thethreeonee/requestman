@@ -7,6 +7,11 @@ enum WorkspaceTransfer {
     static let preferencesDomain = Bundle.main.bundleIdentifier ?? "com.requestman.macos"
     static let preferencesRestored = Notification.Name("Requestman.preferencesRestored")
 
+    static func exportRules(model: WorkspaceModel, window: NSWindow?) {
+        guard model.loaded, !model.isTransitioning else { return }
+        export(WorkspaceArchive(projects: model.document.projects), name: "Requestman 规则", window: window)
+    }
+
     static func exportAll(model: WorkspaceModel, window: NSWindow?) {
         guard model.loaded else { return }
         do {
@@ -34,7 +39,7 @@ enum WorkspaceTransfer {
         }
     }
 
-    static func importFile(model: WorkspaceModel, window: NSWindow?) {
+    static func importFile(model: WorkspaceModel, window: NSWindow?, rulesOnly: Bool = false) {
         guard model.loaded, !model.isTransitioning else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
@@ -44,7 +49,10 @@ enum WorkspaceTransfer {
             guard response == .OK, let url = panel.url else { return }
             Task { @MainActor in
                 do {
-                    let archive = try await Task.detached { try WorkspaceArchive.decode(Data(contentsOf: url)) }.value
+                    let archive = try await Task.detached {
+                        let decoded = try WorkspaceArchive.decode(Data(contentsOf: url))
+                        return try rulesOnly ? decoded.rulesArchive() : decoded
+                    }.value
                     try await model.importArchive(archive)
                     if archive.scope == .workspace {
                         for window in NSApp.windows where !window.frameAutosaveName.isEmpty {

@@ -28,11 +28,16 @@ final class WorkspaceModel {
     func toggleCapture() async { isCapturing.toggle() }
     func setRecordingPaused(_ value: Bool) { history.paused = value }
     func clearHistory() { history.clear() }
+    func cancelReplay(_ id: UUID) {}
+    var replayUnavailableReason: String? { "测试不发送请求" }
+    func replay(_ record: CaptureRecord, editing: Bool, presenter: NSViewController) {}
     func addMockWorkflow(from record: CaptureRecord) { selection = .rules }
 }
 
 @MainActor @Observable
 final class ExecutionHistoryModel {
+    var latestReplay: CaptureRecord? { records.first { $0.replayID != nil } }
+    func reveal(_ id: UUID) { selectedID = id }
     var records: [CaptureRecord] = []
     var paused = false
     var dropped = 0
@@ -61,6 +66,11 @@ enum WorkspaceSettingsSection { case general, environments }
 @MainActor final class StepInspectorViewController: ProjectSidebarViewController {
     var isPresented = false
     func installAccessories(on item: NSSplitViewItem) {}
+}
+
+@MainActor enum WorkspaceTransfer {
+    static func importFile(model: WorkspaceModel, window: NSWindow?, rulesOnly: Bool = false) {}
+    static func exportRules(model: WorkspaceModel, window: NSWindow?) {}
 }
 
 @main @MainActor
@@ -124,7 +134,7 @@ struct InspectorPerformanceChecks {
         let model = WorkspaceModel()
         model.selection = .requests
         let workflow = RequestWorkflow(name: "命中规则")
-        var project = WorkflowProject(name: "测试项目")
+        var project = WorkflowProject(name: "测试规则组")
         project.workflows = [workflow]
         model.document.projects = [project]
         for index in 0..<75 {
@@ -177,7 +187,7 @@ struct InspectorPerformanceChecks {
         model.history.selectedID = model.history.records[0].id
         settle(controller)
         let details = inspector.viewController as! WorkspaceInspectorController
-        let link = views(NSPathControl.self, in: details.requests.view).first { $0.accessibilityLabel() == "命中的规则与项目" }!
+        let link = views(NSPathControl.self, in: details.requests.view).first { $0.accessibilityLabel() == "命中的规则与规则组" }!
         precondition(link.isEnabled && link.font!.pointSize == 14)
         precondition(link.pathItems.map(\.title) == [project.name, workflow.name] && !link.isEditable)
         let method = views(RequestMethodTag.self, in: details.requests.view).first!
@@ -222,7 +232,15 @@ struct InspectorPerformanceChecks {
 
     static func checkDisplayMode(_ controller: WorkspaceSplitController, window: NSWindow) {
         let inspector = controller.splitViewItems[2].viewController.view
-        let mode = window.toolbar!.items.first { $0.itemIdentifier.rawValue == "workspace.inspectorMode" }!.view as! NSSegmentedControl
+        let more = window.toolbar!.items.first { $0.itemIdentifier.rawValue == "workspace.inspectorMore" } as! NSMenuToolbarItem
+        func selectMode(_ index: Int) {
+            more.menu.delegate?.menuNeedsUpdate?(more.menu)
+            let item = more.menu.items.last!.submenu!.items[index]
+            precondition(NSApp.sendAction(item.action!, to: item.target, from: item))
+        }
+        more.menu.delegate?.menuNeedsUpdate?(more.menu)
+        precondition(more.menu.items.last!.submenu!.items[2].state == .on)
+        selectMode(1)
         let tabs = views(NSSegmentedControl.self, in: inspector).first { $0.segmentCount == 5 }!
         let originalHeader = String(repeating: "value", count: 40)
         precondition((0..<tabs.segmentCount).map { tabs.label(forSegment: $0)! } == ["请求头", "查询参数", "请求体", "响应头", "响应体"])
@@ -239,36 +257,33 @@ struct InspectorPerformanceChecks {
         func sourceValue() -> String? {
             views(NSTextView.self, in: inspector).first { !$0.isHiddenOrHasHiddenAncestor && !$0.isEditable }?.string
         }
-        func copyButton() -> NSButton? {
-            let buttons = views(NSButton.self, in: inspector).filter { $0.action == NSSelectorFromString("copyContent:") }
-            precondition(buttons.count == 1, "There must be one content-copy action, outside the retained payload panes")
-            return buttons.first
+        func copyItem() -> NSMenuItem {
+            more.menu.delegate?.menuNeedsUpdate?(more.menu)
+            let submenu = more.menu.items.first { $0.title == "复制" }!.submenu!
+            precondition(submenu.items.count == 4)
+            return submenu.items[1]
         }
+        precondition(!views(NSButton.self, in: inspector).contains { $0.action == NSSelectorFromString("copyContent:") })
+        precondition(views(NSButton.self, in: inspector).contains { $0.action == NSSelectorFromString("copyURL") && $0.isEnabled })
 
         waitFor(controller) { headerValue() == "after-0" }
-        waitFor(controller) { copyButton()?.isEnabled == true }
-        precondition(copyButton()?.accessibilityLabel() == "复制当前请求头")
+        waitFor(controller) { copyItem().isEnabled == true }
+        precondition(copyItem().title == "复制请求头")
         let initialWidth = inspector.bounds.width
         for width: CGFloat in [400, 520, 760] {
             controller.splitView.setPosition(controller.splitView.bounds.maxX - width - controller.splitView.dividerThickness, ofDividerAt: 1)
             settle(controller)
             precondition(abs(inspector.bounds.width - width) <= 2, "Data tabs must preserve the 400 pt inspector minimum")
             let tabFrame = tabs.convert(tabs.bounds, to: inspector)
-            let button = copyButton()!
-            let buttonFrame = button.convert(button.bounds, to: inspector)
             let tabTop = inspector.isFlipped ? tabFrame.minY : inspector.bounds.height - tabFrame.maxY
-            print("Content tabs geometry: inspector=\(inspector.bounds), tabRow=\(tabs.superview!.bounds), top=\(tabTop), tabs=\(tabFrame), copy=\(buttonFrame), intrinsic=\(button.intrinsicContentSize)")
-            precondition(tabTop < 180, "Content tabs must stay directly below the summary, not float mid-inspector")
+            print("Content tabs geometry: inspector=\(inspector.bounds), tabRow=\(tabs.superview!.bounds), top=\(tabTop), tabs=\(tabFrame)")
+            // The summary includes a 32 pt URL button instead of the old 21 pt intrinsic height.
+            precondition(tabTop < 200, "Content tabs must stay directly below the summary, not float mid-inspector")
             precondition(abs(tabFrame.height - tabs.intrinsicContentSize.height) <= 1,
                          "Tabs must retain their native height")
-            precondition(abs(buttonFrame.height - button.intrinsicContentSize.height) <= 1,
-                         "Copy button must not stretch the entire tab row vertically")
             precondition(tabs.segmentDistribution == .fillProportionally)
-            precondition(tabFrame.minX >= 0 && buttonFrame.maxX <= inspector.bounds.width)
-            precondition(abs(buttonFrame.maxX - (inspector.bounds.width - 16)) <= 1,
-                         "Content tabs must expand across the inspector, keeping the copy action at the trailing inset")
-            precondition(buttonFrame.minX > tabFrame.maxX && abs(buttonFrame.midY - tabFrame.midY) <= 1,
-                         "The copy action must remain immediately to the right of the data tabs, in the same row")
+            precondition(abs(tabFrame.minX - 16) <= 1 && abs(tabFrame.maxX - (inspector.bounds.width - 16)) <= 1,
+                         "Content tabs must fill the row between the inspector insets")
             precondition(tabFrame.width + 1 >= tabs.intrinsicContentSize.width)
             if #available(macOS 26.0, *) {
                 precondition(tabs.controlSize == .extraLarge && tabFrame.height >= tabs.intrinsicContentSize.height,
@@ -278,14 +293,14 @@ struct InspectorPerformanceChecks {
         controller.splitView.setPosition(controller.splitView.bounds.maxX - initialWidth - controller.splitView.dividerThickness, ofDividerAt: 1)
         settle(controller)
         select(tabs, 1)
-        waitFor(controller) { headerValue() == "after" && copyButton()?.isEnabled == true }
-        precondition(copyButton()?.accessibilityLabel() == "复制当前查询参数")
-        select(mode, 0)
+        waitFor(controller) { headerValue() == "after" && copyItem().isEnabled == true }
+        precondition(copyItem().title == "复制查询参数")
+        selectMode(0)
         waitFor(controller) { headerValue() == "before" }
-        select(mode, 2)
+        selectMode(2)
         waitFor(controller) { headerValue() == "最终  after" }
         select(tabs, 0)
-        select(mode, 0)
+        selectMode(0)
         waitFor(controller) { headerValue() == originalHeader }
         select(tabs, 2)
         waitFor(controller) {
@@ -294,31 +309,31 @@ struct InspectorPerformanceChecks {
         let format = views(NSButton.self, in: inspector).first { !$0.isHiddenOrHasHiddenAncestor && $0.title == "原始数据" }!
         format.performClick(nil)
         waitFor(controller) { sourceValue() == "{\"items\":[1,2,3]}" }
-        waitFor(controller) { copyButton()?.isEnabled == true }
-        precondition(copyButton()?.accessibilityLabel() == "复制当前请求体")
-        select(mode, 1)
+        waitFor(controller) { copyItem().isEnabled == true }
+        precondition(copyItem().title == "复制请求体")
+        selectMode(1)
         waitFor(controller) { sourceValue() == "{\"items\":[4,5]}" }
         select(tabs, 0)
         waitFor(controller) { headerValue() == "after-0" }
-        select(mode, 2)
+        selectMode(2)
         waitFor(controller) { headerValue() == "最终  after-0" }
         select(tabs, 2)
         waitFor(controller) {
             guard let source = sourceValue() else { return false }
             return source.contains("[1,2,3]") && source.contains("[4,5]")
         }
-        select(mode, 1)
+        selectMode(1)
         select(tabs, 0)
         waitFor(controller) { headerValue() == "after-0" }
         precondition(!views(NSButton.self, in: inspector).contains { ["修改前", "修改后", "修改对比"].contains($0.title) },
                      "The inspector footer must not retain a duplicate display-mode button")
         select(tabs, 4)
-        waitFor(controller) { copyButton()?.isEnabled == false }
-        precondition(copyButton()?.accessibilityLabel() == "复制当前响应体")
+        waitFor(controller) { copyItem().isEnabled == false }
+        precondition(copyItem().title == "复制响应体")
         select(tabs, 0)
-        waitFor(controller) { headerValue() == "after-0" && copyButton()?.isEnabled == true }
+        waitFor(controller) { headerValue() == "after-0" && copyItem().isEnabled == true }
         print("Display-mode integration passed: toolbar actions update real Header/source data across content tabs; source format survives tab changes; no footer mode button")
-        print("Data tabs/copy layout passed at 400/520/760 pt: native full-size proportionally filled tabs, one trailing copy action, active-tab labels and unavailable-data disabling; pasteboard untouched")
+        print("Data tabs/copy layout passed at 400/520/760 pt: native full-size proportionally filled tabs, copy submenu, active-tab labels and unavailable-data disabling; pasteboard untouched")
     }
 
     static func views<T: NSView>(_ type: T.Type, in root: NSView) -> [T] {

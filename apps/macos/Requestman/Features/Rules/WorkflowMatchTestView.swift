@@ -14,6 +14,8 @@ import RequestmanCore
     private var inputs: [MatchTestHeaderRow] = []
     private var contentStack: NSStackView?
     private var heightConstraint: NSLayoutConstraint!
+    private var bodyStack: NSStackView?
+    private var bodyHeight: NSLayoutConstraint!
 
     init(workflow: RequestWorkflow) {
         self.workflow = workflow
@@ -44,12 +46,7 @@ import RequestmanCore
             child.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true
         }
         add(NativeUI.label("当前匹配条件", weight: .semibold))
-        var summaryRows: [NSView] = [Self.row("请求方法", Self.text(workflow.method == "*" ? "全部" : workflow.method)),
-                                     Self.row(workflow.matchTarget.title, Self.text("\(workflow.matchRule.title)    \(workflow.matchPattern)"))]
-        if workflow.matchHeaderEnabled {
-            summaryRows.append(Self.row("Header", Self.text("\(workflow.matchHeaderName)    \(workflow.matchHeaderRule.title)    \(workflow.matchHeaderPattern)")))
-        }
-        add(Self.group(summaryRows))
+        add(Self.group([Self.text(workflow.matchingSummary)]))
         if let error = WorkflowMatchTest.validationError(for: workflow) {
             let errorLabel = Self.text(error); errorLabel.textColor = .systemRed
             add(errorLabel)
@@ -58,24 +55,25 @@ import RequestmanCore
         }
         add(NativeUI.separator())
         add(NativeUI.label("测试请求", weight: .semibold))
-        if workflow.method != "*" && !methods.contains(workflow.method) { method.addItem(withTitle: workflow.method) }
-        method.selectItem(withTitle: workflow.method == "*" ? "GET" : workflow.method)
+        method.selectItem(withTitle: "GET")
         method.identifier = .init("matchTest.method"); method.setAccessibilityLabel("测试请求方法")
         method.widthAnchor.constraint(equalToConstant: 130).isActive = true
         add(Self.row("请求方法", NativeUI.stack([method, Self.spacer()], vertical: false)))
         Self.configure(url, id: "matchTest.url", label: "测试 URL")
         url.onSubmit = { [weak self] in self?.run() }
         add(Self.row("测试 URL", url))
-        var addHeaderButton: NSButton?
-        if workflow.matchHeaderEnabled {
-            add(Self.row("测试 Header", headerRows))
-            addHeader(name: workflow.matchHeaderName)
-            let addHeader = ActionButton(title: "添加 Header") { [weak self] in self?.addHeader() }
-            addHeader.identifier = .init("matchTest.addHeader")
-            addHeaderButton = addHeader
+        add(Self.row("测试 Header", headerRows))
+        func headerNames(_ group: WorkflowMatchGroup) -> [String] {
+            group.conditions.filter { $0.enabled && [.header, .cookie, .contentType].contains($0.field) }.map {
+                $0.field == .cookie ? "Cookie" : $0.field == .contentType ? "Content-Type" : $0.name
+            } + group.groups.filter(\.enabled).flatMap(headerNames)
         }
+        var seen: Set<String> = []
+        for name in headerNames(workflow.matchConditions) where seen.insert(name.lowercased()).inserted { addHeader(name: name) }
+        let addHeaderButton = ActionButton(title: "添加 Header") { [weak self] in self?.addHeader() }
+        addHeaderButton.identifier = .init("matchTest.addHeader")
         runButton.identifier = .init("matchTest.run"); runButton.keyEquivalent = "\r"
-        add(NativeUI.stack((addHeaderButton.map { [$0 as NSView] } ?? []) + [Self.spacer(), runButton], vertical: false))
+        add(NativeUI.stack([addHeaderButton, Self.spacer(), runButton], vertical: false))
         add(NativeUI.separator())
         add(NativeUI.label("测试结果", weight: .semibold))
         status.identifier = .init("matchTest.status")
@@ -83,7 +81,18 @@ import RequestmanCore
         add(status)
         add(resultRows)
         if !workflow.enabled { add(Self.text("当前规则已停用；测试仅验证条件，实际捕获不会启用此规则。", secondary: true)) }
-        let stack = NativeUI.stack([heading, subtitle, NativeUI.separator(), body, footer], spacing: 12)
+        let scroll = NSScrollView(); scroll.identifier = .init("matchTest.scroll")
+        scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false
+        scroll.verticalScrollElasticity = .none; scroll.horizontalScrollElasticity = .none
+        let document = FlippedView(); scroll.documentView = document
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
+        NativeUI.pin(body, to: document)
+        bodyHeight = scroll.heightAnchor.constraint(equalToConstant: 260); bodyHeight.isActive = true
+        bodyStack = body
+        for button in [runButton, addHeaderButton] { MatchingControls.glass(button) }
+        MatchingControls.glass(method)
+        let stack = NativeUI.stack([heading, subtitle, NativeUI.separator(), scroll, footer], spacing: 12)
         NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 24, left: 24, bottom: 20, right: 24))
         for child in stack.arrangedSubviews { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         contentStack = stack
@@ -95,7 +104,10 @@ import RequestmanCore
     override func viewWillDisappear() { super.viewWillDisappear(); generation += 1 }
 
     private func fitContentHeight() {
-        guard let contentStack else { return }
+        guard let contentStack, let bodyStack else { return }
+        view.layoutSubtreeIfNeeded()
+        let limit = min(850, (view.window?.screen ?? NSScreen.main)?.visibleFrame.height ?? 850) - 100
+        bodyHeight.constant = min(max(100, ceil(bodyStack.fittingSize.height)), max(180, limit - 160))
         view.layoutSubtreeIfNeeded()
         let height = max(320, ceil(contentStack.fittingSize.height + 44))
         guard abs(heightConstraint.constant - height) > 1 else { return }
@@ -159,7 +171,7 @@ import RequestmanCore
             status.stringValue = "无法测试：\(error)"; status.textColor = .systemRed
             return
         }
-        status.stringValue = result.matched ? "匹配成功 · 所有条件均满足" : "未匹配 · \(result.conditions.filter { !$0.matched }.map(\.name).joined(separator: "、"))条件未满足"
+        status.stringValue = result.matched ? "匹配成功 · 满足条件组逻辑" : "未匹配 · 未满足条件组逻辑，详情见下方"
         status.textColor = result.matched ? .systemGreen : .systemOrange
         for condition in result.conditions {
             let symbol = condition.matched ? "checkmark.circle.fill" : "exclamationmark.circle.fill"

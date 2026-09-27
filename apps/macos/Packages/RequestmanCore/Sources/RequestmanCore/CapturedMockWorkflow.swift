@@ -8,7 +8,7 @@ public enum CapturedMockWorkflow {
         guard !record.urlWasTruncated, !record.requestHeadersInfo.isTruncated,
               record.requestHeadersInfo.truncatedNames.isEmpty else { return "原始请求信息不完整。" }
         guard record.requestBody.isComplete else { return "请等待原始请求完整采集后再创建 Mock。" }
-        guard WorkflowEngine.isToken(record.method), !["TRACE", "PRI"].contains(record.method.uppercased()),
+        guard HTTPMessageValidation.isToken(record.method), !["TRACE", "PRI"].contains(record.method.uppercased()),
               let url = URLComponents(string: record.url), ["http", "https"].contains(url.scheme),
               url.host != nil, url.user == nil, url.password == nil, url.fragment == nil else { return "当前请求的方法或 URL 不支持创建 Mock。" }
         return nil
@@ -20,9 +20,10 @@ public enum CapturedMockWorkflow {
         if let reason = unavailableReason(for: record) { throw WorkflowError.invalid(reason) }
         let path = URLComponents(string: record.url)?.path ?? ""
         var workflow = RequestWorkflow(name: "Mock \(record.method) \(path.isEmpty ? "/" : path)")
-        workflow.method = record.method
-        workflow.matchRule = .equals
-        workflow.matchPattern = record.url
+        workflow.matchConditions = WorkflowMatchGroup(conditions: [
+            MatchCondition(field: .method, operation: .equals, value: record.method),
+            MatchCondition(field: .url, operation: .equals, value: record.url)
+        ])
         let request = bodyStep(record.requestBody, headers: record.requestHeaders, decodeBody: decodeBody)
         workflow.requestSteps = [step(.setMethod, value: record.method), step(.rewriteURL, value: record.url),
                                  request.body, headerStep(request.headers)]
@@ -67,7 +68,7 @@ public enum CapturedMockWorkflow {
         // Framing/connection fields are regenerated, including Connection-nominated extensions.
         let connectionFields = fields.filter { $0.name.lowercased() == "connection" }
             .flatMap { $0.value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() } }
-        let excluded = Set(WorkflowEngine.managedHeaders + ["proxy-connection", "keep-alive", "te", "expect"] + connectionFields)
+        let excluded = Set(HTTPMessageValidation.managedHeaders + ["proxy-connection", "keep-alive", "te", "expect"] + connectionFields)
         let retained = fields.filter { !excluded.contains($0.name.lowercased()) }
         var result = step(.setHeader)
         result.headers = retained.map { HeaderEntry(operation: .modify, name: $0.name, value: $0.value) }

@@ -220,7 +220,7 @@ import QuartzCore
         image = symbol; alternateImage = symbol
         wantsLayer = true
         setAccessibilityRole(.disclosureTriangle)
-        setAccessibilityLabel("展开或收起项目")
+        setAccessibilityLabel("展开或收起规则组")
     }
     required init?(coder: NSCoder) { nil }
 
