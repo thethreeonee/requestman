@@ -909,7 +909,7 @@ struct WorkspaceSidebarChecks {
         precondition(item.view == nil && item.isBordered, "AppKit must own the menu button's appearance")
         let menu = item.menu
         menu.delegate?.menuNeedsUpdate?(menu)
-        precondition(menu.items.map(\.title) == ["重放", "编辑后重放…", "", "复制", "", "显示选项"])
+        precondition(menu.items.map(\.title) == ["重放", "重新发送请求…", "", "复制", "", "显示选项"])
         precondition(menu.items[2].isSeparatorItem && menu.items[4].isSeparatorItem)
         func copyItems() -> [NSMenuItem] {
             let items = menu.items[3].submenu!.items
@@ -919,7 +919,7 @@ struct WorkspaceSidebarChecks {
         precondition(copyItems().allSatisfy(\.isEnabled))
         model.isCapturing = false
         menu.delegate?.menuNeedsUpdate?(menu)
-        precondition(!menu.items[0].isEnabled && !menu.items[1].isEnabled)
+        precondition(!menu.items[0].isEnabled && menu.items[1].isEnabled)
         model.isCapturing = true
         menu.delegate?.menuNeedsUpdate?(menu)
         for (index, editing) in [false, true].enumerated() {

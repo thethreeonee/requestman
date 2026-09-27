@@ -9,7 +9,6 @@ extension WorkspaceModel {
 
     func replay(_ record: CaptureRecord, editing: Bool, presenter: NSViewController) {
         do {
-            if let reason = replayUnavailableReason { throw WorkflowError.invalid(reason) }
             let draft = try RequestReplayDraft(record: record)
             if editing {
                 guard presenter.presentedViewControllers?.isEmpty != false else { return }

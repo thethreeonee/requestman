@@ -2,6 +2,7 @@
 """Check the replay editor with a send stub in hidden component windows."""
 from pathlib import Path
 import platform
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -21,7 +22,9 @@ try:
         *map(str, sorted((core / "Sources/RequestmanCore").glob("*.swift"))),
     ], check=True)
     import runpy
-    editor_flags, _ = runpy.run_path(str(root / "Scripts/editor-package.py"))["editor_flags"](root, link=True)
+    editor_flags, editor_products = runpy.run_path(str(root / "Scripts/editor-package.py"))["editor_flags"](root, link=True)
+    for bundle in editor_products.glob("*.bundle"):
+        shutil.copytree(bundle, temporary / bundle.name)
     executable = temporary / "check"
     subprocess.run([
         "swiftc", *flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore", *editor_flags,

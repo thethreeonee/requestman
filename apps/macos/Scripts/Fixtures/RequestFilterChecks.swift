@@ -528,8 +528,23 @@ private enum RequestFilterChecks {
             return table.menu(for: event)
         }
         let row = table.rect(ofRow: 2)
+        host.table.replayUnavailableReason = { "请先启动捕获，再重放请求" }
+        let stoppedMenu = menu(at: NSPoint(x: row.midX, y: row.midY))!
+        precondition(!stoppedMenu.items[0].isEnabled && stoppedMenu.items[0].toolTip != nil)
+        let editWhileStopped = stoppedMenu.items[1]
+        precondition(editWhileStopped.title == "重新发送请求…" && editWhileStopped.isEnabled && editWhileStopped.toolTip == nil)
+        precondition(NSApp.sendAction(editWhileStopped.action!, to: editWhileStopped.target, from: editWhileStopped))
+        precondition(replayed?.0.id == model.records[2].id && replayed?.1 == true)
+        var incomplete = model.records[2]
+        incomplete.requestBody = CaptureBodyCollector().snapshot(isComplete: false)
+        let incompleteMenu = NSMenu(); incompleteMenu.autoenablesItems = false
+        RequestActionsMenu.append(to: incompleteMenu, record: incomplete, replayUnavailable: nil, replay: { _, _ in
+            preconditionFailure("An incomplete request must not open the editor")
+        })
+        precondition(!incompleteMenu.items[0].isEnabled && !incompleteMenu.items[1].isEnabled)
+        host.table.replayUnavailableReason = { nil }
         let clickedMenu = menu(at: NSPoint(x: row.midX, y: row.midY))!
-        precondition(clickedMenu.items.map(\.title) == ["重放", "编辑后重放…", "", "复制", "", "Mock 当前请求"])
+        precondition(clickedMenu.items.map(\.title) == ["重放", "重新发送请求…", "", "复制", "", "Mock 当前请求"])
         precondition(clickedMenu.items[2].isSeparatorItem && clickedMenu.items[4].isSeparatorItem)
         let item = clickedMenu.items[5]
         precondition(item.isEnabled)

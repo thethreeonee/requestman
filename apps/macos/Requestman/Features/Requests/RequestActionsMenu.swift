@@ -9,9 +9,9 @@ enum RequestActionsMenu {
                        revealSource: ((UUID) -> Void)? = nil,
                        contentCopyItem: NSMenuItem? = nil,
                        replay: @escaping (CaptureRecord, Bool) -> Void) {
-        let reason = RequestReplayDraft.unavailableReason(for: record) ?? replayUnavailable
-        menu.addItem(item("重放", reason: reason) { replay(record, false) })
-        menu.addItem(item("编辑后重放…", reason: reason) { replay(record, true) })
+        let recordUnavailable = RequestReplayDraft.unavailableReason(for: record)
+        menu.addItem(item("重放", reason: recordUnavailable ?? replayUnavailable) { replay(record, false) })
+        menu.addItem(item("重新发送请求…", reason: recordUnavailable) { replay(record, true) })
         if let id = record.replayID, record.connectionState.isActive {
             menu.addItem(item("取消此次重放") { cancelReplay(id) })
         }

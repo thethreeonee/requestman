@@ -239,10 +239,10 @@ Body 解析模板开启时，完整表达式用浅色背景标识；字面值和
 
 详情更多菜单与日志右键菜单共用 `RequestActionsMenu`，依次提供重放分组、复制子菜单；详情复制子菜单额外提供随当前 Tab 和显示模式变化的内容复制项，打开菜单时固定内容快照。URL 与字段右侧保留快捷复制按钮。详情末尾单独提供显示选项，列表末尾单独保留 Mock。菜单冻结打开时的记录，不追随随后变化的选中行。
 
-`RequestReplayDraft` 从完整原始请求提取方法、URL、重复 Header 和原始 Body 字节；原始记录不被覆盖。编辑后重放使用原生 AppKit sheet 和既有 RequestmanEditor，可编辑方法、URL、Header 和 UTF-8 正文；压缩或二进制正文以 Base64 编辑，保留 Content-Encoding，不执行模板解析。输入实时校验，Host、Content-Length 与逐跳字段由传输重建。
+`RequestReplayDraft` 从完整原始请求提取方法、URL、重复 Header 和原始 Body 字节；原始记录不被覆盖。“重新发送请求…”使用原生 AppKit sheet：方法使用仅供选择的 NSPopUpButton，保留原请求扩展方法选项，Header 使用可增删的 NSTableView，保留重复字段、顺序和未编辑值的空白；正文复用 RequestmanEditor.CodeEditorView 的行号与 JSON 语法着色，可编辑方法、URL、Header 和 UTF-8 正文；压缩或二进制正文以 Base64 编辑，保留 Content-Encoding，不执行模板解析。输入实时校验，Host、Content-Length 与逐跳字段由传输重建。
 
 `WorkspaceModel → CaptureService.replay → CaptureEngine → LocalProxyServer` 仅在捕获运行期间发送，通过 NIO 向当前回环监听提交绝对 HTTP/HTTPS URL，复用代理规则、上游出口、TLS 校验和日志记录。HTTPS 由代理直接连接真实上游 TLS，无需建立客户端 MITM。重放不修改系统代理或证书设置、不跟随重定向、不读取浏览器 Cookie 存储。接收端流式丢弃响应字节，内容由代理记录，SSE 可持续观察，也可单独取消或随停止捕获关闭。每次发送分配独立重放 ID，并保留来源记录 ID；身份通过回环连接的端口关联，不添加 HTTP 元数据 Header。代理终态驱动完成、失败、取消反馈，提交成功不等同于响应完成。取消只关闭指定重放的客户端与下游连接，由既有事务清理关闭上游并取消规则执行。
 
 手动重放的记录绕过日志暂停，普通捕获仍暂停；清空记录继续通过代次隔离阻止旧连接重新出现在日志。发送时定位新记录，当前筛选临时放行该记录，下一次修改筛选即结束放行，不改写筛选条件。日志顶部保留最近重放的状态、查看结果与取消按钮；每条活动重放的右键和详情菜单可独立取消。列表与详情显示重放状态，来源按钮可定位原请求；原记录已清空或淘汰时禁用来源入口。
 
-WebSocket、加密隧道、未完整采集的请求及 CONNECT/TRACE 不提供 HTTP 重放；停止捕获或状态切换期间禁用入口并显示原因。发送失败走工作区错误提示，代理执行和上游错误记录到新日志。
+WebSocket、加密隧道、未完整采集的请求及 CONNECT/TRACE 不提供 HTTP 重放；停止捕获或状态切换期间仅禁用直接重放；“重新发送请求…”仍可打开编辑窗口，实际发送时重新检查捕获状态，未启动时在窗口内提示并保留编辑内容。发送失败走工作区错误提示，代理执行和上游错误记录到新日志。
