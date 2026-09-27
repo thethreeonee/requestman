@@ -226,9 +226,16 @@ public class GutterView: NSView {
             )
             guard let fragment = linePosition.data.lineFragments.first?.data else { continue }
             let lineNumberWidth = CTLineGetTypographicBounds(ctLine, nil, nil, nil)
-            // Match LineFragmentRenderer's baseline, including its local pixel alignment.
-            // Font-size compensation shifts the gutter away from the actual text baseline.
-            let baseline = CGPoint(x: 0, y: fragment.height - fragment.descent + fragment.heightDifference / 2).pixelAligned.y
+            let baseline: CGFloat
+            if linePosition.range.isEmpty {
+                // Empty placeholder fragments have no font descent. Center the number's
+                // visible glyphs in the row instead of treating that placeholder as text.
+                let glyphBounds = CTLineGetBoundsWithOptions(ctLine, .useGlyphPathBounds)
+                baseline = CGPoint(x: 0, y: linePosition.height / 2 + glyphBounds.midY).pixelAligned.y
+            } else {
+                // Match LineFragmentRenderer's baseline, including its local pixel alignment.
+                baseline = CGPoint(x: 0, y: fragment.height - fragment.descent + fragment.heightDifference / 2).pixelAligned.y
+            }
             let yPos = convert(NSPoint(x: 0, y: linePosition.yPos + baseline), from: textView).y
             // Leading padding + (width - linewidth)
             let xPos = edgeInsets.leading + (maxLineNumberWidth - lineNumberWidth)

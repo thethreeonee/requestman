@@ -131,6 +131,7 @@ import RequestmanCore
             }
         }
         checkGutterBaselineRendering()
+        checkEmptyGutterRendering()
         print("Numbered editors passed: template/literal Body and JavaScript, aligned ruler/text edges, rounded clipping, resizing and scrolling")
     }
 
@@ -186,6 +187,50 @@ import RequestmanCore
             }
         }
         print("Rendered gutter passed: number/text baselines, native separator and spacing, both themes and scroller styles, before/after scrolling")
+    }
+
+    static func checkEmptyGutterRendering() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 160), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        for language in [CodeEditorView.Language.json, .javascript] {
+            for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+                let area = CodeEditorView(language: language)
+                window.contentView = area; area.appearance = NSAppearance(named: appearance)
+                for (state, source) in [("initial", ""), ("typed", "1"), ("cleared", ""), ("trailing", "1\n")] {
+                    area.replaceText(with: source)
+                    area.textView.selectionManager.setSelectedRange(NSRange(location: (source as NSString).length, length: 0))
+                    settleEditor(area)
+                    guard state != "typed" else { continue }
+                    let gutter = descendants(area).compactMap { $0 as? GutterView }.first!
+                    let line = area.textView.layoutManager.textLineForOffset((source as NSString).length)!
+                    let row = area.textView.convert(NSRect(x: 0, y: line.yPos, width: gutter.frame.width, height: line.height), to: area)
+                    let bitmap = area.bitmapImageRepForCachingDisplay(in: area.bounds)!
+                    area.cacheDisplay(in: area.bounds, to: bitmap)
+                    let scale = CGFloat(bitmap.pixelsWide) / area.bounds.width
+                    let top = area.isFlipped ? row.minY : area.bounds.height - row.maxY
+                    let x0 = Int(ceil(8 * scale)), x1 = Int(floor((gutter.frame.width - 8) * scale))
+                    let y0 = max(0, Int(floor(top * scale))), y1 = min(bitmap.pixelsHigh, Int(ceil((top + row.height + 2) * scale)))
+                    let inkRows = (y0..<y1).filter { y in
+                        (x0..<x1).contains { x in
+                            guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB), color.alphaComponent > 0.5 else { return false }
+                            return appearance == .darkAqua
+                                ? min(color.redComponent, color.greenComponent, color.blueComponent) > 0.6
+                                : max(color.redComponent, color.greenComponent, color.blueComponent) < 0.4
+                        }
+                    }
+                    guard let first = inkRows.first, let last = inkRows.last else { preconditionFailure("Empty editor must render its line number") }
+                    let center = CGFloat(first + last + 1) / (2 * scale)
+                    let expectedCenter = top + row.height / 2
+                    precondition(abs(center - expectedCenter) <= 1,
+                                 "Empty line number must be centered: language=\(language), state=\(state), center=\(center), rowCenter=\(expectedCenter)")
+                    if let directory = ProcessInfo.processInfo.environment["REQUESTMAN_EMPTY_GUTTER_PREVIEW"], language == .json, appearance == .aqua {
+                        try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: directory).appendingPathComponent("empty-gutter-" + state + ".png"))
+                    }
+                }
+            }
+        }
+        print("Empty gutter rendering passed: initial, typed then cleared and trailing empty lines in Body/JavaScript and both themes")
     }
 
     static func checkStepAccessories() {
@@ -1448,6 +1493,7 @@ import RequestmanCore
 
     static func main() {
         NSApplication.shared.setActivationPolicy(.prohibited)
+        if ProcessInfo.processInfo.environment["REQUESTMAN_GUTTER_ONLY"] == "1" { checkEmptyGutterRendering(); checkGutterBaselineRendering(); return }
         if ProcessInfo.processInfo.environment["REQUESTMAN_SSE_ONLY"] == "1" { checkSSEConfiguration(); return }
         checkSSEConfiguration()
         if ProcessInfo.processInfo.environment["REQUESTMAN_NUMBERED_EDITORS_ONLY"] == "1" {
