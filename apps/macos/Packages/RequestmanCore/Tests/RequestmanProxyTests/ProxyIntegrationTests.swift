@@ -806,6 +806,74 @@ struct ProxyIntegrationTests {
             #expect(record.matchedRules.map(\.kind) == [.setQueryParameter, .replaceURLString])
         }
     }
+    @Test(arguments: [false, true]) func JSONEditsRequireFiniteSSEBody(replaceFirst: Bool) async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow()
+            workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
+            var body = ModificationStep(kind: .replaceBody); body.value = #"{"n":1}"#
+            var edit = ModificationStep(kind: .modifyJSON); edit.jsonEntries = [.init(path: "n", value: "2")]
+            workflow.responseSteps = replaceFirst ? [body, edit] : [edit, body]
+            try await h.start(workflow: workflow)
+            let reply = try await h.exchange("GET \(h.originURL)events HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            // As in the other SSE fixtures, allow asynchronous stream/connection completion before teardown.
+            try await Task.sleep(for: .milliseconds(80))
+            let record = try #require(h.proxy.records.drain().records.first)
+            // Drain queued stream writes before the harness shuts down its event loop.
+            _ = try await record.receivedStream?.readRaw(from: 0)
+            _ = try await record.stream?.readRaw(from: 0)
+            if replaceFirst {
+                #expect(reply.hasSuffix(#"{"n":2}"#) && record.error == nil)
+            } else {
+                #expect(reply.contains("502") && record.error?.contains("替换 Body 之后") == true)
+            }
+        }
+    }
+
+    @Test func JSONEditsModifyChunkedRequestAndGzipResponse() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow()
+            workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
+            var request = ModificationStep(kind: .modifyJSON)
+            request.jsonEntries = [.init(path: "n", value: "123")]
+            var response = ModificationStep(kind: .modifyJSON)
+            response.jsonEntries = [.init(operation: .modify, path: "ok", value: "false")]
+            workflow.requestSteps = [request]; workflow.responseSteps = [response]
+            try await h.start(workflow: workflow)
+            let reply = try await h.exchange("POST \(h.originURL)encoded HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\n\r\n")
+            #expect(reply.hasSuffix(#"{"ok":false}"#))
+            #expect(!reply.lowercased().contains("content-encoding: gzip"))
+            #expect(h.observation.withLock { $0.bodyBytes } == 9)
+            let record = try #require(h.proxy.records.drain().records.first)
+            #expect(record.sentBody.data == Data(#"{"n":123}"#.utf8))
+            #expect(record.receivedBody.data == Data(gzipJSONFixture))
+            #expect(record.responseBody.data == Data(#"{"ok":false}"#.utf8))
+            #expect(record.matchedRules.map(\.kind) == [.modifyJSON, .modifyJSON])
+        }
+    }
+
+    @Test func JSONNoOpPreservesGzipAndMockFeedsResponseEdits() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow()
+            workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
+            var edit = ModificationStep(kind: .modifyJSON)
+            edit.jsonEntries = [.init(operation: .modify, path: "missing", value: "{{$env.unused}}")]
+            workflow.responseSteps = [edit]
+            try await h.start(workflow: workflow)
+            let reply = try await h.exchange("GET \(h.originURL)encoded HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            #expect(reply.lowercased().contains("content-encoding: gzip"))
+            #expect(try #require(h.proxy.records.drain().records.first).responseBody.data == Data(gzipJSONFixture))
+            var mock = ModificationStep(kind: .mock); mock.value = #"{"ok":true}"#
+            edit.jsonEntries = [.init(path: "ok", value: "false")]
+            workflow.requestSteps = [mock]; workflow.responseSteps = [edit]
+            var project = WorkflowProject(); project.workflows = [workflow]
+            var document = WorkspaceDocument(); document.projects = [project]
+            await h.proxy.update(document)
+            let mocked = try await h.exchange("GET \(h.originURL)json-mock HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            #expect(mocked.hasSuffix(#"{"ok":false}"#))
+            #expect(h.observation.withLock { $0.requests } == 1)
+        }
+    }
+
     @Test func scriptStepsModifyRealRequestAndResponseBodies() async throws {
         try await withHarness { h in
             var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0].field = .host

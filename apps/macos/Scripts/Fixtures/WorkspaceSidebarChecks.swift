@@ -33,6 +33,14 @@ enum WorkspaceTransfer {
     static func exportRules(model: WorkspaceModel, window: NSWindow?) { exportedRules = true }
 }
 
+@MainActor
+enum RequestLogTransfer {
+    static var saved: [CaptureRecord] = []
+    static var opened = false
+    static func save(records: [CaptureRecord], window: NSWindow?) { saved = records }
+    static func open(model: WorkspaceModel, window: NSWindow?) { opened = true }
+}
+
 /// Only model and unrelated page content are fixtures. The split controller, toolbar,
 /// transitions and snapshot adapter are compiled directly from the production source.
 @MainActor @Observable
@@ -47,6 +55,8 @@ final class WorkspaceModel {
     let history = SidebarHistoryFixture()
     var loaded = true
     var isCapturing = false
+    var listenPort: Int?
+    var activeProxyConfiguration: ExplicitProxyConfiguration?
     var isTransitioning = false
     var captureMode: CaptureMode = .systemProxy
     var isDiscoveringBrowsers = false
@@ -65,10 +75,23 @@ final class WorkspaceModel {
     var replayed: (CaptureRecord, Bool)?
     func replay(_ record: CaptureRecord, editing: Bool, presenter: NSViewController) { replayed = (record, editing) }
     func addMockWorkflow(from: CaptureRecord) {}
+    var workflow: RequestWorkflow? { document.projects.flatMap(\.workflows).first { $0.id == selectedWorkflowID } }
+    func updateWorkflow(_ workflow: RequestWorkflow) {
+        for index in document.projects.indices {
+            if let row = document.projects[index].workflows.firstIndex(where: { $0.id == workflow.id }) {
+                document.projects[index].workflows[row] = workflow
+            }
+        }
+        selectedStep = (editingResponse ? workflow.responseSteps : workflow.requestSteps).first { $0.id == selectedStepID }
+    }
 }
 
 @MainActor @Observable
 final class SidebarHistoryFixture {
+    var isViewingFile = false
+    var openedFileName: String?
+    var recordsForSaving: [CaptureRecord] { records.filter { filter.matches($0) } }
+    func returnToLive() { isViewingFile = false; openedFileName = nil }
     var latestReplay: CaptureRecord? { records.first { $0.replayID != nil } }
     func reveal(_ id: UUID) { selectedID = id }
     var paused = false
@@ -81,11 +104,18 @@ final class SidebarHistoryFixture {
     func clear() { records.removeAll(); selectedID = nil }
 }
 
+@MainActor final class MobileConnectionViewController: NSViewController {
+    init(model: WorkspaceModel) { super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { nil }
+    override func loadView() { view = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 660)) }
+}
+
 enum WorkspaceSettingsSection { case general, environments }
 
 @MainActor final class ProjectSidebarViewController: NSViewController {
     let outline = NSOutlineView()
     let searchField = NSSearchField()
+    func installBottomAccessory(on item: NSSplitViewItem) {}
     func canPerform(_ command: WorkspaceCommand) -> Bool { false }
     func perform(_ command: WorkspaceCommand) {}
     func createProject() {}
@@ -113,6 +143,8 @@ enum WorkspaceSettingsSection { case general, environments }
     override func loadView() { view = NSView() }
 }
 @MainActor final class RequestInspectorViewController: ObservedViewController {
+    var deviceAliases: () -> [String: String] = { [:] }
+    var onDeviceAliasChange: (String, String) -> Void = { _, _ in }
     var openWorkflow: ((UUID) -> Void)?
     var workflowExists: (UUID) -> Bool = { _ in false }
     let history: SidebarHistoryFixture
@@ -140,6 +172,7 @@ enum WorkspaceSettingsSection { case general, environments }
 struct WorkspaceSidebarChecks {
     private static let inspectorToggleIdentifier = NSToolbarItem.Identifier("workspace.toggleInspector")
     private static let sidebarToggleIdentifier = NSToolbarItem.Identifier("workspace.toggleSidebar")
+    private static let inspectorSeparatorIdentifier = NSToolbarItem.Identifier("workspace.inspectorSeparator")
     private static let inspectorTitleIdentifier = NSToolbarItem.Identifier("workspace.inspectorTitle")
     private static let inspectorModeIdentifier = NSToolbarItem.Identifier("workspace.inspectorMode")
     private static let inspectorMoreIdentifier = NSToolbarItem.Identifier("workspace.inspectorMore")
@@ -149,6 +182,12 @@ struct WorkspaceSidebarChecks {
     static func main() {
         let application = NSApplication.shared
         application.setActivationPolicy(.prohibited)
+        if ProcessInfo.processInfo.environment["REQUESTMAN_LOG_COMMANDS_ONLY"] == "1" {
+            checkKeyboardCommands()
+            checkLogFileView()
+            print("Log menu checks passed: save/open dispatch, filtered selection, file-mode controls and return to live. Hidden components only.")
+            return
+        }
         checkRequestScrollChrome()
         if ProcessInfo.processInfo.environment["REQUESTMAN_SCROLL_CHROME_ONLY"] == "1" { return }
         checkKeyboardCommands()
@@ -326,6 +365,33 @@ struct WorkspaceSidebarChecks {
         [view] + view.subviews.flatMap(replayViewsForAnimation)
     }
 
+    private static func checkLogFileView() {
+        let model = WorkspaceModel()
+        model.selection = .requests
+        model.history.records = [CaptureRecord(method: "GET", url: "https://saved.test/")]
+        model.history.isViewingFile = true; model.history.openedFileName = "saved.requestmanlog.json"
+        let controller = WorkspaceSplitController(model: model, snapshot: .init(model: model), openSettings: {})
+        let window = KeyboardCheckWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
+                                         styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentViewController = controller
+        controller.viewDidAppear()
+        defer { controller.tearDown(); window.close() }
+        let host = controller.splitViewItems[1].viewController as! WorkspaceMainController
+        host.requests.refresh(); window.contentView?.layoutSubtreeIfNeeded()
+        let root: NSView
+        if #available(macOS 26.0, *) { root = controller.splitViewItems[1].topAlignedAccessoryViewControllers.first!.view }
+        else { root = host.requests.view }
+        let button = findViews(NSButton.self, in: root).first { $0.title == "返回实时日志" }!
+        precondition(!button.isHiddenOrHasHiddenAncestor)
+        precondition(findViews(NSTextField.self, in: root).contains { $0.stringValue == "日志文件：saved.requestmanlog.json" })
+        let pause = findViews(NSButton.self, in: root).first { $0.accessibilityLabel() == "暂停记录" }!
+        precondition(!pause.isEnabled)
+        precondition(!controller.canPerform(.clear) && !controller.canPerform(.recording))
+        button.performClick(nil); host.requests.refresh()
+        precondition(!model.history.isViewingFile && button.isHiddenOrHasHiddenAncestor)
+        precondition(pause.isEnabled)
+    }
+
     private static func checkKeyboardCommands() {
         let model = WorkspaceModel()
         model.selection = .requests
@@ -353,7 +419,7 @@ struct WorkspaceSidebarChecks {
             commands.update()
             let keyCodes: [String: UInt16] = ["n": 45, "d": 2, "\r": 36, "\u{8}": 51, "l": 37,
                                                "1": 18, "2": 19, "f": 3, "s": 1, "i": 34, "e": 14,
-                                               "r": 15, "k": 40, "c": 8]
+                                               "r": 15, "k": 40, "c": 8, "o": 31]
             // Match at the NSMenu boundary. Its Backspace equivalent is 0x08;
             // physical Delete event translation (0x7F) still needs full-App acceptance.
             let characters = command.modifiers.contains(.shift) ? command.key.uppercased() : command.key
@@ -375,6 +441,16 @@ struct WorkspaceSidebarChecks {
             commands.performActionForItem(at: commands.items.firstIndex { $0.tag == command.rawValue }!)
         }
         precondition(WorkspaceTransfer.importedRules && WorkspaceTransfer.exportedRules)
+        precondition(controller.canPerform(.saveLog) && controller.canPerform(.openLog))
+        invoke(.saveLog); invoke(.openLog)
+        precondition(RequestLogTransfer.saved.map(\.id) == [record.id] && RequestLogTransfer.opened)
+        model.history.filter.search = "never-matches"
+        precondition(!controller.canPerform(.saveLog))
+        model.history.filter.search = ""
+        model.history.isViewingFile = true
+        precondition(!controller.canPerform(.recording) && !controller.canPerform(.clear))
+        precondition(controller.canPerform(.saveLog) && controller.canPerform(.openLog))
+        model.history.isViewingFile = false
         precondition(controller.canPerform(.capture) && controller.canPerform(.clear))
         model.isTransitioning = true
         precondition(!controller.canPerform(.capture))
@@ -522,7 +598,7 @@ struct WorkspaceSidebarChecks {
         let items = controller.splitViewItems
         precondition(items.count == 3)
         let sidebar = items[0], main = items[1], inspector = items[2]
-        precondition(sidebar.behavior == .sidebar && main.behavior == .default && inspector.behavior == .inspector)
+        precondition(sidebar.behavior == .sidebar && main.behavior == .default && inspector.behavior == .sidebar)
         precondition(sidebar.canCollapse && inspector.canCollapse)
         precondition(sidebar.allowsFullHeightLayout && inspector.allowsFullHeightLayout)
         precondition(sidebar.collapseBehavior == .preferResizingSiblingsWithFixedSplitView)
@@ -554,16 +630,49 @@ struct WorkspaceSidebarChecks {
             try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
         }
         let heading = window.toolbar!.items.first { $0.itemIdentifier == inspectorTitleIdentifier }!.view as! NSStackView
-        let title = heading.arrangedSubviews[0] as! NSTextField
+        let titleRow = heading.arrangedSubviews[0] as! NSStackView
+        let icon = titleRow.arrangedSubviews[0] as! NSImageView
+        let title = titleRow.arrangedSubviews[1] as! NSTextField
         let annotation = heading.arrangedSubviews[1] as! NSTextField
-        precondition(title.stringValue == "步骤详情" && annotation.stringValue == "请求阶段 · 第 2 步")
+        precondition(title.stringValue == step.kind.title && annotation.stringValue == step.kind.stepDescription)
+        precondition(icon.image != nil && !icon.isHidden)
+        for kind in ModificationKind.allCases {
+            precondition(!kind.stepDescription.isEmpty && kind.stepDescription.count <= 25, "Every step description must fit within 25 characters")
+        }
+        let enabledIdentifier = NSToolbarItem.Identifier("workspace.stepEnabled")
+        let enabled = findView(NSSwitch.self, in: window.toolbar!.items.first { $0.itemIdentifier == enabledIdentifier }!.view!)!
+        precondition(enabled.state == .on && enabled.isEnabled)
+        let regularSwitch = NSSwitch(); regularSwitch.controlSize = .regular
+        precondition(enabled.controlSize == .regular && enabled.intrinsicContentSize == regularSwitch.intrinsicContentSize,
+                     "The toolbar switch must retain the default native control size")
+        if #available(macOS 26.0, *) {
+            precondition(inspector.topAlignedAccessoryViewControllers.isEmpty,
+                         "The inspector uses AppKit's default titlebar edge without a top accessory")
+        }
+        enabled.state = .off; precondition(enabled.sendAction(enabled.action, to: enabled.target))
+        precondition(model.workflow!.requestSteps[1].enabled == false && model.workflow!.requestSteps[0].enabled)
+        model.selectedStep!.enabled = true; update(controller, model: model)
+        precondition(enabled.state == .on, "External changes must refresh the toolbar switch")
+        model.loaded = false; update(controller, model: model); precondition(!enabled.isEnabled)
+        model.loaded = true; update(controller, model: model); precondition(enabled.isEnabled)
         precondition(annotation.font!.pointSize < title.font!.pointSize && annotation.textColor == .secondaryLabelColor)
-        precondition(heading.orientation == .vertical && heading.alignment == .leading && heading.spacing == 1)
+        precondition(heading.orientation == .vertical && heading.alignment == .leading && heading.spacing == 4)
         model.document.projects[model.document.projects.count - 1].workflows[0].requestSteps.swapAt(0, 1)
         update(controller, model: model)
-        precondition(annotation.stringValue == "请求阶段 · 第 1 步", "Reordering the same selected step must refresh its annotation")
+        precondition(annotation.stringValue == step.kind.stepDescription, "Reordering preserves the type description")
         model.editingResponse = true; update(controller, model: model)
-        precondition(annotation.stringValue == "响应阶段 · 第 1 步")
+        precondition(annotation.stringValue == step.kind.stepDescription)
+        enabled.state = .off; precondition(enabled.sendAction(enabled.action, to: enabled.target))
+        precondition(model.workflow!.responseSteps[0].enabled == false)
+        for kind in ModificationKind.allCases {
+            model.selectedStep = ModificationStep(kind: kind); model.selectedStepID = model.selectedStep!.id
+            update(controller, model: model)
+            precondition(title.stringValue == kind.title && annotation.stringValue == kind.stepDescription && icon.image != nil)
+        }
+        model.selectedStep = ModificationStep(kind: .replaceURLString); model.selectedStepID = model.selectedStep!.id
+        update(controller, model: model)
+        checkInspectorToolbarGeometry(controller, window: window, inspector: inspector)
+        model.selectedStep = step; model.selectedStepID = step.id
         model.editingResponse = false; update(controller, model: model)
         checkGeometry(controller, window: window, inspector: inspector, windowWidth: window.frame.width)
         invoke(toggleItem(window))
@@ -607,6 +716,7 @@ struct WorkspaceSidebarChecks {
                      "AppKit must create the native toolbar button with an explicit split-controller target")
         let requestHeading = window.toolbar!.items.first { $0.itemIdentifier == inspectorTitleIdentifier }!.view as! NSStackView
         precondition(requestHeading.arrangedSubviews[1].isHidden, "Request-log inspector must not retain a step annotation")
+        if #available(macOS 26.0, *) { precondition(inspector.topAlignedAccessoryViewControllers.isEmpty) }
         checkGeometry(controller, window: window, inspector: inspector, windowWidth: windowWidth)
         checkInitialInspectorWidth(inspector, scenario: "first selection after no selection")
         let root = inspector.viewController as! WorkspaceInspectorController
@@ -722,6 +832,7 @@ struct WorkspaceSidebarChecks {
         checkInspectionModeActions(host, window: window, inspector: inspector)
         checkInspectorToolbarGeometry(controller, window: window, inspector: inspector)
         checkCaptureButton(host, model: model, window: window)
+        checkMobileConnectionButton(controller, model: model, window: window)
 
         // With no focused control, the actual native toolbar item's explicit target must still work.
         precondition(window.makeFirstResponder(nil))
@@ -866,9 +977,10 @@ struct WorkspaceSidebarChecks {
                                                        inspector: NSSplitViewItem) {
         let initialWidth = inspector.viewController.view.bounds.width
         let windowWidth = window.frame.width
-        let identifiers = [inspectorTitleIdentifier, inspectorMoreIdentifier, inspectorToggleIdentifier]
+        let identifiers = [inspectorTitleIdentifier, inspectorMoreIdentifier, inspectorToggleIdentifier,
+                           NSToolbarItem.Identifier("workspace.stepEnabled"), NSToolbarItem.Identifier("workspace.templateInfo")]
         for targetWidth: CGFloat in [400, 520] {
-            controller.splitView.setPosition(controller.splitView.bounds.maxX - targetWidth - controller.splitView.dividerThickness,
+            controller.splitView.setPosition(controller.splitView.bounds.maxX - targetWidth,
                                              ofDividerAt: 1)
             settle(controller) { !inspector.isCollapsed }
             window.contentView?.superview?.layoutSubtreeIfNeeded()
@@ -909,9 +1021,85 @@ struct WorkspaceSidebarChecks {
             checkGeometry(controller, window: window, inspector: inspector, windowWidth: windowWidth)
             log("Inspector toolbar geometry at requested \(targetWidth) pt (actual \(actualWidth)): " + frames.joined(separator: "; "))
         }
+        controller.splitView.setPosition(controller.splitView.bounds.maxX - initialWidth,
+                                         ofDividerAt: 1)
+        settle(controller) { !inspector.isCollapsed }
+    }
+
+    private static func checkMobileConnectionButton(_ controller: WorkspaceSplitController, model: WorkspaceModel, window: NSWindow) {
+        let identifier = NSToolbarItem.Identifier("workspace.mobileConnection")
+        let inspector = controller.splitViewItems[2]
+        func items() -> [NSToolbarItem.Identifier] { window.toolbar!.items.map(\.itemIdentifier) }
+        precondition(!items().contains(identifier))
+        model.document.proxy.allowLAN = true
+        settle(controller) { !items().contains(identifier) }
+        precondition(!model.isCapturing, "Enabling LAN alone must not reveal the mobile action")
+        model.isCapturing = true
+        settle(controller) { !items().contains(identifier) }
+        model.listenPort = 9090
+        settle(controller) { !items().contains(identifier) }
+        model.activeProxyConfiguration = model.document.proxy
+        waitFor(controller) { items().contains(identifier) }
+        for mode in CaptureMode.allCases {
+            model.captureMode = mode
+            settle(controller) { items().contains(identifier) }
+        }
+        model.isTransitioning = true
+        waitFor(controller) { !items().contains(identifier) }
+        model.isTransitioning = false
+        waitFor(controller) { items().contains(identifier) }
+        model.listenPort = nil
+        waitFor(controller) { !items().contains(identifier) }
+        model.listenPort = 9090
+        waitFor(controller) { items().contains(identifier) }
+        model.activeProxyConfiguration?.allowLAN = false
+        waitFor(controller) { !items().contains(identifier) }
+        model.activeProxyConfiguration?.allowLAN = true
+        waitFor(controller) { items().contains(identifier) }
+        let mobile = toolbarItem(window, label: "连接手机")
+        precondition(mobile.view == nil && mobile.image != nil && mobile.isBordered && mobile.isEnabled)
+        precondition(mobile.target === controller && mobile.action == NSSelectorFromString("showMobileConnection:"))
+        precondition(items().firstIndex(of: identifier)! < items().firstIndex(of: inspectorSeparatorIdentifier)!,
+                     "The mobile action must remain in the main pane when the inspector is expanded")
+        let initialWidth = inspector.viewController.view.bounds.width
+        for width: CGFloat in [400, 520] {
+            controller.splitView.setPosition(controller.splitView.bounds.maxX - width - controller.splitView.dividerThickness,
+                                             ofDividerAt: 1)
+            settle(controller) { !inspector.isCollapsed }
+            window.contentView?.superview?.layoutSubtreeIfNeeded()
+            let button = findViews(NSView.self, in: window.contentView!.superview!).first {
+                $0.accessibilityRole() == .button && $0.accessibilityLabel() == "连接手机"
+                    && !$0.isHiddenOrHasHiddenAncestor
+            }!
+            let buttonFrame = button.convert(button.bounds, to: nil)
+            let mainView = controller.splitViewItems[1].viewController.view
+            let mainFrame = mainView.convert(mainView.bounds, to: nil)
+            precondition(mobile.isVisible && buttonFrame.width > 0)
+            precondition(buttonFrame.minX >= mainFrame.minX && buttonFrame.maxX <= mainFrame.maxX,
+                         "The phone button must stay physically inside the main pane at either inspector width")
+        }
         controller.splitView.setPosition(controller.splitView.bounds.maxX - initialWidth - controller.splitView.dividerThickness,
                                          ofDividerAt: 1)
         settle(controller) { !inspector.isCollapsed }
+        invoke(toggleItem(window))
+        waitFor(controller) { inspector.isCollapsed }
+        let collapsedItems = items()
+        let mobileIndex = collapsedItems.firstIndex(of: identifier)!
+        precondition(collapsedItems[mobileIndex + 1] == .space && collapsedItems[mobileIndex + 2] == inspectorToggleIdentifier,
+                     "A native spacer must separate the mobile action and inspector toggle into independent glass groups")
+        invoke(toggleItem(window))
+        waitFor(controller) { !inspector.isCollapsed }
+        precondition(items().filter { $0 == identifier }.count == 1)
+        precondition(items().firstIndex(of: identifier)! < items().firstIndex(of: inspectorSeparatorIdentifier)!)
+        model.document.proxy.allowLAN = false
+        settle(controller) { items().contains(identifier) }
+        model.isCapturing = false
+        model.listenPort = nil
+        model.activeProxyConfiguration = nil
+        model.captureMode = .systemProxy
+        waitFor(controller) { !items().contains(identifier) }
+        precondition(!window.isVisible)
+        log("Mobile toolbar checks passed: actual LAN listener across all capture modes, start/stop/reconfiguration visibility, native icon action wiring, collapsed adjacency and expanded main-pane geometry at 400/520 pt. Hidden window only; presenting a sheet would show the window.")
     }
 
     private static func checkCaptureButton(_ host: NSViewController, model: WorkspaceModel, window: NSWindow) {
@@ -1108,7 +1296,7 @@ struct WorkspaceSidebarChecks {
         precondition(searches.count == (requests ? 1 : 0), "Search appears only on the request log tab")
         if requests {
             let searchIndex = items.firstIndex { $0 is NSSearchToolbarItem }!
-            precondition(items[searchIndex + 1].itemIdentifier == .inspectorTrackingSeparator,
+            precondition(items[searchIndex + 1].itemIdentifier == inspectorSeparatorIdentifier,
                          "Search must remain at the trailing edge of the main toolbar")
         }
         precondition(items.filter { $0.itemIdentifier == inspectorToggleIdentifier }.count == 1)
@@ -1118,12 +1306,16 @@ struct WorkspaceSidebarChecks {
         precondition(items.filter { $0.itemIdentifier == inspectorTitleIdentifier }.count == (inspectorVisible ? 1 : 0))
         precondition(!items.contains { $0.itemIdentifier == inspectorModeIdentifier })
         precondition(items.filter { $0.itemIdentifier == inspectorMoreIdentifier }.count == (inspectorVisible && requests ? 1 : 0))
+        let enabledIdentifier = NSToolbarItem.Identifier("workspace.stepEnabled")
+        precondition(items.filter { $0.itemIdentifier == enabledIdentifier }.count == (inspectorVisible && !requests ? 1 : 0))
         let infoIdentifier = NSToolbarItem.Identifier("workspace.templateInfo")
         precondition(items.filter { $0.itemIdentifier == infoIdentifier }.count == (inspectorVisible && !requests ? 1 : 0))
         if inspectorVisible && !requests {
             let index = items.firstIndex { $0.itemIdentifier == infoIdentifier }!
             precondition(items[index + 1].itemIdentifier == .space && items[index + 2].itemIdentifier == inspectorToggleIdentifier,
                          "Info and inspector toggle must occupy separate native glass groups")
+            precondition(items[index - 1].itemIdentifier == enabledIdentifier && findView(NSSwitch.self, in: items[index - 1].view!) != nil,
+                         "The native step switch appears immediately before Info")
             let info = items[index]
             precondition(info.label == "动态值" && info.image != nil)
             precondition(info.view == nil && info.isBordered && items[index + 2].isBordered,
@@ -1138,7 +1330,7 @@ struct WorkspaceSidebarChecks {
             precondition(items[moreIndex + 1].itemIdentifier == inspectorToggleIdentifier,
                          "More belongs immediately before the inspector toggle")
         }
-        precondition(items.filter { $0.itemIdentifier == .inspectorTrackingSeparator }.count == 1)
+        precondition(items.filter { $0.itemIdentifier == inspectorSeparatorIdentifier }.count == 1)
     }
 
     private static func checkGeometry(_ controller: WorkspaceSplitController, window: NSWindow, inspector: NSSplitViewItem, windowWidth: CGFloat) {

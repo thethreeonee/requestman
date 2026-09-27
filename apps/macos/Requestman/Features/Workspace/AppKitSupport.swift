@@ -1,8 +1,10 @@
 import AppKit
+import QuartzCore
 
-/// A row activation can reveal its inspector even when the selection is unchanged.
+/// Step actions target the owning workspace instead of AppKit's generic inspector action.
 @MainActor @objc protocol StepInspectorPresenting {
     func showStepInspector(_ sender: Any?)
+    func toggleStepInspector(_ sender: Any?)
 }
 
 /// Business commands have explicit targets; standard text editing retains the responder chain.
@@ -11,7 +13,7 @@ enum WorkspaceCommand: Int, CaseIterable {
     case newWorkflow, newProject, duplicate, rename, delete, toggleEnabled
     case rules, requests, search, filters, sidebar, inspector, environment
     case capture, recording, clear, copyURL, copyCURL
-    case importRules, exportRules
+    case importRules, exportRules, saveLog, openLog
 
     var title: String {
         switch self {
@@ -21,7 +23,7 @@ enum WorkspaceCommand: Int, CaseIterable {
         case .rename: "重命名"
         case .delete: "删除选中项"
         case .toggleEnabled: "启用 / 停用选中项"
-        case .rules: "请求修改"
+        case .rules: "规则配置"
         case .requests: "请求日志"
         case .search: "搜索当前页面"
         case .filters: "日志筛选…"
@@ -35,6 +37,8 @@ enum WorkspaceCommand: Int, CaseIterable {
         case .copyCURL: "复制原始请求为 cURL"
         case .importRules: "导入规则…"
         case .exportRules: "导出全部规则…"
+        case .saveLog: "保存当前日志…"
+        case .openLog: "打开日志文件…"
         }
     }
     var key: String {
@@ -47,13 +51,14 @@ enum WorkspaceCommand: Int, CaseIterable {
         case .rules: "1"
         case .requests: "2"
         case .search, .filters: "f"
-        case .sidebar: "s"
+        case .sidebar, .saveLog: "s"
         case .inspector: "i"
         case .environment: "e"
         case .capture, .recording: "r"
         case .clear: "k"
         case .copyURL, .copyCURL: "c"
         case .importRules, .exportRules: ""
+        case .openLog: "o"
         }
     }
     var modifiers: NSEvent.ModifierFlags {
@@ -196,31 +201,6 @@ final class ActionButton: NSButton {
 }
 
 @MainActor
-class ActionTextField: NSTextField, NSTextFieldDelegate {
-    var onChange: (String) -> Void
-    var onSubmit: (() -> Void)?
-    init(_ value: String = "", placeholder: String = "", onChange: @escaping (String) -> Void) {
-        self.onChange = onChange
-        super.init(frame: .zero)
-        stringValue = value; placeholderString = placeholder
-        isEditable = true; isSelectable = true; isBezeled = true; bezelStyle = .squareBezel
-        // The rounded bezel uses a system fill instead of the requested input background.
-        appearance = NSAppearance(named: .aqua)
-        drawsBackground = true; backgroundColor = .white; textColor = .black
-        delegate = self
-    }
-    required init?(coder: NSCoder) { nil }
-    func controlTextDidChange(_ notification: Notification) { onChange(stringValue) }
-    func controlTextDidEndEditing(_ notification: Notification) { onChange(stringValue) }
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        guard commandSelector == #selector(NSResponder.insertNewline(_:)), !textView.hasMarkedText() else { return false }
-        guard window?.makeFirstResponder(nil) == true else { return false }
-        onSubmit?()
-        return true
-    }
-}
-
-@MainActor
 final class ActionPopUpButton: NSPopUpButton {
     var onChange: (Int) -> Void
     init(items: [String], onChange: @escaping (Int) -> Void) {
@@ -233,5 +213,118 @@ final class ActionPopUpButton: NSPopUpButton {
     @objc private func selectItemAction(_ sender: NSPopUpButton) {
         guard isEnabled, indexOfSelectedItem >= 0 else { return }
         onChange(indexOfSelectedItem)
+    }
+}
+
+/// Shared row hover feedback; subclasses retain their own selection and content appearance.
+@MainActor class HoverTableRowView: NSTableRowView {
+    private let hoverLayer = CALayer()
+    private var hoverTrackingArea: NSTrackingArea?
+    private(set) var isHovered = false
+    var isShowingMenu = false { didSet { updateFeedback(animated: false) } }
+    var hoverLayerPrefix: String { "row" }
+    var hoverBackgroundRect: NSRect { bounds.insetBy(dx: 10, dy: 1) }
+    var hoverCornerRadius: CGFloat { 6 }
+    private var animationKey: String { "\(hoverLayerPrefix).hoverOpacity" }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        hoverLayer.name = "\(hoverLayerPrefix).hoverBackground"
+        hoverLayer.opacity = 0
+        hoverLayer.cornerRadius = hoverCornerRadius
+        layer?.insertSublayer(hoverLayer, at: 0)
+        updateHoverColor()
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(displayOptionsChanged),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override var isSelected: Bool { didSet { if oldValue != isSelected { updateFeedback(animated: false) } } }
+    override var isEmphasized: Bool { didSet { if oldValue != isEmphasized { updateFeedback(animated: false) } } }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        hoverLayer.frame = hoverBackgroundRect
+        CATransaction.commit()
+        refreshHover()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area); hoverTrackingArea = area
+        refreshHover()
+    }
+    override func mouseEntered(with event: NSEvent) { refreshHover() }
+    override func mouseExited(with event: NSEvent) { setHovered(false, animated: true) }
+
+    func refreshHover() {
+        guard let window, window.isKeyWindow, !isHiddenOrHasHiddenAncestor, !visibleRect.isEmpty else {
+            setHovered(false, animated: false); return
+        }
+        setHovered(visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)), animated: true)
+    }
+
+    func setHovered(_ hovered: Bool, animated: Bool) {
+        isHovered = hovered
+        updateFeedback(animated: animated)
+    }
+
+    func updateFeedback(animated: Bool) {
+        let target: Float = (isHovered || isShowingMenu) && !isSelected ? 1 : 0
+        let shouldAnimate = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        guard hoverLayer.opacity != target else {
+            if !shouldAnimate { hoverLayer.removeAnimation(forKey: animationKey) }
+            return
+        }
+        let current = hoverLayer.presentation()?.opacity ?? hoverLayer.opacity
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        hoverLayer.opacity = target
+        CATransaction.commit()
+        hoverLayer.removeAnimation(forKey: animationKey)
+        if shouldAnimate {
+            let animation = CABasicAnimation(keyPath: "opacity")
+            animation.fromValue = current; animation.toValue = target
+            animation.duration = target == 1 ? 0.12 : 0.16
+            animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            hoverLayer.add(animation, forKey: animationKey)
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance(); updateHoverColor()
+    }
+    private func updateHoverColor() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            hoverLayer.backgroundColor = NSColor.labelColor.withAlphaComponent(0.055).cgColor
+            CATransaction.commit()
+        }
+    }
+    @objc private func displayOptionsChanged() { updateHoverColor(); updateFeedback(animated: false) }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        let center = NotificationCenter.default
+        center.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
+        center.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: nil)
+        if let window {
+            center.addObserver(self, selector: #selector(keyWindowChanged), name: NSWindow.didResignKeyNotification, object: window)
+            center.addObserver(self, selector: #selector(keyWindowChanged), name: NSWindow.didBecomeKeyNotification, object: window)
+        }
+        refreshHover()
+    }
+    @objc private func keyWindowChanged() { refreshHover() }
+
+    override func viewWillMove(toSuperview newSuperview: NSView?) {
+        if newSuperview == nil { isShowingMenu = false; setHovered(false, animated: false) }
+        super.viewWillMove(toSuperview: newSuperview)
+    }
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow !== window { isShowingMenu = false; setHovered(false, animated: false) }
+        super.viewWillMove(toWindow: newWindow)
     }
 }

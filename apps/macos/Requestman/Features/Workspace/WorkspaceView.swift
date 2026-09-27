@@ -29,7 +29,16 @@ class WorkspacePaneController: NSViewController {
 @MainActor
 final class WorkspaceSidebarController: WorkspacePaneController {
     let sidebar: ProjectSidebarViewController
-    init(model: WorkspaceModel) { sidebar = ProjectSidebarViewController(model: model); super.init(); show(sidebar) }
+    init(model: WorkspaceModel) {
+        sidebar = ProjectSidebarViewController(model: model)
+        super.init()
+        // Let the outline scroll behind the native titlebar; NSScrollView supplies the top inset.
+        if #available(macOS 26.0, *) {
+            show(sidebar, extendsUnderTitlebar: true, extendsUnderBottomAccessory: true)
+        } else {
+            show(sidebar, extendsUnderTitlebar: true)
+        }
+    }
     required init?(coder: NSCoder) { nil }
 }
 
@@ -37,17 +46,18 @@ final class WorkspaceSidebarController: WorkspacePaneController {
 final class WorkspaceMainController: WorkspacePaneController {
     let rules: RulesViewController
     let requests: RequestsViewController
-    init(model: WorkspaceModel) {
+    init(model: WorkspaceModel, section: WorkspaceSection = .rules) {
         rules = RulesViewController(model: model)
         requests = RequestsViewController(model: model)
         super.init()
-        update(section: model.selection)
+        update(section: section)
     }
     required init?(coder: NSCoder) { nil }
     func update(section: WorkspaceSection) {
         requests.setFilterAccessoryVisible(section == .requests)
-        if #available(macOS 26.0, *), section == .requests {
-            show(requests, extendsUnderTitlebar: true)
+        if #available(macOS 26.0, *) {
+            show(section == .rules ? rules : requests, extendsUnderTitlebar: true,
+                 extendsUnderBottomAccessory: section == .rules)
         } else {
             show(section == .rules ? rules : requests)
         }
@@ -62,6 +72,8 @@ final class WorkspaceInspectorController: WorkspacePaneController {
         steps = StepInspectorViewController(model: model)
         requests = RequestInspectorViewController(history: model.history, mode: mode)
         super.init()
+        requests.deviceAliases = { [weak model] in model?.document.deviceAliases ?? [:] }
+        requests.onDeviceAliasChange = { [weak model] source, alias in model?.document.deviceAliases[source] = alias.isEmpty ? nil : alias }
         requests.workflowExists = { [weak model] id in
             model?.document.projects.contains { $0.workflows.contains { $0.id == id } } ?? false
         }

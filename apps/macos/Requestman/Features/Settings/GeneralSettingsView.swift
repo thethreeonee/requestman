@@ -59,7 +59,7 @@ final class GeneralSettingsViewController: ObservedViewController {
         let statusRow = NativeUI.stack([certificateStatus, setupButton], vertical: false, spacing: 12)
         clearWorkspaceButton.hasDestructiveAction = true
         let sections = [
-            SettingsUI.section("启动", rows: [SettingsUI.row("启动方式", mode)], footer: "全局接管会修改系统 HTTP/HTTPS 代理；仅启动浏览器只为所选浏览器打开代理调试窗口。启动方式的修改将在下次启动时生效。"),
+            SettingsUI.section("启动", rows: [SettingsUI.row("启动方式", mode)], footer: "全局接管会修改系统 HTTP/HTTPS 代理；仅启动浏览器打开代理调试窗口；仅启动代理供手机或其他设备手动接入。启动方式的修改将在下次启动时生效。"),
             SettingsUI.section("浏览器", rows: [browserRow, browserStatus, refreshRow], footer: "列出已安装的 Chrome 及同类 Chromium 浏览器。"),
             connection,
             SettingsUI.section("HTTPS 证书", rows: [SettingsUI.row("证书状态", statusRow), certificateError], footer: "配置并信任本机调试证书后，新建 HTTPS 连接可解密、修改并记录。"),
@@ -147,7 +147,7 @@ final class GeneralSettingsViewController: ObservedViewController {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "清除工作区？"
-        alert.informativeText = "将停止捕获，删除所有规则组、规则、环境和请求日志，并将代理与 HTTPS 解密配置恢复默认。证书、浏览器数据和应用偏好设置会保留。此操作无法撤销。"
+        alert.informativeText = "将停止捕获，删除所有规则组、规则、环境、设备别名和请求日志，并将代理与 HTTPS 解密配置恢复默认。证书、浏览器数据和应用偏好设置会保留。此操作无法撤销。"
         alert.addButton(withTitle: "取消").keyEquivalent = "\r"
         let clear = alert.addButton(withTitle: "清除工作区")
         clear.hasDestructiveAction = true
@@ -163,11 +163,11 @@ final class GeneralSettingsViewController: ObservedViewController {
 }
 
 @MainActor
-private final class HTTPSDecryptionSettingsView: NSView, NSTextViewDelegate {
+private final class HTTPSDecryptionSettingsView: NSView {
     private let model: WorkspaceModel
     private let allRequests = NSSwitch()
-    private let domains = DecryptionDomainsTextView()
-    private let domainsScroll = DecryptionDomainsScrollView()
+    private lazy var domainsScroll = ActionTextArea { [weak self] _ in self?.domainsChanged() }
+    private var domains: NSTextView { domainsScroll.textView }
     private let errorLabel = SettingsUI.note("")
     private var displayedDomains: [String]?
 
@@ -177,31 +177,10 @@ private final class HTTPSDecryptionSettingsView: NSView, NSTextViewDelegate {
         allRequests.target = self
         allRequests.action = #selector(toggleAllRequests)
         allRequests.setAccessibilityLabel("解密所有请求")
-        domains.delegate = self
-        domains.isRichText = false
-        domains.allowsUndo = true
-        domains.isAutomaticQuoteSubstitutionEnabled = false
-        domains.isAutomaticDashSubstitutionEnabled = false
-        domains.isAutomaticSpellingCorrectionEnabled = false
-        domains.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        domains.textContainerInset = NSSize(width: 6, height: 6)
-        domains.isVerticallyResizable = true
-        domains.isHorizontallyResizable = false
-        domains.minSize = .zero
-        domains.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        domains.autoresizingMask = [.width]
-        domains.textContainer?.widthTracksTextView = true
         domains.setAccessibilityLabel("HTTPS 解密域名")
         let scroll = domainsScroll
-        scroll.borderType = .noBorder
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
         scroll.verticalScrollElasticity = .none
         scroll.horizontalScrollElasticity = .none
-        scroll.wantsLayer = true
-        scroll.layer?.cornerRadius = 8
-        scroll.layer?.masksToBounds = true
-        scroll.documentView = domains
         scroll.heightAnchor.constraint(equalToConstant: 110).isActive = true
         errorLabel.textColor = .systemRed
         errorLabel.isHidden = true
@@ -218,15 +197,7 @@ private final class HTTPSDecryptionSettingsView: NSView, NSTextViewDelegate {
         let configuration = model.document.httpsDecryption
         allRequests.state = configuration.decryptAllRequests ? .on : .off
         allRequests.isEnabled = model.loaded && !model.isTransitioning
-        domains.isEditable = allRequests.isEnabled && !configuration.decryptAllRequests
-        domains.isSelectable = domains.isEditable
-        domains.setAccessibilityEnabled(domains.isEditable)
-        if !domains.isEditable, window?.firstResponder === domains { window?.makeFirstResponder(nil) }
-        domains.textColor = domains.isEditable ? .textColor : .disabledControlTextColor
-        let background: NSColor = domains.isEditable ? .textBackgroundColor : DecryptionDomainsScrollView.disabledBackgroundColor
-        domains.backgroundColor = background
-        domainsScroll.backgroundColor = background
-        domainsScroll.contentView.backgroundColor = background
+        domainsScroll.isEnabled = allRequests.isEnabled && !configuration.decryptAllRequests
         if displayedDomains != configuration.domains {
             domains.string = configuration.domains.joined(separator: "; ")
             domains.undoManager?.removeAllActions()
@@ -235,7 +206,7 @@ private final class HTTPSDecryptionSettingsView: NSView, NSTextViewDelegate {
         }
     }
 
-    func textDidChange(_ notification: Notification) {
+    private func domainsChanged() {
         guard domains.isEditable, !domains.hasMarkedText() else { return }
         do {
             let values = try HTTPSDecryptionConfiguration.parseDomains(domains.string)
@@ -251,42 +222,6 @@ private final class HTTPSDecryptionSettingsView: NSView, NSTextViewDelegate {
     @objc private func toggleAllRequests() {
         model.document.httpsDecryption.decryptAllRequests = allRequests.state == .on
         refresh()
-    }
-}
-
-@MainActor
-private final class DecryptionDomainsScrollView: NSScrollView {
-    // On newer macOS versions, window/control backgrounds can resolve to the same
-    // white as editable text. Blend an opaque fill to keep disabled fields visible.
-    static let disabledBackgroundColor = NSColor(name: nil) { appearance in
-        var color = NSColor.textBackgroundColor
-        appearance.performAsCurrentDrawingAppearance {
-            color = NSColor.textBackgroundColor.blended(withFraction: 0.10, of: .labelColor) ?? .lightGray
-        }
-        return color
-    }
-
-    override func layout() {
-        super.layout()
-        if let text = documentView as? NSTextView {
-            text.minSize = NSSize(width: 0, height: contentSize.height)
-        }
-    }
-
-    override func scrollWheel(with event: NSEvent) {
-        if contentView.documentRect.height <= contentView.bounds.height + 1 {
-            nextResponder?.scrollWheel(with: event)
-        } else {
-            super.scrollWheel(with: event)
-        }
-    }
-}
-
-@MainActor
-private final class DecryptionDomainsTextView: NSTextView {
-    override func scrollWheel(with event: NSEvent) {
-        if let scroll = enclosingScrollView { scroll.scrollWheel(with: event) }
-        else { super.scrollWheel(with: event) }
     }
 }
 

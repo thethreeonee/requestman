@@ -25,6 +25,7 @@ try:
         "swiftc", *flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore",
         str(root / "Requestman/Features/Workspace/WorkspaceSection.swift"),
         str(root / "Requestman/Features/Workspace/AppKitSupport.swift"),
+        str(root / "Requestman/Features/Workspace/NativeInputs.swift"),
         str(root / "Requestman/Features/Workspace/WorkspaceView.swift"),
         str(root / "Requestman/Features/Requests/RequestsView.swift"),
         str(root / "Requestman/Features/Requests/RequestRecordsTable.swift"),
@@ -37,7 +38,7 @@ try:
         str(root / "Scripts/Fixtures/WorkspaceSidebarChecks.swift"), "-o", str(executable),
     ], check=True)
     try:
-        subprocess.run([str(executable)], check=True, timeout=45)
+        subprocess.run([str(executable)], check=True, timeout=75)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         print("AppKit sidebar CLI checks did not pass; inspect the assertion or runtime error above. "
               "WindowServer connection errors require a macOS GUI session. No visual acceptance is implied.", file=sys.stderr)

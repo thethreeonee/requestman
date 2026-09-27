@@ -95,7 +95,9 @@ extension ProxyConnection {
                 shared.events.append(.init(.matched, transactionID: record?.id, workflowID: match.workflow.id))
                 shared.ruleHitNotifications.append(workflowID: match.workflow.id, name: match.workflow.name)
                 if transaction?.requirements(for: .request).needsCompleteBody == true {
-                    guard reserveScriptFlow() else { return }
+                    if transaction?.requirements(for: .request).hasScripts == true {
+                        guard reserveScriptFlow() else { return }
+                    }
                     scriptRequestHead = head; scriptRequestDraft = draft
                     if head.headers["expect"].contains(where: { $0.lowercased() == "100-continue" }) {
                         client.writeAndFlush(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .continue)), promise: nil)

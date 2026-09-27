@@ -3,6 +3,9 @@ import RequestmanCore
 
 @MainActor
 final class RequestInspectorViewController: ObservedViewController {
+    var deviceAliases: () -> [String: String] = { [:] }
+    var onDeviceAliasChange: (String, String) -> Void = { _, _ in }
+    private let device = DeviceSourceButton()
     var openWorkflow: ((UUID) -> Void)?
     var workflowExists: (UUID) -> Bool = { _ in false }
     private let history: ExecutionHistoryModel
@@ -10,6 +13,7 @@ final class RequestInspectorViewController: ObservedViewController {
     var isPresented = false { didSet { if isViewLoaded { refresh() } } }
     private var tab: RequestDetailTab = .requestHeaders
     private var record: CaptureRecord?
+    private var historyGeneration = 0
     private var panes: [RequestDetailTab: RequestPayloadViewController] = [:]
     private let url = NativeUI.label("", size: 17, weight: .semibold)
     private let copyURLButton = NSButton(title: "", target: nil, action: nil)
@@ -66,7 +70,9 @@ final class RequestInspectorViewController: ObservedViewController {
         error.textColor = .systemRed; error.maximumNumberOfLines = 2
         let stats = NativeUI.stack([method, status, NativeUI.label("│", size: 12, secondary: true), duration,
                                    NativeUI.label("│", size: 12, secondary: true), bytes], vertical: false, spacing: 10)
-        let summary = NativeUI.stack([urlRow, stats, replayRow, rule, error], spacing: 10)
+        device.onRename = { [weak self] in self?.onDeviceAliasChange($0, $1) }
+        let deviceRow = NativeUI.stack([NativeUI.label("设备来源", size: 12, secondary: true), device], vertical: false, spacing: 8)
+        let summary = NativeUI.stack([urlRow, stats, deviceRow, replayRow, rule, error], spacing: 10)
         summary.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
         for child in [urlRow, replayRow, rule, error] { child.widthAnchor.constraint(equalTo: summary.widthAnchor, constant: -32).isActive = true }
         let size: NSControl.ControlSize
@@ -89,13 +95,15 @@ final class RequestInspectorViewController: ObservedViewController {
     override func refresh() {
         let next = history.selected
         let version = mode.version
-        if record?.id != next?.id {
+        if record?.id != next?.id || historyGeneration != history.displayGeneration {
             for pane in panes.values { pane.update(version: version, isActive: false); pane.view.removeFromSuperview(); pane.removeFromParent() }
             panes.removeAll()
         }
+        historyGeneration = history.displayGeneration
         record = next
         rootStack.isHidden = next == nil
         guard let record else { return }
+        device.update(source: record.deviceSource, alias: record.deviceSource.flatMap { deviceAliases()[$0] } ?? "")
         url.stringValue = record.url; url.toolTip = record.url
         url.setAccessibilityLabel("请求 URL"); url.setAccessibilityValue(record.url)
         copyURLButton.isEnabled = !record.urlWasTruncated
@@ -110,7 +118,7 @@ final class RequestInspectorViewController: ObservedViewController {
         method.setMethod(record.method)
         status.stringValue = record.status.map(String.init) ?? "—"
         status.textColor = RequestStatusStyle.color(record.status)
-        duration.stringValue = record.connectionState.isActive ? record.connectionState.rawValue : "\(Int(record.duration * 1000)) ms"
+        duration.stringValue = record.connectionState.isActive ? record.connectionSummary : "\(Int(record.duration * 1000)) ms"
         bytes.stringValue = "响应 \(ByteCountFormatter.string(fromByteCount: Int64(record.responseBytes), countStyle: .file))"
         rule.isHidden = record.matchedWorkflowID == nil
         let rulePath = [record.project, record.workflow]
@@ -122,8 +130,8 @@ final class RequestInspectorViewController: ObservedViewController {
             }
         }
         rule.setAccessibilityValue(rulePath.joined(separator: " > "))
-        rule.isEnabled = record.matchedWorkflowID.map(workflowExists) ?? false
-        rule.toolTip = rulePath.joined(separator: " > ") + (rule.isEnabled ? "\n打开请求修改" : "\n对应的请求修改已不存在")
+        rule.isEnabled = record.archivedAt == nil && (record.matchedWorkflowID.map(workflowExists) ?? false)
+        rule.toolTip = rulePath.joined(separator: " > ") + (record.archivedAt != nil ? "\n日志文件中的规则快照" : rule.isEnabled ? "\n打开请求修改" : "\n对应的请求修改已不存在")
         error.isHidden = record.error == nil; error.stringValue = record.error ?? ""; error.toolTip = record.error
         let showsStream = tab == .responseBody && record.captureProtocol != .http
         streamView.isHidden = !showsStream
@@ -169,7 +177,7 @@ final class RequestInspectorViewController: ObservedViewController {
         RequestClipboard.copy(record.url)
     }
     @objc private func openMatchedWorkflow() {
-        guard let id = record?.matchedWorkflowID, workflowExists(id) else { return }
+        guard record?.archivedAt == nil, let id = record?.matchedWorkflowID, workflowExists(id) else { return }
         openWorkflow?(id)
     }
 }
@@ -230,6 +238,8 @@ private final class RequestStreamView: NSView, NSTableViewDataSource, NSTableVie
         text.isEditable = false; text.isRichText = false; text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         text.isVerticallyResizable = true; text.autoresizingMask = [.width]; text.textContainer?.widthTracksTextView = true
         text.drawsBackground = false
+        text.textContainerInset = NSSize(width: 6, height: 4)
+        text.textContainer?.lineFragmentPadding = 0
         let textScroll = NSScrollView(); textScroll.documentView = text; textScroll.hasVerticalScroller = true
         tableScroll.heightAnchor.constraint(equalToConstant: 180).isActive = true
         textScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 100).isActive = true
@@ -257,7 +267,7 @@ private final class RequestStreamView: NSView, NSTableViewDataSource, NSTableVie
         if !isSSE { format.selectedSegment = 0 }
         guard active else { task?.cancel(); generation += 1; revision = -1; return }
         let summary = selected?.summary
-        notice.stringValue = [record.connectionState.rawValue, "\(summary?.count ?? 0) 条消息", record.closeReason,
+        notice.stringValue = [record.connectionSummary, "\(summary?.count ?? 0) 条消息", record.closeReason,
                               summary?.error.map { "记录失败：\($0)" },
                               version == .difference ? "事件与消息暂不提供修改对比" : nil].compactMap { $0 }.joined(separator: " · ")
         if revision != summary?.revision || changed { reload() }

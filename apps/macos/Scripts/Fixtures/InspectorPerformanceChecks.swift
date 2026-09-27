@@ -36,6 +36,14 @@ final class WorkspaceModel {
 
 @MainActor @Observable
 final class ExecutionHistoryModel {
+    var displayGeneration = 0
+    var isViewingFile = false
+    var openedFileName: String?
+    var recordsForSaving: [CaptureRecord] { records.filter { filter.matches($0) } }
+    func returnToLive() { isViewingFile = false; openedFileName = nil }
+    func openLog(_ records: [CaptureRecord], name: String) {
+        self.records = records; openedFileName = name; isViewingFile = true; displayGeneration += 1
+    }
     var latestReplay: CaptureRecord? { records.first { $0.replayID != nil } }
     func reveal(_ id: UUID) { selectedID = id }
     var records: [CaptureRecord] = []
@@ -49,10 +57,17 @@ final class ExecutionHistoryModel {
 }
 
 
+@MainActor final class MobileConnectionViewController: NSViewController {
+    init(model: WorkspaceModel) { super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { nil }
+    override func loadView() { view = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 660)) }
+}
+
 enum WorkspaceSettingsSection { case general, environments }
 @MainActor class ProjectSidebarViewController: NSViewController {
     let outline = NSOutlineView()
     let searchField = NSSearchField()
+    func installBottomAccessory(on item: NSSplitViewItem) {}
     func canPerform(_ command: WorkspaceCommand) -> Bool { false }
     func perform(_ command: WorkspaceCommand) { preconditionFailure("Unexpected rules command in inspector check") }
     func createProject() { preconditionFailure("Unexpected project creation") }
@@ -130,6 +145,7 @@ struct InspectorPerformanceChecks {
     }
     static func main() {
         NSApplication.shared.setActivationPolicy(.prohibited)
+        if CommandLine.arguments.contains("--saved-logs-only") { checkSavedLogInspector(); return }
         checkImagePreviews()
         if CommandLine.arguments.contains("--images-only") { return }
         checkJSONColors()
@@ -328,6 +344,50 @@ struct InspectorPerformanceChecks {
         print("Image preview checks passed: GIF/PNG, equal before/after columns at 400/520/760 pt, checkbox/raw data, copy, versions, tab retention and unavailable-image fallback. Hidden window only.")
     }
 
+    static func checkSavedLogInspector() {
+        let history = ExecutionHistoryModel()
+        var record = CaptureRecord(method: "GET", url: "https://example.test/saved")
+        record.requestHeaders = [HTTPField("X-Value", "live")]
+        record.deviceSource = "192.168.1.20"
+        history.records = [record]; history.selectedID = record.id
+        let mode = RequestInspectionMode(); mode.version = .original
+        let inspector = RequestInspectorViewController(history: history, mode: mode)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 800),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentViewController = inspector
+        inspector.isPresented = true; inspector.refresh()
+        defer { window.close() }
+        func expectValue(_ expected: String) {
+            let deadline = Date().addingTimeInterval(3)
+            func value() -> String? {
+                guard let outline = views(NSOutlineView.self, in: inspector.view).first(where: { !$0.isHiddenOrHasHiddenAncestor }),
+                      outline.numberOfRows > 0 else { return nil }
+                return (outline.view(atColumn: 1, row: 0, makeIfNecessary: true) as? NSTableCellView)?.textField?.stringValue
+            }
+            while value() != expected && Date() < deadline {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05)); inspector.view.layoutSubtreeIfNeeded()
+            }
+            precondition(value() == expected, "Opening a saved log with the same ID must refresh its payload")
+        }
+        expectValue("live")
+        let source = views(DeviceSourceButton.self, in: inspector.view).first!
+        precondition(source.title == "192.168.1.20")
+        inspector.deviceAliases = { ["192.168.1.20": "测试手机"] }
+        inspector.refresh()
+        precondition(source.title == "测试手机")
+        var renamed: (String, String)?
+        inspector.onDeviceAliasChange = { renamed = ($0, $1) }
+        source.onRename("192.168.1.20", "工作手机")
+        precondition(renamed?.0 == "192.168.1.20" && renamed?.1 == "工作手机")
+        record.requestHeaders = [HTTPField("X-Value", "saved")]; record.archivedAt = Date()
+        history.openLog([record], name: "saved.requestmanlog.json"); inspector.refresh()
+        expectValue("saved")
+        record.requestHeaders = [HTTPField("X-Value", "second-file")]
+        history.openLog([record], name: "second.requestmanlog.json"); inspector.refresh()
+        expectValue("second-file")
+        print("Saved log inspector passed: same-ID file switches rebuild the displayed payload. Hidden component only.")
+    }
+
     static func checkDisplayMode(_ controller: WorkspaceSplitController, window: NSWindow) {
         let inspector = controller.splitViewItems[2].viewController.view
         let more = window.toolbar!.items.first { $0.itemIdentifier.rawValue == "workspace.inspectorMore" } as! NSMenuToolbarItem
@@ -375,8 +435,8 @@ struct InspectorPerformanceChecks {
             let tabFrame = tabs.convert(tabs.bounds, to: inspector)
             let tabTop = inspector.isFlipped ? tabFrame.minY : inspector.bounds.height - tabFrame.maxY
             print("Content tabs geometry: inspector=\(inspector.bounds), tabRow=\(tabs.superview!.bounds), top=\(tabTop), tabs=\(tabFrame)")
-            // The summary includes a 32 pt URL button instead of the old 21 pt intrinsic height.
-            precondition(tabTop < 200, "Content tabs must stay directly below the summary, not float mid-inspector: top=\(tabTop), tabs=\(tabFrame), inspector=\(inspector.bounds)")
+            // The summary includes the URL button and the additional native device-source row.
+            precondition(tabTop < 240, "Content tabs must stay directly below the summary, not float mid-inspector: top=\(tabTop), tabs=\(tabFrame), inspector=\(inspector.bounds)")
             precondition(abs(tabFrame.height - tabs.intrinsicContentSize.height) <= 1,
                          "Tabs must retain their native height")
             precondition(tabs.segmentDistribution == .fillProportionally)

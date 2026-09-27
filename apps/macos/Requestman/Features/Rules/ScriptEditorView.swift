@@ -76,7 +76,7 @@ import RequestmanEditor
 @MainActor final class ScriptAPIHelpViewController: NSViewController {
     override func loadView() {
         let text = RulesTextArea(editable: false); text.borderType = .noBorder
-        text.string = Self.text; text.textView.textContainerInset = NSSize(width: 20, height: 20)
+        text.string = Self.text
         view = text; preferredContentSize = NSSize(width: 560, height: 620)
     }
     private static let text = """
@@ -295,7 +295,7 @@ struct ScriptPreviewInput: Equatable, Sendable {
     }
     private func addText(_ title: String, keyPath: WritableKeyPath<ScriptPreviewInput, String>, to stack: NSStackView) {
         stack.addArrangedSubview(NativeUI.label(title, size: 12))
-        let text = RulesTextArea(roundedInput: true) { [weak self] value in self?.updateInput { $0[keyPath: keyPath] = value } }
+        let text = RulesTextArea(revealFocus: true) { [weak self] value in self?.updateInput { $0[keyPath: keyPath] = value } }
         text.string = input[keyPath: keyPath]; text.textView.setAccessibilityLabel(title)
         stack.addArrangedSubview(text); text.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         text.heightAnchor.constraint(equalToConstant: 64).isActive = true

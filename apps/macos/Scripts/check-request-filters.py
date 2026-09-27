@@ -24,6 +24,7 @@ try:
     subprocess.run([
         "swiftc", *flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore",
         str(root / "Requestman/Features/Workspace/AppKitSupport.swift"),
+        str(root / "Requestman/Features/Workspace/NativeInputs.swift"),
         str(root / "Requestman/Features/Requests/RequestFilterControls.swift"),
         str(root / "Requestman/Features/Requests/RequestRecordsTable.swift"),
         str(root / "Requestman/Features/Requests/RequestCURL.swift"),

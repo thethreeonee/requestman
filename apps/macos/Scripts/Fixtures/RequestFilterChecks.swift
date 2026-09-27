@@ -8,6 +8,7 @@ private final class FilterFixture {
     var selectedID: UUID?
     var paused = false
     var workflowNames: [UUID: String] = [:]
+    var deviceAliases: [String: String] = [:]
     var records: [CaptureRecord] = (0..<8).map { index in
         let methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT"]
         let statuses: [Int?] = [101, 200, 302, 404, 500, nil, 204, 200]
@@ -42,6 +43,7 @@ private final class FilterFixtureView: ObservedViewController {
         controls.onFilterChange = { [weak model] in model?.filter = $0 }
         controls.toggleRecording = { [weak model] in model?.paused.toggle() }
         controls.clear = { [weak model] in model?.records.removeAll() }
+        table.onDeviceAliasChange = { [weak model] source, alias in model?.deviceAliases[source] = alias.isEmpty ? nil : alias }
         table.onSelectionChange = { [weak model] in model?.selectedID = $0 }
         let stack = NativeUI.stack([controls, table], spacing: 0)
         NativeUI.pin(stack, to: view)
@@ -51,12 +53,43 @@ private final class FilterFixtureView: ObservedViewController {
     override func refresh() {
         controls.update(filter: model.filter, records: model.records, paused: model.paused)
         table.update(records: model.records.filter { model.filter.matches($0) }, selectedID: model.selectedID,
-                     workflowNames: model.workflowNames)
+                     workflowNames: model.workflowNames, deviceAliases: model.deviceAliases)
     }
 }
 
 @main @MainActor
 private enum RequestFilterChecks {
+    private static func checkDeviceAliases(model: FilterFixture, host: FilterFixtureView) {
+        let original = model.records
+        model.records[0].deviceSource = "192.168.1.20"
+        model.records[1].deviceSource = "192.168.1.20"
+        model.records[2].deviceSource = "192.168.1.21"
+        model.records[3].deviceSource = "local"
+        settle(host.view)
+        let table = descendants(host.view).compactMap { $0 as? NSTableView }.first!
+        precondition(table.tableColumns[4].title == "设备来源")
+        precondition(!table.tableColumns.contains { $0.title == "环境" })
+        func source(_ row: Int) -> DeviceSourceButton {
+            descendants(table.view(atColumn: 4, row: row, makeIfNecessary: true)!).compactMap { $0 as? DeviceSourceButton }.first!
+        }
+        precondition(source(0).title == "192.168.1.20" && source(3).title == "本机")
+        source(0).performClick(nil)
+        settle(host.view)
+        let editor = source(0).popover?.contentViewController as? DeviceAliasViewController
+        precondition(editor != nil, "Source must create the native alias popover")
+        let field = descendants(editor!.view).compactMap { $0 as? ActionTextField }.first!
+        field.stringValue = "测试手机"; field.onSubmit?()
+        settle(host.view)
+        precondition(model.deviceAliases["192.168.1.20"] == "测试手机")
+        precondition(source(0).title == "测试手机" && source(1).title == "测试手机")
+        precondition(source(2).title == "192.168.1.21")
+        host.table.onDeviceAliasChange("192.168.1.20", "")
+        settle(host.view)
+        precondition(source(0).title == "192.168.1.20" && source(1).title == "192.168.1.20")
+        model.records = original; model.deviceAliases = [:]
+        settle(host.view)
+    }
+
     private static func checkRuleRename(model: FilterFixture, host: FilterFixtureView) {
         let originalRecords = model.records
         let workflowID = UUID()
@@ -116,13 +149,14 @@ private enum RequestFilterChecks {
         let window = makeWindow(host)
         defer { window.close() }
         checkRuleRename(model: model, host: host)
+        checkDeviceAliases(model: model, host: host)
         for width in [1440.0, 820, 600, 569, 567, host.controls.minimumContentWidth, 820] {
             window.setContentSize(NSSize(width: width, height: 620))
             settle(host.view)
             precondition(abs(host.view.bounds.width - width) < 2, "Content must remain at requested width \(width), got \(host.view.bounds.width)")
             let views = descendants(host.view)
             let table = views.compactMap { $0 as? NSTableView }.first!
-            precondition(table.tableColumns.map(\.title) == ["时间", "状态码", "请求", "命中的规则", "环境", "耗时"])
+            precondition(table.tableColumns.map(\.title) == ["时间", "状态码", "请求", "命中的规则", "设备来源", "耗时"])
             let scroll = table.enclosingScrollView!
             precondition(!scroll.hasHorizontalScroller)
             precondition(abs(table.tableColumns.reduce(0) { $0 + $1.width } - scroll.contentSize.width) < 2)
@@ -567,6 +601,12 @@ private enum RequestFilterChecks {
         RequestActionsMenu.append(to: completedActions, record: active, replayUnavailable: nil, replay: { _, _ in })
         precondition(!completedActions.items.contains { $0.title == "取消此次重放" })
         precondition(completedActions.items.first { $0.title == "查看原请求" }?.isEnabled == false)
+        active.connectionState = .open; active.archivedAt = Date()
+        let archivedActions = NSMenu()
+        RequestActionsMenu.append(to: archivedActions, record: active, replayUnavailable: nil, replay: { _, _ in })
+        precondition(!archivedActions.items.contains { $0.title == "取消此次重放" }, "A saved active replay cannot cancel a live connection")
+        var savedRecord: CaptureRecord?
+        host.table.onSaveSession = { savedRecord = $0 }
         var replayed: (CaptureRecord, Bool)?
         host.table.onReplay = { replayed = ($0, $1) }
         var requestedRecord: CaptureRecord?
@@ -595,7 +635,7 @@ private enum RequestFilterChecks {
         precondition(!incompleteMenu.items[0].isEnabled && !incompleteMenu.items[1].isEnabled)
         host.table.replayUnavailableReason = { nil }
         let clickedMenu = menu(at: NSPoint(x: row.midX, y: row.midY))!
-        precondition(clickedMenu.items.map(\.title) == ["重放", "重新发送请求…", "", "复制", "", "Mock 当前请求"])
+        precondition(clickedMenu.items.map(\.title) == ["重放", "重新发送请求…", "", "复制", "", "Mock 当前请求", "", "保存当前请求会话…"])
         precondition(clickedMenu.items[2].isSeparatorItem && clickedMenu.items[4].isSeparatorItem)
         let item = clickedMenu.items[5]
         precondition(item.isEnabled)
@@ -616,6 +656,10 @@ private enum RequestFilterChecks {
         precondition(NSApp.sendAction(item.action!, to: item.target, from: item))
         precondition(requestedRecord?.url == clickedURL)
         precondition(requestedRecord?.responseBody.data == original[2].responseBody.data)
+        let saveItem = clickedMenu.items[7]
+        precondition(saveItem.isEnabled && NSApp.sendAction(saveItem.action!, to: saveItem.target, from: saveItem))
+        precondition(savedRecord?.id == original[2].id && savedRecord?.responseBody.data == original[2].responseBody.data,
+                     "Saving must use the clicked request snapshot even after the list is cleared")
         precondition(menu(at: NSPoint(x: 20, y: 20)) == nil, "Empty space has no request menu")
         model.records = original
         settle(host.view)

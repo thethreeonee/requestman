@@ -318,7 +318,8 @@ final class RequestSourceView: NSView {
         view.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         view.textColor = .labelColor
         view.drawsBackground = false
-        view.textContainerInset = NSSize(width: 12, height: 12)
+        view.textContainerInset = NSSize(width: 6, height: 4)
+        view.textContainer?.lineFragmentPadding = 0
         view.isVerticallyResizable = true
         view.isHorizontallyResizable = false
         view.autoresizingMask = [.width]

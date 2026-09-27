@@ -26,6 +26,7 @@ try:
                     "-o", str(temporary / "RequestmanScriptWorker")], check=True)
     subprocess.run(["swiftc", *flags, *editor_flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore",
                     str(root / "Requestman/Features/Workspace/AppKitSupport.swift"),
+                    str(root / "Requestman/Features/Workspace/NativeInputs.swift"),
                     str(root / "Requestman/Features/Workspace/WorkspaceTransfer.swift"),
                     str(root / "Requestman/Features/Workspace/WorkspaceSection.swift"),
                     *map(str, sorted((root / "Requestman/Features/Rules").glob("*.swift"))),

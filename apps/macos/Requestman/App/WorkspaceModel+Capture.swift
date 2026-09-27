@@ -86,7 +86,7 @@ extension WorkspaceModel {
         }
     }
     func toggleCapture() async {
-        guard loaded, !isTransitioning, isCapturing || captureMode == .systemProxy || !isDiscoveringBrowsers else { return }
+        guard loaded, !isTransitioning, isCapturing || captureMode != .browser || !isDiscoveringBrowsers else { return }
         isTransitioning = true
         defer { isTransitioning = false; isLaunchingBrowser = false }
         do {
@@ -153,10 +153,12 @@ extension WorkspaceModel {
         await ruleHitNotifications?.prepareAuthorization()
         let port = try await captureService.start(configuration: configuration, document: document, mode: mode)
         listenPort = port
+        activeProxyConfiguration = captureService.activeConfiguration
         isCapturing = true
         return port
     }
     func synchronizeCaptureState() {
+        activeProxyConfiguration = captureService.activeConfiguration
         listenPort = captureService.activePort
         isCapturing = listenPort != nil
         if !isCapturing { activeBrowser = nil }
@@ -177,6 +179,7 @@ extension WorkspaceModel {
         }
     }
     func setRecordingPaused(_ paused: Bool) {
+        guard !history.isViewingFile else { return }
         history.paused = paused; captureService.recordBuffer?.setPaused(paused)
     }
     func clearHistory() { captureService.recordBuffer?.clear(); history.clear() }
@@ -198,6 +201,7 @@ extension WorkspaceModel {
             do {
                 let previousPort = listenPort
                 listenPort = try await captureService.reconfigure(configuration: document.proxy, document: document)
+                activeProxyConfiguration = captureService.activeConfiguration
                 if captureService.activeMode == .browser, listenPort != previousPort,
                    let port = listenPort, let browser = activeBrowser {
                     // The current session keeps its browser even if next-start preferences changed.

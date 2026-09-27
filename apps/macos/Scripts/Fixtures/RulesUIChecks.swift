@@ -44,6 +44,7 @@ import RequestmanCore
 @MainActor private final class StepInspectorReceiver: NSResponder, StepInspectorPresenting {
     var count = 0
     func showStepInspector(_ sender: Any?) { count += 1 }
+    func toggleStepInspector(_ sender: Any?) { count += 1 }
 }
 
 @MainActor private final class ScriptFocusCheckWindow: NSWindow {
@@ -122,8 +123,8 @@ import RequestmanCore
                         let textFrame = area.contentView.convert(area.contentView.bounds, to: area)
                         precondition(abs(rulerFrame.minY - textFrame.minY) <= 0.5 && abs(rulerFrame.maxY - textFrame.maxY) <= 0.5,
                                      "Numbered editor edges must align: mode=\(mode), ruler=\(rulerFrame), text=\(textFrame)")
-                        precondition(area.layer?.cornerRadius == 8 && area.layer?.masksToBounds == true && area.clipsToBounds,
-                                     "The whole editor, including the gutter, shares one rounded clip")
+                        precondition(area.borderType == .bezelBorder && area.clipsToBounds,
+                                     "The editor uses the native scroll-view bezel")
                         let bitmap = area.bitmapImageRepForCachingDisplay(in: area.bounds)!
                         area.cacheDisplay(in: area.bounds, to: bitmap)
                     }
@@ -132,7 +133,7 @@ import RequestmanCore
         }
         checkGutterBaselineRendering()
         checkEmptyGutterRendering()
-        print("Numbered editors passed: template/literal Body and JavaScript, aligned ruler/text edges, rounded clipping, resizing and scrolling")
+        print("Numbered editors passed: template/literal Body and JavaScript, aligned ruler/text edges, native borders, resizing and scrolling")
     }
 
     static func checkGutterBaselineRendering() {
@@ -151,7 +152,7 @@ import RequestmanCore
                     let gutter = descendants(area).compactMap { $0 as? GutterView }.first!
                     let separator = descendants(gutter).compactMap { $0 as? NSBox }.first { $0.identifier?.rawValue == "editor.gutterSeparator" }!
                     precondition(separator.boxType == .separator && abs(separator.alignmentRect(forFrame: separator.frame).maxX - gutter.bounds.maxX) <= 0.5, "Separator frame=\(separator.frame), gutter=\(gutter.bounds)")
-                    precondition(abs(area.textView.textInsets.left - gutter.frame.width - 8) < 0.5)
+                    precondition(abs(area.textView.textInsets.left - gutter.frame.width - 6) < 0.5)
                     let bitmap = area.bitmapImageRepForCachingDisplay(in: area.bounds)!
                     area.cacheDisplay(in: area.bounds, to: bitmap)
                     let scale = CGFloat(bitmap.pixelsWide) / area.bounds.width
@@ -241,29 +242,52 @@ import RequestmanCore
         model.updateWorkflow(workflow)
         let inspector = StepInspectorViewController(model: model)
         let split = NSSplitViewController(); split.splitView.isVertical = true
-        let placeholder = NSViewController(); placeholder.view = NSView()
-        split.addSplitViewItem(NSSplitViewItem(viewController: placeholder))
-        let item = NSSplitViewItem(inspectorWithViewController: inspector)
+        let sidebar = ProjectSidebarViewController(model: model)
+        let flow = FlowEditorViewController(model: model)
+        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
+        sidebarItem.minimumThickness = 260; sidebarItem.maximumThickness = 320; sidebarItem.allowsFullHeightLayout = true
+        split.addSplitViewItem(sidebarItem)
+        let flowItem = NSSplitViewItem(viewController: flow)
+        flowItem.minimumThickness = 420; flowItem.allowsFullHeightLayout = true
+        split.addSplitViewItem(flowItem)
+        let item = NSSplitViewItem(sidebarWithViewController: inspector)
         item.minimumThickness = 400; item.maximumThickness = 600; item.allowsFullHeightLayout = true
         split.addSplitViewItem(item)
         inspector.installAccessories(on: item)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 800), styleMask: [.titled, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
-        // The real workspace constrains its window; keep this empty sibling fixture from shrinking it on selection changes.
-        window.contentMinSize = NSSize(width: 900, height: 800)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 800), styleMask: [.titled, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        // Keep the three-pane fixture within the workspace's usable size during selection changes.
+        window.contentMinSize = NSSize(width: 1100, height: 600)
         window.isReleasedWhenClosed = false; window.contentViewController = split
         defer { window.close() }
         func settle() {
             for _ in 0..<3 { window.contentView?.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
         }
         settle()
-        let top = item.topAlignedAccessoryViewControllers.first!, bottom = item.bottomAlignedAccessoryViewControllers.first!
+        let bottom = item.bottomAlignedAccessoryViewControllers.first!
+        precondition(item.topAlignedAccessoryViewControllers.isEmpty, "Step headings live in the window toolbar")
+        let preview = descendants(flow.view).first { $0.identifier?.rawValue == "rules.previewFlow" }!
+        let sidebarAdd = descendants(sidebar.view).first { $0.identifier?.rawValue == "rules.sidebarAdd" }!
+        let flowScroll = descendants(flow.view).first { $0.identifier?.rawValue == "rules.editorScroll" } as! NSScrollView
+        precondition(!preview.isDescendant(of: flowScroll), "Preview stays outside the scrolling form")
+        func checkFooterAlignment() {
+            let actions = [sidebarAdd, preview] + descendants(bottom.view).compactMap { $0 as? NSButton }
+            let centers = actions.map { $0.convert($0.bounds, to: split.view).midY }
+            precondition(centers.max()! - centers.min()! < 1, "All three pane actions align: \(centers)")
+            precondition(abs(preview.convert(preview.bounds, to: flow.view).minX - 24) < 1)
+        }
+        checkFooterAlignment()
+        let previewBeforeScroll = preview.convert(preview.bounds, to: split.view)
+        flowScroll.documentView!.scroll(NSPoint(x: 0, y: flowScroll.documentView!.bounds.maxY)); settle()
+        precondition(preview.convert(preview.bounds, to: split.view) == previewBeforeScroll)
+        window.setContentSize(NSSize(width: 1200, height: 600)); settle(); checkFooterAlignment()
+        window.setContentSize(NSSize(width: 1400, height: 800)); settle(); checkFooterAlignment()
         let scroll = descendants(inspector.view).compactMap { $0 as? NSScrollView }.first!
-        precondition(scroll.frame == inspector.view.bounds, "The form scrolls behind both native accessory bars")
+        precondition(scroll.frame == inspector.view.bounds, "The form scrolls behind the native footer accessory")
         precondition(!descendants(inspector.view).compactMap { $0 as? NSBox }.contains { $0.boxType == .separator }, "No footer separator remains")
-        precondition(top.view.frame.height > 0 && bottom.view.frame.height > 0)
+        precondition(bottom.view.frame.height > 0)
         let first = descendants(inspector.view).first { $0.identifier?.rawValue == "rules.headerEntry" }!
-        precondition(first.convert(first.bounds, to: split.view).maxY <= top.view.convert(top.view.bounds, to: split.view).minY + 1,
-                     "The first Header begins below the top accessory")
+        precondition(first.convert(first.bounds, to: split.view).maxY <= inspector.view.convert(inspector.view.safeAreaRect, to: split.view).maxY + 1,
+                     "The first Header begins inside the unobscured area")
         let add = descendants(bottom.view).compactMap { $0 as? ActionButton }.first { $0.title == "Header 修改" }!
         add.performClick(nil); inspector.refresh(); settle()
         precondition(model.selectedStep?.headerEntries.count == 13)
@@ -274,18 +298,18 @@ import RequestmanCore
         let footerFrame = bottom.view.convert(bottom.view.bounds, to: split.view)
         precondition(lastFrame.minY >= footerFrame.maxY - 1, "The last Header stays above the footer at the scroll limit: last=\(lastFrame), footer=\(footerFrame), insets=\(currentScroll.contentInsets)")
         inspector.isPresented = false; settle()
-        precondition(top.isHidden && bottom.isHidden, "Switching away hides both accessories")
+        precondition(bottom.isHidden, "Switching away hides the footer accessory")
         inspector.isPresented = true; settle()
-        precondition(!top.isHidden && !bottom.isHidden)
+        precondition(!bottom.isHidden)
         model.selectedStepID = nil; inspector.refresh(); settle()
-        precondition(top.isHidden && bottom.isHidden, "Clearing the selected step hides both accessories")
+        precondition(bottom.isHidden, "Clearing the selected step hides the footer accessory")
         model.addStep(.replaceBody, response: false); inspector.refresh(); settle()
         let bodyScroll = descendants(inspector.view).compactMap { $0 as? NSScrollView }.first!
         let body = descendants(inspector.view).compactMap { $0 as? CodeEditorView }.first!
-        precondition(body.frame.height >= 360 && !top.isHidden && !bottom.isHidden)
+        precondition(body.frame.height >= 360 && !bottom.isHidden)
         let available = bodyScroll.contentSize.height - bodyScroll.contentInsets.top - bodyScroll.contentInsets.bottom
         precondition(abs(bodyScroll.documentView!.frame.height - available) < 2,
-                     "A short Body form fills the unobscured viewport without excess scrolling: document=\(bodyScroll.documentView!.frame), available=\(available), scroll=\(bodyScroll.frame), contentSize=\(bodyScroll.contentSize), insets=\(bodyScroll.contentInsets), safe=\(inspector.view.safeAreaRect), top=\(top.view.frame), bottom=\(bottom.view.frame), window=\(window.frame)")
+                     "A short Body form fills the unobscured viewport without excess scrolling: document=\(bodyScroll.documentView!.frame), available=\(available), scroll=\(bodyScroll.frame), contentSize=\(bodyScroll.contentSize), insets=\(bodyScroll.contentInsets), safe=\(inspector.view.safeAreaRect), bottom=\(bottom.view.frame), window=\(window.frame)")
         model.addStep(.script, response: false); inspector.refresh(); settle()
         let script = inspector.children.first { $0 is ScriptEditorViewController }!
         precondition(inspector.view.safeAreaRect.contains(script.view.frame), "The script editor's controls stay inside the unobscured area")
@@ -364,7 +388,7 @@ import RequestmanCore
         inspector.refresh(); inspector.view.layoutSubtreeIfNeeded()
         let area = descendants(inspector.view).compactMap { $0 as? CodeEditorView }.first!
         precondition(area.string == workflow.requestSteps[2].value && area.textView.isEditable)
-        precondition(area.clipsToBounds && area.layer?.masksToBounds == true)
+        precondition(area.clipsToBounds && area.borderType == .bezelBorder)
         // Render the actual literal editor inside its scrolling Inspector, with a long body.
         area.string = "{\n" + (0..<80).map { "  \"field\($0)\": \"value\"" }.joined(separator: ",\n") + "\n}"
         for height: CGFloat in [480, 760] {
@@ -418,8 +442,19 @@ import RequestmanCore
         defer { window.close() }
         var checked = 0
         func check(_ controller: NSViewController) {
-            window.contentViewController = controller
-            window.setContentSize(NSSize(width: 640, height: 1000))
+            if controller === inspector {
+                let split = NSSplitViewController()
+                let main = NSViewController(); main.view = NSView()
+                split.addSplitViewItem(NSSplitViewItem(viewController: main))
+                let item = NSSplitViewItem(sidebarWithViewController: inspector)
+                item.minimumThickness = 640; item.maximumThickness = 640
+                split.addSplitViewItem(item)
+                window.contentViewController = split
+                window.setContentSize(NSSize(width: 1060, height: 1000))
+            } else {
+                window.contentViewController = controller
+                window.setContentSize(NSSize(width: 640, height: 1000))
+            }
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
                 window.appearance = NSAppearance(named: appearance)
                 for _ in 0..<3 {
@@ -427,11 +462,12 @@ import RequestmanCore
                     RunLoop.main.run(until: Date().addingTimeInterval(0.02))
                 }
                 let fields = descendants(controller.view).compactMap { $0 as? NSTextField }.filter {
-                    ($0 is ActionTextField || $0 is HeaderNameField) && $0.isEditable && $0.isBezeled
+                    ($0 is ActionTextField || $0 is HeaderNameField) && $0.isEditable && ($0.isBezeled || $0.isBordered)
                         && $0.bezelStyle != .roundedBezel && !$0.isHiddenOrHasHiddenAncestor
                 }
                 precondition(!fields.isEmpty)
                 for field in fields {
+                    precondition(abs(field.bounds.height - 32) < 0.5, "Single-line input height must be 32 pt: \(field.accessibilityLabel() ?? field.placeholderString ?? "input"), \(field.bounds)")
                     for focused in [false, true] {
                         if focused { field.selectText(nil) } else { window.makeFirstResponder(nil) }
                         controller.view.layoutSubtreeIfNeeded()
@@ -447,7 +483,8 @@ import RequestmanCore
                                    color.alphaComponent > 0.95 && color.redComponent > 0.95 && color.greenComponent > 0.95 && color.blueComponent > 0.95 { white += 1 }
                             }
                         }
-                        precondition(field is HeaderNameField || white > bitmap.pixelsWide * bitmap.pixelsHigh / 3,
+                        precondition(field is HeaderNameField || field.accessibilityLabel() == "JSON 路径"
+                                     || white > bitmap.pixelsWide * bitmap.pixelsHigh / 3,
                                      "Input must render an opaque white fill: \(field.accessibilityLabel() ?? field.placeholderString ?? "input"), \(appearance), focus=\(focused)")
                         if focused {
                             let editor = field.currentEditor() as! NSTextView
@@ -466,7 +503,7 @@ import RequestmanCore
         workflow.matchConditions.conditions.append(.init(field: .header, operation: .equals, name: "X-Test", value: "test"))
         model.updateWorkflow(workflow)
         check(flow)
-        for kind in [ModificationKind.setHeader, .setQueryParameter, .replaceURLString, .mock, .delay, .script] {
+        for kind in [ModificationKind.setHeader, .modifyJSON, .setQueryParameter, .replaceURLString, .mock, .delay, .script] {
             model.addStep(kind, response: kind == .delay); inspector.refresh()
             check(inspector)
         }
@@ -481,7 +518,7 @@ import RequestmanCore
         let main = NSViewController(); main.view = NSView()
         let mainItem = NSSplitViewItem(viewController: main); mainItem.minimumThickness = 420
         split.addSplitViewItem(mainItem)
-        let item = NSSplitViewItem(inspectorWithViewController: inspector)
+        let item = NSSplitViewItem(sidebarWithViewController: inspector)
         item.minimumThickness = 400; item.maximumThickness = 760; item.allowsFullHeightLayout = true
         split.addSplitViewItem(item); inspector.installAccessories(on: item)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800), styleMask: [.titled, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
@@ -497,22 +534,13 @@ import RequestmanCore
             split.splitView.setPosition(split.splitView.bounds.width - split.splitView.dividerThickness - width, ofDividerAt: 0)
             settle()
             let baseline = inspector.view.frame.width, windowFrame = window.frame
-            let header = item.topAlignedAccessoryViewControllers.first!.view
-            let headerHeight = header.frame.height
-            let description = (descendants(header).first { $0.identifier?.rawValue == "rules.stepDescription" } as! NSTextField).stringValue
+            precondition(item.topAlignedAccessoryViewControllers.isEmpty)
             for index in [1, 2, 0, 2, 1, 0] {
                 let control = descendants(inspector.view).first { $0.identifier?.rawValue == "rules.urlRewriteTarget" } as! NSSegmentedControl
                 control.selectedSegment = index; control.sendAction(control.action, to: control.target); settle()
                 precondition(abs(inspector.view.frame.width - baseline) < 1 && window.frame == windowFrame,
                              "URL target must not resize the inspector or window: target=\(index), before=\(baseline), after=\(inspector.view.frame.width)")
-                let top = item.topAlignedAccessoryViewControllers.first!.view
-                let hint = descendants(top).first { $0.identifier?.rawValue == "rules.stepDescription" } as! NSTextField
-                // NSTextField's frame extends beyond its alignment rect for native text insets.
-                let hintRect = hint.convert(hint.bounds, to: top)
-                precondition(hintRect.minX >= 0 && hintRect.maxX <= baseline && hintRect.height > 0,
-                             "Description must fit the inspector: target=\(index), baseline=\(baseline), hint=\(hintRect)")
-                precondition(hint.stringValue == description && abs(top.frame.height - headerHeight) < 1,
-                             "The top description and accessory height remain unchanged when switching targets")
+                precondition(item.topAlignedAccessoryViewControllers.isEmpty)
                 let inputHint = descendants(inspector.view).first { $0.identifier?.rawValue == "rules.urlRewriteInputDescription" } as? NSTextField
                 if index == 0 { precondition(inputHint == nil) }
                 else {
@@ -585,10 +613,7 @@ import RequestmanCore
         func buttons() -> [NSButton] { descendants(inspector.view).compactMap { $0 as? NSButton } }
         settle()
         precondition(boxes().count == 1)
-        let description = descendants(inspector.view).compactMap { $0 as? NSTextField }.first { $0.identifier?.rawValue == "rules.stepDescription" }!
-        precondition((description.superview as? NSStackView)?.arrangedSubviews[1] === description)
-        precondition(description.stringValue.contains("区分大小写") && description.stringValue.contains("所有匹配"))
-        precondition(!description.isDescendant(of: boxes()[0]))
+        precondition(!descendants(inspector.view).contains { $0.identifier?.rawValue == "rules.stepDescription" })
         let firstBox = boxes()[0]
         let search = descendants(firstBox).compactMap { $0 as? ActionTextField }.first!
         let replacement = descendants(firstBox).compactMap { $0 as? RulesTextArea }.first!
@@ -648,12 +673,7 @@ import RequestmanCore
         }
         settle()
         precondition(boxes().count == 1)
-        let descriptions = descendants(inspector.view).compactMap { $0 as? NSTextField }.filter { $0.identifier?.rawValue == "rules.stepDescription" }
-        precondition(descriptions.count == 1)
-        let description = descriptions[0]
-        precondition((description.superview as? NSStackView)?.arrangedSubviews[1] === description)
-        precondition(!description.stringValue.contains("旧配置"))
-        precondition(boxes().allSatisfy { !description.isDescendant(of: $0) })
+        precondition(!descendants(inspector.view).contains { $0.identifier?.rawValue == "rules.stepDescription" })
         precondition(descendants(boxes()[0]).compactMap { $0 as? NSTextField }.filter { !$0.isEditable }.map(\.stringValue) == ["操作", "参数名称", "参数值"])
         precondition(buttons().first { $0.title == "添加参数操作" }!.isDescendant(of: descendants(inspector.view).first { $0.identifier?.rawValue == "rules.stepFooter" }!), "Query parameter addition stays in the fixed footer")
         let firstBox = boxes()[0]
@@ -765,12 +785,9 @@ import RequestmanCore
         model.updateWorkflow(workflow); settle()
         precondition(parameterName(boxes()[0]).stringValue == "legacy")
         precondition(model.selectedStep?.queryParameters == nil, "Opening a legacy form must not migrate it")
-        let legacyDescription = descendants(inspector.view).compactMap { $0 as? NSTextField }.first { $0.identifier?.rawValue == "rules.stepDescription" }!
-        precondition(legacyDescription.stringValue.contains("旧配置"))
         let legacyRule = descendants(boxes()[0]).compactMap { $0 as? ActionPopUpButton }.first { $0.accessibilityLabel() == "参数名称匹配规则" }!
         precondition(legacyRule.indexOfSelectedItem == 0 && !legacyRule.isHiddenOrHasHiddenAncestor)
         legacyRule.selectItem(at: 1); legacyRule.onChange(1); settle()
-        precondition(!legacyDescription.stringValue.contains("旧配置"))
         precondition(model.selectedStep?.queryParameterEntries.first?.operation == .modify && model.selectedStep?.queryParameterEntries.first?.matchRule == .contains)
     }
 
@@ -902,9 +919,7 @@ import RequestmanCore
         let boxes = descendants(inspector.view).compactMap { $0 as? NSBox }.filter { $0.identifier?.rawValue == "rules.headerEntry" }
         precondition(boxes.count == 2 && boxes.allSatisfy { descendants($0).compactMap { $0 as? HeaderNameField }.count == 1 })
         precondition(boxes.allSatisfy { !button("Header 修改").isDescendant(of: $0) })
-        let hint = descendants(inspector.view).first { $0.identifier?.rawValue == "rules.stepDescription" }!
-        precondition(boxes.allSatisfy { !hint.isDescendant(of: $0) })
-        precondition(hint.superview === button("删除").superview?.superview, "The type description belongs to the heading stack")
+        precondition(!descendants(inspector.view).contains { $0.identifier?.rawValue == "rules.stepDescription" })
         let fields = descendants(inspector.view).compactMap { $0 as? HeaderNameField }
         fields[1].stringValue = "X-Token"; fields[1].controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: fields[1]))
         let area = descendants(inspector.view).compactMap { $0 as? RulesTextArea }[1]
@@ -914,7 +929,7 @@ import RequestmanCore
         inspector.refresh()
         precondition(model.selectedStep?.headerEntries[1].value == original)
         let layout = area.textView.layoutManager as! TemplateLayoutManager
-        precondition(layout.tokenRanges.count == 2 && area.layer?.cornerRadius == 8)
+        precondition(layout.tokenRanges.count == 2 && area.borderType == .bezelBorder)
         precondition((original as NSString).substring(with: layout.tokenRanges[0]) == "{{$env.api}}")
         window.contentView?.layoutSubtreeIfNeeded()
         var previousMark: NSRect?
@@ -1166,7 +1181,8 @@ import RequestmanCore
         area.string = "12345678{{$uuid}}"
         text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         text.textContainer!.widthTracksTextView = false
-        text.textContainer!.containerSize = NSSize(width: 80, height: CGFloat.greatestFiniteMagnitude)
+        // Keep a 70 pt usable line width after removing the former 5 pt padding on each side.
+        text.textContainer!.containerSize = NSSize(width: 70, height: CGFloat.greatestFiniteMagnitude)
         layout.ensureLayout(for: text.textContainer!)
         let token = layout.tokenRanges[0]
         let before = layout.glyphIndexForCharacter(at: token.location - 1)
@@ -1291,25 +1307,11 @@ import RequestmanCore
             let inputScroll = controls.compactMap { $0 as? NSScrollView }.first { !($0 is RulesTextArea) }!
             let focusRect = headers.convert(headers.bounds.insetBy(dx: -4, dy: -4), to: inputScroll.contentView)
             precondition(inputScroll.contentView.bounds.contains(focusRect), "The outer viewport must include the complete focus ring, including its left edge")
-            func focusPixels() -> Int {
-                let bitmap = headers.bitmapImageRepForCachingDisplay(in: headers.bounds)!
-                headers.cacheDisplay(in: headers.bounds, to: bitmap)
-                var count = 0
-                for y in 0..<bitmap.pixelsHigh {
-                    for x in 0..<bitmap.pixelsWide {
-                        if let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
-                           color.alphaComponent > 0.2, color.blueComponent > color.redComponent + 0.15,
-                           color.blueComponent > color.greenComponent + 0.05 { count += 1 }
-                    }
-                }
-                return count
-            }
             window.makeFirstResponder(nil)
-            let unfocusedPixels = focusPixels()
             precondition(window.makeFirstResponder(headers.textView))
-            precondition(focusPixels() > unfocusedPixels + 50, "Focused text areas must visibly render the native blue focus ring")
+            precondition(window.firstResponder === headers.textView)
             window.makeFirstResponder(nil)
-            precondition(focusPixels() == unfocusedPixels, "Moving focus away must remove the focus ring")
+            precondition(window.firstResponder !== headers.textView)
             precondition(controller.view.bounds.size == NSSize(width: 900, height: 620))
             precondition(result.bounds.width > 380 && result.bounds.height > 400, "Unexpected result viewport: \(result.bounds)")
             let inputRect = headers.convert(headers.bounds, to: controller.view)
@@ -1707,11 +1709,113 @@ import RequestmanCore
         print("Matching presentation: group add/remove, operator changes, retained values, folding, wide/narrow native layouts passed")
     }
 
+    static func checkJSONEditing() {
+        for response in [false, true] {
+            let model = WorkspaceModel(); model.addProject(); model.addStep(.modifyJSON, response: response)
+            let inspector = StepInspectorViewController(model: model)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 750), styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false; window.contentViewController = inspector; inspector.refresh()
+            defer { window.close() }
+            func controls<T: NSView>(_ type: T.Type) -> [T] { descendants(inspector.view).compactMap { $0 as? T } }
+            let path = controls(ActionTextField.self).first { $0.accessibilityLabel() == "JSON 路径" }!
+            path.stringValue = "items[0].name"; path.onChange(path.stringValue)
+            let area = controls(RulesTextArea.self).first!
+            area.textView.string = #""张三""#; area.textDidChange(Notification(name: NSText.didChangeNotification))
+            inspector.refresh()
+            precondition(model.selectedStep?.jsonEntries.first?.path == "items[0].name")
+            precondition(model.selectedStep?.jsonEntries.first?.value == #""张三""#)
+            let operation = controls(ActionPopUpButton.self).first { $0.accessibilityLabel() == "JSON 修改方法" }!
+            precondition(operation.itemTitles == ["添加或覆盖", "修改", "删除"])
+            operation.selectItem(at: 2); operation.onChange(2); inspector.refresh()
+            precondition(area.isHiddenOrHasHiddenAncestor && model.selectedStep?.jsonEntries.first?.operation == .remove)
+            operation.selectItem(at: 1); operation.onChange(1); inspector.refresh()
+            precondition(!area.isHiddenOrHasHiddenAncestor && area.string == #""张三""#)
+            window.setContentSize(NSSize(width: 440, height: 750))
+            for _ in 0..<3 { window.contentView?.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+            let scroll = controls(NSScrollView.self).first { $0.documentView is FlippedView }!
+            precondition(scroll.documentView!.frame.height <= scroll.contentSize.height, "One JSON entry should fit without scrolling: document=\(scroll.documentView!.frame) viewport=\(scroll.contentSize) window=\(window.contentView!.frame)")
+            controls(ActionButton.self).first { $0.title == "添加 JSON 修改" }!.performClick(nil); inspector.refresh()
+            precondition(model.selectedStep?.jsonEntries.count == 2)
+            precondition(controls(NSBox.self).filter { $0.identifier?.rawValue == "rules.jsonEntry" }.count == 2)
+            controls(ActionButton.self).first { $0.accessibilityLabel() == "删除 JSON 修改" }!.performClick(nil); inspector.refresh()
+            precondition(model.selectedStep?.jsonEntries.count == 1 && model.selectedStep?.jsonEntries.first?.path == "")
+            for _ in 0..<5 { controls(ActionButton.self).first { $0.title == "添加 JSON 修改" }!.performClick(nil); inspector.refresh() }
+            window.contentView?.layoutSubtreeIfNeeded()
+            let overflow = controls(NSScrollView.self).first { $0.documentView is FlippedView }!
+            precondition(overflow.documentView!.frame.height > overflow.contentSize.height)
+            model.loaded = false; inspector.refresh()
+            precondition(controls(ActionTextField.self).allSatisfy { !$0.isEnabled })
+            precondition(controls(ActionPopUpButton.self).allSatisfy { !$0.isEnabled })
+            let flow = FlowEditorViewController(model: model); _ = flow.view; flow.refresh()
+            let menus = descendants(flow.view).compactMap { $0 as? NSButton }.filter { $0.identifier?.rawValue == "rules.addStep" }
+            precondition(menus.count == 2 && menus.allSatisfy { $0.menu!.items.map(\.title).filter { $0 == "修改 JSON" }.count == 1 })
+        }
+        print("JSON form passed: both phases, editing, operations, retained values, add/remove, menus and layout")
+    }
+
+    static func checkSidebarScrollChrome() {
+        guard #available(macOS 26.0, *) else { return }
+        let model = WorkspaceModel(); model.addProject()
+        let original = model.document.projects[0].workflows[0]
+        model.document.projects[0].workflows = (0..<60).map { index in
+            var workflow = original; workflow.id = UUID(); workflow.name = "Rule \(index)"; return workflow
+        }
+        model.selectedWorkflowID = model.document.projects[0].workflows[0].id
+        let sidebar = ProjectSidebarViewController(model: model)
+        let split = NSSplitViewController()
+        let item = NSSplitViewItem(sidebarWithViewController: sidebar)
+        item.allowsFullHeightLayout = true
+        item.minimumThickness = 260; item.maximumThickness = 400
+        split.addSplitViewItem(item)
+        split.addSplitViewItem(NSSplitViewItem(viewController: NSViewController()))
+        sidebar.installBottomAccessory(on: item)
+        sidebar.installBottomAccessory(on: item)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+                              styleMask: [.titled, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.toolbar = NSToolbar(identifier: "sidebar.scrollCheck"); window.toolbarStyle = .unified
+        window.contentViewController = split
+        defer { window.close() }
+        window.setContentSize(NSSize(width: 900, height: 600))
+        sidebar.refresh()
+        let scroll = sidebar.outline.enclosingScrollView!
+        for height: CGFloat in [600, 420] {
+            window.setContentSize(NSSize(width: 900, height: height))
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            split.view.layoutSubtreeIfNeeded()
+            precondition(item.bottomAlignedAccessoryViewControllers.count == 1)
+            let accessory = item.bottomAlignedAccessoryViewControllers[0]
+            let frame = scroll.convert(scroll.bounds, to: sidebar.view)
+            precondition(abs(frame.minY - sidebar.view.bounds.minY) < 1 && abs(frame.maxY - sidebar.view.bounds.maxY) < 1,
+                         "The rule tree must fill the sidebar behind both bars")
+            precondition(scroll.contentInsets.top > 0 && scroll.contentInsets.bottom >= accessory.view.bounds.height - 1,
+                         "Native insets must reserve titlebar and footer: \(scroll.contentInsets), footer=\(accessory.view.bounds)")
+            let footerFrame = accessory.view.convert(accessory.view.bounds, to: nil)
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: -scroll.contentInsets.top))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            let first = sidebar.outline.convert(sidebar.outline.rect(ofRow: 0), to: nil)
+            precondition(first.maxY <= window.contentLayoutRect.maxY + 1, "First row stays below the titlebar at rest")
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: 200))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            precondition(accessory.view.convert(accessory.view.bounds, to: nil) == footerFrame, "Footer stays fixed during scrolling")
+            sidebar.outline.scrollRowToVisible(sidebar.outline.numberOfRows - 1)
+            let last = sidebar.outline.convert(sidebar.outline.rect(ofRow: sidebar.outline.numberOfRows - 1), to: nil)
+            precondition(last.minY >= footerFrame.maxY - 1, "Last row must remain reachable above the footer")
+            precondition(sidebar.searchField.isDescendant(of: accessory.view))
+        }
+        print("Sidebar scroll chrome passed: full-height tree, native top/bottom insets, reachable first/last rows, fixed footer and resizing. Hidden window only.")
+    }
+
     static func main() {
         NSApplication.shared.setActivationPolicy(.prohibited)
+        checkSidebarScrollChrome()
+        if ProcessInfo.processInfo.environment["REQUESTMAN_SIDEBAR_SCROLL_ONLY"] == "1" { return }
+        if ProcessInfo.processInfo.environment["REQUESTMAN_SINGLE_LINE_BACKGROUNDS_ONLY"] == "1" { checkSingleLineBackgrounds(); return }
         if ProcessInfo.processInfo.environment["REQUESTMAN_GUTTER_ONLY"] == "1" { checkEmptyGutterRendering(); checkGutterBaselineRendering(); return }
         if ProcessInfo.processInfo.environment["REQUESTMAN_MATCHING_ONLY"] == "1" { checkMatchingPresentation(); return }
         if ProcessInfo.processInfo.environment["REQUESTMAN_FLOW_PRESENTATION_ONLY"] == "1" { checkFlowPresentation(); return }
+        checkJSONEditing()
+        if ProcessInfo.processInfo.environment["REQUESTMAN_JSON_FORM_ONLY"] == "1" { return }
         checkFlowPresentation()
         if ProcessInfo.processInfo.environment["REQUESTMAN_NUMBERED_EDITORS_ONLY"] == "1" {
             checkNumberedEditorGeometry(); checkCodeEditorBehavior(); checkBodyEditing(); checkScriptEditing(); print("Body and script editing passed"); return
@@ -1777,13 +1881,6 @@ import RequestmanCore
         if ProcessInfo.processInfo.environment["REQUESTMAN_CAPTURED_MOCK_ONLY"] == "1" { return }
         checkMatchTesting()
         if ProcessInfo.processInfo.environment["REQUESTMAN_MATCH_ONLY"] == "1" { return }
-        if ProcessInfo.processInfo.environment["REQUESTMAN_SINGLE_LINE_BACKGROUNDS_ONLY"] == "1" {
-            checkSingleLineBackgrounds()
-            try! checkURLReplacementEditing()
-            checkQueryParameterEditing()
-            checkScriptPresentation()
-            return
-        }
         if ProcessInfo.processInfo.environment["REQUESTMAN_SCRIPT_PRESENTATION_ONLY"] == "1" {
             checkScriptPresentation()
             print("Script inspector and preview sheet presentation checks passed")

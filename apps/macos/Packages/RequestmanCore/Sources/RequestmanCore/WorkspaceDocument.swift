@@ -122,10 +122,11 @@ public struct WorkspaceEnvironment: Codable, Equatable, Identifiable, Sendable {
 }
 
 public enum ModificationKind: String, Codable, CaseIterable, Sendable {
-    case setHeader, removeHeader, replaceBody, rewriteURL, setQueryParameter, replaceURLString, setMethod, setStatus, mock, redirect, script, delay
+    case setHeader, removeHeader, modifyJSON, replaceBody, rewriteURL, setQueryParameter, replaceURLString, setMethod, setStatus, mock, redirect, script, delay
     public var title: String {
         switch self {
         case .setHeader, .removeHeader: "修改 Header"
+        case .modifyJSON: "修改 JSON"
         case .replaceBody: "替换 Body"
         case .rewriteURL: "改写请求 URL"
         case .setQueryParameter: "修改查询参数"
@@ -186,6 +187,11 @@ public struct ModificationStep: Codable, Equatable, Identifiable, Sendable {
     public var usesBodyFile: Bool { [.replaceBody, .mock].contains(kind) && bodySource == .file }
     /// nil reads the legacy single name/value pair; an empty array is an empty step.
     public var headers: [HeaderEntry]?
+    public var jsonEdits: [JSONEditEntry]?
+    public var jsonEntries: [JSONEditEntry] {
+        get { jsonEdits ?? [] }
+        set { jsonEdits = newValue }
+    }
     public var queryParameters: [QueryParameterEntry]?
     public var urlReplacements: [URLReplacementEntry]?
     /// Missing in older configurations keeps the complete URL rewrite behavior.
@@ -231,6 +237,7 @@ public struct ModificationStep: Codable, Equatable, Identifiable, Sendable {
         if kind == .redirect { status = 302 }
         if kind == .mock { value = "{\n  \"ok\": true\n}" }
         if kind == .delay { value = "1000" }
+        if kind == .modifyJSON { jsonEdits = [JSONEditEntry()] }
     }
 }
 

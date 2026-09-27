@@ -21,9 +21,9 @@ extension ProxyConnection {
         receivedBodyCollector = nil
         let steps = match?.workflow.responseSteps.filter(\.enabled) ?? []
         let replacement = steps.firstIndex { $0.kind == .replaceBody || $0.kind == .redirect }
-        // Whole-body scripts cannot read an endless response. A preceding replacement supplies a finite input.
-        if let script = steps.firstIndex(where: { $0.kind == .script }), replacement == nil || script < replacement! {
-            throw WorkflowError.invalid("SSE 响应脚本需要在替换 Body 之后执行；暂不支持事件流脚本")
+        // Whole-body edits cannot read an endless response. A preceding replacement supplies a finite input.
+        if let edit = steps.firstIndex(where: { PhaseExecutionRequirements(steps: [$0]).needsCompleteBody }), replacement == nil || edit < replacement! {
+            throw WorkflowError.invalid("SSE 响应脚本或 JSON 修改需要在替换 Body 之后执行；暂不支持事件流内容修改")
         }
         if replacement != nil {
             if let channel = upstream { upstream = nil; upstreamTarget = nil; closeProxyChannel(channel) }

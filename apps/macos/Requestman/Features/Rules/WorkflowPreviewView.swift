@@ -23,6 +23,7 @@ import RequestmanCore
         url.cell?.usesSingleLineMode = true; url.cell?.wraps = false; url.cell?.isScrollable = true
         url.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let done = ActionButton(title: "完成") { [weak self] in self?.execution?.cancel(); self?.dismiss(nil) }; done.keyEquivalent = "\r"
+        if #available(macOS 26.0, *) { done.bezelStyle = .glass; done.borderShape = .capsule }
         let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let heading = NativeUI.stack([NativeUI.label("预览流程", size: 18, weight: .bold), spacer, done], vertical: false)
         let sample = ActionButton(title: "请求与响应输入…") { [weak self] in

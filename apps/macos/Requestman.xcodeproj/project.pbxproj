@@ -5,6 +5,10 @@
 	};
 	"objectVersion" = "60";
 	"objects" = {
+        "A10927F10000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Workspace/NativeInputs.swift"; "sourceTree" = "<group>"; };
+        "A10927F10000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10927F10000000000000001"; };
+        "A10927AC0000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestLogTransfer.swift"; "sourceTree" = "<group>"; };
+        "A10927AC0000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10927AC0000000000000001"; };
         "A10927AB0000000000000003" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestReplayEditor.swift"; "sourceTree" = "<group>"; };
         "A10927AB0000000000000004" = { "isa" = "PBXBuildFile"; "fileRef" = "A10927AB0000000000000003"; };
         "A10927AB0000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestActionsMenu.swift"; "sourceTree" = "<group>"; };
@@ -402,6 +406,7 @@
 				"66C777AADFDD9EF77AB46C95",
 				"A10D78910B42E56000000001",
                 "A10A99000000000000000001",
+                "A10927F10000000000000001",
                 "A10926D00000000000000001",
                 "A10926D00000000000000003",
                 "A10A99000000000000000051",
@@ -428,6 +433,7 @@
                 "7462B155995E50B320F72A65",
                 "5B2309CD972EDCEF3A5E3DAD",
                 "A10927AB0000000000000003",
+                "A10927AC0000000000000001",
                 "A10927AB0000000000000001",
                 "BEB4E525F48603DE12666E8E",
                 "F38B4ECE2819FC9E4240EE95",
@@ -482,6 +488,7 @@
 				"AA723CB28A14D53FFE8683CC",
 				"A10D78910B42E56000000002",
                 "A10A99000000000000000002",
+                "A10927F10000000000000002",
                 "A10926D00000000000000002",
                 "A10926D00000000000000004",
                 "A10A99000000000000000052",
@@ -508,6 +515,7 @@
                 "F050DFA43F608FA6C5A97E1F",
                 "CB7B14A9FE67B6E05AD212CE",
                 "A10927AB0000000000000004",
+                "A10927AC0000000000000002",
                 "A10927AB0000000000000002",
                 "3FE625F0ED4E4732804874D9",
                 "22372EBFC3A8E041A25BF830",

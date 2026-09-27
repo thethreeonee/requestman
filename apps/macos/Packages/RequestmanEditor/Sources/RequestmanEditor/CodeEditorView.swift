@@ -10,6 +10,7 @@ import CodeEditTextView
     /// Business annotations, independent of the syntax grammar (for example template variables).
     public var annotationRanges: ((String) -> [NSRange])? { didSet { scheduleHighlight() } }
     private var gutter: GutterView!
+    private let gutterClipView = NSClipView()
     private let highlighter = SyntaxHighlighter()
     private var highlightTask: Task<Void, Never>?
     private var generation = 0
@@ -18,26 +19,27 @@ import CodeEditTextView
     public init(language: Language, onChange: @escaping (String) -> Void = { _ in }) {
         self.language = language
         self.onChange = onChange
-        textView = TextView(string: "", font: .monospacedSystemFont(ofSize: 12, weight: .regular),
-                            textColor: .textColor, lineHeightMultiplier: 1.4, wrapLines: true,
+        textView = TextView(string: "", font: .monospacedSystemFont(ofSize: 14, weight: .regular),
+                            textColor: .textColor, lineHeightMultiplier: 1.6, wrapLines: true,
                             isEditable: true, isSelectable: true, letterSpacing: 1)
         super.init(frame: .zero)
-        borderType = .noBorder
+        borderType = .bezelBorder
         hasVerticalScroller = true; hasHorizontalScroller = false; autohidesScrollers = true
         drawsBackground = true; backgroundColor = .textBackgroundColor
         clipsToBounds = true; wantsLayer = true
-        layer?.cornerRadius = 8; layer?.masksToBounds = true
         textView.overscrollAmount = 0
         textView.allowsUndo = true
         documentView = textView
-        gutter = GutterView(font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular),
+        gutter = GutterView(font: .monospacedDigitSystemFont(ofSize: 13, weight: .regular),
                             textColor: .secondaryLabelColor, selectedTextColor: .labelColor,
                             textView: textView, delegate: self)
         gutter.backgroundColor = .textBackgroundColor
         gutter.edgeInsets = .init(leading: 8, trailing: 8)
         gutter.backgroundEdgeInsets = .init(leading: 0, trailing: 0)
         gutter.translatesAutoresizingMaskIntoConstraints = true
-        addFloatingSubview(gutter, for: .horizontal)
+        gutterClipView.drawsBackground = false
+        gutterClipView.documentView = gutter
+        addSubview(gutterClipView)
         gutter.updateWidthIfNeeded()
         contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(invalidateGutter), name: NSView.boundsDidChangeNotification, object: contentView)
@@ -70,7 +72,7 @@ import CodeEditTextView
     }
 
     public func gutterViewWidthDidUpdate() {
-        textView.textInsets = .init(left: (gutter?.frame.width ?? 40) + 8, right: 8)
+        textView.textInsets = .init(left: (gutter?.frame.width ?? 40) + 6, right: 6)
         needsLayout = true
     }
 
@@ -78,7 +80,7 @@ import CodeEditTextView
         super.layout()
         textView.updateFrameIfNeeded()
         gutter.updateWidthIfNeeded()
-        gutter.frame.size.height = max(contentSize.height, textView.frame.height)
+        alignGutterViewport()
         gutter.needsDisplay = true
     }
 
@@ -94,7 +96,15 @@ import CodeEditTextView
         scheduleHighlight()
     }
 
-    @objc private func invalidateGutter() { gutter.needsDisplay = true }
+    private func alignGutterViewport() {
+        // Clip to the text viewport so the gutter cannot cover the native bezel.
+        gutter.frame.size.height = max(contentSize.height, textView.frame.height, contentView.bounds.maxY)
+        gutterClipView.frame = NSRect(x: contentView.frame.minX, y: contentView.frame.minY,
+                                     width: gutter.frame.width, height: contentView.frame.height)
+        gutterClipView.scroll(to: NSPoint(x: 0, y: contentView.bounds.minY))
+    }
+
+    @objc private func invalidateGutter() { alignGutterViewport(); gutter.needsDisplay = true }
     @objc private func textChanged() {
         guard !assigningText else { return }
         scheduleHighlight(); needsLayout = true

@@ -18,6 +18,9 @@ final class RequestsViewController: ObservedViewController {
         model.cancelReplay(id)
     }
     private lazy var replayBar = NativeUI.stack([replayStatus, showReplay, cancelReplay], vertical: false, spacing: 8)
+    private let fileName = NativeUI.label("", size: 12)
+    private lazy var returnToLive = ActionButton(title: "返回实时日志") { [weak model] in model?.history.returnToLive() }
+    private lazy var fileBar = NativeUI.stack([fileName, returnToLive], vertical: false, spacing: 8)
     private let empty = RequestEmptyStateView()
     private var filterAccessory: NSViewController?
     private weak var filterAccessoryItem: NSSplitViewItem?
@@ -28,6 +31,7 @@ final class RequestsViewController: ObservedViewController {
         filters.onFilterChange = { [weak model] in model?.history.filter = $0 }
         filters.toggleRecording = { [weak model] in guard let model else { return }; model.setRecordingPaused(!model.history.paused) }
         filters.clear = { [weak model] in model?.clearHistory() }
+        table.onDeviceAliasChange = { [weak model] source, alias in model?.document.deviceAliases[source] = alias.isEmpty ? nil : alias }
         table.onSelectionChange = { [weak model] in model?.history.selectedID = $0 }
         table.replayUnavailableReason = { [weak model] in model?.replayUnavailableReason }
         table.onReplay = { [weak self] record, editing in
@@ -40,6 +44,10 @@ final class RequestsViewController: ObservedViewController {
         replayStatus.lineBreakMode = .byTruncatingMiddle
         replayStatus.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         replayBar.edgeInsets = NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+        fileName.lineBreakMode = .byTruncatingMiddle
+        fileName.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        fileBar.edgeInsets = NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+        table.onSaveSession = { [weak self] record in RequestLogTransfer.save(records: [record], window: self?.view.window) }
         table.onMockRequest = { [weak model] in model?.addMockWorkflow(from: $0) }
         let tableContainer = NSView()
         NativeUI.pin(table, to: tableContainer)
@@ -51,9 +59,9 @@ final class RequestsViewController: ObservedViewController {
             NativeUI.pin(tableContainer, to: view)
         } else {
             let separator = NSBox(); separator.boxType = .separator
-            let stack = NativeUI.stack([filters, status, replayBar, separator, tableContainer], spacing: 0)
+            let stack = NativeUI.stack([fileBar, filters, status, replayBar, separator, tableContainer], spacing: 0)
             NativeUI.pin(stack, to: view)
-            for child in [filters, replayBar, separator, tableContainer] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+            for child in [fileBar, filters, replayBar, separator, tableContainer] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
             tableContainer.setContentHuggingPriority(.defaultLow, for: .vertical)
         }
     }
@@ -63,7 +71,8 @@ final class RequestsViewController: ObservedViewController {
         let accessory = NSSplitViewItemAccessoryViewController()
         accessory.automaticallyAppliesContentInsets = false
         if #available(macOS 26.1, *) { accessory.preferredScrollEdgeEffectStyle = .soft }
-        let bar = NativeUI.stack([filters, status, replayBar], spacing: 0)
+        let bar = NativeUI.stack([fileBar, filters, status, replayBar], spacing: 0)
+        fileBar.widthAnchor.constraint(equalTo: bar.widthAnchor).isActive = true
         filters.widthAnchor.constraint(equalTo: bar.widthAnchor).isActive = true
         replayBar.widthAnchor.constraint(equalTo: bar.widthAnchor).isActive = true
         bar.setContentHuggingPriority(.required, for: .vertical)
@@ -88,21 +97,23 @@ final class RequestsViewController: ObservedViewController {
     }
     func focusList() { table.focusList() }
     func showFilters() { filters.showFilters() }
-    override func viewWillAppear() { super.viewWillAppear(); if model.history.latestReplay == nil { model.history.selectedID = nil } }
     override func refresh() {
         let history = model.history, records = model.history.filtered
+        fileBar.isHidden = !history.isViewingFile
+        fileName.stringValue = history.openedFileName.map { "日志文件：" + $0 } ?? ""
+        fileName.toolTip = fileName.stringValue
         let replay = history.latestReplay
         replayBar.isHidden = replay == nil
         replayStatus.stringValue = replay.map { ($0.replaySummary ?? "") + " · " + $0.method + " " + $0.url } ?? ""
         replayStatus.toolTip = replayStatus.stringValue
         cancelReplay.isHidden = replay?.connectionState.isActive != true
-        filters.update(filter: history.filter, records: history.records, paused: history.paused)
+        filters.update(filter: history.filter, records: history.records, paused: history.paused, viewingFile: history.isViewingFile)
         status.stringValue = [history.paused ? "记录已暂停，代理继续工作；手动重放仍记录结果" : "", history.dropped > 0 ? "高负载下已丢弃 \(history.dropped) 条待显示记录" : ""].filter { !$0.isEmpty }.joined(separator: "    ")
-        status.isHidden = status.stringValue.isEmpty
+        status.isHidden = history.isViewingFile || status.stringValue.isEmpty
         let workflowNames = Dictionary(model.document.projects.flatMap(\.workflows).map { ($0.id, $0.name) },
                                        uniquingKeysWith: { first, _ in first })
-        table.update(records: records, selectedID: history.selectedID, workflowNames: workflowNames)
+        table.update(records: records, selectedID: history.selectedID, workflowNames: workflowNames, deviceAliases: model.document.deviceAliases)
         empty.isHidden = !records.isEmpty
-        empty.update(title: history.records.isEmpty ? "等待请求" : "没有符合条件的记录", description: history.records.isEmpty ? "启动捕获，将浏览器连接到本地代理后，请求会显示在这里。" : "调整搜索或筛选条件。", symbol: "clock")
+        empty.update(title: history.records.isEmpty ? (history.isViewingFile ? "日志文件为空" : "等待请求") : "没有符合条件的记录", description: history.records.isEmpty ? (history.isViewingFile ? "该文件没有保存请求。" : "启动捕获，将浏览器或手机连接到代理后，请求会显示在这里。") : "调整搜索或筛选条件。", symbol: "clock")
     }
 }

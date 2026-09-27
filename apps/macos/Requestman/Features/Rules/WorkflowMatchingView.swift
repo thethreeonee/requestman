@@ -209,6 +209,7 @@ import RequestmanCore
     private lazy var removeButton = MatchingControls.remove { [weak self] in self?.remove?() }
     private var arranged: [NSLayoutConstraint] = []
     private var layoutKey = ""
+    private static let popupWidth: CGFloat = 125
     init() {
         super.init(frame: .zero)
         identifier = .init("rules.conditionRow")
@@ -216,7 +217,7 @@ import RequestmanCore
         MatchingControls.glass(field); MatchingControls.glass(operation)
         field.setAccessibilityLabel("匹配字段"); operation.setAccessibilityLabel("匹配运算符")
         name.setAccessibilityLabel("匹配名称"); value.setAccessibilityLabel("匹配值")
-        for control in [enabled, field, operation, name, value, removeButton] as [NSControl] {
+        for control in [enabled, field, name, operation, value, removeButton] as [NSControl] {
             addSubview(control); control.translatesAutoresizingMaskIntoConstraints = false
         }
         for input in [name, value] {
@@ -225,8 +226,8 @@ import RequestmanCore
             input.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
         enabled.widthAnchor.constraint(equalToConstant: 20).isActive = true
-        field.widthAnchor.constraint(equalToConstant: 120).isActive = true
-        operation.widthAnchor.constraint(equalToConstant: 125).isActive = true
+        field.widthAnchor.constraint(equalToConstant: Self.popupWidth).isActive = true
+        operation.widthAnchor.constraint(equalToConstant: Self.popupWidth).isActive = true
     }
     required init?(coder: NSCoder) { nil }
     func refresh(_ item: MatchCondition, editable: Bool) {
@@ -253,40 +254,52 @@ import RequestmanCore
             if parent.bounds.width > 0 { availableWidth = min(availableWidth, parent.bounds.width) }
             ancestor = parent
         }
-        let compact = availableWidth < 680
+        // Reserve space only for visible controls, including a usable value input.
+        let fixedControlsWidth: CGFloat = 20 + Self.popupWidth * 2 + 24 + 3 * 8
+        let nameWidth: CGFloat = item.field.needsName ? 150 + 8 : 0
+        let valueWidth: CGFloat = item.operation.needsValue ? 160 + 8 : 0
+        let compact = availableWidth < fixedControlsWidth + nameWidth + valueWidth
         let key = "\(compact)-\(item.field.needsName)-\(item.operation.needsValue)"
         if layoutKey != key {
             layoutKey = key; NSLayoutConstraint.deactivate(arranged)
             var first: [NSView] = [enabled, field]
             var second: [NSView] = []
-            if !compact && item.field.needsName { first.append(name) }
-            first.append(operation)
+            if item.field.needsName { first.append(name) }
             if compact {
-                if item.field.needsName { second.append(name) }
+                // Keep the subject before its predicate when reading across rows.
+                second.append(operation)
                 if item.operation.needsValue { second.append(value) }
-            } else if item.operation.needsValue { first.append(value) }
+            } else {
+                first.append(operation)
+                if item.operation.needsValue { first.append(value) }
+            }
             first.append(removeButton)
             let firstCenter = enabled.centerYAnchor
-            arranged = [enabled.leadingAnchor.constraint(equalTo: leadingAnchor), enabled.topAnchor.constraint(equalTo: topAnchor, constant: 5),
-                        removeButton.trailingAnchor.constraint(equalTo: trailingAnchor), heightAnchor.constraint(equalToConstant: second.isEmpty ? 32 : 64)]
+            let lineHeight = NativeInputMetrics.fieldHeight
+            let lineSpacing: CGFloat = 8
+            arranged = [enabled.leadingAnchor.constraint(equalTo: leadingAnchor), enabled.centerYAnchor.constraint(equalTo: topAnchor, constant: lineHeight / 2),
+                        removeButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+                        heightAnchor.constraint(equalToConstant: second.isEmpty ? lineHeight : lineHeight * 2 + lineSpacing)]
             for view in first.dropFirst() { arranged.append(view.centerYAnchor.constraint(equalTo: firstCenter)) }
             for pair in zip(first, first.dropFirst()) {
-                // An existence condition has no value field; keep the remove button at the trailing edge.
-                if pair.1 === removeButton && (compact || !item.operation.needsValue) {
+                // Only text inputs stretch to fill the space before the remove button.
+                if pair.1 === removeButton && pair.0 !== name && pair.0 !== value {
                     arranged.append(pair.1.leadingAnchor.constraint(greaterThanOrEqualTo: pair.0.trailingAnchor, constant: 8))
                 } else {
-                    let gap: CGFloat = !compact && pair.0 === field && pair.1 === operation ? 166 : 8
-                    arranged.append(pair.1.leadingAnchor.constraint(equalTo: pair.0.trailingAnchor, constant: gap))
+                    arranged.append(pair.1.leadingAnchor.constraint(equalTo: pair.0.trailingAnchor, constant: 8))
                 }
             }
             if !compact && item.field.needsName { arranged.append(name.widthAnchor.constraint(equalToConstant: 150)) }
             if let start = second.first, let end = second.last {
                 arranged.append(start.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 28))
-                arranged.append(end.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -32))
-                for view in second { arranged.append(view.centerYAnchor.constraint(equalTo: topAnchor, constant: 48)) }
-                if second.count == 2 {
-                    arranged.append(name.widthAnchor.constraint(equalTo: value.widthAnchor, multiplier: 0.7))
-                    arranged.append(value.leadingAnchor.constraint(equalTo: name.trailingAnchor, constant: 8))
+                arranged.append(end === value
+                    ? end.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -32)
+                    : end.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -32))
+                for view in second {
+                    arranged.append(view.centerYAnchor.constraint(equalTo: topAnchor, constant: lineHeight * 1.5 + lineSpacing))
+                }
+                for pair in zip(second, second.dropFirst()) {
+                    arranged.append(pair.1.leadingAnchor.constraint(equalTo: pair.0.trailingAnchor, constant: 8))
                 }
             }
             NSLayoutConstraint.activate(arranged)

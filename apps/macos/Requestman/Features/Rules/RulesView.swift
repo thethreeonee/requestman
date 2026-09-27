@@ -12,6 +12,10 @@ import RequestmanCore
     let model: WorkspaceModel
     let outline = ProjectOutlineView()
     let searchField = NSSearchField()
+    private let scroll = NSScrollView()
+    private var footer: NSStackView!
+    private var footerConstraints: [NSLayoutConstraint] = []
+    private var bottomAccessory: NSViewController?
     private var roots: [Item] = []
     private var workflowItems: [UUID: [Item]] = [:]
     private var structure: [UUID] = []
@@ -35,7 +39,7 @@ import RequestmanCore
         outline.setAccessibilityLabel("规则组与请求修改")
         outline.contextMenu = { [weak self] row in self?.menu(forRow: row) }
         outline.target = self; outline.doubleAction = #selector(doubleClickProject)
-        let scroll = NSScrollView(); scroll.documentView = outline; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
+        scroll.documentView = outline; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         scroll.hasHorizontalScroller = false
         let add = addButton
         add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "添加")
@@ -47,18 +51,37 @@ import RequestmanCore
         searchField.toolTip = "搜索请求修改（⌘F）"
         searchField.sendsSearchStringImmediately = true; searchField.setAccessibilityLabel("搜索请求修改")
         searchField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let footer = NativeUI.stack([add, searchField], vertical: false, spacing: 10)
-        for child in [scroll, footer] { child.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(child) }
+        footer = NativeUI.stack([add, searchField], vertical: false, spacing: 10)
+        for child in [scroll, footer!] { child.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(child) }
         NSLayoutConstraint.activate([
             scroll.topAnchor.constraint(equalTo: view.topAnchor),
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            footer.heightAnchor.constraint(equalToConstant: 36),
+            add.widthAnchor.constraint(equalTo: add.heightAnchor), add.heightAnchor.constraint(equalTo: searchField.heightAnchor)
+        ])
+        footerConstraints = [
             scroll.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -10),
             footer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
             footer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            footer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -10),
-            add.widthAnchor.constraint(equalTo: add.heightAnchor), add.heightAnchor.constraint(equalTo: searchField.heightAnchor)
-        ])
+            footer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8)
+        ]
+        NSLayoutConstraint.activate(footerConstraints)
+    }
+    func installBottomAccessory(on item: NSSplitViewItem) {
+        guard #available(macOS 26.0, *), bottomAccessory == nil else { return }
+        _ = view
+        let accessory = NSSplitViewItemAccessoryViewController()
+        accessory.automaticallyAppliesContentInsets = false
+        if #available(macOS 26.1, *) { accessory.preferredScrollEdgeEffectStyle = .soft }
+        accessory.view = NSView()
+        NSLayoutConstraint.deactivate(footerConstraints)
+        footerConstraints = []
+        footer.removeFromSuperview()
+        NativeUI.pin(footer, to: accessory.view, insets: NSEdgeInsets(top: 10, left: 12, bottom: 8, right: 12))
+        scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor).isActive = true
+        bottomAccessory = accessory
+        item.addBottomAlignedAccessoryViewController(accessory)
     }
     override func refresh() {
         let focusedItemID = (outline.item(atRow: outline.selectedRow) as? Item)?.id
@@ -146,7 +169,7 @@ import RequestmanCore
     }
 
     func canPerform(_ command: WorkspaceCommand) -> Bool {
-        guard model.loaded, model.selection == .rules, !outline.isHiddenOrHasHiddenAncestor, view.window?.firstResponder === outline,
+        guard model.loaded, !outline.isHiddenOrHasHiddenAncestor, view.window?.firstResponder === outline,
               let item = outline.item(atRow: outline.selectedRow) as? Item,
               let project = model.document.projects.first(where: { $0.id == item.projectID }),
               item.isProject || project.workflows.contains(where: { $0.id == item.id }) else { return false }
@@ -277,13 +300,14 @@ import RequestmanCore
     private func rename(_ item: Item) {
         guard let project = model.document.projects.first(where: { $0.id == item.projectID }) else { return }
         let name = item.isProject ? project.name : project.workflows.first { $0.id == item.id }?.name ?? ""
-        let field = NSTextField(string: name)
-        field.frame = NSRect(x: 0, y: 0, width: 300, height: 24)
+        let field = ActionTextField(name)
+        field.frame = NSRect(x: 0, y: 0, width: 300, height: NativeInputMetrics.fieldHeight)
         field.setAccessibilityLabel(item.isProject ? "规则组名称" : "请求修改名称")
         let alert = NSAlert()
         alert.messageText = item.isProject ? "重命名规则组" : "重命名请求修改"
         alert.addButton(withTitle: "保存"); alert.addButton(withTitle: "取消")
         alert.accessoryView = field; alert.window.initialFirstResponder = field
+        field.onSubmit = { [weak alert] in alert?.buttons.first?.performClick(nil) }
         let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
             guard response == .alertFirstButtonReturn, let self, model.loaded else { return }
             let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -319,22 +343,40 @@ import RequestmanCore
     let model: WorkspaceModel
     private let content = NSView()
     private var editor: FlowEditorViewController?
+    private var previewAccessory: NSViewController?
     private var lastID: UUID?
     init(model: WorkspaceModel) { self.model = model; super.init() }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func loadView() { view = content }
+    func installBottomAccessory(on item: NSSplitViewItem) {
+        guard #available(macOS 26.0, *), previewAccessory == nil else { return }
+        _ = view
+        let accessory = NSSplitViewItemAccessoryViewController()
+        accessory.automaticallyAppliesContentInsets = false
+        if #available(macOS 26.1, *) { accessory.preferredScrollEdgeEffectStyle = .soft }
+        accessory.view = NSView()
+        accessory.isHidden = model.workflow == nil
+        previewAccessory = accessory
+        item.addBottomAlignedAccessoryViewController(accessory)
+        lastID = nil
+        refresh()
+    }
     func focusName() { refresh(); editor?.focusName() }
     func canPerform(_ command: WorkspaceCommand) -> Bool { editor?.canPerform(command) ?? false }
     func perform(_ command: WorkspaceCommand) { editor?.perform(command) }
     override func refresh() {
         let current = model.workflow
+        if #available(macOS 26.0, *) {
+            (previewAccessory as? NSSplitViewItemAccessoryViewController)?.isHidden = current == nil
+        }
         if lastID != current?.id || content.subviews.isEmpty {
             editor?.stopObserving()
             editor?.removeFromParent(); editor = nil
             content.subviews.forEach { $0.removeFromSuperview() }
+            previewAccessory?.view.subviews.forEach { $0.removeFromSuperview() }
             lastID = current?.id
             if current != nil {
-                let controller = FlowEditorViewController(model: model); editor = controller
+                let controller = FlowEditorViewController(model: model, footerHost: previewAccessory?.view); editor = controller
                 addChild(controller); NativeUI.pin(controller.view, to: content)
             } else {
                 let title = NativeUI.label("编排一次，自动处理每次请求", size: 20, weight: .semibold)
@@ -368,129 +410,36 @@ import RequestmanCore
     @objc private func changed() { onChange(state == .on) }
 }
 
-@MainActor final class RulesTextArea: NSScrollView, NSTextViewDelegate {
-    let textView: NSTextView
+@MainActor final class RulesTextArea: ActionTextArea {
     private let templateLayout: TemplateLayoutManager?
-    private let roundedInput: Bool
-    var onChange: (String) -> Void
-    init(editable: Bool = true, template: Bool = false, roundedInput: Bool = false, onChange: @escaping (String) -> Void = { _ in }) {
-        self.onChange = onChange
-        self.roundedInput = roundedInput
+    init(editable: Bool = true, template: Bool = false, revealFocus: Bool = false, onChange: @escaping (String) -> Void = { _ in }) {
+        let textView: NSTextView
         if template {
             let storage = NSTextStorage()
             let layout = TemplateLayoutManager()
             let container = NSTextContainer(containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
             storage.addLayoutManager(layout); layout.addTextContainer(container)
             textView = TemplateTextView(frame: .zero, textContainer: container); templateLayout = layout
-        } else { textView = roundedInput ? RulesInputTextView() : RulesEditorTextView(); templateLayout = nil }
-        super.init(frame: .zero)
-        hasVerticalScroller = true; borderType = .bezelBorder; documentView = textView
-        autohidesScrollers = true
-        textView.isRichText = false; textView.isEditable = editable; textView.isSelectable = true
-        textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        textView.isAutomaticQuoteSubstitutionEnabled = false; textView.isAutomaticDashSubstitutionEnabled = false
-        textView.isAutomaticTextReplacementEnabled = false; textView.isAutomaticSpellingCorrectionEnabled = false
-        textView.isHorizontallyResizable = false; textView.isVerticallyResizable = true
-        // A zero-frame NSTextView otherwise inherits the viewport as its maximum height.
-        textView.minSize = .zero
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.autoresizingMask = [.width]; textView.textContainer?.widthTracksTextView = true
-        textView.textContainerInset = NSSize(width: 6, height: 8); textView.delegate = self
-        textView.allowsUndo = true
-        if roundedInput {
-            borderType = .noBorder; drawsBackground = false
-            focusRingType = .exterior; textView.focusRingType = .none
-            contentView.wantsLayer = true
-            contentView.layer?.cornerRadius = 8; contentView.layer?.masksToBounds = true
-            contentView.layer?.borderWidth = 1
-            contentView.layer?.borderColor = NSColor.separatorColor.cgColor
-            (textView as? RulesInputTextView)?.focusChanged = { [weak self] focused in
-                guard let self else { return }
-                needsDisplay = true
-                // NSTextView reveals its text, but the outer form must also reveal the editor's focus ring.
-                if focused, let parent = superview {
-                    parent.scrollToVisible(convert(bounds.insetBy(dx: -6, dy: -6), to: parent))
-                }
-            }
-        }
+        } else { textView = InputTextView(); templateLayout = nil }
+        super.init(textView: textView, editable: editable, revealFocus: revealFocus, onChange: onChange)
+        templateLayout?.horizontalBackgroundOverflow = min(4, textView.textContainerInset.width)
         if template {
             let paragraph = NSMutableParagraphStyle()
             paragraph.minimumLineHeight = 24
             textView.defaultParagraphStyle = paragraph
             textView.typingAttributes[.paragraphStyle] = paragraph
-            wantsLayer = true; layer?.cornerRadius = 8; layer?.masksToBounds = true
-        }
-
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    override func scrollWheel(with event: NSEvent) {
-        // Wrapped editors have no horizontal overflow. If their content fits vertically,
-        // let the surrounding form handle the complete wheel/trackpad event, including momentum.
-        if contentView.documentRect.height <= contentView.bounds.height + 1 {
-            nextResponder?.scrollWheel(with: event)
-        } else {
-            super.scrollWheel(with: event)
         }
     }
-    override var focusRingMaskBounds: NSRect { roundedInput ? bounds.insetBy(dx: 2, dy: 2) : super.focusRingMaskBounds }
-    override func drawFocusRingMask() {
-        guard roundedInput else { super.drawFocusRingMask(); return }
-        NSBezierPath(roundedRect: focusRingMaskBounds, xRadius: 6, yRadius: 6).fill()
-    }
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard roundedInput, window?.isKeyWindow == true, window?.firstResponder === textView else { return }
-        NSGraphicsContext.saveGraphicsState()
-        NSFocusRingPlacement.only.set()
-        drawFocusRingMask()
-        NSGraphicsContext.restoreGraphicsState()
-    }
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        if roundedInput { contentView.layer?.borderColor = NSColor.separatorColor.cgColor }
-    }
-    override func layout() {
-        super.layout()
-        let minimum = NSSize(width: 0, height: max(0, contentSize.height))
-        if textView.minSize != minimum { textView.minSize = minimum }
-    }
-    var string: String {
-        get { textView.string }
-        set { if textView.string != newValue { textView.string = newValue; refreshTokens() } }
-    }
-    private func refreshTokens() {
+    required init?(coder: NSCoder) { nil }
+    override func refreshTextPresentation() {
         templateLayout?.updateTokens(excluding: textView.markedRange())
         if templateLayout != nil { textView.typingAttributes.removeValue(forKey: .kern) }
         textView.needsDisplay = true
     }
-    func textDidChange(_ notification: Notification) { refreshTokens(); onChange(textView.string) }
-
-}
-
-@MainActor class RulesEditorTextView: NSTextView {
-    override func scrollWheel(with event: NSEvent) {
-        // Route before NSTextView applies its own wheel handling to fitting text.
-        if let scrollView = enclosingScrollView { scrollView.scrollWheel(with: event) }
-        else { super.scrollWheel(with: event) }
-    }
-}
-
-@MainActor private final class RulesInputTextView: RulesEditorTextView {
-    var focusChanged: ((Bool) -> Void)?
-    override func becomeFirstResponder() -> Bool {
-        let accepted = super.becomeFirstResponder()
-        if accepted { focusChanged?(true) }
-        return accepted
-    }
-    override func resignFirstResponder() -> Bool {
-        let accepted = super.resignFirstResponder()
-        if accepted { focusChanged?(false) }
-        return accepted
-    }
 }
 
 /// Keep decoration spacing out of the caret position after ordinary text.
-final class TemplateTextView: RulesEditorTextView {
+final class TemplateTextView: InputTextView {
     private func leadingPadding(at index: Int) -> CGFloat {
         (layoutManager as? TemplateLayoutManager)?.leadingPadding(at: index) ?? 0
     }
@@ -562,6 +511,7 @@ final class TemplateLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
         return true
     }
 
+    var horizontalBackgroundOverflow: CGFloat = 0
     private(set) var tokenRanges: [NSRange] = []
     static let expression = try! NSRegularExpression(pattern: #"\{\{[^{}\r\n]+\}\}"#)
     func updateTokens(excluding markedRange: NSRange = NSRange(location: NSNotFound, length: 0)) {
@@ -618,7 +568,11 @@ final class TemplateLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
             let halfHeight = min(max(20, text.height + 4) / 2, text.midY - line.minY, line.maxY - text.midY)
             let mark = NSRect(x: text.minX - 4, y: text.midY - halfHeight,
                               width: text.width + 8, height: halfHeight * 2)
-            let bounds = NSRect(x: 0, y: line.minY, width: container.containerSize.width, height: line.height)
+            // A mark may use the text view's inset so line-start tokens keep their padding
+            // when the text container itself has no extra line-fragment padding.
+            let overflow = self.horizontalBackgroundOverflow
+            let bounds = NSRect(x: -overflow, y: line.minY,
+                                width: container.containerSize.width + overflow * 2, height: line.height)
             result.append(mark.intersection(bounds))
         }
         return result

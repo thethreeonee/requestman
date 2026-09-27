@@ -6,7 +6,7 @@
 
 主要场景是辅助 Chrome Web 开发，通过请求出站与响应回站两条流程执行自动修改、动态取值、脚本、辅助请求、Mock 和可选人工断点。完整范围、执行语义建议、模块选型及验收见 [产品与技术设计草案](ProductDesign.md)。当前已接入原生工作区、HTTP/1.1 显式代理、HTTPS 解密与未配置证书时的 CONNECT 透传。
 
-当前通过系统 HTTP/HTTPS 代理或 Chromium 浏览器显式代理接入，按应用透明接管作为另一接入适配器，复用代理与流程引擎。主导航栏是唯一启动入口，通用设置决定 `CaptureMode.systemProxy`（全局接管）或 `.browser`（仅启动浏览器）。前者修改系统代理，后者只启动回环监听并带参数打开所选浏览器，不读写当前系统代理设置。显式代理不是按进程过滤；捕获启停不修改 Surge 配置和证书信任。用户主动打开 HTTPS 证书设置时，由独立服务生成、安装 CA 并请求当前用户的 SSL 信任授权。
+当前通过系统 HTTP/HTTPS 代理或 Chromium 浏览器显式代理接入，按应用透明接管作为另一接入适配器，复用代理与流程引擎。主导航栏是唯一启动入口，通用设置决定 `CaptureMode.systemProxy`（全局接管）、`.browser`（仅启动浏览器）或 `.proxyOnly`（仅启动代理）。前者修改系统代理，浏览器模式带参数打开所选浏览器，仅启动代理模式等待手动接入，两者不读写当前系统代理设置。默认监听回环，局域网开关可将任一模式的监听范围扩展至 IPv4 所有接口。显式代理不是按进程过滤；捕获启停不修改 Surge 配置和证书信任。用户主动打开 HTTPS 证书设置时，由独立服务生成、安装 CA 并请求当前用户的 SSL 信任授权。
 
 ## 两个客户端
 
@@ -42,21 +42,21 @@ CA 材料和实际信任结果使用最多 5 秒的固定期限缓存，命中�
 
 HTTP/1.1 顺序请求复用下游连接，每条下游最多保留一个同目标、同出口的上游连接，HTTPS 同时复用 TLS 会话。上游主动关闭后，下次请求重新建连；不重试已发送请求。每个事务完成后清空规则匹配、Body 采集器和内存租约，保留独立记录；闲置 30 秒关闭且不生成虚假失败记录，停止监听关闭在用和闲置连接。仍限制最多 256 个下游连接，不支持流水线和跨客户端连接池。 浏览器预连接或请求完成后的空闲 TLS 连接收到 `uncleanShutdown`（未发送 `close_notify`）时只关闭连接，不新增失败 CONNECT；真实握手中断和进行中的请求仍记录失败与不完整 Body。TLS 错误保留 NIOSSL 枚举及底层 BoringSSL 原因，避免 NSError 桥接只显示数字错误码。
 
-主窗口由 `WorkspaceWindowController` 创建 `NSWindow`，直接将 `WorkspaceSplitController` 作为 contentViewController；窗口与分栏尺寸全部由 AppKit 管理。规则组侧栏、主内容和 Inspector 使用保留的 `NSViewController`，交互内容约束到各栏的系统 safe area；macOS 26+ 请求日志的滚动视图延伸到主栏顶部，由系统自动为标题栏和筛选附件留出内容 inset。两侧分别使用 `NSSplitViewItem(sidebarWithViewController:)` 与 `NSSplitViewItem(inspectorWithViewController:)`，启用 `allowsFullHeightLayout` 与窗口 `.fullSizeContentView`，由系统提供贯穿窗口高度的侧栏材质。左栏范围 260–400 pt，初始 320 pt；主内容最小 420 pt；右栏范围 400–760 pt，初始 520 pt。之后由分栏保留用户宽度，拖动分隔线不改变工作区外框。`ObservedViewController` 用 `withObservationTracking` 注册一次性依赖并在变更后重新注册，在主线程更新既有控件；不轮询模型，不因每次输入重建编辑器。窗口工具栏使用独立 `WorkspaceToolbarSnapshot` 跳过相同状态的重复更新。
+主窗口和独立日志窗口分别由 `WorkspaceWindowController` 创建 `NSWindow`，直接将各自固定为 `.rules` / `.requests` 的 `WorkspaceSplitController` 作为 contentViewController；两个窗口共享 `WorkspaceModel` 与 `ExecutionHistoryModel`，保留各自的分栏、详情状态和窗口位置。日志窗口延迟创建并复用，关闭不停止捕获或清空记录；`WorkspaceModel.selection` 作为打开目标窗口的导航请求，经 App delegate 唤起对应窗口，菜单命令按当前 key window 分发，新建规则先唤起主窗口；窗口与分栏尺寸全部由 AppKit 管理。规则组侧栏、主内容和 Inspector 使用保留的 `NSViewController`，交互内容约束到各栏的系统 safe area；macOS 26+ 请求日志的滚动视图延伸到主栏顶部，由系统自动为标题栏和筛选附件留出内容 inset。规则编辑页同样延伸到标题栏背后，并铺满到底部预览附件栏下方；`RulesViewController` 持有底部原生附件，`FlowEditorViewController` 将预览按钮放入附件内容视图，切换规则时替换内容，无规则时隐藏附件。顶部沿用工具栏默认滚动边缘，底部在 macOS 26.1+ 使用 `.soft`；系统内容 inset 保持首尾字段可达。两侧均使用 `NSSplitViewItem(sidebarWithViewController:)`，启用 `allowsFullHeightLayout` 与窗口 `.fullSizeContentView`，由系统提供贯穿窗口高度的侧栏材质。右侧工具栏使用自定义标识的原生 `NSTrackingSeparatorToolbarItem` 明确跟踪第二条分隔线，避免系统预留 Inspector 标识按角色定位。左右工具栏按钮分别直接切换对应分栏的 `isCollapsed`，通过原生 animator 保留动画，不依赖按角色查找分栏的系统 toggle 实现。左栏范围 260–400 pt，初始 320 pt；主内容最小 420 pt；右栏范围 400–760 pt，初始 520 pt。之后由分栏保留用户宽度，拖动分隔线不改变工作区外框。`ObservedViewController` 用 `withObservationTracking` 注册一次性依赖并在变更后重新注册，在主线程更新既有控件；不轮询模型，不因每次输入重建编辑器。窗口工具栏使用独立 `WorkspaceToolbarSnapshot` 跳过相同状态的重复更新。
 
 规则组树使用 `ProjectOutlineView` 原生选择与展开事件，`RulesSidebarCell` 分别约束箭头后的图标、名称、数量和固定操作栏，文件夹与规则同为 30 pt，名称对齐到同一竖线。底部恢复左加号、右搜索的原有布局。单击选择、双击文件夹整行展开收起；双击使用原生 `doubleAction`；鼠标和键盘展开同步更新原生状态，再用显式 Core Animation 处理行位移、淡入淡出与固定 SF Symbol 的居中箭头旋转，减少动态效果时直接切换。过时动画按代次取消，结束、reload 和脱离窗口时清理快照。步骤列表复用未变更的卡片并保留 `NSBox` 自有内容视图，切换规则时停止旧编辑器观察。`ProjectIconMenu` 以原生 palette 菜单组成六列图标网格，仅展示预览并保留辅助功能名称。`ProjectSidebarRowView` 仅为用户指定的悬停反馈增加浅灰装饰层，用 `CABasicAnimation` 动画 `opacity`（移入 120 ms、移出 160 ms）；model layer 保存终值、presentation layer 用于中途反转，选中、移除与窗口失焦时清理反馈，颜色随有效外观更新。选择、焦点、展开箭头和右键菜单继续由 AppKit 提供。设计与验收范围见 [规则组侧栏](Design/project-sidebar.md)。
 
-主窗口仅安装一条 `.unified` 原生 `NSToolbar`，工作区切换直接使用 `NSSegmentedControl`。`WorkspaceSettingsWindowController` 持有独立设置窗口，使用 `ToolbarSectionControl` 原生分段控件切换“通用 / 环境管理”，保留 `.large` 尺寸与系统胶囊形状。两个窗口隐藏标题文字，设置内容固定 800 × 540 pt，切换页面不改变窗口大小。通用页在同一个 `NSScrollView` 中用系统 `NSBox` 分组，收纳启动方式、浏览器、本地代理、上游代理、协议支持和 HTTPS 证书。浏览器使用带应用图标的 `NSPopUpButton`；设置内的环境列表与编辑页采用 `NSSplitViewController`、`NSTableView` 和 AppKit 字段。设置不另装第二条导航栏。
+请求修改和日志窗口各安装一条 `.unified` 原生 `NSToolbar`，移除请求修改 / 请求日志分段切换。两者分别使用 `Requestman.RulesToolbar` 与 `Requestman.RequestLogsToolbar` 标识；AppKit 会在同标识工具栏之间同步条目和显示状态，即使关闭 `autosavesConfiguration` 也会同步，因此不同窗口布局不能共用标识。`WorkspaceSettingsWindowController` 持有独立设置窗口，使用 `ToolbarSectionControl` 原生分段控件切换“通用 / 环境管理”，保留 `.large` 尺寸与系统胶囊形状。各窗口隐藏标题文字，设置内容固定 800 × 540 pt，切换页面不改变窗口大小。通用页在同一个 `NSScrollView` 中用系统 `NSBox` 分组，收纳启动方式、浏览器、本地代理、上游代理、协议支持和 HTTPS 证书。浏览器使用带应用图标的 `NSPopUpButton`；设置内的环境列表与编辑页采用 `NSSplitViewController`、`NSTableView` 和 AppKit 字段。设置不另装第二条导航栏。
 
 请求日志使用原生 `NSTableView`，按“时间 / 状态码 / 请求 / 命中的规则 / 环境 / 耗时”展示。行高 56 pt，主文字 13 pt。请求列将有同色边框和浅背景的方法标签与 URL 单行居中，仅失败时显示第二行说明；列表与详情共用 `RequestMethodTag`，按与实际文字相同配置的 `NSTextFieldCell.cellSize` 计算完整宽度，包含系统截断留白；请求列的最小宽度沿用同一测量，优先完整展示方法名。状态码按 1xx/2xx/3xx/4xx–5xx 分别使用系统蓝/绿/橙/红色。规则列上行以次级颜色展示规则组名称，下行以主颜色按捕获的工作流 ID 展示当前名称，改名同步刷新、删除后回退到捕获名称；同一工作流的多个执行步骤不计作多条命中，不显示 +N，不再单设规则组列。列宽支持原生表头拖动，按稳定列标识保存到 `UserDefaults`（`requestLog.columnWidths.v1`），重新打开页面或 App 时恢复。通过 `NSTableColumn.width` 的变化在原生鼠标跟踪过程中同步调整相邻列及表格边界，松手通知仅保存最终列宽，窗口或详情栏改变可用宽度时按保存比例适配并保留最小宽度；记录刷新不重置列宽，自动适配不覆盖偏好。保持无横向滚动、禁止列重排；耗时固定在最右列，标题与数值右对齐。长文本截断并提供完整提示。
 
-macOS 26+ 主内容栏启用 `allowsFullHeightLayout`，请求日志筛选栏与暂停/丢弃状态使用 `NSSplitViewItemAccessoryViewController` 顶部附件；macOS 26.1+ 指定 `.soft` 滚动边缘样式。原生 `NSScrollView` 自动避让附件和标题栏，表头保持在筛选栏下方，滚动内容延伸到两层顶部栏背后；附件仅在日志页挂载，切回请求修改时从共享分栏移除并恢复安全区布局，返回日志页复用原附件与筛选条件。macOS 14/15 保留内联筛选栏。
+macOS 26+ 主内容栏启用 `allowsFullHeightLayout`，请求日志筛选栏与暂停/丢弃状态使用 `NSSplitViewItemAccessoryViewController` 顶部附件；macOS 26.1+ 指定 `.soft` 滚动边缘样式。原生 `NSScrollView` 自动避让附件和标题栏，表头保持在筛选栏下方，滚动内容延伸到两层顶部栏背后；附件仅在独立日志窗口挂载；主窗口保持规则编辑布局，重开日志窗口保留附件和筛选条件。macOS 14/15 保留内联筛选栏。
 
-`RequestFilterControls` 在列表顶部提供暂停/清空、资源类型和表格上方展开的筛选表单，常规宽度单行显示，窄窗口将全部类型分段独立放在第二行。搜索使用 `WorkspaceSplitController` 管理的原生 `NSSearchToolbarItem`，位于标题栏环境选择右侧，仅请求日志页显示；通过 `WorkspaceToolbarSnapshot` 同步 `history.filter.search`，支持输入、清除、表单重置与切换页签保留条件。九项资源类型以原生胶囊分段控件平铺，macOS 26+ 采用 `.extraLarge`、旧系统采用 `.large`，直接按固有尺寸布局，两侧按钮匹配其原生高度；frame 与 bounds 保持相同尺寸，不缩放文字；每段增加 16 pt 横向留白，始终保留完整自然宽度；筛选入口使用 `line.3.horizontal.decrease` 原生玻璃圆形按钮，不显示“更多”或类型下拉菜单。请求行右键“Mock 当前请求”冻结点击时的完整 `CaptureRecord`，交给 `WorkspaceModel.addMockWorkflow(from:)` 在后台通过 `CapturedMockWorkflow` 和既有正文解码器生成规则。匹配原始方法与完整 URL，请求阶段预填原始方法、URL、Body 和 Header；生成的 Header 操作统一为 `.modify`，只修改已有同名项，不生成添加、覆盖、删除项或静态 Mock。有完整上游响应时，响应阶段从 `originalStatus`、`receivedBody` 和 `receivedHeaders` 依次预填状态码、Body、Header，缺少完整原始响应则留空；创建后插入首个命中规则组的规则首位并跳转选中。原始请求完整性检查在菜单和生成器两层执行，不依赖响应成功或完整；详细数据与不可用边界见 [macOS README](../README.md#从日志创建-mock)。`ModificationStep.literalValues` 缺省继续解析模板，捕获生成步骤设为字面值；`bodyEncoding` 缺省文本，二进制使用 Base64，执行时解码为 `HTTPMessageDraft.replacementBodyData`；未解码的原始压缩正文同时保存 `bodyContentEncoding`，文本 Body 步骤发送 Base64 原始实体字节时恢复该编码，使 Header 的“修改”不会因编码已被清除而跳过。代理以 `replacementBytes` 统一发送文本与二进制，长度按字节计算，脚本编辑正文会清除旧二进制替换。`ExecutionHistoryModel.filter` 持有 `CaptureRecordFilter`，Core 统一处理搜索、MIME/扩展名分类、最终响应状态码、原始 URL 包含、原始域名精确匹配、规则组/环境/结果/方法以及原始/修改后请求 Header 条件。`CaptureFilterGroup` 递归组合普通条件和子组，每组独立选择全部／任一；URL、域名、方法与状态码用空格／逗号分隔多个值，前导减号排除。Header 每条独立选择来源并保留原文值，组间共享三值逻辑，缺失证据不因反向匹配产生假命中。筛选表单随顶部附件高度展开，超过上限内部滚动；收起不重置条件，输入更新保持编辑器。`ModificationExecutionEngine.execute` 每步成功后回调，代理记录有界 `CaptureMatchedRule` 快照；未执行、禁用和失败步骤不混入成功规则。具体语义及验收见 [请求日志筛选设计](Design/request-log-filters.md)。
+`RequestFilterControls` 在列表顶部提供暂停/清空、资源类型和表格上方展开的筛选表单，常规宽度单行显示，窄窗口将全部类型分段独立放在第二行。搜索使用 `WorkspaceSplitController` 管理的原生 `NSSearchToolbarItem`，位于主内容区标题栏右侧，仅请求日志页显示；通过 `WorkspaceToolbarSnapshot` 同步 `history.filter.search`，支持输入、清除、表单重置与切换页签保留条件。九项资源类型以原生胶囊分段控件平铺，macOS 26+ 采用 `.extraLarge`、旧系统采用 `.large`，直接按固有尺寸布局，两侧按钮匹配其原生高度；frame 与 bounds 保持相同尺寸，不缩放文字；每段增加 16 pt 横向留白，始终保留完整自然宽度；筛选入口使用 `line.3.horizontal.decrease` 原生玻璃圆形按钮，不显示“更多”或类型下拉菜单。请求行右键“Mock 当前请求”冻结点击时的完整 `CaptureRecord`，交给 `WorkspaceModel.addMockWorkflow(from:)` 在后台通过 `CapturedMockWorkflow` 和既有正文解码器生成规则。匹配原始方法与完整 URL，请求阶段预填原始方法、URL、Body 和 Header；生成的 Header 操作统一为 `.modify`，只修改已有同名项，不生成添加、覆盖、删除项或静态 Mock。有完整上游响应时，响应阶段从 `originalStatus`、`receivedBody` 和 `receivedHeaders` 依次预填状态码、Body、Header，缺少完整原始响应则留空；创建后插入首个命中规则组的规则首位并跳转选中。原始请求完整性检查在菜单和生成器两层执行，不依赖响应成功或完整；详细数据与不可用边界见 [macOS README](../README.md#从日志创建-mock)。`ModificationStep.literalValues` 缺省继续解析模板，捕获生成步骤设为字面值；`bodyEncoding` 缺省文本，二进制使用 Base64，执行时解码为 `HTTPMessageDraft.replacementBodyData`；未解码的原始压缩正文同时保存 `bodyContentEncoding`，文本 Body 步骤发送 Base64 原始实体字节时恢复该编码，使 Header 的“修改”不会因编码已被清除而跳过。代理以 `replacementBytes` 统一发送文本与二进制，长度按字节计算，脚本编辑正文会清除旧二进制替换。`ExecutionHistoryModel.filter` 持有 `CaptureRecordFilter`，Core 统一处理搜索、MIME/扩展名分类、最终响应状态码、原始 URL 包含、原始域名精确匹配、规则组/环境/结果/方法以及原始/修改后请求 Header 条件。`CaptureFilterGroup` 递归组合普通条件和子组，每组独立选择全部／任一；URL、域名、方法与状态码用空格／逗号分隔多个值，前导减号排除。Header 每条独立选择来源并保留原文值，组间共享三值逻辑，缺失证据不因反向匹配产生假命中。筛选表单随顶部附件高度展开，超过上限内部滚动；收起不重置条件，输入更新保持编辑器。`ModificationExecutionEngine.execute` 每步成功后回调，代理记录有界 `CaptureMatchedRule` 快照；未执行、禁用和失败步骤不混入成功规则。具体语义及验收见 [请求日志筛选设计](Design/request-log-filters.md)。
 
-请求日志页使用原生 `NSToolbarItem` 作为唯一详情开关，创建时显式连接分栏控制器的 `toggleInspector` 动作；左栏按钮同样连接 `toggleSidebar`。这些工具栏项使用应用自己的标识，保持 `view = nil`，由 AppKit 显示 SF Symbol 和默认按钮外观，不依赖当前焦点转发动作。详情按钮在展开和收起后均保留，未选中有效记录时禁用；请求修改页复用该项展开步骤详情，详情标题与选择状态随页面切换。`NSTrackingSeparatorToolbarItem` 跟随右侧分栏边界，其后仅在展开时显示左对齐的“请求详情”标题；标题使用原生 `NSTextField`，字号取 `NSFont.preferredFont(forTextStyle: .title2).pointSize`，字重为 `.semibold`，工具栏项 `isBordered = false`，不额外添加玻璃背景。`RequestInspectorViewController` 不另建工具栏，`RequestsViewController` 不提供第二个详情按钮。选中记录自动展开，手动收起保留选择及 Tab 状态；原生 `isCollapsed` 是可见性的唯一来源，KVO 将其同步到详情的 `isPresented`，关闭隐藏内容及 Popover 的交互而保留宿主。清空或记录淘汰关闭详情，进入请求日志页仍从未选择状态开始。整个窗口与详情均不设底部状态栏；详情上方保留方向、数量、“仅显示变更”和内容提示，数据区域延伸至底部操作区上方。控件层依据 [Apple AppKit Inspector 与工具栏说明](https://developer.apple.com/videos/play/wwdc2023/10054/)，此次原生窗口布局仍待真实 App 运行验收。
+请求日志页使用原生 `NSToolbarItem` 作为唯一详情开关，创建时显式连接分栏控制器的 `toggleDetailsPane` 动作，再由其调用 `toggleInspector`；左栏按钮同样连接 `toggleSidebar`。这些工具栏项使用应用自己的标识，保持 `view = nil`，由 AppKit 显示 SF Symbol 和默认按钮外观，不依赖当前焦点转发动作。详情按钮在展开和收起后均保留；工具栏通过 `NSToolbarItemValidation` 显式校验，避免系统 Inspector 动作按分栏角色判断可用性。已展开时始终允许收起，收起且未选中有效记录时禁用；请求修改页复用该项展开步骤详情，两个窗口各自保留详情标题与选择状态。右侧 `NSTrackingSeparatorToolbarItem` 仅在右栏展开时安装并跟随实际分栏边界，收起后移除，避免按钮左侧残留竖线；其后仅在展开时显示左对齐的“请求详情”标题；标题使用原生 `NSTextField`，字号取 `NSFont.preferredFont(forTextStyle: .title2).pointSize`，字重为 `.semibold`，工具栏项 `isBordered = false`，不额外添加玻璃背景。`RequestInspectorViewController` 不另建工具栏，`RequestsViewController` 不提供第二个详情按钮。选中记录自动展开，手动收起保留选择及 Tab 状态；原生 `isCollapsed` 是可见性的唯一来源，KVO 将其同步到详情的 `isPresented`，关闭隐藏内容及 Popover 的交互而保留宿主。清空或记录淘汰关闭详情，首次打开日志窗口且未选择记录时保持详情收起；重新打开保留原选择。整个窗口与详情均不设底部状态栏；详情上方保留方向、数量、“仅显示变更”和内容提示，数据区域延伸至底部操作区上方。控件层依据 [Apple AppKit Inspector 与工具栏说明](https://developer.apple.com/videos/play/wwdc2023/10054/)，此次原生窗口布局仍待真实 App 运行验收。
 
-捕获按钮紧邻环境选择左侧，两者在标题栏中一起居中。捕获按钮使用原生 `NSButton` 的 `.imageOnly` 布局，显示绿色播放或红色停止图标；可见标题保持为空，当前启动方式与状态说明通过 `toolTip` 和辅助功能标签提供。状态刷新不向 `title` 写入文本，以免 AppKit 自动切换为图文重叠布局。
+环境选择位于主窗口左侧栏工具栏内，顺序为侧栏开关、环境选择、侧栏跟踪分隔线；环境按钮宽度为 90–140 pt，长名称截断。`eyeglasses` 眼镜按钮位于主内容区右上角，右侧栏收起时通过原生工具栏间隔与右侧按钮分组隔开，展开后仍保留在主内容区、实际分栏边界左侧；它与 ⌘2 打开或唤起独立日志窗口，⌘1 唤起请求修改主窗口；日志详情跳转规则和 Mock 创建同样唤起主窗口，打开日志文件和重放结果定位到日志窗口。环境切换快捷键仅在主窗口可用；请求日志通过筛选条件按环境查看记录。捕获按钮位于主内容区工具栏左端，移除居中标识和前置弹性空白。捕获按钮使用原生 `NSButton` 的 `.imageOnly` 布局，显示绿色播放或红色停止图标；可见标题保持为空，当前启动方式与状态说明通过 `toolTip` 和辅助功能标签提供。状态刷新不向 `title` 写入文本，以免 AppKit 自动切换为图文重叠布局。
 
 `check-workspace-sidebar.py` 编译实际工作区原生壳与模型、内容替身，在不显示的 `NSWindow` 中回归分栏布局、工具栏和状态同步，包括捕获按钮在浏览器名称、启动/停止及禁用状态变化后的宽度、图标布局与动作，以及纯 AppKit 窗口下在 1100/1440/1800 pt 窗口中调整左右分隔线后，工作区仍贴住窗口左右边缘、窗口大小保持不变和可见栏最小宽度。它与完整 App 的外观、鼠标交互和真实数据验收分别报告，不能以隐藏窗口回归代替视觉验收。
 
@@ -190,9 +190,11 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 `WorkspaceArchiveTests` 覆盖完整内容往返、三种导出范围、重复追加和 ID 隔离、环境覆盖、未知版本/坏文件拒绝、旧规则组默认值与规则组禁用匹配。规则 UI 检查覆盖行高、隐藏副标题、空白区/箭头整行点击与菜单动作；请求列表检查覆盖已存在表格的列宽恢复。隐藏窗口回归与完整 App 的文件面板和视觉验收分别报告。
 
-带边框的单行表单输入框由 `ActionTextField` 统一使用原生 `.squareBezel`、浅色控件外观和白底黑字；`HeaderNameField` 可编辑组合框不绘制背景，不固定外观和文字颜色，跟随系统原生样式。不添加背景容器或自绘控件。普通单行输入框在浅色和深色窗口中均保持白色输入区域，请求名称平时显示无边框标题，仅在编辑时显示原生圆角输入框；按系统文字内边距补偿布局，使两种状态的文字都与下方条件标题左对齐。文字布局宽度优先为 450 pt、窄窗口可收缩，编辑框高度至少 40 pt，跟随窗口外观；编辑前后保留文字位置；单行文字与原生 field editor 使用同一块按字体实际行高垂直居中的区域。规则隐藏窗口回归对匹配值、查询参数、URL 查找、状态码、延迟及脚本备注进行聚焦前后像素与输入检查，Header 组合框保留编辑行为检查。
+带边框的单行表单输入框由 `ActionTextField` 统一使用原生 `.squareBezel`、浅色控件外观和白底黑字；`HeaderNameField` 可编辑组合框不绘制背景，不固定外观和文字颜色，跟随系统原生样式。不添加背景容器或自绘控件。JSON 路径框保留系统原生凹槽边框，跟随所在窗口的外观并使用系统文字与背景颜色，不强制白底。普通单行表单输入框与 Header 组合框统一使用 32 pt 固有高度；文字与 field editor 垂直居中，标题编辑保留独立布局。请求名称平时显示无边框标题，仅在编辑时显示原生圆角输入框；按系统文字内边距补偿布局，使两种状态的文字都与下方条件标题左对齐。文字布局宽度优先为 450 pt、窄窗口可收缩，编辑框高度至少 40 pt，跟随窗口外观；编辑前后保留文字位置；单行文字与原生 field editor 使用同一块按字体实际行高垂直居中的区域。规则隐藏窗口回归对匹配值、查询参数、URL 查找、状态码、延迟及脚本备注进行聚焦前后像素与输入检查，Header 组合框和 JSON 路径框保留编辑行为检查，不断言白色填充；Inspector 字段放入真实分栏层级检查，缓存像素检查不能替代屏幕合成效果验收。
 
 ## 工作区键盘命令
+
+请求修改页的“预览流程”固定在主栏底部左侧，独立于正文滚动区；侧栏添加与搜索、主栏预览、步骤详情添加与删除使用 36 pt 高的底部操作行和 8 pt 底部留白，按钮垂直居中对齐。
 
 通用设置在全部分组下方提供“清除工作区…”原生按钮，使用 `NSAlert` Sheet 二次确认，默认按钮为“取消”。`canClearWorkspace` 允许已加载或读取失败后的工作区执行清除，首次加载及操作进行中禁用；读取失败后的清除若再失败，继续禁用编辑且不自动保存未加载的空快照。`WorkspaceModel.clearWorkspace` 与捕获启停、导入和重配互斥，暂时禁用工作区编辑；等待已开始的自动保存结束后，先停止捕获并完成系统代理恢复，再保存空 `WorkspaceDocument`，成功后才发布模型并清空日志、选择、筛选及暂停状态。失败保留配置和日志，已停止的捕获不自动重启。清除不删除证书、浏览器数据或 UserDefaults；工作区代次防止之前的异步 Mock 创建结果重新插入规则。`check-settings-ui.py` 覆盖按钮位置、取消/确认以及使用真实宿主模型和临时文件的失败、持久化与过时自动保存检查，不操作真实代理和证书。
 
@@ -206,9 +208,9 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 `ModificationStep.headers` 为统一“修改 Header”步骤保存可增删条目及各自的 `add` / `modify` / `remove` / `set` 操作，同一步可按顺序添加、修改、删除及添加或覆盖。添加始终追加，修改只更新已有同名项的值并保留其名称、数量和顺序；没有匹配时跳过。`set` 在详情中以“添加或覆盖”提供选择，先移除所有同名项再添加新值，无匹配时直接添加；旧配置保留原有语义；Header 条目下方不展示操作说明或旧配置兼容说明。旧条目缺少操作时按 `setHeader` / `removeHeader` 类型读取，缺省数组时读取旧 `name/value`；显式空数组表示不操作。`HeaderProcessor` 在整组解析与校验通过后才应用，保证后续条目失败不会留下半组修改。删除只校验名称；删除和未匹配的修改忽略保存的值。编辑器逐条提供原生修改方法下拉框，删除时隐藏值、切回保留值；添加菜单仅保留统一入口。区块显式约束内容边距，滚动文档固定顶部与水平起点。`$env.` 是新的环境引用前缀，旧 `env.` 保持兼容，单次替换语义不变。
 
-步骤 Inspector 在 macOS 26+ 使用安装到右侧 `NSSplitViewItem` 的顶部、底部 `NSSplitViewItemAccessoryViewController` 承载标题和 footer（26.1+ 的边缘样式为 `.soft`），正文滚动视图铺满面板，系统内容 inset 保证首尾字段可达。footer 无分割线；附件栏随选中步骤和页面可见性隐藏，旧系统使用无分割线的固定布局。配置表单仅在内容超出可见高度时滚动，滚动条自动隐藏，外层表单关闭弹性回弹；底部移除排序按钮，红色删除按钮使用 transient `NSPopover` 确认，并检查原步骤、工作流和阶段仍匹配。Header、查询参数与 URL 模板文本继续使用原生 `NSTextView` 的纯文本编辑、撤销和复制；`TemplateLayoutManager` 只绘制完整表达式的浅蓝圆角背景和文字颜色，值编辑器裁切为 8 pt 圆角。脚本编辑器不启用模板标记。内置变量与格式见[内置变量](Design/request-modification.md#内置变量)。`WorkflowTemplateContext` 在代理匹配原始请求后生成时间、随机值和原始请求快照，流式执行与脚本后台执行显式传递同一 Sendable 值；本地预览同样共享上下文。响应状态码在响应流程入口固定，Mock 使用本地生成状态码。模板标记按 Core Text 的实际字形轮廓垂直居中，左右扩展 4 pt，背景围绕文字中心对称限制在实际行高内；排版基线居中，24 pt 行高为相邻 20 pt 标记保留至少 4 pt 间隔，短值编辑器可完整显示两行。
+步骤 Inspector 在 macOS 26+ 使用安装到右侧 `NSSplitViewItem` 的底部 `NSSplitViewItemAccessoryViewController` 承载 footer（26.1+ 的边缘样式为 `.soft`），正文滚动视图铺满面板，系统内容 inset 保证首尾字段可达。footer 无分割线；附件栏随选中步骤和页面可见性隐藏，旧系统使用无分割线的固定布局。配置表单仅在内容超出可见高度时滚动，滚动条自动隐藏，外层表单关闭弹性回弹；底部移除排序按钮，红色删除按钮使用 transient `NSPopover` 确认，并检查原步骤、工作流和阶段仍匹配。Header、查询参数与 URL 模板文本继续使用原生 `NSTextView` 的纯文本编辑、撤销和复制；`TemplateLayoutManager` 只绘制完整表达式的浅蓝圆角背景和文字颜色，值编辑器使用 `NSScrollView.borderType = .bezelBorder`和系统文本背景色，边缘由 AppKit 绘制，不设置图层圆角或自绘焦点框；当前系统原生多行边框为直角，不保证与单行框的圆角相同。脚本编辑器不启用模板标记。内置变量与格式见[内置变量](Design/request-modification.md#内置变量)。`WorkflowTemplateContext` 在代理匹配原始请求后生成时间、随机值和原始请求快照，流式执行与脚本后台执行显式传递同一 Sendable 值；本地预览同样共享上下文。响应状态码在响应流程入口固定，Mock 使用本地生成状态码。模板标记按 Core Text 的实际字形轮廓垂直居中，左右扩展 4 pt，背景围绕文字中心对称限制在实际行高内；排版基线居中，24 pt 行高为相邻 20 pt 标记保留至少 4 pt 间隔，短值编辑器可完整显示两行。
 
-步骤类型说明位于 Inspector 标题下方；每个 Header 使用独立 `NSBox`，添加按钮固定在 footer 左侧；它与所有步骤 footer 右侧的删除按钮使用原生 `.glass` 样式与 `.capsule` 形状（macOS 26+），使用系统 `large` 控件尺寸。Header、查询参数操作与 URL 字符串替换配置区块右上角的移除按钮统一使用 24 pt 原生圆形减号按钮，保留删除提示与辅助功能名称。`WorkspaceSplitController` 在步骤 Inspector 的收起按钮左侧提供独立原生玻璃 info 按钮，由 `TemplateValuesViewController` 在 Popover 内展示内置变量和当前环境变量名称。原生复制按钮按行悬停淡入淡出，键盘焦点与减少动态效果均有替代行为。`TemplateLayoutManager` 用仅影响排版的字距属性为变量与普通文本保留实际空隙，不修改底层字符串。
+步骤图标和名称位于窗口工具栏原“步骤详情”位置，下方显示不超过 25 字的类型说明，替代阶段与序号；主副标题间距为 4 pt，原生启用开关使用 `.small` 尺寸，位于收起按钮左侧；开关左侧以 11 pt 次要文字显示“已启用 / 已停用”，间隔 6 pt，随当前步骤状态同步。顶部与左侧栏一样沿用原生工具栏及全高内容布局，由 AppKit 管理默认滚动边缘，不安装顶部附件或显式覆盖边缘样式；正文不重复标题与说明；每个 Header 使用独立 `NSBox`，添加按钮固定在 footer 左侧；它与所有步骤 footer 右侧的删除按钮使用原生 `.glass` 样式与 `.capsule` 形状（macOS 26+），使用系统 `large` 控件尺寸。Header、查询参数操作与 URL 字符串替换配置区块右上角的移除按钮统一使用 24 pt 原生圆形减号按钮，保留删除提示与辅助功能名称。`StepInspectorViewController` 在底部左侧添加按钮右边提供独立的原生圆形 info 按钮，两个按钮间保留 12 pt 空隙；没有添加操作的步骤仍在左下角显示 info。按钮使用自身的系统样式，不使用共享玻璃容器。`TemplateValuesViewController` 在按钮上方的 Popover 内展示内置变量和当前环境变量名称；重建表单、切换步骤、收起侧栏或关闭窗口时关闭弹层。原生复制按钮按行悬停淡入淡出，键盘焦点与减少动态效果均有替代行为。`TemplateLayoutManager` 用仅影响排版的字距属性为变量与普通文本保留实际空隙，不修改底层字符串。
 
 环境管理首组使用“名称”标题和单个输入框，环境切换保留在主窗口。变量行提供字符串、数值、布尔、数组、对象类型；`NamedValue.type` 持久化类型，旧配置缺少类型时默认为字符串。非字符串值按 JSON 格式校验，无效编辑保留为当前表单草稿并显示错误，合法后才保存。模板按文本插入变量值；代理、流程预览和脚本试运行传递同一环境快照的类型，脚本 `env` 将非字符串解析为对应 JavaScript 值并递归冻结。
 
@@ -218,7 +220,7 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 代理在 CONNECT 协议识别后读取最新工作区范围，只有 TLS 且范围命中时才调用证书提供方；未命中直接沿既有 `connectOpaqueTunnel` 路径转发，不读取 CA、不签发叶证书，也不进入 HTTP 规则与内容采集。证书不可用仍沿原有透传或错误路径处理，普通 HTTP 与 CONNECT 内明文 HTTP 的既有行为不变。范围通过原工作区保存/更新通道应用，不属于需重配监听的 `ExplicitProxyConfiguration`，现有连接保持原模式。全量归档包含该配置，规则组/请求归档合并不覆盖当前配置。
 
-验证覆盖旧工作区解码、保存与归档、域名边界、空列表和全部开关；本地 TCP/TLS 测试通过客户端仅信任预期签发方确认透传没有 MITM，并检查证书提供方调用次数、规则是否执行、日志内容以及 HTTP 上游串联。设置采用原生 `NSSwitch` 与 `NSTextView`；域名输入区裁切为 8 pt 圆角，文本未超出可见高度时将滚轮事件传给外层设置页，超出时保留内部滚动。开启全部解密或工作区不可编辑时，域名输入区禁用编辑与选择、取消焦点，并使用系统禁用文字色，并在文本背景色中混入 10% 标签色形成随明暗外观变化的不透明灰底；避免窗口背景色与输入背景色同为纯白时没有禁用区别。隐藏窗口检查覆盖开关、有效输入、错误草稿、导入刷新及短文本/长文本/缩短后的滚轮分发；不等同于完整 App 的浏览器运行验收。
+验证覆盖旧工作区解码、保存与归档、域名边界、空列表和全部开关；本地 TCP/TLS 测试通过客户端仅信任预期签发方确认透传没有 MITM，并检查证书提供方调用次数、规则是否执行、日志内容以及 HTTP 上游串联。设置采用原生 `NSSwitch` 与 `NSTextView`；域名输入区使用原生 `.bezelBorder`，文本未超出可见高度时将滚轮事件传给外层设置页，超出时保留内部滚动。开启全部解密或工作区不可编辑时，域名输入区禁用编辑与选择、取消焦点，使用系统禁用文字色与 `.controlBackgroundColor`，不自行混合背景颜色。隐藏窗口检查覆盖开关、有效输入、错误草稿、导入刷新及短文本/长文本/缩短后的滚轮分发；不等同于完整 App 的浏览器运行验收。
 
 ## 本地 Body 文件映射
 
@@ -226,7 +228,7 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 ## 独立代码编辑器
 
-`Packages/RequestmanEditor` 由 Body 与 JavaScript 表单共用。文本编辑、布局和撤销使用 CodeEditTextView 0.12.1；语法颜色由 HighlighterSwift 3.1.0 在独立 actor 中计算，80 ms 合并输入，回到主线程前检查文本和版本，忽略过时结果与输入法组字期。仅更新颜色属性，不重写正文、选择或撤销记录；明暗主题使用 atom-one-light / atom-one-dark。行号复用 CodeEditSourceEditor 0.15.2 的 MIT GutterView，移除折叠和控制器依赖，直接使用同一个 TextLayoutManager 的行几何；不引入其 SwiftUI 界面。正文与行号共用 8 pt 外层裁切。短文本把滚轮传给外层表单，长文本保留内部滚动。
+`Packages/RequestmanEditor` 由 Body 与 JavaScript 表单共用。文本编辑、布局和撤销使用 CodeEditTextView 0.12.1；语法颜色由 HighlighterSwift 3.1.0 在独立 actor 中计算，80 ms 合并输入，回到主线程前检查文本和版本，忽略过时结果与输入法组字期。仅更新颜色属性，不重写正文、选择或撤销记录；明暗主题使用 atom-one-light / atom-one-dark。行号复用 CodeEditSourceEditor 0.15.2 的 MIT GutterView，移除折叠和控制器依赖，直接使用同一个 TextLayoutManager 的行几何；不引入其 SwiftUI 界面。正文与行号共用原生滚动视图的 `.bezelBorder` 和系统文本背景色，不设置额外圆角裁切。短文本把滚轮传给外层表单，长文本保留内部滚动。
 
 Body 解析模板开启时，完整表达式用浅色背景标识；字面值和 Base64 不标识模板。格式化继续使用 BodyJSONPresentation 保留数值原始拼写和模板，通过编辑器的替换接口形成可撤销操作。Header 等普通模板字段仍用 RulesTextArea；移除旧 BodyLineRuler 与 JavaScriptSyntax。依赖许可证随编辑器资源包提供，来源与改动见 [编辑器说明](../Packages/RequestmanEditor/README.md)。
 
@@ -246,3 +248,34 @@ Body 解析模板开启时，完整表达式用浅色背景标识；字面值和
 手动重放的记录绕过日志暂停，普通捕获仍暂停；清空记录继续通过代次隔离阻止旧连接重新出现在日志。发送时定位新记录，当前筛选临时放行该记录，下一次修改筛选即结束放行，不改写筛选条件。日志顶部保留最近重放的状态、查看结果与取消按钮；每条活动重放的右键和详情菜单可独立取消。列表与详情显示重放状态，来源按钮可定位原请求；原记录已清空或淘汰时禁用来源入口。
 
 WebSocket、加密隧道、未完整采集的请求及 CONNECT/TRACE 不提供 HTTP 重放；停止捕获或状态切换期间仅禁用直接重放；“重新发送请求…”仍可打开编辑窗口，实际发送时重新检查捕获状态，未启动时在窗口内提示并保留编辑内容。发送失败走工作区错误提示，代理执行和上游错误记录到新日志。
+
+## 请求日志文件（2026-09-27）
+
+`RequestLogArchive` 提供版本化 UTF-8 JSON 日志，`CaptureRecord` 的 Codable 保存消息与执行元数据，Body 明确区分文本和 Base64；流存储由串行队列冻结边界、独立读取句柄导出，并恢复为供详情分页读取的临时存储。正文完整性、活动连接状态和重放来源均保留。文件写入在后台逐条编码，完成后通过同目录原子替换发布；导入完整校验后才发布。
+
+`RequestLogTransfer` 提供原生保存/打开面板，菜单保存只取 `ExecutionHistoryModel.recordsForSaving`，单条右键冻结所指记录。`ExecutionHistoryModel` 分离实时历史与打开文件，保留并恢复实时选择和筛选；文件记录不会被实时快照合并或淘汰。切换文件代次使详情重建载荷，避免相同请求 ID 的旧缓存。重放返回实时历史，文件中的活动重放不能取消真实连接。文件不携带规则配置、不自动触发网络动作。格式与交互见[保存日志](Design/saved-request-logs.md)。
+
+
+## JSON 局部修改
+
+请求和响应流程共用 `modifyJSON` / `JSONBodyProcessor`，有条目时声明完整 Body 和后台执行需求。`ModificationStep.jsonEdits` 保存有序路径操作；对象、数组导航和原始数字文本由独立解析器处理，每步仍由 `ModificationExecutionEngine` 原子提交。代理复用现有 gzip / deflate 解码，SSE 在无限 Body 上拒绝此步骤，有限替换后可执行。表单复用步骤 Inspector 的逐条原生分组、添加和删除行为。具体路径、类型、失败及归档契约见[修改 JSON](Design/request-modification.md#修改-json)。
+
+
+## 文本域内边距
+
+普通 AppKit 文本域统一使用左右 6 pt、上下 4 pt 的 `textContainerInset`，并将 `lineFragmentPadding` 设为 0，避免水平留白叠加。规则表单、试运行输入与结果、脚本帮助、HTTPS 域名、Body 源码和事件流原文使用同一规格；JSON 值直接沿用 `RulesTextArea` 默认值。Body / JavaScript / 重放正文的 `CodeEditorView` 将行号栏之后与右侧的正文留白设为 6 pt，行号区域与行高保持既有布局。
+
+
+## 共享表单输入
+
+普通表单输入集中在 [NativeInputs.swift](../Requestman/Features/Workspace/NativeInputs.swift)：`ActionTextField` 封装单行值变更、编辑结束和输入法安全的 Return；`.table` 用于原生表格内编辑；`ActionComboBox` 统一自由输入、候选选择和保留草稿的候选刷新；`ActionTextArea` 统一纯文本配置、禁用状态、内边距与内外层滚轮分发。`NativeInputMetrics` 集中维护普通表单的 32 pt 单行高度及多行字体、内边距。沿用现有单行外观与原生 ComboBox、文本域表现。
+
+规则、匹配测试、环境、连接设置、重命名和重放表单复用这些组件；`HeaderNameField` 只提供 Header 候选与标签，`RulesTextArea` 只保留模板着色和光标行为。业务校验、字段标题、固定高度和提交动作仍由调用处负责。使用 `onChange` / `onSubmit` 等回调，不覆盖组件内部 delegate；程序设置文本不会触发业务回调。搜索继续使用系统 `NSSearchField`；Body、JavaScript 与重放正文继续复用 `RequestmanEditor.CodeEditorView`，只读载荷和事件流查看器保留专用实现。
+
+## 局域网手机接入与设备来源
+
+`ExplicitProxyConfiguration.allowLAN` 默认关闭，旧配置缺省为 false。主窗口仅在局域网监听实际生效、监听端口存在且不处于启停或重配期间显示 `iphone.gen3` 连接引导图标：右侧栏收起时在开关左侧，展开后位于 Inspector tracking separator 左侧，保留在主内容区；设置页只保留局域网开关。`LocalProxyServer` 根据该值绑定 `127.0.0.1` 或 `0.0.0.0`，同一端口接入本机、手机和重放；范围变化走 `CaptureEngine.restart` 的停止、重启、失败回滚流程。`activeConfiguration` 提供实际生效的配置，连接引导不根据尚未生效的草稿宣称可连接。上游 HTTP 转发与 CONNECT 继续复用既有传输；配置及解析后的地址检查覆盖本机局域网 IP，避免自循环。重放关联增加回环地址校验，远端同端口不再被识别为内部重放。
+
+`MobileSetupHandler` 仅在局域网开启时处理发往本机监听地址的 `/requestman` 路径，提供引导页、公开 DER 和 iOS CA 描述文件；处理器在 CONNECT / WebSocket 升级前退出，避免接收解码器移除时释放的原始字节。下载不经过规则、日志或上游。`LocalCertificateService.publicCertificateDER` 只读取、解码并校验证书有效期，不访问私钥或修改信任。
+
+`CaptureRecord.deviceSource` 保存规范化的客户端 IP（回环归为 `local`），贯穿 HTTP、HTTPS、隧道、SSE、WebSocket 与日志归档；旧记录缺省 nil。`WorkspaceDocument.deviceAliases` 保存别名；表格与详情从同一映射读取，修改后由 Observation 刷新已有记录，不改写历史请求和环境快照。设备列接替环境列，旧环境列宽迁移到设备列。连接与使用边界见[局域网手机抓取](Design/mobile-capture.md)。

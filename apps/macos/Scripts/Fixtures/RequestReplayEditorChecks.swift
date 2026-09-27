@@ -172,6 +172,27 @@ struct RequestReplayEditorChecks {
         precondition(history.records.count == 500 && history.latestReplay?.id == completed.id)
         history.clear()
         precondition(history.latestReplay == nil && history.selectedID == nil)
+        history.filter.search = "source"
+        history.append([source], dropped: 0); history.selectedID = source.id
+        let fileRecords = (0..<510).map { CaptureRecord(method: "GET", url: "https://saved.test/\($0)") }
+        history.openLog(fileRecords, name: "saved.requestmanlog.json")
+        precondition(history.isViewingFile && history.records.count == 510 && history.filter.search.isEmpty)
+        precondition(history.selectedID == fileRecords.first?.id)
+        let arriving = CaptureRecord(method: "GET", url: "https://live.test/new")
+        history.append([arriving], dropped: 3)
+        precondition(history.records.map(\.id) == fileRecords.map(\.id), "Live traffic must not mutate an opened log")
+        history.filter.search = "never-matches"
+        history.reveal(fileRecords[0].id)
+        precondition(history.filtered.count == 1 && history.recordsForSaving.isEmpty, "Export must obey the filter, not a reveal exception")
+        history.returnToLive()
+        precondition(history.records.map(\.id) == [arriving.id, source.id])
+        precondition(history.filter.search == "source" && history.selectedID == source.id && history.dropped == 3)
+        history.openLog(fileRecords, name: "saved.requestmanlog.json")
+        history.beginReplay(try! RequestReplayDraft(record: source))
+        precondition(!history.isViewingFile && history.latestReplay != nil)
+        history.openLog(fileRecords, name: "saved.requestmanlog.json")
+        history.clear()
+        precondition(!history.isViewingFile && history.records.isEmpty)
     }
 
 }

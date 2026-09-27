@@ -16,7 +16,7 @@ import RequestmanCore
     required init?(coder: NSCoder) { nil }
     override func loadView() {
         view = NSView()
-        let title = NativeUI.label("动态值", size: 14, weight: .semibold)
+        let title = NativeUI.label("模板变量", size: 14, weight: .semibold)
         let stack = NativeUI.stack(rows, spacing: 0)
         for row in rows { row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         let document = FlippedView(); NativeUI.pin(stack, to: document)

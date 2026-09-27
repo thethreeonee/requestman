@@ -26,6 +26,7 @@ enum StepProcessors {
     static func processor(for kind: ModificationKind) -> any StepProcessor {
         switch kind {
         case .setHeader, .removeHeader: HeaderProcessor()
+        case .modifyJSON: JSONBodyProcessor()
         case .replaceBody: BodyProcessor()
         case .rewriteURL: URLRewriteProcessor()
         case .setQueryParameter: QueryParameterProcessor()

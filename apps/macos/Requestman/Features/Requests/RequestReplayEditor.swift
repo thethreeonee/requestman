@@ -7,7 +7,7 @@ final class RequestReplayEditor: NSViewController {
     private let initial: RequestReplayDraft
     private let send: (RequestReplayDraft) async throws -> Void
     private let method = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let url = NSTextField()
+    private lazy var url = ActionTextField { [weak self] _ in self?.validate() }
     private lazy var headers = ReplayHeadersEditor(fields: initial.headers) { [weak self] in self?.validate() }
     // Use the same syntax-colored editor as the rule body editor, without rewriting the payload.
     private lazy var body = CodeEditorView(language: base64 ? .plaintext : .json) { [weak self] _ in self?.validate() }
@@ -40,7 +40,7 @@ final class RequestReplayEditor: NSViewController {
         url.setAccessibilityLabel("请求 URL")
         url.stringValue = initial.url; url.placeholderString = "https://example.com/path"
         method.target = self; method.action = #selector(methodChanged)
-        url.delegate = self
+        url.onSubmit = { [weak self] in self?.replay() }
         url.lineBreakMode = .byTruncatingMiddle
         body.string = base64 ? initial.body.base64EncodedString() : String(data: initial.body, encoding: .utf8) ?? ""
         body.textView.setAccessibilityLabel(base64 ? "请求正文 Base64" : "请求正文")
@@ -174,14 +174,13 @@ final class RequestReplayEditor: NSViewController {
     }
 }
 
-extension RequestReplayEditor: NSTextFieldDelegate {
-    func controlTextDidChange(_ obj: Notification) { validate() }
+extension RequestReplayEditor {
     @objc private func methodChanged() { validate() }
 }
 
 /// Native name/value table. Each edit updates the draft without normalizing other fields.
 @MainActor
-private final class ReplayHeadersEditor: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
+private final class ReplayHeadersEditor: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private(set) var fields: [HTTPField]
     private let onChange: () -> Void
     private let table = NSTableView()
@@ -244,11 +243,20 @@ private final class ReplayHeadersEditor: NSView, NSTableViewDataSource, NSTableV
         let cell = (tableView.makeView(withIdentifier: tableColumn.identifier, owner: self) as? NSTableCellView) ?? NSTableCellView()
         cell.identifier = tableColumn.identifier
         if cell.textField == nil {
-            let field = NSTextField()
-            field.isBezeled = false; field.drawsBackground = false
-            field.isEditable = true; field.isSelectable = true
-            field.font = .systemFont(ofSize: 13); field.delegate = self
-            field.lineBreakMode = .byTruncatingTail
+            let field = ActionTextField(presentation: .table)
+            field.onBeginEditing = { [weak self, weak field] in
+                guard let self, let field else { return }
+                let row = table.row(for: field)
+                if row >= 0 { table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
+            }
+            field.onChange = { [weak self, weak field] text in
+                guard let self, let field else { return }
+                let row = table.row(for: field)
+                guard fields.indices.contains(row) else { return }
+                if field.tag == 0 { fields[row].name = text }
+                else { fields[row].value = text }
+                onChange()
+            }
             cell.textField = field; field.translatesAutoresizingMaskIntoConstraints = false
             cell.addSubview(field)
             NSLayoutConstraint.activate([
@@ -264,19 +272,6 @@ private final class ReplayHeadersEditor: NSView, NSTableViewDataSource, NSTableV
         field.setAccessibilityLabel(isName ? "请求头名称" : "请求头值")
         field.isEnabled = isEnabled
         return cell
-    }
-    func controlTextDidBeginEditing(_ obj: Notification) {
-        guard let field = obj.object as? NSTextField else { return }
-        let row = table.row(for: field)
-        if row >= 0 { table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
-    }
-    func controlTextDidChange(_ obj: Notification) {
-        guard let field = obj.object as? NSTextField else { return }
-        let row = table.row(for: field)
-        guard fields.indices.contains(row) else { return }
-        if field.tag == 0 { fields[row].name = field.stringValue }
-        else { fields[row].value = field.stringValue }
-        onChange()
     }
     func tableViewSelectionDidChange(_ notification: Notification) { updateControls() }
     private func updateControls() {

@@ -375,116 +375,15 @@ import QuartzCore
     @objc private func openMenu() { showMenu?(moreButton) }
 }
 
-/// Only the explicitly requested hover feedback is layered; AppKit draws selection and focus.
-@MainActor final class ProjectSidebarRowView: NSTableRowView {
-    private let hoverLayer = CALayer()
-    private var hoverTrackingArea: NSTrackingArea?
-    private(set) var isHovered = false
-    var isShowingMenu = false { didSet { updateFeedback(animated: false) } }
-    private static let animationKey = "sidebar.hoverOpacity"
+/// AppKit draws sidebar selection and focus; shared hover also reveals row actions.
+@MainActor final class ProjectSidebarRowView: HoverTableRowView {
+    override var hoverLayerPrefix: String { "sidebar" }
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        wantsLayer = true
-        hoverLayer.name = "sidebar.hoverBackground"
-        hoverLayer.opacity = 0
-        hoverLayer.cornerRadius = 6
-        layer?.insertSublayer(hoverLayer, at: 0)
-        updateHoverColor()
-        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(displayOptionsChanged),
-            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
-    }
-    required init?(coder: NSCoder) { nil }
-
-    override var isSelected: Bool { didSet { if oldValue != isSelected { updateFeedback(animated: false) } } }
-    override var isEmphasized: Bool { didSet { if oldValue != isEmphasized { updateFeedback(animated: false) } } }
-
-    override func layout() {
-        super.layout()
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        hoverLayer.frame = bounds.insetBy(dx: 10, dy: 1)
-        CATransaction.commit()
-        refreshHover()
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
-        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
-        addTrackingArea(area); hoverTrackingArea = area
-        refreshHover()
-    }
-    override func mouseEntered(with event: NSEvent) { refreshHover() }
-    override func mouseExited(with event: NSEvent) { setHovered(false, animated: true) }
-
-    func refreshHover() {
-        guard let window, window.isKeyWindow, !isHiddenOrHasHiddenAncestor, !visibleRect.isEmpty else {
-            setHovered(false, animated: false); return
-        }
-        setHovered(visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)), animated: true)
-    }
-
-    func setHovered(_ hovered: Bool, animated: Bool) {
-        isHovered = hovered
-        updateFeedback(animated: animated)
-    }
-
-    private func updateFeedback(animated: Bool) {
+    override func updateFeedback(animated: Bool) {
         let cell = numberOfColumns > 0 ? view(atColumn: 0) as? RulesSidebarCell : nil
         cell?.showActions(isHovered || isSelected || isShowingMenu)
         cell?.updateSelectionAppearance()
         subviews.compactMap { $0 as? ProjectDisclosureButton }.forEach { $0.updateSelectionAppearance() }
-        let target: Float = (isHovered || isShowingMenu) && !isSelected ? 1 : 0
-        let shouldAnimate = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        guard hoverLayer.opacity != target else {
-            if !shouldAnimate { hoverLayer.removeAnimation(forKey: Self.animationKey) }
-            return
-        }
-        let current = hoverLayer.presentation()?.opacity ?? hoverLayer.opacity
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        hoverLayer.opacity = target
-        CATransaction.commit()
-        hoverLayer.removeAnimation(forKey: Self.animationKey)
-        if shouldAnimate {
-            let animation = CABasicAnimation(keyPath: "opacity")
-            animation.fromValue = current; animation.toValue = target
-            animation.duration = target == 1 ? 0.12 : 0.16
-            animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            hoverLayer.add(animation, forKey: Self.animationKey)
-        }
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance(); updateHoverColor()
-    }
-    private func updateHoverColor() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            CATransaction.begin(); CATransaction.setDisableActions(true)
-            hoverLayer.backgroundColor = NSColor.labelColor.withAlphaComponent(0.055).cgColor
-            CATransaction.commit()
-        }
-    }
-    @objc private func displayOptionsChanged() { updateHoverColor(); updateFeedback(animated: false) }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        let center = NotificationCenter.default
-        center.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
-        center.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: nil)
-        if let window {
-            center.addObserver(self, selector: #selector(keyWindowChanged), name: NSWindow.didResignKeyNotification, object: window)
-            center.addObserver(self, selector: #selector(keyWindowChanged), name: NSWindow.didBecomeKeyNotification, object: window)
-        }
-        refreshHover()
-    }
-    @objc private func keyWindowChanged() { refreshHover() }
-
-    override func viewWillMove(toSuperview newSuperview: NSView?) {
-        if newSuperview == nil { isShowingMenu = false; setHovered(false, animated: false) }
-        super.viewWillMove(toSuperview: newSuperview)
-    }
-    override func viewWillMove(toWindow newWindow: NSWindow?) {
-        if newWindow !== window { isShowingMenu = false; setHovered(false, animated: false) }
-        super.viewWillMove(toWindow: newWindow)
+        super.updateFeedback(animated: animated)
     }
 }

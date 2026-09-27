@@ -96,12 +96,13 @@ final class RequestFilterControls: NSView {
         }
     }
 
-    func update(filter: CaptureRecordFilter, records: [CaptureRecord], paused: Bool) {
+    func update(filter: CaptureRecordFilter, records: [CaptureRecord], paused: Bool, viewingFile: Bool = false) {
         self.filter = filter; self.records = records
         pause.image = NSImage(systemSymbolName: paused ? "play" : "pause", accessibilityDescription: nil)
         pause.setAccessibilityLabel(paused ? "继续记录" : "暂停记录")
         pause.toolTip = (paused ? "继续记录" : "暂停记录（代理继续工作）") + "（⌘⇧R）"
-        clearButton.isEnabled = !records.isEmpty
+        pause.isEnabled = !viewingFile
+        clearButton.isEnabled = !viewingFile && !records.isEmpty
         clearButton.toolTip = "清空全部请求日志（⌘K）"
         primary.selectedSegment = primaryTypes.firstIndex(of: filter.resource) ?? -1
         updateFilterButton()
@@ -399,12 +400,12 @@ private func filterRemoveButton(label: String, action: @escaping () -> Void) -> 
 }
 
 @MainActor
-private final class FilterConditionRow: NSView, NSComboBoxDelegate {
+private final class FilterConditionRow: NSView {
     let conditionID: UUID
     private var condition: CaptureFilterCondition
     private let onChange: (CaptureFilterCondition) -> Void
     private let field = NSPopUpButton(), operation = NSPopUpButton(), source = NSPopUpButton()
-    private let name = NSComboBox(), value = NSComboBox()
+    private let name = ActionComboBox(), value = ActionComboBox()
     private var headerRow: NSStackView!
     private var records: [CaptureRecord] = []
     init(condition: CaptureFilterCondition, onChange: @escaping (CaptureFilterCondition) -> Void, remove: @escaping () -> Void) {
@@ -417,11 +418,19 @@ private final class FilterConditionRow: NSView, NSComboBoxDelegate {
         operation.target = self; operation.action = #selector(selectOperation); operation.setAccessibilityLabel("匹配方式")
         name.placeholderString = "Header 名称"; name.setAccessibilityLabel("Header 名称")
         for control in [name, value] {
-            control.delegate = self; control.numberOfVisibleItems = 8
+            control.numberOfVisibleItems = 8
             control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             control.setContentHuggingPriority(.defaultLow, for: .horizontal)
         }
         name.completes = true
+        name.onChange = { [weak self] text in
+            guard let self else { return }
+            self.condition.headerName = text; self.onChange(self.condition)
+        }
+        value.onChange = { [weak self] text in
+            guard let self else { return }
+            self.condition.value = text; self.onChange(self.condition)
+        }
         field.widthAnchor.constraint(equalToConstant: 112).isActive = true
         operation.widthAnchor.constraint(equalToConstant: 80).isActive = true
         let row = NativeUI.stack([field, operation, value, filterRemoveButton(label: "移除条件", action: remove)], vertical: false, spacing: 8)
@@ -465,23 +474,10 @@ private final class FilterConditionRow: NSView, NSComboBoxDelegate {
             setSuggestions(name, headers.map { $0.name.lowercased() } + ["content-type", "accept", "user-agent", "authorization", "cookie", "origin", "referer"], text: condition.headerName)
         }
     }
-    private func setSuggestions(_ control: NSComboBox, _ values: [String], text: String) {
+    private func setSuggestions(_ control: ActionComboBox, _ values: [String], text: String) {
         let suggestions = Array(Set(values.filter { !$0.isEmpty })).sorted()
-        if control.objectValues.compactMap({ $0 as? String }) != suggestions {
-            control.removeAllItems(); control.addItems(withObjectValues: suggestions)
-        }
+        control.setSuggestions(suggestions)
         if control.stringValue != text { control.stringValue = text }
-    }
-    func controlTextDidChange(_ notification: Notification) {
-        guard let control = notification.object as? NSComboBox else { return }
-        if control === name { condition.headerName = name.stringValue } else { condition.value = value.stringValue }
-        onChange(condition)
-    }
-    func controlTextDidEndEditing(_ notification: Notification) { controlTextDidChange(notification) }
-    func comboBoxSelectionDidChange(_ notification: Notification) {
-        guard let control = notification.object as? NSComboBox, let selected = control.objectValueOfSelectedItem as? String else { return }
-        if control === name { condition.headerName = selected } else { condition.value = selected }
-        onChange(condition)
     }
     @objc private func selectField() {
         condition.field = CaptureFilterField.allCases[field.indexOfSelectedItem]

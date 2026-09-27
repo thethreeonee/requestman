@@ -54,7 +54,7 @@ extension ProxyConnection {
             let result: Result<ModificationExecutionResult, Error>
             do {
                 try control.check()
-                if hasScript, !output.hasReplacementBody, let data = output.bodyData {
+                if transaction.requirements(for: phase).needsCompleteBody, !output.hasReplacementBody, let data = output.bodyData {
                     output.bodyText = try ScriptBodyText.decode(data, headers: output.headers, control: control)
                 }
                 var preparedRequest = inputRequest

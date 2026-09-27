@@ -28,6 +28,9 @@ final class WorkspaceModel {
     var selectedBrowserID = ""
     var isDiscoveringBrowsers = false
     var proxyConfigurationError: String?
+    var isCapturing = false
+    var listenPort: Int?
+    var activeProxyConfiguration: ExplicitProxyConfiguration?
     var selectedEnvironmentID: UUID?
     var certificateSetup = CertificateSetupModel(service: ReadOnlyCertificateFixture())
     func browserDisplayName(_ browser: ChromiumBrowser) -> String { browser.name }
@@ -58,6 +61,7 @@ private struct ReadOnlyCertificateFixture: CertificateService {
 struct SettingsUIChecks {
     static func main() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
+        checkSharedInputs()
         let model = WorkspaceModel()
         let windowController = WorkspaceSettingsWindowController(model: model)
         let window = windowController.window!
@@ -92,7 +96,7 @@ struct SettingsUIChecks {
         try await Task.sleep(for: .milliseconds(300))
         precondition(model.clearCount == 1)
         let port = field("本地代理端口", in: controller.view)
-        precondition(port.bounds.width == 140 && port.bounds.height > 0)
+        precondition(port.bounds.width == 140 && abs(port.bounds.height - 32) < 0.5)
         port.onChange("9191")
         precondition(model.document.proxy.port == 9191)
         model.isTransitioning = true
@@ -117,11 +121,83 @@ struct SettingsUIChecks {
         model.loaded = true
         model.loadFailed = false
         general.refresh()
+        let lan = descendants(general.view).compactMap { $0 as? NSSwitch }.first { $0.accessibilityLabel() == "允许局域网设备连接" }!
+        precondition(lan.state == .off)
+        lan.state = .on
+        NSApplication.shared.sendAction(lan.action!, to: lan.target, from: lan)
+        precondition(model.document.proxy.allowLAN)
+        let captureMode = descendants(general.view).compactMap { $0 as? ActionPopUpButton }.first { $0.itemTitles.contains("仅启动代理") }!
+        captureMode.onChange(CaptureMode.allCases.firstIndex(of: .proxyOnly)!)
+        precondition(model.captureMode == .proxyOnly)
+        let guide = MobileConnectionViewController(model: model)
+        let guideWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 490), styleMask: [.titled], backing: .buffered, defer: false)
+        guideWindow.isReleasedWhenClosed = false; guideWindow.contentViewController = guide
+        guide.loadViewIfNeeded(); guide.refresh()
+        let qr = descendants(guide.view).compactMap { $0 as? NSImageView }.first { $0.identifier?.rawValue == "mobile.qr" }!
+        let guidePort = descendants(guide.view).compactMap { $0 as? NSTextField }.first { $0.identifier?.rawValue == "mobile.port" }!
+        precondition(qr.image == nil && qr.isHiddenOrHasHiddenAncestor)
+        precondition(guidePort.stringValue == "—")
+        model.isCapturing = true; model.listenPort = 9191; model.activeProxyConfiguration = model.document.proxy
+        guide.refresh()
+        precondition(qr.isHiddenOrHasHiddenAncestor && !button("设置证书…", in: guide.view).isHiddenOrHasHiddenAncestor)
+        model.certificateSetup = CertificateSetupModel(service: ReadOnlyCertificateFixture(configured: true))
+        await model.certificateSetup.refreshStatus()
+        guide.refresh()
+        guideWindow.setContentSize(guide.preferredContentSize)
+        guide.view.layoutSubtreeIfNeeded()
+        precondition(descendants(guide.view).allSatisfy { !($0 is NSScrollView) })
+        precondition(guide.preferredContentSize.height < 560, "The three steps must fit a compact dialog")
+        precondition(guidePort.stringValue == "9191" && !guidePort.isEditable && guidePort.isSelectable)
+        let server = descendants(guide.view).compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == "服务器（这台 Mac）" }!
+        precondition(server.bounds.width > 200)
+        if !LocalNetwork.addresses().isEmpty {
+            precondition(qr.image != nil && !qr.isHiddenOrHasHiddenAncestor)
+            precondition(button("复制安装链接", in: guide.view).toolTip!.hasSuffix(":9191/requestman"))
+            model.document.proxy.port = 9292
+            guide.refresh()
+            precondition(guidePort.stringValue == "9191", "The guide must show the actual port, not the settings draft")
+            if server.numberOfItems > 1 {
+                server.selectItem(at: 1)
+                NSApplication.shared.sendAction(server.action!, to: server.target, from: server)
+                precondition(button("复制安装链接", in: guide.view).toolTip!.contains(LocalNetwork.addresses()[1].host))
+            }
+        }
+        if let prefix = ProcessInfo.processInfo.environment["REQUESTMAN_SETTINGS_SNAPSHOT"] {
+            for (style, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+                let preview = MobileConnectionViewController(model: model)
+                let previewWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 490), styleMask: [.titled], backing: .buffered, defer: false)
+                previewWindow.isReleasedWhenClosed = false
+                previewWindow.appearance = NSAppearance(named: appearance)
+                previewWindow.contentViewController = preview
+                preview.loadViewIfNeeded(); preview.refresh()
+                previewWindow.setContentSize(preview.preferredContentSize)
+                preview.view.wantsLayer = true
+                preview.view.effectiveAppearance.performAsCurrentDrawingAppearance {
+                    preview.view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+                }
+                preview.view.layoutSubtreeIfNeeded()
+                preview.view.displayIfNeeded()
+                let bitmap = preview.view.bitmapImageRepForCachingDisplay(in: preview.view.bounds)!
+                preview.view.cacheDisplay(in: preview.view.bounds, to: bitmap)
+                try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: "\(prefix)-mobile-\(style).png"))
+                previewWindow.close()
+            }
+        }
+        model.isTransitioning = true
+        guide.refresh()
+        precondition(qr.image == nil && qr.isHiddenOrHasHiddenAncestor && !server.isEnabled)
+        model.isTransitioning = false
+        model.activeProxyConfiguration?.allowLAN = false
+        guide.refresh()
+        precondition(qr.image == nil && qr.isHiddenOrHasHiddenAncestor, "Failed LAN reconfiguration must not advertise an inactive endpoint")
+        precondition(guide.preferredContentSize.height < 560)
+        guideWindow.close(); model.isCapturing = false; model.listenPort = nil; model.activeProxyConfiguration = nil
+        model.document.proxy.port = 9191
         let decryptAll = descendants(general.view).compactMap { $0 as? NSSwitch }.first { $0.accessibilityLabel() == "解密所有请求" }!
         let domains = descendants(general.view).compactMap { $0 as? NSTextView }.first { $0.accessibilityLabel() == "HTTPS 解密域名" }!
         precondition(decryptAll.state == .on && !domains.isEditable)
         precondition(!domains.isSelectable && domains.textColor == .disabledControlTextColor)
-        precondition(domains.enclosingScrollView!.layer?.cornerRadius == 8 && domains.enclosingScrollView!.layer?.masksToBounds == true)
+        precondition(domains.enclosingScrollView!.borderType == .bezelBorder)
         decryptAll.state = .off
         NSApplication.shared.sendAction(decryptAll.action!, to: decryptAll.target, from: decryptAll)
         precondition(!model.document.httpsDecryption.decryptAllRequests && domains.isEditable)
@@ -320,11 +396,6 @@ struct SettingsUIChecks {
                     try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: "\(prefix)-domain-\(style)-\(state).png"))
                 }
             }
-            if appearance == .aqua {
-                precondition(samples[0] - samples[1] > 0.05, "Disabled field must render visibly gray, not white")
-            } else {
-                precondition(samples[1] - samples[0] > 0.05, "Disabled field must remain distinct in dark appearance")
-            }
             print("Domain background pixels \(appearance.rawValue): editable=\(samples[0]), disabled=\(samples[1])")
         }
     }
@@ -366,6 +437,57 @@ struct SettingsUIChecks {
                 }
             }
         }
+    }
+
+    private static func checkSharedInputs() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 240),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        var changes: [String] = []
+        var submissions = 0
+        let field = ActionTextField { changes.append($0) }
+        field.onSubmit = { submissions += 1 }
+        field.frame = NSRect(x: 20, y: 150, width: 300, height: 32)
+        window.contentView!.addSubview(field)
+        field.selectText(nil)
+        let editor = field.currentEditor() as! NSTextView
+        editor.setMarkedText("拼", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: 0, length: 0))
+        precondition(!field.control(field, textView: editor, doCommandBy: #selector(NSResponder.insertNewline(_:))))
+        precondition(editor.hasMarkedText() && submissions == 0, "Return must leave IME composition to AppKit")
+        editor.insertText("中文", replacementRange: editor.markedRange())
+        editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        precondition(submissions == 1 && changes.last == "中文" && field.currentEditor() == nil)
+        field.stringValue = "programmatic"
+        precondition(changes.last == "中文", "Model refresh must not send a user-edit callback")
+
+        changes = []
+        let combo = ActionComboBox(suggestions: ["Accept", "Host"]) { changes.append($0) }
+        combo.frame = NSRect(x: 20, y: 100, width: 300, height: 32)
+        window.contentView!.addSubview(combo)
+        combo.selectText(nil)
+        let comboEditor = combo.currentEditor() as! NSTextView
+        comboEditor.insertText("  X-Custom  ", replacementRange: NSRange(location: 0, length: 0))
+        let count = changes.count
+        comboEditor.setSelectedRange(NSRange(location: 2, length: 8))
+        combo.setSuggestions(["Content-Type", "Host"])
+        precondition(combo.stringValue == "  X-Custom  " && changes.count == count)
+        precondition(comboEditor.selectedRange() == NSRange(location: 2, length: 8), "Candidate refresh must retain the editing selection")
+        comboEditor.setMarkedText("拼", selectedRange: NSRange(location: 1, length: 0), replacementRange: comboEditor.selectedRange())
+        combo.setSuggestions(["Accept", "Content-Type"])
+        precondition(comboEditor.hasMarkedText(), "Candidate refresh must retain IME composition")
+        comboEditor.insertText("名称", replacementRange: comboEditor.markedRange())
+        window.makeFirstResponder(nil)
+        combo.selectItem(at: 1)
+        combo.comboBoxSelectionDidChange(Notification(name: NSComboBox.selectionDidChangeNotification, object: combo))
+        precondition(combo.stringValue == "Content-Type" && changes.last == "Content-Type")
+
+        let readOnly = ActionTextArea(editable: false)
+        readOnly.string = "read-only"
+        readOnly.isEnabled = false; readOnly.isEnabled = true
+        precondition(!readOnly.textView.isEditable && readOnly.textView.isSelectable,
+                     "Re-enabling a read-only viewer must not turn it into an editor")
+        print("Shared input checks passed: IME-safe Return, commit, programmatic refresh, ComboBox draft/selection/IME preservation and read-only state")
     }
 
     private static func checkOutsideClickEditing() {

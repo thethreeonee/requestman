@@ -12,7 +12,7 @@ enum RequestActionsMenu {
         let recordUnavailable = RequestReplayDraft.unavailableReason(for: record)
         menu.addItem(item("重放", reason: recordUnavailable ?? replayUnavailable) { replay(record, false) })
         menu.addItem(item("重新发送请求…", reason: recordUnavailable) { replay(record, true) })
-        if let id = record.replayID, record.connectionState.isActive {
+        if let id = record.replayID, record.archivedAt == nil, record.connectionState.isActive {
             menu.addItem(item("取消此次重放") { cancelReplay(id) })
         }
         if let source = record.replaySourceID {

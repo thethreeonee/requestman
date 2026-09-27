@@ -18,12 +18,15 @@ struct RequestmanEntry {
 final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private(set) var model: WorkspaceModel!
     private var workspaceWindow: WorkspaceWindowController?
+    private var logsWindow: WorkspaceWindowController?
     private var settingsWindow: WorkspaceSettingsWindowController?
     private var recordsTask: Task<Void, Never>?
     private var composition: AppComposition!
     private var notificationsTask: Task<Void, Never>?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // Keep independent windows and omit AppKit's automatic tab menus.
+        NSWindow.allowsAutomaticWindowTabbing = false
         composition = AppComposition()
     }
 
@@ -32,6 +35,7 @@ final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVal
         installMenus()
         let controller = WorkspaceWindowController(model: model) { [weak self] in self?.showSettings(nil) }
         workspaceWindow = controller
+        model.openSection = { [weak self] section in self?.showSection(section) }
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         notificationsTask = Task { [weak self] in await self?.model.collectRuleHitNotifications() }
@@ -70,14 +74,37 @@ final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVal
         settingsWindow?.showWindow(sender)
         settingsWindow?.window?.makeKeyAndOrderFront(sender)
     }
-    @objc private func showWorkspace(_ sender: Any?) { workspaceWindow?.showWindow(sender) }
+    @objc private func showWorkspace(_ sender: Any?) { showSection(.rules) }
+
+    private func showSection(_ section: WorkspaceSection) {
+        if section == .requests, logsWindow == nil {
+            logsWindow = WorkspaceWindowController(model: model, section: .requests) { [weak self] in
+                self?.showSettings(nil)
+            }
+        }
+        let controller = section == .rules ? workspaceWindow : logsWindow
+        controller?.showWindow(nil)
+        controller?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    private var activeWorkspace: WorkspaceSplitController? {
+        guard let keyWindow = NSApp.keyWindow else { return nil }
+        return [workspaceWindow, logsWindow].compactMap { $0 }
+            .first { $0.window === keyWindow }?.workspace
+    }
 
     @objc func performWorkspaceCommand(_ sender: NSMenuItem) {
-        workspaceWindow?.workspace.performWorkspaceCommand(sender)
+        guard let workspace = activeWorkspace, workspace.validateMenuItem(sender) else { return }
+        if let command = WorkspaceCommand(rawValue: sender.tag), command == .newProject || command == .newWorkflow {
+            showSection(.rules)
+            workspaceWindow?.workspace.performWorkspaceCommand(sender)
+        } else {
+            workspace.performWorkspaceCommand(sender)
+        }
     }
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         guard item.action == WorkspaceCommand.action else { return true }
-        return workspaceWindow?.workspace.validateMenuItem(item) ?? false
+        return activeWorkspace?.validateMenuItem(item) ?? false
     }
 
     private func installMenus() {
@@ -105,6 +132,8 @@ final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVal
         for command in [WorkspaceCommand.newWorkflow, .newProject] { file.addItem(command.menuItem(target: self)) }
         file.addItem(.separator())
         for command in [WorkspaceCommand.importRules, .exportRules] { file.addItem(command.menuItem(target: self)) }
+        file.addItem(.separator())
+        for command in [WorkspaceCommand.saveLog, .openLog] { file.addItem(command.menuItem(target: self)) }
 
         let editItem = NSMenuItem(); menu.addItem(editItem)
         let edit = NSMenu(title: "编辑"); editItem.submenu = edit
@@ -117,11 +146,14 @@ final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVal
         for command in [WorkspaceCommand.duplicate, .rename, .delete, .toggleEnabled] { edit.addItem(command.menuItem(target: self)) }
         edit.addItem(.separator())
         for command in [WorkspaceCommand.search, .copyURL, .copyCURL] { edit.addItem(command.menuItem(target: self)) }
-        for (title, commands) in [("显示", [WorkspaceCommand.rules, .requests, .filters, .sidebar, .inspector, .environment]),
-                                  ("捕获", [WorkspaceCommand.capture, .recording, .clear])] {
+        for (title, groups) in [("显示", [[WorkspaceCommand.rules, .requests], [.filters, .sidebar, .inspector, .environment]]),
+                                ("捕获", [[WorkspaceCommand.capture, .recording, .clear]])] {
             let item = NSMenuItem(); menu.addItem(item)
             let submenu = NSMenu(title: title); item.submenu = submenu
-            for command in commands { submenu.addItem(command.menuItem(target: self)) }
+            for (index, commands) in groups.enumerated() {
+                if index > 0 { submenu.addItem(.separator()) }
+                for command in commands { submenu.addItem(command.menuItem(target: self)) }
+            }
         }
         let windowItem = NSMenuItem(); menu.addItem(windowItem)
         let windows = NSMenu(title: "窗口"); windowItem.submenu = windows
@@ -141,21 +173,21 @@ final class WorkspaceWindowController: NSWindowController {
     let workspace: WorkspaceSplitController
     private var showingError = false
 
-    init(model: WorkspaceModel, openSettings: @escaping () -> Void) {
+    init(model: WorkspaceModel, section: WorkspaceSection = .rules, openSettings: @escaping () -> Void) {
         self.model = model
-        workspace = WorkspaceSplitController(model: model, snapshot: WorkspaceToolbarSnapshot(model: model), openSettings: openSettings)
+        workspace = WorkspaceSplitController(model: model, snapshot: WorkspaceToolbarSnapshot(model: model, section: section), openSettings: openSettings)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         super.init(window: window)
-        window.title = "Requestman"
+        window.title = section == .rules ? "Requestman" : "请求日志"
         window.isReleasedWhenClosed = false
         window.contentViewController = workspace
         window.setContentSize(NSSize(width: 1440, height: 900))
         window.contentMinSize = NSSize(width: 1100, height: 680)
         window.center()
-        window.setFrameAutosaveName("Requestman.Workspace")
-        observeErrors()
+        window.setFrameAutosaveName(section == .rules ? "Requestman.Workspace" : "Requestman.RequestLogs")
+        if section == .rules { observeErrors() }
     }
     required init?(coder: NSCoder) { nil }
 
@@ -167,7 +199,7 @@ final class WorkspaceWindowController: NSWindowController {
     }
 
     private func presentError(_ message: String?) {
-        guard !showingError, let message, let window else { return }
+        guard !showingError, let message, let window = NSApp.keyWindow ?? window else { return }
         showingError = true
         let alert = NSAlert(); alert.messageText = "Requestman"; alert.informativeText = message
         alert.addButton(withTitle: "好")

@@ -29,6 +29,7 @@ try:
     subprocess.run([
         "swiftc", *flags, "-I", str(temporary), "-L", str(temporary), "-lRequestmanCore", *editor_flags,
         str(root / "Requestman/Features/Workspace/AppKitSupport.swift"),
+        str(root / "Requestman/Features/Workspace/NativeInputs.swift"),
         str(root / "Requestman/Features/Requests/RequestReplayEditor.swift"),
         str(root / "Requestman/Features/Requests/ExecutionHistoryModel.swift"),
         str(root / "Scripts/Fixtures/RequestReplayEditorChecks.swift"), "-o", str(executable),

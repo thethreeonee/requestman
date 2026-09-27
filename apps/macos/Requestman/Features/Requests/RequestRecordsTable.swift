@@ -4,6 +4,7 @@ import RequestmanCore
 @MainActor
 final class RequestRecordsTable: NSView {
     static let columnWidthsKey = "requestLog.columnWidths.v1"
+    var onDeviceAliasChange: (String, String) -> Void = { _, _ in }
     var onSelectionChange: (UUID?) -> Void = { _ in }
     var replayUnavailableReason: () -> String? = { nil }
     var onCancelReplay: (UUID) -> Void = { _ in }
@@ -11,6 +12,7 @@ final class RequestRecordsTable: NSView {
     var sourceExists: (UUID) -> Bool = { _ in false }
     var onReplay: (CaptureRecord, Bool) -> Void = { _, _ in }
     var onMockRequest: (CaptureRecord) -> Void = { _ in }
+    var onSaveSession: (CaptureRecord) -> Void = { _ in }
     private let coordinator: Coordinator
     private let scrollView: NSScrollView
 
@@ -18,12 +20,14 @@ final class RequestRecordsTable: NSView {
         coordinator = Coordinator(defaults: columnDefaults)
         scrollView = RecordsScrollView()
         super.init(frame: .zero)
+        coordinator.onDeviceAliasChange = { [weak self] in self?.onDeviceAliasChange($0, $1) }
         coordinator.onSelectionChange = { [weak self] in self?.onSelectionChange($0) }
         coordinator.replayUnavailableReason = { [weak self] in self?.replayUnavailableReason() }
         coordinator.onCancelReplay = { [weak self] in self?.onCancelReplay($0) }
         coordinator.revealSource = { [weak self] in self?.revealSource?($0) }
         coordinator.sourceExists = { [weak self] in self?.sourceExists($0) ?? false }
         coordinator.onReplay = { [weak self] in self?.onReplay($0, $1) }
+        coordinator.onSaveSession = { [weak self] in self?.onSaveSession($0) }
         coordinator.onMockRequest = { [weak self] in self?.onMockRequest($0) }
         configure()
     }
@@ -53,6 +57,9 @@ final class RequestRecordsTable: NSView {
         table.setAccessibilityLabel("请求日志")
         for column in RecordColumn.allCases {
             let item = RecordsTableColumn(identifier: column.identifier)
+            if column == .time || column == .duration {
+                item.headerCell = RecordsEdgeHeaderCell(textCell: column.title)
+            }
             item.title = column.title
             item.minWidth = 0
             item.maxWidth = .greatestFiniteMagnitude
@@ -76,22 +83,24 @@ final class RequestRecordsTable: NSView {
         addSubview(scrollView)
     }
 
-    func update(records: [CaptureRecord], selectedID: UUID?, workflowNames: [UUID: String] = [:]) {
+    func update(records: [CaptureRecord], selectedID: UUID?, workflowNames: [UUID: String] = [:], deviceAliases: [String: String] = [:]) {
         coordinator.selection = selectedID
-        coordinator.update(records: records, workflowNames: workflowNames)
+        coordinator.update(records: records, workflowNames: workflowNames, deviceAliases: deviceAliases)
         coordinator.fitColumns(to: scrollView.contentView.bounds.width)
     }
 
     @MainActor
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         var selection: UUID?
-        var onSelectionChange: (UUID?) -> Void = { _ in }
+        var onDeviceAliasChange: (String, String) -> Void = { _, _ in }
+    var onSelectionChange: (UUID?) -> Void = { _ in }
         var replayUnavailableReason: () -> String? = { nil }
         var onCancelReplay: (UUID) -> Void = { _ in }
         var revealSource: ((UUID) -> Void)?
         var sourceExists: (UUID) -> Bool = { _ in false }
         var onReplay: (CaptureRecord, Bool) -> Void = { _, _ in }
         var onMockRequest: (CaptureRecord) -> Void = { _ in }
+        var onSaveSession: (CaptureRecord) -> Void = { _ in }
         weak var table: NSTableView?
         private var rows: [RecordRow] = []
         private var capturedRecords: [UUID: CaptureRecord] = [:]
@@ -129,7 +138,7 @@ final class RequestRecordsTable: NSView {
             preferredWidths = nil
             if let saved = defaults.dictionary(forKey: RequestRecordsTable.columnWidthsKey) {
                 let widths = RecordColumn.allCases.compactMap { column -> CGFloat? in
-                    guard let value = saved[column.rawValue] as? Double,
+                    guard let value = (saved[column.rawValue] ?? (column == .device ? saved["environment"] : nil)) as? Double,
                           value.isFinite, value > 0, value < 100_000 else { return nil }
                     return CGFloat(value)
                 }
@@ -137,12 +146,12 @@ final class RequestRecordsTable: NSView {
             }
         }
 
-        func update(records: [CaptureRecord], workflowNames: [UUID: String]) {
+        func update(records: [CaptureRecord], workflowNames: [UUID: String], deviceAliases: [String: String]) {
             guard let table else { return }
             capturedRecords = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
             let nextRows = records.map {
                 RecordRow(record: $0, timeFormatter: timeFormatter,
-                          workflowName: $0.matchedWorkflowID.flatMap { workflowNames[$0] })
+                          workflowName: $0.matchedWorkflowID.flatMap { workflowNames[$0] }, deviceAliases: deviceAliases)
             }
             requiredRequestWidth = (Set(records.map(\.method)).map { RequestMethodTag.requiredWidth(for: $0) }.max() ?? 0) + 24
             updating = true
@@ -286,6 +295,9 @@ final class RequestRecordsTable: NSView {
                                       revealSource: record.replaySourceID.map(sourceExists) == true ? revealSource : nil, replay: onReplay)
             menu.addItem(.separator())
             menu.addItem(item)
+            menu.addItem(.separator())
+            let save = onSaveSession
+            menu.addItem(RequestActionsMenu.item("保存当前请求会话…") { save(record) })
             return menu
         }
 
@@ -300,6 +312,7 @@ final class RequestRecordsTable: NSView {
                   let column = RecordColumn(rawValue: identifier.rawValue) else { return nil }
             let cell = (tableView.makeView(withIdentifier: identifier, owner: nil) as? RecordCell)
                 ?? RecordCell(column: column)
+            cell.device.onRename = { [weak self] in self?.onDeviceAliasChange($0, $1) }
             cell.configure(rows[row])
             return cell
         }
@@ -335,8 +348,17 @@ private final class RecordsTableColumn: NSTableColumn {
     }
 }
 
+@MainActor
+private final class RecordsEdgeHeaderCell: NSTableHeaderCell {
+    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
+        // Inset only the title; AppKit still draws the full header and resize borders.
+        let inset = min(12, cellFrame.width / 2)
+        super.drawInterior(withFrame: cellFrame.insetBy(dx: inset, dy: 0), in: controlView)
+    }
+}
+
 private enum RecordColumn: String, CaseIterable {
-    case time, status, request, rules, environment, duration
+    case time, status, request, rules, device, duration
     var identifier: NSUserInterfaceItemIdentifier { .init(rawValue) }
     var title: String {
         switch self {
@@ -344,7 +366,7 @@ private enum RecordColumn: String, CaseIterable {
         case .status: "状态码"
         case .request: "请求"
         case .rules: "命中的规则"
-        case .environment: "环境"
+        case .device: "设备来源"
         case .duration: "耗时"
         }
     }
@@ -357,26 +379,28 @@ private struct RecordRow: Equatable {
     let url: String
     let project: String
     let workflow: String?
-    let environment: String
+    let deviceSource: String?
+    let deviceAlias: String
     let status: Int?
     let duration: String
     let result: String
     let failure: String?
     let replay: String?
 
-    init(record: CaptureRecord, timeFormatter: DateFormatter, workflowName: String?) {
+    init(record: CaptureRecord, timeFormatter: DateFormatter, workflowName: String?, deviceAliases: [String: String]) {
         id = record.id
         time = timeFormatter.string(from: record.startedAt)
         method = record.captureProtocol == .http ? record.method : record.captureProtocol == .sse ? "SSE" : "WS"
         url = record.url
         project = record.project
         workflow = record.matchedWorkflowID != nil
-            ? (workflowName ?? record.workflow)
+            ? (record.archivedAt == nil ? workflowName ?? record.workflow : record.workflow)
             : record.matchedRules.first?.name
-        environment = record.environment
+        deviceSource = record.deviceSource
+        deviceAlias = record.deviceSource.flatMap { deviceAliases[$0] } ?? ""
         status = record.status
         let seconds = max(0, record.duration)
-        duration = record.connectionState.isActive ? record.connectionState.rawValue : seconds >= 1 ? String(format: "%.1f s", seconds) : String(format: "%.0f ms", seconds * 1000)
+        duration = record.connectionState.isActive ? record.connectionSummary : seconds >= 1 ? String(format: "%.1f s", seconds) : String(format: "%.0f ms", seconds * 1000)
         result = record.replaySummary ?? record.error.map { "\(record.outcome.rawValue) · \($0)" } ?? record.outcome.rawValue
         replay = record.replaySummary
         failure = record.error ?? (record.outcome == .failed ? record.outcome.rawValue : nil)
@@ -400,6 +424,7 @@ private final class RecordsScrollView: NSScrollView {
 
 @MainActor
 private final class RecordCell: NSTableCellView {
+    let device = DeviceSourceButton()
     private let column: RecordColumn
     private let primary = NSTextField(labelWithString: "")
     private let secondary = NSTextField(labelWithString: "")
@@ -430,6 +455,7 @@ private final class RecordCell: NSTableCellView {
             primary.font = .monospacedDigitSystemFont(ofSize: 13, weight: column == .status ? .medium : .regular)
         }
         if column == .status { primary.font = RequestStatusStyle.font }
+        if column == .device { primary.isHidden = true; addSubview(device) }
         textField = primary
     }
 
@@ -462,8 +488,9 @@ private final class RecordCell: NSTableCellView {
             primaryColor = .secondaryLabelColor
             secondaryColor = .labelColor
             secondary.isHidden = row.workflow == nil
-        case .environment:
-            primary.stringValue = row.environment
+        case .device:
+            device.update(source: row.deviceSource, alias: row.deviceAlias)
+            primary.stringValue = device.title
         case .duration:
             primary.stringValue = row.duration
             primaryColor = .secondaryLabelColor
@@ -487,6 +514,7 @@ private final class RecordCell: NSTableCellView {
         let inset = min(12, bounds.width / 2)
         let width = max(0, bounds.width - inset * 2)
         let lineHeight: CGFloat = 20
+        if column == .device { device.frame = NSRect(x: inset, y: (bounds.height - 28) / 2, width: width, height: 28) }
         if column == .request {
             let tagWidth = methodTag.intrinsicContentSize.width
             let gap = min(10, max(0, width - tagWidth))
@@ -604,5 +632,81 @@ final class RequestMethodTag: NSView {
     private func updateColor() {
         label.textColor = selected ? .alternateSelectedControlTextColor : tint
         needsDisplay = true
+    }
+}
+
+/// Both log cells and Inspector resolve names from the same workspace alias registry.
+@MainActor
+final class DeviceSourceButton: NSButton {
+    var onRename: (String, String) -> Void = { _, _ in }
+    private var source: String?
+    private var alias = ""
+    private(set) var popover: NSPopover?
+    init() {
+        super.init(frame: .zero)
+        bezelStyle = .inline
+        controlSize = .small
+        alignment = .left
+        cell?.lineBreakMode = .byTruncatingTail
+        target = self; action = #selector(editAlias)
+        setAccessibilityLabel("设备来源")
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+    required init?(coder: NSCoder) { nil }
+    func update(source: String?, alias: String) {
+        if self.source != source { popover?.close(); popover = nil }
+        self.source = source; self.alias = alias
+        title = DeviceSource.title(source, aliases: source.map { [$0: alias] } ?? [:])
+        isEnabled = source != nil
+        toolTip = source.map { ($0 == "local" ? "本机回环连接" : $0) + " · 点击设置别名" } ?? "此日志未记录设备来源"
+        setAccessibilityValue(title)
+    }
+    @objc private func editAlias() {
+        guard let source else { return }
+        if let popover, popover.isShown { popover.performClose(nil); return }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        let editor = DeviceAliasViewController(source: source, alias: alias) { [weak self, weak popover] value in
+            self?.onRename(source, value)
+            popover?.performClose(nil)
+        }
+        popover.contentViewController = editor
+        self.popover = popover
+        popover.show(relativeTo: bounds, of: self, preferredEdge: .maxY)
+    }
+}
+
+@MainActor
+final class DeviceAliasViewController: NSViewController {
+    private let source: String
+    private let field: ActionTextField
+    private let save: (String) -> Void
+    init(source: String, alias: String, save: @escaping (String) -> Void) {
+        self.source = source; self.save = save
+        field = ActionTextField(alias, placeholder: "例如：我的 iPhone")
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { nil }
+    override func loadView() {
+        view = NSView()
+        field.setAccessibilityLabel("设备别名")
+        field.onSubmit = { [weak self] in self?.submit() }
+        let saveButton = ActionButton(title: "保存") { [weak self] in self?.submit() }
+        let clear = ActionButton(title: "清除别名") { [weak self] in self?.save("") }
+        let sourceLabel = NativeUI.label(source == "local" ? "本机回环连接" : source, size: 12, secondary: true)
+        sourceLabel.isSelectable = true
+        let note = NSTextField(wrappingLabelWithString: "同一来源的所有日志会统一更新。局域网设备按 IP 识别，IP 改变后需重新设置。")
+        note.font = .systemFont(ofSize: 12); note.textColor = .secondaryLabelColor
+        let stack = NativeUI.stack([NativeUI.label("设备别名", size: 14, weight: .semibold), sourceLabel, field, note,
+                                   NativeUI.stack([clear, NSView(), saveButton], vertical: false)], spacing: 10)
+        field.widthAnchor.constraint(equalToConstant: 280).isActive = true
+        note.widthAnchor.constraint(equalToConstant: 280).isActive = true
+        NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16))
+        preferredContentSize = NSSize(width: 312, height: 200)
+    }
+    override func viewDidAppear() { super.viewDidAppear(); view.window?.makeFirstResponder(field) }
+    private func submit() {
+        if let editor = field.currentEditor() as? NSTextView, editor.hasMarkedText() { return }
+        save(String(field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80)))
     }
 }
