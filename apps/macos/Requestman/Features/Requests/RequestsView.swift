@@ -149,7 +149,8 @@ final class RequestsViewController: ObservedViewController {
         replayStatus.stringValue = replay.map { ($0.replaySummary ?? "") + " · " + $0.method + " " + $0.url } ?? ""
         replayStatus.toolTip = replayStatus.stringValue
         cancelReplay.isHidden = replay?.connectionState.isActive != true
-        filters.update(filter: history.filter, records: history.records, paused: history.paused, viewingFile: history.isViewingFile)
+        filters.update(filter: history.filter, records: history.records, paused: history.paused,
+                       viewingFile: history.isViewingFile, customColumnCount: displayOptions.extraColumns.count)
         status.stringValue = [history.paused ? "记录已暂停，代理继续工作；手动重放仍记录结果" : "", history.dropped > 0 ? "高负载下已丢弃 \(history.dropped) 条待显示记录" : ""].filter { !$0.isEmpty }.joined(separator: "    ")
         status.isHidden = history.isViewingFile || status.stringValue.isEmpty
         let workflowNames = Dictionary(model.document.projects.flatMap(\.workflows).map { ($0.id, $0.name) },

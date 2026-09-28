@@ -16,6 +16,7 @@ final class RequestFilterControls: NSView {
     private let primary = NSSegmentedControl(labels: CaptureResourceType.allCases.map(\.rawValue), trackingMode: .selectOne, target: nil, action: nil)
     private let filterButton = RequestFilterActionButton(symbol: "line.3.horizontal.decrease", label: "筛选")
     private let displayButton = RequestFilterActionButton(symbol: "list.dash", label: "显示选项")
+    private var customColumnCount = -1
     private(set) var isExpanded = false
     private let toolbar = NSView()
     private let panelClip = FlippedView()
@@ -102,7 +103,8 @@ final class RequestFilterControls: NSView {
         }
     }
 
-    func update(filter: CaptureRecordFilter, records: [CaptureRecord], paused: Bool, viewingFile: Bool = false) {
+    func update(filter: CaptureRecordFilter, records: [CaptureRecord], paused: Bool, viewingFile: Bool = false,
+                customColumnCount: Int = 0) {
         self.filter = filter; self.records = records
         pause.image = NSImage(systemSymbolName: paused ? "play" : "pause", accessibilityDescription: nil)
         pause.setAccessibilityLabel(paused ? "继续记录" : "暂停记录")
@@ -112,6 +114,7 @@ final class RequestFilterControls: NSView {
         clearButton.toolTip = "清空全部请求日志（⌘K）"
         primary.selectedSegment = primaryTypes.firstIndex(of: filter.resource) ?? -1
         updateFilterButton()
+        updateDisplayButton(customColumnCount: customColumnCount)
         panel?.update(filter: filter, records: records)
         needsLayout = true
     }
@@ -152,6 +155,16 @@ final class RequestFilterControls: NSView {
             .withSymbolConfiguration(configuration)
         filterButton.setAccessibilityValue((isExpanded ? "已展开，" : "已收起，") + (active ? "\(count) 个筛选条件" : "无筛选条件"))
         filterButton.toolTip = (active ? "筛选（\(count) 个条件）" : "筛选状态码、URL、域名、请求方法、环境和请求 Header") + "（⌘⌥F）"
+    }
+    private func updateDisplayButton(customColumnCount count: Int) {
+        guard customColumnCount != count else { return }
+        customColumnCount = count
+        let active = count > 0
+        // Keep list.dash and use the native bezel tint; no custom background layer.
+        displayButton.bezelColor = active ? .systemBlue : nil
+        displayButton.contentTintColor = active ? .white : nil
+        displayButton.toolTip = active ? "显示选项（\(count) 个自定义列）" : "显示选项"
+        displayButton.setAccessibilityValue(active ? "\(count) 个自定义列" : "无自定义列")
     }
     @objc private func selectPrimary() {
         guard primaryTypes.indices.contains(primary.selectedSegment) else { return }
