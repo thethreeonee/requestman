@@ -24,6 +24,7 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     var pendingTunnelHead: HTTPRequestHead?
     var pendingWebSocketResponse: HTTPResponseHead?
     var client: Channel?
+    let preparedOrigin: PreparedTLSOrigin?
     var upstream: Channel?
     var timer: Scheduled<Void>?
     var recordTimer: Scheduled<Void>?
@@ -83,8 +84,9 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
     var scriptRequestBytes = Data()
     var scriptResponseBytes = Data()
 
-    init(configuration: ExplicitProxyConfiguration, shared: ProxySharedState, records: CaptureRecordBuffer, tlsAuthority: String? = nil, plainAuthority: String? = nil, http2Session: ProxyHTTP2Session? = nil) {
+    init(configuration: ExplicitProxyConfiguration, shared: ProxySharedState, records: CaptureRecordBuffer, tlsAuthority: String? = nil, plainAuthority: String? = nil, http2Session: ProxyHTTP2Session? = nil, preparedOrigin: PreparedTLSOrigin? = nil) {
         self.configuration = configuration; self.shared = shared; self.records = records
+        self.preparedOrigin = preparedOrigin
         self.tlsAuthority = tlsAuthority; self.plainAuthority = plainAuthority; self.http2Session = http2Session
     }
     func handlerAdded(context: ChannelHandlerContext) {

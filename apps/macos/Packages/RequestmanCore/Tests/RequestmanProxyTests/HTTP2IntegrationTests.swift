@@ -4,6 +4,7 @@ import NIOHTTP1
 import NIOHTTP2
 import NIOPosix
 import NIOSSL
+import NIOTLS
 import Testing
 import os
 import RequestmanCore
@@ -13,10 +14,66 @@ import RequestmanCore
 /// TCP/TLS loopback only. Certificates are ephemeral and never installed in a keychain.
 @Suite(.serialized)
 struct HTTP2IntegrationTests {
+    @Test(arguments: ["h2", "http/1.1", "none", "both", "prefer-http1"], [false, true])
+    func browserNegotiatesOriginProtocol(originProtocol: String, upstream: Bool) async throws {
+        try await withHTTP2Harness(originProtocol: originProtocol, upstream: upstream) { h in
+            let (selected, reply) = try await h.browserRequest()
+            let expected = ["h2", "both"].contains(originProtocol) ? "h2" : "http/1.1"
+            #expect(selected == expected)
+            #expect(reply.status == 200 && reply.body == "browser")
+            #expect(h.observation.withLock { $0.connections } == 1)
+            #expect(h.observation.withLock { $0.requests } == 1)
+            let record = try #require(try await h.records(count: 1).first)
+            let version = expected == "h2" ? "HTTP/2" : "HTTP/1.1"
+            #expect(record.clientHTTPVersion == version && record.upstreamHTTPVersion == version)
+            #expect(record.error == nil)
+        }
+    }
+
+    @Test func browserNegotiationRejectsUntrustedOriginWithoutHTTP() async throws {
+        try await withHTTP2Harness(trustOrigin: false) { h in
+            await #expect(throws: (any Error).self) { try await h.browserRequest() }
+            #expect(h.observation.withLock { $0.connections } == 1)
+            #expect(h.observation.withLock { $0.requests } == 0)
+            let record = try #require(try await h.records(count: 1).first)
+            #expect(record.method == "CONNECT" && record.outcome == .failed)
+            #expect(record.error?.contains("TLS") == true)
+        }
+    }
+
+    @Test(arguments: ["h2", "http/1.1"])
+    func browserMockNegotiatesTLSWithoutSendingOriginRequest(originProtocol: String) async throws {
+        try await withHTTP2Harness(originProtocol: originProtocol) { h in
+            var document = WorkspaceDocument()
+            var workflow = RequestWorkflow()
+            workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .contains, value: "/echo")
+            var mock = ModificationStep(kind: .mock); mock.value = "local"
+            workflow.requestSteps = [mock]
+            var project = WorkflowProject(); project.workflows = [workflow]; document.projects = [project]
+            await h.proxy.update(document)
+            let (_, reply) = try await h.browserRequest()
+            #expect(reply.status == 200 && reply.body == "local")
+            #expect(h.observation.withLock { $0.connections } == 1)
+            #expect(h.observation.withLock { $0.requests } == 0)
+            let record = try #require(try await h.records(count: 1).first)
+            #expect(record.upstreamHTTPVersion == nil && record.error == nil)
+        }
+    }
+
+    @Test func http1OnlyBrowserStaysHTTP1WithDualProtocolOrigin() async throws {
+        try await withHTTP2Harness(originProtocol: "both") { h in
+            let (selected, reply) = try await h.browserRequest(offered: ["http/1.1"])
+            #expect(selected == "http/1.1" && reply.status == 200)
+            #expect(h.observation.withLock { $0.connections } == 1)
+            let record = try #require(try await h.records(count: 1).first)
+            #expect(record.clientHTTPVersion == "HTTP/1.1" && record.upstreamHTTPVersion == "HTTP/1.1")
+        }
+    }
+
     @Test(arguments: [false, true])
     func multiplexingTrailersLargeBodyAndCancellation(upstream: Bool) async throws {
         try await withHTTP2Harness(upstream: upstream) { h in
-            let client = try await h.client()
+            let client = try await h.client(offered: ["h2", "http/1.1"])
             let held = try await client.send(path: "/hold", authority: h.authority)
             let fast = try await client.send(path: "/echo", authority: h.authority, body: "hello", omitLength: true, trailers: [("x-request-trailer", "tail")])
             let reply = try await fast.reply()
@@ -91,7 +148,7 @@ struct HTTP2IntegrationTests {
 
     @Test func goAwayCreatesNewConnectionOnlyForNewRequests() async throws {
         try await withHTTP2Harness { h in
-            let client = try await h.client()
+            let client = try await h.client(offered: ["h2", "http/1.1"])
             let first = try await client.send(path: "/goaway", authority: h.authority, body: "first")
             #expect(try await first.reply().body == "first")
             let second = try await client.send(path: "/echo", authority: h.authority, body: "second")
@@ -250,9 +307,20 @@ private final class HTTP2Collector: ChannelInboundHandler, @unchecked Sendable {
         timeout?.cancel()
         if !done { done = true; promise.fail(WorkflowError.invalid("测试流提前关闭")) }
     }
-    func errorCaught(context: ChannelHandlerContext, error: Error) {
+    func fail(_ error: Error) {
         if !done { done = true; timeout?.cancel(); promise.fail(error) }
-        context.close(promise: nil)
+    }
+    func errorCaught(context: ChannelHandlerContext, error: Error) { fail(error); context.close(promise: nil) }
+}
+private final class BrowserTLSFailure: ChannelInboundHandler, @unchecked Sendable {
+    typealias InboundIn = ByteBuffer
+    let collector: HTTP2Collector
+    init(collector: HTTP2Collector) { self.collector = collector }
+    func channelInactive(context: ChannelHandlerContext) {
+        collector.fail(WorkflowError.invalid("测试浏览器连接提前关闭")); context.fireChannelInactive()
+    }
+    func errorCaught(context: ChannelHandlerContext, error: Error) {
+        collector.fail(error); context.close(promise: nil)
     }
 }
 private struct HTTP2CertificateProvider: TLSCertificateProviding {
@@ -269,20 +337,29 @@ private final class HTTP2Harness: @unchecked Sendable {
     var origin: Channel?
     var proxyPort = 0
     var authority = ""
-    init() throws {
+    init(trustOrigin: Bool = true) throws {
         ca = try EphemeralTLSAuthority()
-        proxy = LocalProxyServer(certificateProvider: HTTP2CertificateProvider(authority: ca), upstreamTrustRoots: [try ca.trustRoot()])
+        proxy = LocalProxyServer(certificateProvider: HTTP2CertificateProvider(authority: ca), upstreamTrustRoots: trustOrigin ? [try ca.trustRoot()] : [try EphemeralTLSAuthority().trustRoot()])
     }
     func start(originProtocol: String, upstream: Bool) async throws {
         let identity = try ca.identity(for: "localhost")
         let cert = try NIOSSLCertificate(bytes: Array(identity.certificateDER), format: .der)
         let key = try NIOSSLPrivateKey(bytes: Array(identity.privateKeyPEM), format: .pem)
         var config = TLSConfiguration.makeServerConfiguration(certificateChain: [.certificate(cert)], privateKey: .privateKey(key))
-        config.applicationProtocols = originProtocol == "none" ? [] : [originProtocol]
+        config.applicationProtocols = originProtocol == "none" ? [] : originProtocol == "both" ? ["h2", "http/1.1"] : originProtocol == "prefer-http1" ? ["http/1.1", "h2"] : [originProtocol]
         let tls = try NIOSSLContext(configuration: config)
         origin = try await ServerBootstrap(group: group).childChannelInitializer { [self] channel in
             channels.withLock { $0.append(channel) }; observation.withLock { $0.connections += 1 }
             return channel.eventLoop.makeCompletedFuture { try channel.pipeline.syncOperations.addHandler(NIOSSLServerHandler(context: tls)) }.flatMap {
+                if originProtocol == "both" || originProtocol == "prefer-http1" {
+                    return channel.configureHTTP2SecureUpgrade(h2ChannelConfigurator: { channel in
+                        channel.configureHTTP2Pipeline(mode: .server, connectionConfiguration: .init(), streamConfiguration: .init(), inboundStreamInitializer: { stream in
+                            stream.pipeline.addHandlers(HTTP2FramePayloadToHTTP1ServerCodec(), HTTP2OriginHandler(observation: self.observation))
+                        }).map { _ in () }
+                    }, http1ChannelConfigurator: { channel in
+                        channel.pipeline.configureHTTPServerPipeline().flatMap { channel.pipeline.addHandler(HTTP2OriginHandler(observation: self.observation)) }
+                    })
+                }
                 if originProtocol == "h2" {
                     return channel.configureHTTP2Pipeline(mode: .server, connectionConfiguration: .init(), streamConfiguration: .init(), inboundStreamInitializer: { stream in
                         stream.eventLoop.makeCompletedFuture { try stream.pipeline.syncOperations.addHandlers(HTTP2FramePayloadToHTTP1ServerCodec(), HTTP2OriginHandler(observation: self.observation)) }
@@ -305,9 +382,9 @@ private final class HTTP2Harness: @unchecked Sendable {
         try await reservation.close().get()
         return try await proxy.start(configuration: config, document: .init())
     }
-    func client() async throws -> HTTP2Client {
+    func client(offered: [String] = ["h2"]) async throws -> HTTP2Client {
         var config = TLSConfiguration.makeClientConfiguration()
-        config.trustRoots = .certificates([try ca.trustRoot()]); config.applicationProtocols = ["h2"]
+        config.trustRoots = .certificates([try ca.trustRoot()]); config.applicationProtocols = offered
         let tls = try NIOSSLContext(configuration: config)
         let promise = group.next().makePromise(of: NIOHTTP2Handler.StreamMultiplexer.self)
         let authority = authority
@@ -324,6 +401,53 @@ private final class HTTP2Harness: @unchecked Sendable {
         channels.withLock { $0.append(channel) }
         return HTTP2Client(channel: channel, multiplexer: try await promise.futureResult.get())
     }
+    func browserRequest(offered: [String] = ["h2", "http/1.1"]) async throws -> (String, HTTP2Reply) {
+        var config = TLSConfiguration.makeClientConfiguration()
+        config.trustRoots = .certificates([try ca.trustRoot()]); config.applicationProtocols = offered
+        let tls = try NIOSSLContext(configuration: config)
+        let loop = group.next()
+        let result = loop.makePromise(of: HTTP2Reply.self)
+        let collector = HTTP2Collector(promise: result)
+        let selected = OSAllocatedUnfairLock(initialState: "")
+        let authority = authority
+        let channel = try await ClientBootstrap(group: loop).channelInitializer { channel in
+            channel.eventLoop.makeCompletedFuture {
+                try channel.pipeline.syncOperations.addHandlers(HTTPSCONNECTGate(authority: authority, coalesce: true, coalesced: OSAllocatedUnfairLock(initialState: false)),
+                    NIOSSLClientHandler(context: tls, serverHostname: "localhost"),
+                    ApplicationProtocolNegotiationHandler { negotiated in
+                        let stream: EventLoopFuture<Channel>
+                        let protocolName: String
+                        if negotiated == .negotiated("h2") {
+                            protocolName = "h2"
+                            stream = channel.configureHTTP2Pipeline(mode: .client, connectionConfiguration: proxyHTTP2Configuration(server: false), streamConfiguration: .init(), inboundStreamInitializer: { $0.close() }).flatMap { mux in
+                                mux.createStreamChannel { stream in
+                                    stream.pipeline.addHandlers(HTTP2FramePayloadToHTTP1ClientCodec(httpProtocol: .https), collector)
+                                }
+                            }
+                        } else {
+                            protocolName = "http/1.1"
+                            stream = channel.pipeline.addHTTPClientHandlers().flatMap {
+                                channel.pipeline.addHandler(collector)
+                            }.map { channel }
+                        }
+                        selected.withLock { $0 = protocolName }
+                        return stream.flatMap { stream in
+                            let head = HTTPRequestHead(version: protocolName == "h2" ? .http2 : .http1_1, method: .POST, uri: "/echo", headers: HTTPHeaders([("host", authority), ("content-length", "7")]))
+                            stream.write(HTTPClientRequestPart.head(head), promise: nil)
+                            stream.write(HTTPClientRequestPart.body(.byteBuffer(stream.allocator.buffer(string: "browser"))), promise: nil)
+                            return stream.writeAndFlush(HTTPClientRequestPart.end(nil))
+                        }
+                    }, BrowserTLSFailure(collector: collector))
+            }
+        }.connect(host: "127.0.0.1", port: proxyPort).get()
+        channels.withLock { $0.append(channel) }
+        let timeout = loop.scheduleTask(in: .seconds(10)) { channel.close(promise: nil) }
+        defer { timeout.cancel() }
+        let reply = try await result.futureResult.get()
+        try await channel.close().get()
+        return (selected.withLock { $0 }, reply)
+    }
+
     func records(count: Int) async throws -> [CaptureRecord] {
         var records: [UUID: CaptureRecord] = [:]
         for _ in 0..<400 {
@@ -370,8 +494,8 @@ private final class HTTP2OriginHandler: ChannelInboundHandler, @unchecked Sendab
     }
     func errorCaught(context: ChannelHandlerContext, error: Error) { context.close(promise: nil) }
 }
-private func withHTTP2Harness(originProtocol: String = "h2", upstream: Bool = false, _ body: (HTTP2Harness) async throws -> Void) async throws {
-    let h = try HTTP2Harness()
+private func withHTTP2Harness(originProtocol: String = "h2", upstream: Bool = false, trustOrigin: Bool = true, _ body: (HTTP2Harness) async throws -> Void) async throws {
+    let h = try HTTP2Harness(trustOrigin: trustOrigin)
     do { try await h.start(originProtocol: originProtocol, upstream: upstream); try await body(h); await h.close() }
     catch { await h.close(); throw error }
 }

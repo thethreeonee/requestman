@@ -12,13 +12,15 @@ final class ProxyHTTP2Session: @unchecked Sendable {
     let downstream: Channel
     let configuration: ExplicitProxyConfiguration
     let shared: ProxySharedState
+    let preparedOrigin: PreparedTLSOrigin?
     private var origins: [String: ProxyHTTP2Origin] = [:]
     private var closed = false
     private var activeStreams = 0
     private var idleTimer: Scheduled<Void>?
 
-    init(downstream: Channel, configuration: ExplicitProxyConfiguration, shared: ProxySharedState) {
+    init(downstream: Channel, configuration: ExplicitProxyConfiguration, shared: ProxySharedState, preparedOrigin: PreparedTLSOrigin? = nil) {
         self.downstream = downstream; self.configuration = configuration; self.shared = shared
+        self.preparedOrigin = preparedOrigin
         downstream.closeFuture.whenComplete { [self] _ in
             closed = true; idleTimer?.cancel(); idleTimer = nil
             for origin in origins.values { origin.close() }
@@ -52,7 +54,7 @@ final class ProxyHTTP2Session: @unchecked Sendable {
                 guard let self, self.origins[key] === origin else { return }
                 self.origins.removeValue(forKey: key)
             }
-            origin.connect(host: host, port: port, endpoint: endpoint, configuration: configuration)
+            origin.connect(host: host, port: port, endpoint: endpoint, configuration: configuration, prepared: preparedOrigin?.take(host: host, port: port, endpoint: endpoint))
         }
         return origin.stream(owner: owner)
     }
@@ -73,8 +75,8 @@ private final class ProxyHTTP2Origin: @unchecked Sendable {
         self.loop = loop; self.shared = shared; ready = loop.makePromise()
     }
 
-    func connect(host: String, port: Int, endpoint: ProxyEndpoint, configuration: ExplicitProxyConfiguration) {
-        let connection = ClientBootstrap(group: loop).connectTimeout(.seconds(5))
+    func connect(host: String, port: Int, endpoint: ProxyEndpoint, configuration: ExplicitProxyConfiguration, prepared: PreparedTLSOrigin?) {
+        let connection = prepared.map { loop.makeSucceededFuture($0.channel) } ?? ClientBootstrap(group: loop).connectTimeout(.seconds(5))
             .channelInitializer { [shared] channel in
                 guard shared.register(channel, downstream: false) else { return channel.close() }
                 return channel.eventLoop.makeSucceededVoidFuture()
@@ -85,6 +87,15 @@ private final class ProxyHTTP2Origin: @unchecked Sendable {
                   !(channel.remoteAddress?.port == configuration.port && LocalNetwork.isLocalHost(channel.remoteAddress?.ipAddress ?? "")) else {
                 closeProxyChannel(channel)
                 return loop.makeFailedFuture(WorkflowError.invalid("连接已取消或指向代理自身"))
+            }
+            if let prepared {
+                return prepared.activate {
+                    channel.setOption(ChannelOptions.autoRead, value: true).flatMap {
+                        channel.configureHTTP2Pipeline(mode: .client, connectionConfiguration: proxyHTTP2Configuration(server: false), streamConfiguration: .init(), inboundStreamInitializer: { $0.close() })
+                    }.flatMap { multiplexer in
+                        channel.pipeline.addHandler(HTTP2OriginLifecycle(origin: self)).map { multiplexer }
+                    }
+                }
             }
             let tunnel: EventLoopFuture<Void>
             if case .httpProxy = configuration.upstream {
@@ -180,18 +191,26 @@ extension ProxyTLS {
     /// Do not write an HTTP request until TLS has confirmed the required protocol.
     static func negotiateClient<Value: Sendable>(channel: Channel, host: String, http2: Bool, shared: ProxySharedState,
                                                  configure: @escaping @Sendable () -> EventLoopFuture<Value>) -> EventLoopFuture<Value> {
+        negotiateClient(channel: channel, host: host, http2: http2, browserOffer: false, shared: shared) { _ in configure() }
+    }
+
+    /// A browser offering both versions lets the origin select before downstream TLS.
+    static func negotiateClient<Value: Sendable>(channel: Channel, host: String, http2: Bool = false, browserOffer: Bool,
+                                                 shared: ProxySharedState,
+                                                 configure: @escaping @Sendable (String) -> EventLoopFuture<Value>) -> EventLoopFuture<Value> {
         let state = TLSNegotiationState<Value>(channel: channel)
         do {
-            try channel.pipeline.syncOperations.addHandler(client(host: host, testTrustRoots: shared.upstreamTrustRoots, http2: http2))
+            try channel.pipeline.syncOperations.addHandler(client(host: host, testTrustRoots: shared.upstreamTrustRoots, http2: http2, browserOffer: browserOffer))
             try channel.pipeline.syncOperations.addHandler(ApplicationProtocolNegotiationHandler { result in
                 let expected = http2 ? "h2" : "http/1.1"
                 // No ALPN remains valid for legacy HTTP/1.1 servers; HTTP/2 always requires h2.
-                guard result == .negotiated(expected) || (!http2 && result == .fallback) else {
+                guard result == .negotiated(expected) || (!http2 && result == .fallback) || (browserOffer && result == .negotiated("h2")) else {
                     let error = WorkflowError.invalid("协议不匹配：客户端要求 \(expected)，上游未协商相同协议")
                     state.complete(.failure(error)); channel.close(promise: nil)
                     return channel.eventLoop.makeFailedFuture(error)
                 }
-                return configure().map { value in state.complete(.success(value)) }
+                let selected = result == .negotiated("h2") ? "h2" : "http/1.1"
+                return configure(selected).map { value in state.complete(.success(value)) }
             })
             try channel.pipeline.syncOperations.addHandler(TLSNegotiationFailure(state: state))
             state.startDeadline()

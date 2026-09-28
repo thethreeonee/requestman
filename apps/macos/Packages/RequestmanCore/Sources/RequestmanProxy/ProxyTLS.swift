@@ -8,14 +8,16 @@ import os
 
 /// Cache identities, not trust decisions. The provider authorizes every lease first.
 final class ProxyTLSContexts: Sendable {
-    private let servers = OSAllocatedUnfairLock(initialState: [Data: NIOSSLContext]())
+    private struct Key: Hashable { let certificate: Data; let protocols: [String] }
+    private let servers = OSAllocatedUnfairLock(initialState: [Key: NIOSSLContext]())
 
-    func server(_ identity: TLSCertificateIdentity) throws -> NIOSSLContext {
+    func server(_ identity: TLSCertificateIdentity, protocols: [String] = ["h2", "http/1.1"]) throws -> NIOSSLContext {
         try servers.withLock { contexts in
-            if let context = contexts[identity.certificateDER] { return context }
-            let context = try ProxyTLS.serverContext(identity)
+            let key = Key(certificate: identity.certificateDER, protocols: protocols)
+            if let context = contexts[key] { return context }
+            let context = try ProxyTLS.serverContext(identity, protocols: protocols)
             if contexts.count >= 128, let key = contexts.keys.first { contexts.removeValue(forKey: key) }
-            contexts[identity.certificateDER] = context
+            contexts[key] = context
             return context
         }
     }
@@ -41,28 +43,29 @@ enum ProxyTLS {
         return error.localizedDescription
     }
 
-    private static let clientContext = makeClientContext(protocolName: "http/1.1")
-    private static let http2ClientContext = makeClientContext(protocolName: "h2")
-    private static func makeClientContext(protocolName: String) -> Result<NIOSSLContext, Error> { Result {
+    private static let clientContext = makeClientContext(protocols: ["http/1.1"])
+    private static let http2ClientContext = makeClientContext(protocols: ["h2"])
+    private static let browserClientContext = makeClientContext(protocols: ["h2", "http/1.1"])
+    private static func makeClientContext(protocols: [String]) -> Result<NIOSSLContext, Error> { Result {
         var configuration = TLSConfiguration.makeClientConfiguration()
         configuration.minimumTLSVersion = .tlsv12
-        configuration.applicationProtocols = [protocolName]
+        configuration.applicationProtocols = protocols
         configuration.certificateVerification = .noHostnameVerification
         configuration.trustRoots = .certificates([])
         return try NIOSSLContext(configuration: configuration)
     } }
-    static func serverContext(_ identity: TLSCertificateIdentity) throws -> NIOSSLContext {
+    static func serverContext(_ identity: TLSCertificateIdentity, protocols: [String] = ["h2", "http/1.1"]) throws -> NIOSSLContext {
         let certificate = try NIOSSLCertificate(bytes: Array(identity.certificateDER), format: .der)
         let key = try NIOSSLPrivateKey(bytes: Array(identity.privateKeyPEM), format: .pem)
         var configuration = TLSConfiguration.makeServerConfiguration(
             certificateChain: [.certificate(certificate)], privateKey: .privateKey(key)
         )
         configuration.minimumTLSVersion = .tlsv12
-        configuration.applicationProtocols = ["h2", "http/1.1"]
+        configuration.applicationProtocols = protocols
         return try NIOSSLContext(configuration: configuration)
     }
 
-    static func client(host: String, testTrustRoots: [NIOSSLCertificate]?, http2: Bool = false) throws -> NIOSSLClientHandler {
+    static func client(host: String, testTrustRoots: [NIOSSLCertificate]?, http2: Bool = false, browserOffer: Bool = false) throws -> NIOSSLClientHandler {
         let name = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         // Security validates the target hostname below. NIOSSL must not compare an IP
         // target to the HTTP upstream proxy's socket address a second time.
@@ -71,7 +74,7 @@ enum ProxyTLS {
         let anchors = try testTrustRoots?.map { Data(try $0.toDERBytes()) }
         let sni = (try? SocketAddress(ipAddress: name, port: 443)) == nil ? name : nil
         return try NIOSSLClientHandler(
-            context: (http2 ? http2ClientContext : clientContext).get(), serverHostname: sni,
+            context: (browserOffer ? browserClientContext : http2 ? http2ClientContext : clientContext).get(), serverHostname: sni,
             customVerificationCallback: { certificates, promise in
                 do {
                     let chain = try certificates.map { Data(try $0.toDERBytes()) }

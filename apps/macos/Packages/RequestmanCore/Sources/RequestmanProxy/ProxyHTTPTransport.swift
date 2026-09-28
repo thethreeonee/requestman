@@ -21,6 +21,13 @@ extension ProxyConnection {
             closeProxyChannel(previous)
         }
         upstreamTarget = key
+        if secure, let prepared = preparedOrigin?.take(host: targetHost, port: targetPort, endpoint: endpoint) {
+            upstream = prepared.channel
+            return prepared.activate {
+                prepared.channel.pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes, decoderLimitConfiguration: proxyDecoderLimits())
+                    .flatMap { prepared.channel.pipeline.addHandler(ProxyResponseHandler(owner: self)) }.map { prepared.channel }
+            }
+        }
         return bootstrap(on: loop).connect(host: endpoint.host, port: endpoint.port).flatMap { [self] channel in
             guard isProcessing, !isLoopChannel(channel) else {
                 closeProxyChannel(channel)
