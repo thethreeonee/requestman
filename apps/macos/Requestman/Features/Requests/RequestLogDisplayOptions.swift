@@ -16,6 +16,7 @@ final class RequestLogDisplayOptionsController: NSViewController, NSTableViewDat
     private let table = NSTableView()
     private let scroll = NSScrollView()
     private var listHeight: NSLayoutConstraint!
+    private var contentStack: NSStackView?
     private lazy var edit = ActionButton(title: "编辑…") { [weak self] in
         guard let self, let column = selectedColumn else { return }; editColumn(column)
     }
@@ -61,6 +62,12 @@ final class RequestLogDisplayOptionsController: NSViewController, NSTableViewDat
                  NativeUI.label("拖动日志表头可调整列顺序", size: 11, secondary: true)]
         let stack = NativeUI.stack(rows, spacing: 8)
         NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16))
+        contentStack = stack
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        table.reloadData()
         update(options: options, allowLAN: allowLAN)
     }
 
@@ -83,7 +90,15 @@ final class RequestLogDisplayOptionsController: NSViewController, NSTableViewDat
         }
         listHeight.constant = CGFloat(max(1, min(4, options.extraColumns.count))) * 38 + 2
         edit.isEnabled = selectedColumn != nil; remove.isEnabled = selectedColumn != nil
-        preferredContentSize = view.fittingSize
+        updateContentSize()
+    }
+
+    private func updateContentSize() {
+        guard let contentStack else { return }
+        // Measure the constrained content, not the initially zero-sized container.
+        let size = NSSize(width: 352, height: ceil(contentStack.fittingSize.height) + 32)
+        if preferredContentSize != size { preferredContentSize = size }
+        if view.frame.size != size { view.setFrameSize(size) }
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { options.extraColumns.count }
@@ -139,6 +154,7 @@ final class RequestLogExtraColumnEditor: NSViewController {
     private lazy var customTitle = ActionTextField(draft.title, placeholder: "留空使用字段名") { [weak self] in self?.draft.title = $0 }
     private let nameLabel = NativeUI.label("名称", size: 12, secondary: true)
     private let error = NativeUI.label("", size: 12, secondary: true)
+    private var contentStack: NSStackView?
     private lazy var save = ActionButton(title: isNew ? "添加" : "保存") { [weak self] in self?.submit() }
 
     init(column: RequestLogExtraColumn?, onSave: @escaping (RequestLogExtraColumn) -> Void) {
@@ -168,6 +184,10 @@ final class RequestLogExtraColumnEditor: NSViewController {
         for control in [field, stage, name, customTitle, error] {
             control.widthAnchor.constraint(equalToConstant: 340).isActive = true
         }
+        contentStack = stack
+    }
+    override func viewDidLoad() {
+        super.viewDidLoad()
         updateFields()
     }
     private func updateFields() {
@@ -180,7 +200,11 @@ final class RequestLogExtraColumnEditor: NSViewController {
         name.placeholderString = draft.field == .header ? "选择或输入 Header" : "例如 page、keyword"
         name.setSuggestions(draft.field == .header ? HeaderNameField.suggestions : [])
         validate()
-        preferredContentSize = view.fittingSize
+        if let contentStack {
+            let size = NSSize(width: 380, height: ceil(contentStack.fittingSize.height) + 40)
+            if preferredContentSize != size { preferredContentSize = size }
+            if view.frame.size != size { view.setFrameSize(size) }
+        }
     }
     private func validate() { error.stringValue = draft.validationError ?? " "; save.isEnabled = draft.validationError == nil }
     @objc private func changeField() {

@@ -120,6 +120,9 @@ final class RequestsViewController: ObservedViewController {
         let popover = NSPopover()
         popover.behavior = .transient
         popover.contentViewController = controller
+        // Load and size the contents before AppKit attempts to position the popover.
+        controller.view.layoutSubtreeIfNeeded()
+        popover.contentSize = controller.preferredContentSize
         displayPopover = popover
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
     }
