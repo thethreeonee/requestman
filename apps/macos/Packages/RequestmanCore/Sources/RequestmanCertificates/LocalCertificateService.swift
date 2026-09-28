@@ -102,6 +102,9 @@ public actor LocalCertificateService: CertificateService, TLSCertificateProvidin
     public func migrateAuthorization(allowingUI: Bool) throws -> CertificateStatus {
         do { return try status() }
         catch LocalCertificateError.authorizationRequired { }
+        // Disabling Keychain UI is not permission to attempt an ACL write at startup.
+        // Leave the existing key untouched until the user explicitly starts setup.
+        guard allowingUI else { throw LocalCertificateError.authorizationRequired }
         return try CertificateKeychainInteraction.perform(allowingUI: allowingUI) {
             try Task.checkCancellation()
             guard let data = try documentStore.read() ?? trustStore.installedCertificateData() else {

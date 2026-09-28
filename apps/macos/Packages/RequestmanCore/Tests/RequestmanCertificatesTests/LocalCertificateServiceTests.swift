@@ -127,15 +127,17 @@ struct LocalCertificateServiceTests {
         #expect(after.interactiveKeyReads == 0)
     }
 
-    @Test func silentMigrationCannotEscalateOrReplaceTheCA() async throws {
+    @Test func silentMigrationNeverAttemptsAnACLWriteOrReplacesTheCA() async throws {
         let fixture = MemoryCertificates()
         let service = fixture.service()
         _ = try await service.generate()
         fixture.requireAuthorization()
+        let original = fixture.snapshot()
         await #expect(throws: LocalCertificateError.authorizationRequired) {
             try await service.migrateAuthorization(allowingUI: false)
         }
         #expect(fixture.snapshot().authorizationRepairs == 0)
+        #expect(fixture.snapshot().authorizationAttempts == original.authorizationAttempts)
         #expect(fixture.snapshot().keyCreates == 1)
         #expect(fixture.snapshot().installs == 0)
         #expect(fixture.snapshot().trusts == 0)
@@ -489,6 +491,7 @@ private final class MemoryCertificates: CertificateKeyStore, CertificateDocument
         var needsAuthorization = false
         var cancelRepair = false
         var authorizationRepairs = 0
+        var authorizationAttempts = 0
         var interactiveKeyReads = 0
         var removedCertificates: [Data] = []
         var cancelRemovalOnce: Bool
@@ -524,6 +527,7 @@ private final class MemoryCertificates: CertificateKeyStore, CertificateDocument
     }
     func authorizeSigning() throws {
         try lock.withLock {
+            state.authorizationAttempts += 1
             guard state.needsAuthorization else { return }
             var allowed = DarwinBoolean(false)
             #expect(SecKeychainGetUserInteractionAllowed(&allowed) == errSecSuccess)

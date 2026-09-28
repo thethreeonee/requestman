@@ -101,7 +101,7 @@ CA 私钥仅保存在本机文件型钥匙串，禁止导出，由钥匙串锁�
 
 授权只在用户主动配置证书时发生，配置阶段为当前应用建立持久的 CA 签名权限，新权限描述为“Requestman HTTPS 调试 CA”。已有证书复用原私钥与信任，修复签名权限不重新生成 CA。完成前会在禁止弹窗的条件下复核签名能力和实际 SSL 信任；启动、返回前台、状态检查及 HTTPS 解密均禁止钥匙串授权弹窗。钥匙串锁定或应用签名变化导致授权不可用时，在通用设置中提示点击“设置证书…”重新授权，不自动重弹。
 
-启动首次检查现有 CA 时会尝试静默迁移签名授权，每次进程启动最多尝试一次，返回前台只刷新状态。迁移不生成、安装、重新信任或替换证书，完成后重新验证免弹窗签名与实际信任。若 macOS 要求密码确认，静默迁移会停止并保留“设置证书…”入口；不能绕过旧临时签名到新身份之间的系统授权。
+启动及返回前台只读取现有 CA 状态，不尝试迁移或修改私钥 ACL；禁止弹窗的检查发现授权不可用时，仅显示“设置证书…”入口。只有用户主动配置时才修复签名授权，复用原 CA 和已有信任；不能绕过应用身份变化后的系统授权。
 
 在系统中删除证书或私钥后，本地可能仍保留公开 CA 文件。检测到私钥缺失时，证书设置显示“重新生成证书”；点击后仅清理对应旧 CA 的当前用户信任与默认钥匙串证书，将旧公开文件移入废纸篓，再生成、安装并信任新 CA。若私钥仍在则复用并重新安装原证书；钥匙串锁定、授权被拒或存在其他同名证书时不自动替换。取消或保存失败后可继续设置。
 
@@ -160,7 +160,7 @@ App 的 Bundle ID 为 `com.muirr.requestman.macos`，Debug 与 Release 共用 `C
 
 宿主通过 `CaptureService` 访问实现；`RequestmanCore` 保存模型、动作与资源契约，`RequestmanProxy` 使用 SwiftNIO 处理真实连接。依赖版本记录在 [Package.resolved](Packages/RequestmanCore/Package.resolved)。
 
-开发 HTTPS 解密时需使用稳定的 App 签名：复制 [Signing.local.xcconfig.example](Configuration/Signing.local.xcconfig.example) 为同目录的 `Signing.local.xcconfig`，填写开发团队 ID；本机配置已被 Git 忽略，并由 `Base.xcconfig` 引入。临时（ad hoc / Sign to Run Locally）签名以构建哈希标识 App，重新编译会使旧 CA 私钥授权失效，不能保证跨构建免授权。切换到稳定签名后，打开一次“设置证书…”为现有 CA 授权，无需重新生成 CA；配置阶段会实际请求一次签名，让系统处理签名身份变化产生的授权，再进行禁止弹窗的最终复核。实际重新编译、重启后的钥匙串行为仍须人工验收。
+开发 HTTPS 解密时需使用稳定的 App 签名：复制 [Signing.local.xcconfig.example](Configuration/Signing.local.xcconfig.example) 为同目录的 `Signing.local.xcconfig`，填写开发团队 ID；本机配置已被 Git 忽略，并由 `Base.xcconfig` 引入。临时（ad hoc / Sign to Run Locally）签名以构建哈希标识 App，重新编译会使旧 CA 私钥授权失效，不能保证跨构建免授权。Bundle ID 也是钥匙串识别应用的签名条件之一：由旧标识 `com.requestman.macos` 切换为 `com.muirr.requestman.macos` 后，即使开发证书不变，也可能需要重新授权一次。固定 Bundle ID、开发团队和签名证书后，打开一次“设置证书…”为现有 CA 授权，无需重新生成 CA；配置阶段会实际请求一次签名，让系统处理签名身份变化产生的授权，再进行禁止弹窗的最终复核。实际重新编译、重启后的钥匙串行为仍须人工验收。
 
 Debug 使用 `ONLY_ACTIVE_ARCH=YES`，使宿主与 Swift Package 都面向当前运行目标的架构；Release 保留 `ONLY_ACTIVE_ARCH=NO`。不要仅让 Debug 宿主额外编译另一架构，否则可能在依赖只有 arm64 模块时出现 x86_64 的 `Unable to resolve module dependency`。工程检查脚本包含此配置校验；独立包的测试和源码类型检查不能替代 Xcode 工程构建验收。
 

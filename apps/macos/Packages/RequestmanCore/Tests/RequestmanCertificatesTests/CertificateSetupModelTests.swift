@@ -21,17 +21,17 @@ struct CertificateSetupModelTests {
         #expect(model.errorMessage == nil)
     }
 
-    @Test func startupMigratesOnceAndLaterActivationsOnlyRefresh() async {
+    @Test func startupAndLaterActivationsOnlyReadStatus() async {
         let service = SetupServiceFixture(status: .init(generated: true, installed: true, trusted: true))
         let model = CertificateSetupModel(service: service)
         await model.prepareForStartup()
         #expect(model.isConfigured)
         await model.prepareForStartup()
-        #expect(await service.events == ["migrate", "status"])
-        #expect(await service.migrationInteraction == [false])
+        #expect(await service.events == ["status", "status"])
+        #expect(await service.migrationInteraction.isEmpty)
     }
 
-    @Test func deniedStartupMigrationDoesNotPromptOrRetryUntilExplicitSetup() async {
+    @Test func deniedStartupAccessNeverRepairsAuthorizationUntilExplicitSetup() async {
         let service = SetupServiceFixture(status: .init(generated: true, installed: true, trusted: true),
                                           requiresAuthorization: true)
         let model = CertificateSetupModel(service: service)
@@ -40,10 +40,17 @@ struct CertificateSetupModelTests {
         #expect(!model.canRegenerate)
         #expect(model.errorMessage == LocalCertificateError.authorizationRequired.localizedDescription)
         await model.prepareForStartup()
-        #expect(await service.events == ["migrate", "status"])
-        #expect(await service.migrationInteraction == [false])
+        #expect(await service.events == ["status", "status"])
+        #expect(await service.migrationInteraction.isEmpty)
         await model.run()
         #expect(model.isConfigured)
+        #expect(await service.events == ["status", "status", "status", "generate", "status"])
+        // A new app model must reuse the repaired CA without setup or ACL migration.
+        let reopened = CertificateSetupModel(service: service)
+        await reopened.prepareForStartup()
+        #expect(reopened.isConfigured)
+        #expect(await service.events == ["status", "status", "status", "generate", "status", "status"])
+        #expect(await service.migrationInteraction.isEmpty)
     }
 
     @Test func reusesAlreadyTrustedCertificateWithoutWriting() async {
