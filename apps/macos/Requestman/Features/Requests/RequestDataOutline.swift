@@ -81,7 +81,7 @@ final class RequestDataOutline: NSView {
         outline.allowsEmptySelection = true
         outline.allowsColumnSelection = false
         outline.allowsColumnReordering = false
-        outline.allowsColumnResizing = false
+        outline.allowsColumnResizing = true
         outline.columnAutoresizingStyle = .noColumnAutoresizing
         outline.style = .plain
         outline.backgroundColor = .clear
@@ -90,13 +90,16 @@ final class RequestDataOutline: NSView {
         outline.doubleAction = #selector(RequestDataOutlineView.toggleClickedItemExpansion(_:))
 
         for column in RequestDataColumn.allCases {
-            let item = NSTableColumn(identifier: column.identifier)
+            let item = RequestDataTableColumn(identifier: column.identifier)
             item.title = column.title
             item.minWidth = 0
             item.maxWidth = .greatestFiniteMagnitude
-            item.resizingMask = []
+            item.resizingMask = column == .action ? [] : .userResizingMask
             item.isEditable = false
             outline.addTableColumn(item)
+            item.widthChanged = { [weak coordinator = coordinator] column in
+                coordinator?.resizeColumn(column)
+            }
             if column == .name { outline.outlineTableColumn = item }
         }
         outline.dataSource = coordinator
@@ -141,6 +144,9 @@ final class RequestDataOutline: NSView {
         private var states: [String: OutlineState] = [:]
         private var stateOrder: [String] = []
         private var updating = false
+        private var applyingWidths = false
+        private var availableWidth: CGFloat = 0
+        private var preferredWidths: [Bool: [CGFloat]] = [:]
 
         init(onSelectPath: @escaping (String) -> Void) { self.onSelectPath = onSelectPath }
 
@@ -189,18 +195,71 @@ final class RequestDataOutline: NSView {
         }
 
         func fitColumns(to availableWidth: CGFloat) {
-            guard let outline, availableWidth > 0 else { return }
+            guard outline != nil, !applyingWidths, availableWidth > 0 else { return }
+            self.availableWidth = availableWidth
             let actionWidth = min(60, availableWidth)
             let typeWidth: CGFloat = showsTypes ? min(54, availableWidth * 0.14) : 0
             let remaining = max(0, availableWidth - actionWidth - typeWidth)
             let nameWidth = min(190, remaining * 0.42)
-            let widths = [nameWidth, remaining - nameWidth, typeWidth, actionWidth]
-            for (column, width) in zip(outline.tableColumns, widths) where abs(column.width - width) > 0.1 {
-                column.width = width
+            var widths = [nameWidth, remaining - nameWidth, typeWidth, actionWidth]
+            let preferred = (preferredWidths[showsTypes] ?? widths).map { max(1, $0) }
+            let minimums = minimumWidths
+            var pending = showsTypes ? [0, 1, 2] : [0, 1]
+            var space = availableWidth - actionWidth
+            while !pending.isEmpty {
+                let total = pending.reduce(CGFloat.zero) { $0 + preferred[$1] }
+                let clamped = pending.filter { space * preferred[$0] / total < minimums[$0] }
+                if clamped.isEmpty {
+                    for index in pending { widths[index] = space * preferred[index] / total }
+                    break
+                }
+                for index in clamped { widths[index] = minimums[index]; space -= minimums[index] }
+                pending.removeAll { clamped.contains($0) }
+            }
+            applyWidths(widths)
+        }
+
+        private var minimumWidths: [CGFloat] {
+            let minimums: [CGFloat] = [64, 64, showsTypes ? 40 : 0]
+            let space = max(0, availableWidth - min(60, availableWidth))
+            let scale = min(1, space / minimums.reduce(0, +))
+            return minimums.map { $0 * scale } + [min(60, availableWidth)]
+        }
+
+        private func applyWidths(_ widths: [CGFloat]) {
+            guard let outline else { return }
+            applyingWidths = true
+            defer { applyingWidths = false }
+            let minimums = minimumWidths
+            let minimumTotal = minimums.reduce(0, +)
+            for (index, column) in outline.tableColumns.enumerated() {
+                column.minWidth = minimums[index]
+                column.maxWidth = index == 3 ? minimums[index] : availableWidth - minimumTotal + minimums[index]
+                if abs(column.width - widths[index]) > 0.1 { column.width = widths[index] }
             }
             if abs(outline.frame.width - availableWidth) > 0.1 {
                 outline.setFrameSize(NSSize(width: availableWidth, height: outline.frame.height))
             }
+        }
+
+        func resizeColumn(_ column: NSTableColumn) {
+            guard !applyingWidths, !updating, !column.isHidden, availableWidth > 60, let outline,
+                  let index = outline.tableColumns.firstIndex(of: column), index != 3 else { return }
+            var widths = outline.tableColumns.map { $0.isHidden ? 0 : $0.width }
+            let minimums = minimumWidths
+            let visible = showsTypes ? [0, 1, 2] : [0, 1]
+            let neighbors = visible.filter { $0 > index } + visible.filter { $0 < index }.reversed()
+            var excess = widths.reduce(0, +) - availableWidth
+            for neighbor in neighbors where excess > 0 {
+                let reduction = min(excess, max(0, widths[neighbor] - minimums[neighbor]))
+                widths[neighbor] -= reduction
+                excess -= reduction
+            }
+            if excess < 0, let neighbor = neighbors.first { widths[neighbor] -= excess }
+            applyWidths(widths)
+            // Retain each column layout across refreshes and source/tree switches.
+            // Temporary viewport changes do not overwrite the user's proportions.
+            preferredWidths[showsTypes] = outline.tableColumns.map { $0.isHidden ? 0 : $0.width }
         }
 
         private func makeItem(_ node: RequestDataNode) -> RequestDataItem {
@@ -304,6 +363,17 @@ private enum RequestDataColumn: String, CaseIterable {
         case .value: "值"
         case .type: "类型"
         case .action: ""
+        }
+    }
+}
+
+@MainActor
+private final class RequestDataTableColumn: NSTableColumn {
+    var widthChanged: ((NSTableColumn) -> Void)?
+
+    override var width: CGFloat {
+        didSet {
+            if abs(width - oldValue) > 0.01 { widthChanged?(self) }
         }
     }
 }
