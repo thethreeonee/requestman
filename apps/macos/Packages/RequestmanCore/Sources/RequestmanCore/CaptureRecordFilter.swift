@@ -211,11 +211,11 @@ public struct CaptureRecordFilter: Equatable, Sendable {
     public var hasCriteria: Bool {
         !search.isEmpty || resource != .all || activeConditionCount > (inverted ? 1 : 0)
     }
-    public func matches(_ record: CaptureRecord) -> Bool {
+    public func matches(_ record: CaptureRecord, displayOptions: RequestLogDisplayOptions = .init(),
+                        searchContext: RequestLogSearchContext = .init()) -> Bool {
         guard hasCriteria else { return true }
-        let textMatches = search.isEmpty || record.url.localizedCaseInsensitiveContains(search)
-            || record.workflow.localizedCaseInsensitiveContains(search)
-            || record.matchedRules.contains { $0.summary.localizedCaseInsensitiveContains(search) }
+        let textMatches = search.isEmpty || RequestLogRow(record: record, displayOptions: displayOptions, context: searchContext)
+            .contains(search, displayOptions: displayOptions, allowLAN: searchContext.allowLAN)
         let metadataMatches = textMatches && (resource == .all || CaptureResourceType.classify(record) == resource)
             && (!activeOnly || record.connectionState.isActive)
             && (project.isEmpty || record.project == project)

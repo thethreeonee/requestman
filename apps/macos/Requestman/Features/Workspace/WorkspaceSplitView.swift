@@ -431,9 +431,9 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         environmentButton.widthAnchor.constraint(lessThanOrEqualToConstant: 140).isActive = true
         environmentButton.cell?.lineBreakMode = .byTruncatingTail
         let search = NSSearchField()
-        search.placeholderString = "筛选 URL 或规则名称"
-        search.toolTip = "搜索请求日志（⌘F）"
-        search.setAccessibilityLabel("筛选 URL 或规则名称")
+        search.placeholderString = "搜索当前显示列"
+        search.toolTip = "搜索当前显示列的内容（⌘F）"
+        search.setAccessibilityLabel("搜索当前显示列")
         search.sendsSearchStringImmediately = true
         search.delegate = self
         search.target = self

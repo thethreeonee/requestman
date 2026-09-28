@@ -4,6 +4,8 @@ import RequestmanCore
 
 @MainActor @Observable
 final class ExecutionHistoryModel {
+    var displayOptions = RequestLogDisplayOptions.load()
+    var searchContext: () -> RequestLogSearchContext = { .init() }
     private(set) var displayGeneration = 0
     private var liveRecords: [CaptureRecord] = []
     private var openedRecords: [CaptureRecord]?
@@ -13,7 +15,7 @@ final class ExecutionHistoryModel {
     var isViewingFile: Bool { openedRecords != nil }
     var records: [CaptureRecord] { openedRecords ?? liveRecords }
     /// Export obeys the actual filter, excluding temporary reveal exceptions used by replay navigation.
-    var recordsForSaving: [CaptureRecord] { records.filter { filter.matches($0) } }
+    var recordsForSaving: [CaptureRecord] { matchingRecords(includingRevealed: false) }
     func openLog(_ records: [CaptureRecord], name: String) {
         if !isViewingFile { liveSelection = selectedID; liveFilter = filter }
         displayGeneration += 1
@@ -74,6 +76,13 @@ final class ExecutionHistoryModel {
         returnToLive()
         liveRecords.removeAll(); selectedID = nil; revealedID = nil; latestReplayID = nil; dropped = 0
     }
-    var filtered: [CaptureRecord] { records.filter { $0.id == revealedID || filter.matches($0) } }
+    var filtered: [CaptureRecord] { matchingRecords(includingRevealed: true) }
+    private func matchingRecords(includingRevealed: Bool) -> [CaptureRecord] {
+        let context = searchContext()
+        return records.filter {
+            (includingRevealed && $0.id == revealedID)
+                || filter.matches($0, displayOptions: displayOptions, searchContext: context)
+        }
+    }
     var selected: CaptureRecord? { records.first { $0.id == selectedID } }
 }

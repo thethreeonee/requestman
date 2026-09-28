@@ -7,7 +7,10 @@ final class RequestsViewController: ObservedViewController {
     private let model: WorkspaceModel
     private let filters = RequestFilterControls()
     private let table = RequestRecordsTable()
-    private var displayOptions = RequestLogDisplayOptions.load()
+    private var displayOptions: RequestLogDisplayOptions {
+        get { model.history.displayOptions }
+        set { model.history.displayOptions = newValue }
+    }
     private let status = NativeUI.label("", size: 11, secondary: true)
     private let replayStatus = NativeUI.label("", size: 12)
     private lazy var showReplay = ActionButton(title: "查看重放结果") { [weak self] in

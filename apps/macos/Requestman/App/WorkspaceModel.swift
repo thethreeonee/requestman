@@ -86,5 +86,12 @@ final class WorkspaceModel {
         self.certificateSetup = certificateSetup
         self.documentStore = documentStore
         self.ruleHitNotifications = ruleHitNotifications
+        history.searchContext = { [weak self] in
+            guard let self else { return .init() }
+            return .init(allowLAN: document.proxy.allowLAN,
+                         workflowNames: Dictionary(document.projects.flatMap(\.workflows).map { ($0.id, $0.name) },
+                                                   uniquingKeysWith: { first, _ in first }),
+                         deviceAliases: document.deviceAliases)
+        }
     }
 }

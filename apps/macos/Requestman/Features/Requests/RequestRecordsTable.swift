@@ -120,13 +120,6 @@ final class RequestRecordsTable: NSView {
         private var displayOptions = RequestLogDisplayOptions()
         private var lastAllowLAN: Bool?
         private var configuringColumns = false
-        private let timeFormatter: DateFormatter = {
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.timeZone = .autoupdatingCurrent
-            formatter.dateFormat = "HH:mm:ss"
-            return formatter
-        }()
 
         init(defaults: UserDefaults) {
             self.defaults = defaults
@@ -159,9 +152,8 @@ final class RequestRecordsTable: NSView {
             guard let table else { return }
             capturedRecords = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
             let nextRows = records.map {
-                RecordRow(record: $0, timeFormatter: timeFormatter,
-                          workflowName: $0.matchedWorkflowID.flatMap { workflowNames[$0] }, deviceAliases: deviceAliases,
-                          extraValues: extraValues(in: $0))
+                RecordRow(record: $0, displayOptions: displayOptions,
+                          context: .init(workflowNames: workflowNames, deviceAliases: deviceAliases))
             }
             requiredRequestWidth = (Set(records.map(\.method)).map { RequestMethodTag.requiredWidth(for: $0) }.max() ?? 0) + 24
             updating = true
@@ -201,12 +193,6 @@ final class RequestRecordsTable: NSView {
                 table.selectRowIndexes(indexes, byExtendingSelection: false)
                 if let selectedRow { table.scrollRowToVisible(selectedRow) }
             }
-        }
-
-        private func extraValues(in record: CaptureRecord) -> [String: String] {
-            Dictionary(uniqueKeysWithValues: displayOptions.extraColumns.filter { $0.isEnabled }.map {
-                ($0.identifier, $0.value(in: record) ?? "—")
-            })
         }
 
         func setDisplayOptions(_ options: RequestLogDisplayOptions, allowLAN: Bool) {
@@ -442,42 +428,7 @@ private final class RecordsEdgeHeaderCell: NSTableHeaderCell {
     }
 }
 
-private struct RecordRow: Equatable {
-    let id: UUID
-    let time: String
-    let method: String
-    let url: String
-    let project: String
-    let workflow: String?
-    let deviceSource: String?
-    let deviceAlias: String
-    let extraValues: [String: String]
-    let status: Int?
-    let duration: String
-    let result: String
-    let failure: String?
-    let replay: String?
-
-    init(record: CaptureRecord, timeFormatter: DateFormatter, workflowName: String?, deviceAliases: [String: String], extraValues: [String: String]) {
-        self.extraValues = extraValues
-        id = record.id
-        time = timeFormatter.string(from: record.startedAt)
-        method = record.captureProtocol == .http ? record.method : record.captureProtocol == .sse ? "SSE" : "WS"
-        url = record.url
-        project = record.project
-        workflow = record.matchedWorkflowID != nil
-            ? (record.archivedAt == nil ? workflowName ?? record.workflow : record.workflow)
-            : record.matchedRules.first?.name
-        deviceSource = record.deviceSource
-        deviceAlias = record.deviceSource.flatMap { deviceAliases[$0] } ?? ""
-        status = record.status
-        let seconds = max(0, record.duration)
-        duration = record.connectionState.isActive ? record.connectionSummary : seconds >= 1 ? String(format: "%.1f s", seconds) : String(format: "%.0f ms", seconds * 1000)
-        result = record.replaySummary ?? record.error.map { "\(record.outcome.rawValue) · \($0)" } ?? record.outcome.rawValue
-        replay = record.replaySummary
-        failure = record.error ?? (record.outcome == .failed ? record.outcome.rawValue : nil)
-    }
-}
+private typealias RecordRow = RequestLogRow
 
 @MainActor
 private final class RecordsScrollView: NSScrollView {
