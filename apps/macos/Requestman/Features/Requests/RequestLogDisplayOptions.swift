@@ -7,137 +7,53 @@ extension RequestLogStandardColumn {
 }
 
 @MainActor
-final class RequestLogDisplayOptionsController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
-    private var options: RequestLogDisplayOptions
-    private var allowLAN: Bool
-    private let onChange: (RequestLogDisplayOptions) -> Void
-    private let editColumn: (RequestLogExtraColumn?) -> Void
-    private var checkboxes: [RecordColumn: NSButton] = [:]
-    private let table = NSTableView()
-    private let scroll = NSScrollView()
-    private var listHeight: NSLayoutConstraint!
-    private var contentStack: NSStackView?
-    private lazy var edit = ActionButton(title: "编辑…") { [weak self] in
-        guard let self, let column = selectedColumn else { return }; editColumn(column)
-    }
-    private lazy var remove = ActionButton(title: "删除") { [weak self] in self?.removeSelected() }
-    private var selectedColumn: RequestLogExtraColumn? {
-        options.extraColumns.indices.contains(table.selectedRow) ? options.extraColumns[table.selectedRow] : nil
-    }
-
-    init(options: RequestLogDisplayOptions, allowLAN: Bool, onChange: @escaping (RequestLogDisplayOptions) -> Void,
-         editColumn: @escaping (RequestLogExtraColumn?) -> Void) {
-        self.options = options; self.allowLAN = allowLAN; self.onChange = onChange; self.editColumn = editColumn
-        super.init(nibName: nil, bundle: nil)
-    }
-    required init?(coder: NSCoder) { nil }
-
-    override func loadView() {
-        view = NSView()
-        var rows: [NSView] = [NativeUI.label("显示选项", size: 14, weight: .semibold)]
-        for column in RecordColumn.allCases {
-            let button = NSButton(checkboxWithTitle: column == .request ? "请求（URL）" : column.title,
-                                  target: self, action: #selector(toggleColumn(_:)))
-            button.identifier = column.identifier
-            checkboxes[column] = button; rows.append(button)
-        }
-        let enabled = NSTableColumn(identifier: .init("enabled")); enabled.width = 28
-        let title = NSTableColumn(identifier: .init("title")); title.width = 272
-        table.addTableColumn(enabled); table.addTableColumn(title)
-        table.headerView = nil; table.rowHeight = 36
-        table.allowsColumnReordering = false; table.allowsColumnResizing = false
-        table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
-        table.dataSource = self; table.delegate = self
-        table.target = self; table.doubleAction = #selector(editSelected)
-        table.setAccessibilityLabel("额外列")
-        scroll.documentView = table; scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true; scroll.borderType = .bezelBorder
-        scroll.widthAnchor.constraint(equalToConstant: 320).isActive = true
-        listHeight = scroll.heightAnchor.constraint(equalToConstant: 40); listHeight.isActive = true
-        let add = ActionButton(title: "添加额外列…") { [weak self] in self?.editColumn(nil) }
-        let actions = NativeUI.stack([add, edit, remove], vertical: false, spacing: 8)
-        let separator = NativeUI.separator()
-        separator.widthAnchor.constraint(equalTo: scroll.widthAnchor).isActive = true
-        rows += [separator, NativeUI.label("额外列", size: 12, weight: .semibold), scroll, actions,
-                 NativeUI.label("拖动日志表头可调整列顺序", size: 11, secondary: true)]
-        let stack = NativeUI.stack(rows, spacing: 8)
-        NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16))
-        contentStack = stack
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        table.reloadData()
-        update(options: options, allowLAN: allowLAN)
-    }
-
-    func update(options: RequestLogDisplayOptions, allowLAN: Bool) {
-        let oldID = isViewLoaded ? selectedColumn?.id : nil
-        let extrasChanged = self.options.extraColumns != options.extraColumns
-        self.options = options; self.allowLAN = allowLAN
-        guard isViewLoaded else { return }
+enum RequestLogDisplayOptionsMenu {
+    static func make(options: RequestLogDisplayOptions, allowLAN: Bool,
+                     onChange: @escaping (RequestLogDisplayOptions) -> Void,
+                     editColumn: @escaping (RequestLogExtraColumn?) -> Void) -> NSMenu {
+        let menu = NSMenu(title: "显示选项")
+        menu.autoenablesItems = false
         let available = options.columns.subtracting([.device])
-        for (column, button) in checkboxes {
-            button.state = options.columns.contains(column) ? .on : .off
-            button.isEnabled = column == .device ? allowLAN : !(available.count == 1 && available.contains(column))
-            button.toolTip = column == .device && !allowLAN ? "开启允许局域网设备连接后可显示" : nil
-        }
-        if extrasChanged || table.numberOfRows != options.extraColumns.count {
-            table.reloadData()
-            if let oldID, let index = options.extraColumns.firstIndex(where: { $0.id == oldID }) {
-                table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+        for column in RecordColumn.allCases {
+            let item = RequestActionsMenu.item(column == .request ? "请求（URL）" : column.title) {
+                var next = options
+                if next.columns.contains(column) { next.columns.remove(column) }
+                else { next.columns.insert(column) }
+                onChange(next)
             }
+            item.state = options.columns.contains(column) ? .on : .off
+            item.isEnabled = column == .device ? allowLAN : !(available.count == 1 && available.contains(column))
+            if column == .device && !allowLAN { item.toolTip = "开启允许局域网设备连接后可显示" }
+            menu.addItem(item)
         }
-        listHeight.constant = CGFloat(max(1, min(4, options.extraColumns.count))) * 38 + 2
-        edit.isEnabled = selectedColumn != nil; remove.isEnabled = selectedColumn != nil
-        updateContentSize()
-    }
-
-    private func updateContentSize() {
-        guard let contentStack else { return }
-        // Measure the constrained content, not the initially zero-sized container.
-        let size = NSSize(width: 352, height: ceil(contentStack.fittingSize.height) + 32)
-        if preferredContentSize != size { preferredContentSize = size }
-        if view.frame.size != size { view.setFrameSize(size) }
-    }
-
-    func numberOfRows(in tableView: NSTableView) -> Int { options.extraColumns.count }
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard options.extraColumns.indices.contains(row) else { return nil }
-        let column = options.extraColumns[row]
-        if tableColumn?.identifier.rawValue == "enabled" {
-            let button = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleExtra(_:)))
-            button.tag = row; button.state = column.isEnabled ? .on : .off
-            button.setAccessibilityLabel("显示 " + column.displayTitle)
-            return button
+        menu.addItem(.separator())
+        for column in options.extraColumns {
+            let title = (column.displayTitle.isEmpty ? column.field.title : column.displayTitle) + " · " + column.stage.title
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            item.state = column.isEnabled ? .on : .off
+            item.toolTip = column.summary
+            let submenu = NSMenu(title: title); submenu.autoenablesItems = false
+            let visible = RequestActionsMenu.item("显示此列") {
+                var next = options
+                guard let index = next.extraColumns.firstIndex(where: { $0.id == column.id }) else { return }
+                next.extraColumns[index].isEnabled.toggle()
+                onChange(next)
+            }
+            visible.state = column.isEnabled ? .on : .off
+            submenu.addItem(visible)
+            submenu.addItem(RequestActionsMenu.item("编辑…") { editColumn(column) })
+            submenu.addItem(RequestActionsMenu.item("删除") {
+                var next = options
+                next.extraColumns.removeAll { $0.id == column.id }
+                next.columnOrder = next.orderedColumnIDs
+                onChange(next)
+            })
+            item.submenu = submenu
+            menu.addItem(item)
         }
-        let title = column.displayTitle.isEmpty ? column.field.title : column.displayTitle
-        let label = NativeUI.label(title + " · " + column.stage.title)
-        label.toolTip = column.summary
-        return label
-    }
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        edit.isEnabled = selectedColumn != nil; remove.isEnabled = selectedColumn != nil
-    }
-    private func changed(_ next: RequestLogDisplayOptions) {
-        update(options: next, allowLAN: allowLAN); onChange(next)
-    }
-    @objc private func toggleColumn(_ sender: NSButton) {
-        guard let value = sender.identifier?.rawValue, let column = RecordColumn(rawValue: value) else { return }
-        var next = options
-        if sender.state == .on { next.columns.insert(column) } else { next.columns.remove(column) }
-        changed(next)
-    }
-    @objc private func toggleExtra(_ sender: NSButton) {
-        guard options.extraColumns.indices.contains(sender.tag) else { return }
-        var next = options; next.extraColumns[sender.tag].isEnabled = sender.state == .on; changed(next)
-    }
-    @objc private func editSelected() { if let column = selectedColumn { editColumn(column) } }
-    private func removeSelected() {
-        guard let id = selectedColumn?.id else { return }
-        var next = options; next.extraColumns.removeAll { $0.id == id }
-        next.columnOrder = next.orderedColumnIDs
-        changed(next)
+        if !options.extraColumns.isEmpty { menu.addItem(.separator()) }
+        menu.addItem(RequestActionsMenu.item("添加额外列…") { editColumn(nil) })
+        return menu
     }
 }
 

@@ -15,7 +15,7 @@ final class RequestFilterControls: NSView {
     private let separator = NSBox()
     private let primary = NSSegmentedControl(labels: CaptureResourceType.allCases.map(\.rawValue), trackingMode: .selectOne, target: nil, action: nil)
     private let filterButton = RequestFilterActionButton(symbol: "line.3.horizontal.decrease", label: "筛选")
-    private let displayButton = RequestFilterActionButton(symbol: "tablecells", label: "显示选项")
+    private let displayButton = RequestFilterActionButton(symbol: "list.dash", label: "显示选项")
     private(set) var isExpanded = false
     private let toolbar = NSView()
     private let panelClip = FlippedView()

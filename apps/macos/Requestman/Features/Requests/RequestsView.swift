@@ -8,7 +8,6 @@ final class RequestsViewController: ObservedViewController {
     private let filters = RequestFilterControls()
     private let table = RequestRecordsTable()
     private var displayOptions = RequestLogDisplayOptions.load()
-    private var displayPopover: NSPopover?
     private let status = NativeUI.label("", size: 11, secondary: true)
     private let replayStatus = NativeUI.label("", size: 12)
     private lazy var showReplay = ActionButton(title: "查看重放结果") { [weak self] in
@@ -110,24 +109,20 @@ final class RequestsViewController: ObservedViewController {
     func focusList() { table.focusList() }
     func showFilters() { filters.showFilters() }
     private func showDisplayOptions(relativeTo anchor: NSView) {
-        if displayPopover?.isShown == true { displayPopover?.performClose(nil); return }
-        let controller = RequestLogDisplayOptionsController(options: displayOptions, allowLAN: model.document.proxy.allowLAN, onChange: { [weak self] options in
-            guard let self else { return }
-            displayOptions = options
-            options.save()
-            refresh()
-        }, editColumn: { [weak self] in self?.editExtraColumn($0) })
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.contentViewController = controller
-        // Load and size the contents before AppKit attempts to position the popover.
-        controller.view.layoutSubtreeIfNeeded()
-        popover.contentSize = controller.preferredContentSize
-        displayPopover = popover
-        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        guard anchor.window != nil else { return }
+        let menu = RequestLogDisplayOptionsMenu.make(options: displayOptions, allowLAN: model.document.proxy.allowLAN,
+            onChange: { [weak self] options in
+                guard let self else { return }
+                displayOptions = options
+                options.save()
+                refresh()
+            }, editColumn: { [weak self] column in
+                // Present the sheet after native menu tracking has ended.
+                Task { @MainActor [weak self] in self?.editExtraColumn(column) }
+            })
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.maxY + 3), in: anchor)
     }
     private func editExtraColumn(_ column: RequestLogExtraColumn?) {
-        displayPopover?.close()
         presentAsSheet(RequestLogExtraColumnEditor(column: column) { [weak self] edited in
             guard let self else { return }
             if let index = displayOptions.extraColumns.firstIndex(where: { $0.id == edited.id }) {
@@ -143,10 +138,6 @@ final class RequestsViewController: ObservedViewController {
     @objc private func restoreDisplayOptions() {
         displayOptions = .load()
         if isViewLoaded { refresh() }
-    }
-    override func viewWillDisappear() {
-        displayPopover?.performClose(nil)
-        super.viewWillDisappear()
     }
     override func refresh() {
         let history = model.history, records = model.history.filtered
@@ -166,8 +157,6 @@ final class RequestsViewController: ObservedViewController {
         table.update(records: records, selectedID: history.selectedID, workflowNames: workflowNames,
                      deviceAliases: model.document.deviceAliases, showsDeviceSource: model.document.proxy.allowLAN,
                      displayOptions: displayOptions)
-        (displayPopover?.contentViewController as? RequestLogDisplayOptionsController)?
-            .update(options: displayOptions, allowLAN: model.document.proxy.allowLAN)
         empty.isHidden = !records.isEmpty
         empty.update(title: history.records.isEmpty ? (history.isViewingFile ? "日志文件为空" : "等待请求") : "没有符合条件的记录", description: history.records.isEmpty ? (history.isViewingFile ? "该文件没有保存请求。" : "启动捕获，将浏览器或手机连接到代理后，请求会显示在这里。") : "调整搜索或筛选条件。", symbol: "clock")
     }

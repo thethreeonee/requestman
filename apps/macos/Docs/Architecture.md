@@ -282,9 +282,9 @@ WebSocket、加密隧道、未完整采集的请求及 CONNECT/TRACE 不提供 H
 
 ## 请求日志显示选项
 
-筛选按钮左侧的“显示选项”通过原生 Popover 提供标准列勾选和额外列列表；原生 sheet 统一添加／编辑额外列的字段类型、阶段、字段名及可选标题，列表支持启停与删除。`RequestmanCore.RequestLogDisplayOptions` 保存列选择、多列定义与顺序；`RequestLogExtraColumn` 负责字段提取和合法阶段校验，AppKit 只负责配置与展示。设置保存到应用偏好，配置导入后同步恢复；至少保留一个不依赖局域网的标准列。
+筛选按钮左侧的“显示选项”使用 `list.dash` 图标，通过原生 `NSMenu` 提供标准列勾选及额外列子菜单；额外列子菜单提供显示、编辑和删除，菜单末尾保留“添加额外列…”。原生 sheet 统一添加／编辑额外列的字段类型、阶段、字段名及可选标题，在菜单跟踪结束后呈现。`RequestmanCore.RequestLogDisplayOptions` 保存列选择、多列定义与顺序；`RequestLogExtraColumn` 负责字段提取和合法阶段校验，AppKit 只负责配置与展示。设置保存到应用偏好，配置导入后同步恢复；至少保留一个不依赖局域网的标准列。
 
-显示选项与额外列编辑器在 `viewDidLoad` 完成首次状态更新，使用内容 Stack 的 fitting height 加边距设置根视图尺寸及 `preferredContentSize`，避免依赖初始零尺寸容器。Popover 展示前显式加载内容、完成布局并设置 `contentSize`；日志刷新时仅在尺寸变化后更新，保留当前选择。
+显示菜单在每次点击时读取当前配置，由 AppKit 负责菜单布局及定位，不再创建显示选项 Popover 或同步测量其内容。额外列编辑器在 `viewDidLoad` 完成首次状态更新，使用内容 Stack 的 fitting height 加边距设置根视图尺寸及 `preferredContentSize`。
 
 表格开启原生表头拖动，列顺序按稳定标识持久化；额外列使用独立 UUID，改名、切换字段、隐藏或开启局域网均不改变身份与顺序。列宽按标识保存，不依赖列的数组下标；隐藏列不参与空间分配或拖动补偿。新列默认插在请求后的额外列区域，已有手动顺序保持。旧单个 Header 配置迁移到固定 UUID，保留启用状态、来源、名称和旧 Header 列宽；旧六列及环境列宽迁移继续兼容。
 
