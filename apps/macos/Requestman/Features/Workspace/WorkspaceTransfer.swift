@@ -4,7 +4,7 @@ import RequestmanCore
 
 @MainActor
 enum WorkspaceTransfer {
-    static let preferencesDomain = Bundle.main.bundleIdentifier ?? "com.requestman.macos"
+    static let preferencesDomain = Bundle.main.bundleIdentifier ?? "com.muirr.requestman.macos"
     static let preferencesRestored = Notification.Name("Requestman.preferencesRestored")
 
     static func exportRules(model: WorkspaceModel, window: NSWindow?) {
