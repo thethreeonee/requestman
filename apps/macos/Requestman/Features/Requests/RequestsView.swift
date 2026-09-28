@@ -38,6 +38,11 @@ final class RequestsViewController: ObservedViewController {
         filters.toggleRecording = { [weak model] in guard let model else { return }; model.setRecordingPaused(!model.history.paused) }
         filters.clear = { [weak model] in model?.clearHistory() }
         filters.showDisplayOptions = { [weak self] in self?.showDisplayOptions(relativeTo: $0) }
+        table.onColumnOrderChange = { [weak self] order in
+            guard let self else { return }
+            displayOptions.columnOrder = order
+            displayOptions.save()
+        }
         table.onDeviceAliasChange = { [weak model] source, alias in model?.document.deviceAliases[source] = alias.isEmpty ? nil : alias }
         table.onSelectionChange = { [weak model] in model?.history.selectedID = $0 }
         table.replayUnavailableReason = { [weak model] in model?.replayUnavailableReason }
@@ -106,17 +111,31 @@ final class RequestsViewController: ObservedViewController {
     func showFilters() { filters.showFilters() }
     private func showDisplayOptions(relativeTo anchor: NSView) {
         if displayPopover?.isShown == true { displayPopover?.performClose(nil); return }
-        let controller = RequestLogDisplayOptionsController(options: displayOptions, allowLAN: model.document.proxy.allowLAN) { [weak self] options in
+        let controller = RequestLogDisplayOptionsController(options: displayOptions, allowLAN: model.document.proxy.allowLAN, onChange: { [weak self] options in
             guard let self else { return }
             displayOptions = options
             options.save()
             refresh()
-        }
+        }, editColumn: { [weak self] in self?.editExtraColumn($0) })
         let popover = NSPopover()
         popover.behavior = .transient
         popover.contentViewController = controller
         displayPopover = popover
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+    }
+    private func editExtraColumn(_ column: RequestLogExtraColumn?) {
+        displayPopover?.close()
+        presentAsSheet(RequestLogExtraColumnEditor(column: column) { [weak self] edited in
+            guard let self else { return }
+            if let index = displayOptions.extraColumns.firstIndex(where: { $0.id == edited.id }) {
+                displayOptions.extraColumns[index] = edited
+            } else {
+                displayOptions.extraColumns.append(edited)
+            }
+            displayOptions.columnOrder = displayOptions.orderedColumnIDs
+            displayOptions.save()
+            refresh()
+        })
     }
     @objc private func restoreDisplayOptions() {
         displayOptions = .load()

@@ -6,6 +6,7 @@ final class RequestRecordsTable: NSView {
     static let columnWidthsKey = "requestLog.columnWidths.v1"
     var onDeviceAliasChange: (String, String) -> Void = { _, _ in }
     var onSelectionChange: (UUID?) -> Void = { _ in }
+    var onColumnOrderChange: ([String]) -> Void = { _ in }
     var replayUnavailableReason: () -> String? = { nil }
     var onCancelReplay: (UUID) -> Void = { _ in }
     var revealSource: ((UUID) -> Void)?
@@ -22,6 +23,7 @@ final class RequestRecordsTable: NSView {
         super.init(frame: .zero)
         coordinator.onDeviceAliasChange = { [weak self] in self?.onDeviceAliasChange($0, $1) }
         coordinator.onSelectionChange = { [weak self] in self?.onSelectionChange($0) }
+        coordinator.onColumnOrderChange = { [weak self] in self?.onColumnOrderChange($0) }
         coordinator.replayUnavailableReason = { [weak self] in self?.replayUnavailableReason() }
         coordinator.onCancelReplay = { [weak self] in self?.onCancelReplay($0) }
         coordinator.revealSource = { [weak self] in self?.revealSource?($0) }
@@ -50,7 +52,7 @@ final class RequestRecordsTable: NSView {
         table.allowsMultipleSelection = false
         table.allowsEmptySelection = true
         table.allowsColumnSelection = false
-        table.allowsColumnReordering = false
+        table.allowsColumnReordering = true
         table.allowsColumnResizing = true
         table.columnAutoresizingStyle = .noColumnAutoresizing
         table.style = .plain
@@ -65,7 +67,7 @@ final class RequestRecordsTable: NSView {
             item.maxWidth = .greatestFiniteMagnitude
             item.resizingMask = .userResizingMask
             item.isEditable = false
-            item.isHidden = column == .device || column == .header
+            item.isHidden = column == .device
             item.headerCell.alignment = column == .duration ? .right : .left
             table.addTableColumn(item)
             item.widthChanged = { [weak coordinator = coordinator] column in
@@ -96,7 +98,8 @@ final class RequestRecordsTable: NSView {
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         var selection: UUID?
         var onDeviceAliasChange: (String, String) -> Void = { _, _ in }
-    var onSelectionChange: (UUID?) -> Void = { _ in }
+        var onSelectionChange: (UUID?) -> Void = { _ in }
+        var onColumnOrderChange: ([String]) -> Void = { _ in }
         var replayUnavailableReason: () -> String? = { nil }
         var onCancelReplay: (UUID) -> Void = { _ in }
         var revealSource: ((UUID) -> Void)?
@@ -109,12 +112,14 @@ final class RequestRecordsTable: NSView {
         private var capturedRecords: [UUID: CaptureRecord] = [:]
         private var updating = false
         private let defaults: UserDefaults
-        private var preferredWidths: [CGFloat]?
+        private var preferredWidths: [String: CGFloat] = [:]
         private var availableWidth: CGFloat = 0
         private var requiredRequestWidth: CGFloat = 0
         private var fittedRequestWidth: CGFloat = -1
         private var applyingWidths = false
         private var displayOptions = RequestLogDisplayOptions()
+        private var lastAllowLAN: Bool?
+        private var configuringColumns = false
         private let timeFormatter: DateFormatter = {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -139,16 +144,15 @@ final class RequestRecordsTable: NSView {
         }
 
         private func reloadPreferences() {
-            preferredWidths = nil
-            if let saved = defaults.dictionary(forKey: RequestRecordsTable.columnWidthsKey) {
-                let widths = RecordColumn.allCases.compactMap { column -> CGFloat? in
-                    if column == .header, saved[column.rawValue] == nil { return 140 }
-                    guard let value = (saved[column.rawValue] ?? (column == .device ? saved["environment"] : nil)) as? Double,
-                          value.isFinite, value > 0, value < 100_000 else { return nil }
-                    return CGFloat(value)
+            preferredWidths = [:]
+            for (key, value) in defaults.dictionary(forKey: RequestRecordsTable.columnWidthsKey) ?? [:] {
+                if let width = value as? Double, width.isFinite, width > 0, width < 100_000 {
+                    preferredWidths[key] = CGFloat(width)
                 }
-                if widths.count == RecordColumn.allCases.count { preferredWidths = widths }
             }
+            if preferredWidths["device"] == nil { preferredWidths["device"] = preferredWidths["environment"] }
+            let legacyID = RequestLogExtraColumn(id: RequestLogExtraColumn.legacyHeaderID).identifier
+            if preferredWidths[legacyID] == nil { preferredWidths[legacyID] = preferredWidths["header"] }
         }
 
         func update(records: [CaptureRecord], workflowNames: [UUID: String], deviceAliases: [String: String]) {
@@ -157,7 +161,7 @@ final class RequestRecordsTable: NSView {
             let nextRows = records.map {
                 RecordRow(record: $0, timeFormatter: timeFormatter,
                           workflowName: $0.matchedWorkflowID.flatMap { workflowNames[$0] }, deviceAliases: deviceAliases,
-                          headerValue: displayOptions.headerValue(in: $0))
+                          extraValues: extraValues(in: $0))
             }
             requiredRequestWidth = (Set(records.map(\.method)).map { RequestMethodTag.requiredWidth(for: $0) }.max() ?? 0) + 24
             updating = true
@@ -187,7 +191,7 @@ final class RequestRecordsTable: NSView {
                     !inserted.contains($0) && previous[rows[$0].id] != rows[$0]
                 })
                 if !changed.isEmpty {
-                    table.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integersIn: RecordColumn.allCases.indices))
+                    table.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integersIn: table.tableColumns.indices))
                 }
             }
 
@@ -199,23 +203,48 @@ final class RequestRecordsTable: NSView {
             }
         }
 
+        private func extraValues(in record: CaptureRecord) -> [String: String] {
+            Dictionary(uniqueKeysWithValues: displayOptions.extraColumns.filter { $0.isEnabled }.map {
+                ($0.identifier, $0.value(in: record) ?? "—")
+            })
+        }
+
         func setDisplayOptions(_ options: RequestLogDisplayOptions, allowLAN: Bool) {
-            displayOptions = options
+            guard options != displayOptions || lastAllowLAN != allowLAN else { return }
+            displayOptions = options; lastAllowLAN = allowLAN
             guard let table else { return }
-            applyingWidths = true
-            defer { applyingWidths = false }
-            for column in RecordColumn.allCases {
-                guard let item = table.tableColumn(withIdentifier: column.identifier) else { continue }
-                if column == .header {
-                    item.title = options.trimmedHeaderName.isEmpty ? column.title : options.trimmedHeaderName
-                    item.headerToolTip = options.headerSource.title + " Header：" + options.trimmedHeaderName
-                }
-                let visible = options.isVisible(column, allowLAN: allowLAN)
-                if item.isHidden == visible {
-                    item.isHidden = !visible
-                    availableWidth = 0
+            configuringColumns = true; applyingWidths = true
+            defer { configuringColumns = false; applyingWidths = false }
+            let identifiers = options.orderedColumnIDs
+            let valid = Set(identifiers)
+            for item in table.tableColumns where !valid.contains(item.identifier.rawValue) { table.removeTableColumn(item) }
+            for extra in options.extraColumns where table.tableColumn(withIdentifier: .init(extra.identifier)) == nil {
+                let item = RecordsTableColumn(identifier: .init(extra.identifier))
+                item.minWidth = 0; item.maxWidth = .greatestFiniteMagnitude
+                item.resizingMask = .userResizingMask; item.isEditable = false
+                item.widthChanged = { [weak self] in self?.resizeColumn($0) }
+                table.addTableColumn(item)
+            }
+            for (index, id) in identifiers.enumerated() {
+                let current = table.column(withIdentifier: .init(id))
+                if current >= 0 && current != index { table.moveColumn(current, toColumn: index) }
+            }
+            for item in table.tableColumns {
+                if let column = RecordColumn(rawValue: item.identifier.rawValue) {
+                    item.isHidden = !options.isVisible(column, allowLAN: allowLAN)
+                } else if let extra = options.extraColumns.first(where: { $0.identifier == item.identifier.rawValue }) {
+                    item.title = extra.displayTitle; item.headerToolTip = extra.summary
+                    item.isHidden = !extra.isEnabled || extra.validationError != nil
                 }
             }
+            availableWidth = 0
+        }
+
+        func tableViewColumnDidMove(_ notification: Notification) {
+            guard !configuringColumns, let table else { return }
+            let order = table.tableColumns.map { $0.identifier.rawValue }
+            displayOptions.columnOrder = order
+            onColumnOrderChange(order)
         }
 
         private var visibleColumnIndexes: [Int] {
@@ -224,7 +253,7 @@ final class RequestRecordsTable: NSView {
         }
 
         func fitColumns(to width: CGFloat) {
-            guard table != nil, width > 0,
+            guard let table, !configuringColumns, width > 0,
                   abs(width - availableWidth) > 0.1 || requiredRequestWidth != fittedRequestWidth else { return }
             availableWidth = width
             fittedRequestWidth = requiredRequestWidth
@@ -235,9 +264,18 @@ final class RequestRecordsTable: NSView {
             let status: CGFloat = max(48, 76 * compactScale)
             let duration: CGFloat = max(64, 92 * compactScale)
             let flexible = max(0, width - time - status - duration)
-            let initial = [time, status, flexible * 0.52, flexible * 0.22, flexible * 0.36,
-                           flexible * 0.12, duration]
-            let weights = preferredWidths ?? initial
+            let weights = table.tableColumns.map { column -> CGFloat in
+                if let preferred = preferredWidths[column.identifier.rawValue] { return preferred }
+                switch RecordColumn(rawValue: column.identifier.rawValue) {
+                case .time: return time
+                case .status: return status
+                case .duration: return duration
+                case .request: return max(1, flexible * 0.52)
+                case .rules: return max(1, flexible * 0.36)
+                case .device: return max(1, flexible * 0.12)
+                case nil: return max(1, flexible * 0.22)
+                }
+            }
             let minimums = minimumWidths
             var widths = Array(repeating: CGFloat.zero, count: weights.count)
             var remaining = visibleColumnIndexes
@@ -258,13 +296,25 @@ final class RequestRecordsTable: NSView {
         }
 
         private var minimumWidths: [CGFloat] {
-            let widths: [CGFloat] = [60, 48, 120, 80, 80, 48, 64]
-            let visible = visibleColumnIndexes
-            let scale = min(1, availableWidth / (visible.reduce(CGFloat.zero) { $0 + widths[$1] } * 1.5))
-            return widths.enumerated().map { index, width in
-                guard visible.contains(index) else { return 0 }
-                return index == 2 ? max(width * scale, requiredRequestWidth) : width * scale
+            guard let table else { return [] }
+            let widths = table.tableColumns.map { column -> CGFloat in
+                guard !column.isHidden else { return 0 }
+                switch RecordColumn(rawValue: column.identifier.rawValue) {
+                case .time: return 60
+                case .status, .device: return 48
+                case .request: return 120
+                case .duration: return 64
+                case .rules, nil: return 80
+                }
             }
+            let scale = min(1, availableWidth / max(1, widths.reduce(0, +) * 1.5))
+            var minimums = widths.map { $0 * scale }
+            if let index = table.tableColumns.firstIndex(where: { $0.identifier == RecordColumn.request.identifier }),
+               !table.tableColumns[index].isHidden {
+                let otherMinimums = minimums.reduce(0, +) - minimums[index]
+                minimums[index] = min(max(minimums[index], requiredRequestWidth), max(0, availableWidth - otherMinimums))
+            }
+            return minimums
         }
 
         private func apply(_ widths: [CGFloat]) {
@@ -299,20 +349,18 @@ final class RequestRecordsTable: NSView {
             }
             if excess < 0, let neighbor = neighbors.first { widths[neighbor] -= excess }
             apply(widths)
-            // Preserve hidden columns' saved widths when resizing the visible columns.
-            preferredWidths = table.tableColumns.enumerated().map { index, column in
-                column.isHidden ? (preferredWidths?[index] ?? column.width) : column.width
+            // Widths are keyed by stable identity, never by the current drag order.
+            for column in table.tableColumns where !column.isHidden {
+                preferredWidths[column.identifier.rawValue] = column.width
             }
         }
 
         func tableViewColumnDidResize(_ notification: Notification) {
-            guard !applyingWidths, let table else { return }
-            // AppKit sends this notification when tracking ends. Live layout is
-            // handled by the column's width setter; persist only the final widths.
-            let widths = preferredWidths ?? table.tableColumns.map(\.width)
-            defaults.set(Dictionary(uniqueKeysWithValues: zip(RecordColumn.allCases, widths).map {
-                ($0.0.rawValue, Double($0.1))
-            }), forKey: RequestRecordsTable.columnWidthsKey)
+            guard !applyingWidths, !configuringColumns, let table else { return }
+            for column in table.tableColumns where !column.isHidden {
+                preferredWidths[column.identifier.rawValue] = column.width
+            }
+            defaults.set(preferredWidths.mapValues(Double.init), forKey: RequestRecordsTable.columnWidthsKey)
         }
 
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -345,10 +393,10 @@ final class RequestRecordsTable: NSView {
         }
 
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-            guard rows.indices.contains(row), let identifier = tableColumn?.identifier,
-                  let column = RecordColumn(rawValue: identifier.rawValue) else { return nil }
+            guard rows.indices.contains(row), let identifier = tableColumn?.identifier else { return nil }
+            let column = RecordColumn(rawValue: identifier.rawValue)
             let cell = (tableView.makeView(withIdentifier: identifier, owner: nil) as? RecordCell)
-                ?? RecordCell(column: column)
+                ?? RecordCell(column: column, identifier: identifier)
             cell.device.onRename = { [weak self] in self?.onDeviceAliasChange($0, $1) }
             cell.configure(rows[row])
             return cell
@@ -403,15 +451,15 @@ private struct RecordRow: Equatable {
     let workflow: String?
     let deviceSource: String?
     let deviceAlias: String
-    let headerValue: String
+    let extraValues: [String: String]
     let status: Int?
     let duration: String
     let result: String
     let failure: String?
     let replay: String?
 
-    init(record: CaptureRecord, timeFormatter: DateFormatter, workflowName: String?, deviceAliases: [String: String], headerValue: String) {
-        self.headerValue = headerValue
+    init(record: CaptureRecord, timeFormatter: DateFormatter, workflowName: String?, deviceAliases: [String: String], extraValues: [String: String]) {
+        self.extraValues = extraValues
         id = record.id
         time = timeFormatter.string(from: record.startedAt)
         method = record.captureProtocol == .http ? record.method : record.captureProtocol == .sse ? "SSE" : "WS"
@@ -449,17 +497,17 @@ private final class RecordsScrollView: NSScrollView {
 @MainActor
 private final class RecordCell: NSTableCellView {
     let device = DeviceSourceButton()
-    private let column: RecordColumn
+    private let column: RecordColumn?
     private let primary = NSTextField(labelWithString: "")
     private let secondary = NSTextField(labelWithString: "")
     private let methodTag = RequestMethodTag()
     private var primaryColor = NSColor.labelColor
     private var secondaryColor = NSColor.secondaryLabelColor
 
-    init(column: RecordColumn) {
+    init(column: RecordColumn?, identifier: NSUserInterfaceItemIdentifier) {
         self.column = column
         super.init(frame: .zero)
-        identifier = column.identifier
+        self.identifier = identifier
         for label in [primary, secondary] {
             label.maximumNumberOfLines = 1
             label.lineBreakMode = .byTruncatingTail
@@ -512,8 +560,8 @@ private final class RecordCell: NSTableCellView {
             primaryColor = .secondaryLabelColor
             secondaryColor = .labelColor
             secondary.isHidden = row.workflow == nil
-        case .header:
-            primary.stringValue = row.headerValue.replacingOccurrences(of: "\n", with: " · ")
+        case nil:
+            primary.stringValue = (row.extraValues[identifier?.rawValue ?? ""] ?? "—").replacingOccurrences(of: "\n", with: " · ")
         case .device:
             device.update(source: row.deviceSource, alias: row.deviceAlias)
             primary.stringValue = device.title
@@ -531,11 +579,10 @@ private final class RecordCell: NSTableCellView {
             setAccessibilityLabel("命中的规则")
             setAccessibilityValue(toolTip)
         }
-        if column == .header {
-            primary.toolTip = row.headerValue
-            toolTip = row.headerValue
-            setAccessibilityLabel("Header 值")
-            setAccessibilityValue(row.headerValue)
+        if column == nil {
+            let value = row.extraValues[identifier?.rawValue ?? ""] ?? "—"
+            primary.toolTip = value; toolTip = value
+            setAccessibilityLabel("额外字段值"); setAccessibilityValue(value)
         }
         updateColors()
         needsLayout = true
