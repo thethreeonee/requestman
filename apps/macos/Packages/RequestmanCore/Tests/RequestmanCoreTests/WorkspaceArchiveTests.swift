@@ -72,7 +72,7 @@ struct WorkspaceArchiveTests {
 
     @Test func allRulesRoundTripPreservesGroupsAndAppendsWithoutReplacingSettings() throws {
         var source = populated()
-        source.projects[0].enabled = false
+        source.projects[0].setWorkflowsEnabled(false)
         source.projects.append(WorkflowProject(name: "空规则组"))
         let archive = try WorkspaceArchive.decode(WorkspaceArchive(projects: source.projects).encoded())
         #expect(archive.scope == .rules)
@@ -84,7 +84,7 @@ struct WorkspaceArchiveTests {
         current.httpsDecryption.domains = ["current.test"]
         let merged = try archive.merging(into: current)
         #expect(merged.projects.map(\.name) == current.projects.map(\.name) + source.projects.map(\.name))
-        #expect(!merged.projects[1].enabled && merged.projects[1].symbol == "network")
+        #expect(merged.projects[1].workflows.allSatisfy { !$0.enabled } && merged.projects[1].symbol == "network")
         #expect(merged.projects[2].workflows.isEmpty)
         var unchanged = merged; unchanged.projects = current.projects
         #expect(unchanged == current)
@@ -138,20 +138,52 @@ struct WorkspaceArchiveTests {
         #expect(throws: (any Error).self) { try WorkspaceArchive(document: source, preferences: Data()).merging(into: source) }
     }
 
-    @Test func legacyProjectDefaultsAndProjectDisablePreserveIndividualState() throws {
+    @Test func legacyProjectDefaultsAndGroupActionsUpdateEveryRule() throws {
         let legacy = try JSONSerialization.data(withJSONObject: ["id": UUID().uuidString, "name": "旧规则组", "workflows": []])
         let decoded = try JSONDecoder().decode(WorkflowProject.self, from: legacy)
-        #expect(decoded.enabled && decoded.symbol == "folder")
+        #expect(decoded.symbol == "folder")
         var document = populated()
         document.projects[0].workflows[0].matchConditions.conditions[2].enabled = false
         document.projects[0].workflows[1].enabled = false
         #expect(WorkflowEngine.match(document, method: "PATCH", url: "https://api.test/") != nil)
-        document.projects[0].enabled = false
+        let originalRules = document.projects[0].workflows
+        document.projects[0].setWorkflowsEnabled(false)
+        #expect(document.projects[0].workflows.allSatisfy { !$0.enabled })
         #expect(WorkflowEngine.match(document, method: "PATCH", url: "https://api.test/") == nil)
         document = try JSONDecoder().decode(WorkspaceDocument.self, from: JSONEncoder().encode(document))
-        #expect(!document.projects[0].enabled && document.projects[0].symbol == "network")
-        document.projects[0].enabled = true
+        #expect(document.projects[0].symbol == "network")
+        #expect(document.projects[0].workflows.allSatisfy { !$0.enabled })
+        document.projects[0].setWorkflowsEnabled(true)
+        #expect(document.projects[0].workflows.allSatisfy { $0.enabled })
+        for (original, updated) in zip(originalRules, document.projects[0].workflows) {
+            var expected = original
+            expected.enabled = true
+            #expect(updated == expected)
+        }
         #expect(WorkflowEngine.match(document, method: "PATCH", url: "https://api.test/") != nil)
-        #expect(!document.projects[0].workflows[1].enabled)
+        var empty = WorkflowProject()
+        empty.setWorkflowsEnabled(false)
+        #expect(empty.workflows.isEmpty)
+        empty.setWorkflowsEnabled(true)
+        #expect(empty.workflows.isEmpty)
+    }
+
+    @Test func legacyGroupDisableMigratesToRulesWithoutKeepingAGroupGate() throws {
+        var source = populated()
+        source.projects[0].workflows[0].matchConditions.conditions[2].enabled = false
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(source.projects[0])) as! [String: Any]
+        #expect(json["enabled"] == nil)
+        json["enabled"] = false
+        var project = try JSONDecoder().decode(WorkflowProject.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(project.workflows.allSatisfy { !$0.enabled })
+        source.projects = [project]
+        #expect(RuleMatchingEngine.match(source, method: "PATCH", url: "https://api.test/") == nil)
+        project.workflows[0].enabled = true
+        source.projects = [project]
+        #expect(RuleMatchingEngine.match(source, method: "PATCH", url: "https://api.test/")?.workflow.id == project.workflows[0].id)
+        #expect(!project.workflows[1].enabled)
+        let saved = try JSONSerialization.jsonObject(with: JSONEncoder().encode(project)) as! [String: Any]
+        #expect(saved["enabled"] == nil)
+        #expect(try JSONDecoder().decode(WorkflowProject.self, from: JSONEncoder().encode(project)) == project)
     }
 }

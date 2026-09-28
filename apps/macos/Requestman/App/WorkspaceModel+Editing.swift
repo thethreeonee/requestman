@@ -39,14 +39,9 @@ extension WorkspaceModel {
                     document.projects.firstIndex { $0.id == projectID }
                 }
                 let selectedIndex = document.projects.firstIndex {
-                    $0.enabled && $0.workflows.contains { $0.id == selectedWorkflowID }
+                    $0.workflows.contains { $0.id == selectedWorkflowID }
                 }
-                let index: Int
-                if let existing = matchingIndex ?? selectedIndex ?? document.projects.firstIndex(where: \.enabled) {
-                    index = existing
-                } else {
-                    document.projects.append(WorkflowProject()); index = document.projects.count - 1
-                }
+                let index = matchingIndex ?? selectedIndex ?? 0
                 document.projects[index].workflows.insert(workflow, at: 0)
                 selectedWorkflowID = workflow.id
                 selectedStepID = nil

@@ -1941,7 +1941,7 @@ import RequestmanCore
         for _ in 0..<2 {
             for expectedRows in [1, 2] {
                 sidebar.toggleProject(at: 0)
-                checkDisclosureAnimations(sidebar.outline, expanding: expectedRows == 2)
+                checkDisclosureState(sidebar.outline, expanding: expectedRows == 2)
                 RunLoop.main.run(until: Date().addingTimeInterval(0.22))
                 precondition(sidebar.outline.numberOfRows == expectedRows, "Double-click action toggles a project exactly once")
                 precondition(model.selectedWorkflowID == selectedBeforeCollapse)
@@ -1949,7 +1949,7 @@ import RequestmanCore
         }
         for expectedRows in [1, 2] {
             sidebar.outline.disclosureButton(at: 0)!.performClick(nil)
-            checkDisclosureAnimations(sidebar.outline, expanding: expectedRows == 2)
+            checkDisclosureState(sidebar.outline, expanding: expectedRows == 2)
             RunLoop.main.run(until: Date().addingTimeInterval(0.22))
             precondition(sidebar.outline.numberOfRows == expectedRows, "Native disclosure buttons toggle once")
         }
@@ -1959,7 +1959,7 @@ import RequestmanCore
                 windowNumber: window.windowNumber, context: nil, characters: character,
                 charactersIgnoringModifiers: character, isARepeat: false, keyCode: keyCode)!
             sidebar.outline.keyDown(with: key)
-            checkDisclosureAnimations(sidebar.outline, expanding: expectedRows == 2)
+            checkDisclosureState(sidebar.outline, expanding: expectedRows == 2)
             RunLoop.main.run(until: Date().addingTimeInterval(0.22))
             precondition(sidebar.outline.numberOfRows == expectedRows, "Native arrow keys expand and collapse the selected project")
         }
@@ -2008,12 +2008,13 @@ import RequestmanCore
         sidebar.outline.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
         projectRow.setHovered(false, animated: false)
         var projectMenu = sidebar.menu(forRow: 0)!
-        precondition(projectMenu.items.filter { !$0.isSeparatorItem }.map(\.title) == ["添加请求修改", "禁用整个规则组", "复制整个规则组", "重命名", "修改图标", "导出整组…", "删除规则组"])
-        projectMenu.performActionForItem(at: projectMenu.indexOfItem(withTitle: "禁用整个规则组")); sidebar.refresh()
-        precondition(!model.document.projects[0].enabled && model.workflow!.enabled)
+        precondition(projectMenu.items.filter { !$0.isSeparatorItem }.map(\.title) == ["添加请求修改", "全部禁用", "复制整个规则组", "重命名", "修改图标", "导出整组…", "删除规则组"])
+        projectMenu.performActionForItem(at: projectMenu.indexOfItem(withTitle: "全部禁用")); sidebar.refresh()
+        precondition(model.document.projects[0].workflows.allSatisfy { !$0.enabled })
+        precondition(sidebar.outline.view(atColumn: 0, row: 1, makeIfNecessary: true)!.alphaValue == 0.45)
         projectMenu = sidebar.menu(forRow: 0)!
-        precondition(projectMenu.item(withTitle: "启用整个规则组") != nil)
-        projectMenu.performActionForItem(at: projectMenu.indexOfItem(withTitle: "启用整个规则组"))
+        precondition(projectMenu.item(withTitle: "全部启用") != nil)
+        projectMenu.performActionForItem(at: projectMenu.indexOfItem(withTitle: "全部启用"))
         let icons = projectMenu.item(withTitle: "修改图标")!.submenu!
         let palettes = icons.items.compactMap(\.submenu)
         let iconChoices = palettes.flatMap(\.items)
@@ -2208,9 +2209,9 @@ import RequestmanCore
         window.makeFirstResponder(sidebar.outline)
         sidebar.outline.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         precondition(sidebar.canPerform(.duplicate) && sidebar.canPerform(.toggleEnabled))
-        let enabledBefore = model.document.projects[0].enabled
+        let enabledBefore = model.document.projects[0].workflows.contains(where: \.enabled)
         sidebar.perform(.toggleEnabled)
-        precondition(model.document.projects[0].enabled != enabledBefore && sidebar.outline.selectedRow == 0)
+        precondition(model.document.projects[0].workflows.contains(where: \.enabled) != enabledBefore && sidebar.outline.selectedRow == 0)
         let projectCount = model.document.projects.count
         sidebar.perform(.duplicate)
         precondition(model.document.projects.count == projectCount + 1)
@@ -2277,56 +2278,14 @@ import RequestmanCore
         checkSidebarWidths()
         print("Rules UI checks passed: Body JSON formatting/save/undo, syntax colors and ruler rendering, native sidebar, live field identity, both lanes, multiple headers, template marks and clipboard/undo, deletion confirmation, all inspector kinds and preview inputs. Hidden CLI window only; no App built or run.")
     }
-    private static func checkDisclosureAnimations(_ outline: ProjectOutlineView, expanding: Bool) {
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
-        guard let button = outline.disclosureButton(at: 0),
-              let rotation = button.layer?.animation(forKey: "sidebar.disclosureRotation") as? CAKeyframeAnimation else {
-            preconditionFailure("The native disclosure button must have a rotation animation")
-        }
-        precondition(rotation.duration == 0.18 && rotation.values?.count == 33)
-        let pivot = CGPoint(x: button.layer!.bounds.midX - button.layer!.bounds.width * button.layer!.anchorPoint.x,
-                            y: button.layer!.bounds.midY - button.layer!.bounds.height * button.layer!.anchorPoint.y)
-        for value in rotation.values as! [NSValue] {
-            let transformed = pivot.applying(CATransform3DGetAffineTransform(value.caTransform3DValue))
-            precondition(hypot(transformed.x - pivot.x, transformed.y - pivot.y) < 0.001,
-                         "Every rotation sample must preserve the arrow center: \(pivot) -> \(transformed)")
-        }
-        let buttonFrame = button.convert(button.bounds, to: outline)
-        let cell = outline.view(atColumn: 0, row: 0, makeIfNecessary: false)!
-        let icon = descendants(cell).first { $0.identifier?.rawValue == "rules.sidebarIcon" }!
-        let iconFrame = icon.superview!.convert(icon.alignmentRect(forFrame: icon.frame), to: outline)
-        precondition(abs(buttonFrame.midY - iconFrame.midY) < 0.5,
-                     "The actual arrow button and folder icon must share a center: \(buttonFrame), \(iconFrame)")
-        precondition(button.image === button.alternateImage, "Disclosure must never swap arrow glyphs")
-        if let directory = ProcessInfo.processInfo.environment["REQUESTMAN_ARROW_SNAPSHOT_DIR"],
-           let rowView = outline.rowView(atRow: 0, makeIfNecessary: false) {
-            let wasSelected = rowView.isSelected
-            rowView.isSelected = false
-            rowView.display()
-            defer { rowView.isSelected = wasSelected }
-            let context = CGContext(data: nil, width: Int(rowView.bounds.width * 2), height: Int(rowView.bounds.height * 2),
-                                    bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
-                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-            context.setFillColor(NSColor.white.cgColor)
-            context.fill(CGRect(x: 0, y: 0, width: rowView.bounds.width * 2, height: rowView.bounds.height * 2))
-            context.translateBy(x: 0, y: rowView.bounds.height * 2)
-            context.scaleBy(x: 2, y: -2)
-            rowView.layer!.render(in: context)
-            let bitmap = NSBitmapImageRep(cgImage: context.makeImage()!)
-            let name = expanding ? "expanded.png" : "collapsed.png"
-            try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: directory).appendingPathComponent(name))
-        }
-        if expanding {
-            let layer = outline.rowView(atRow: 1, makeIfNecessary: false)?.layer
-            precondition(layer?.animation(forKey: "sidebar.rowPosition") != nil,
-                         "Entering children must actually animate their position")
-            precondition(layer?.animation(forKey: "sidebar.rowOpacity") != nil)
-        } else {
-            let snapshot = outline.layer?.sublayers?.first { $0.name == "sidebar.disappearingRow" }
-            precondition(snapshot?.animation(forKey: "sidebar.rowOpacity") != nil,
-                         "Collapsing children must fade out instead of disappearing instantly")
-        }
+    private static func checkDisclosureState(_ outline: ProjectOutlineView, expanding: Bool) {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.22))
+        let item = outline.item(atRow: 0)!
+        precondition(outline.isItemExpanded(item) == expanding)
+        let button = outline.disclosureButton(at: 0)!
+        precondition((button.state == .on) == expanding, "Native arrow follows the outline's expansion state")
+        precondition(outline.layer?.sublayers?.contains { $0.name == "sidebar.disappearingRow" } != true,
+                     "Disclosure must not create a second rendering of removed rows")
     }
     private static func checkRapidSidebarDisclosure() {
         let model = WorkspaceModel()
@@ -2439,19 +2398,13 @@ import RequestmanCore
             }
             row.isShowingMenu = false
         }
-        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            for expanded in [false, true] {
-                sidebar.toggleProject(at: 0)
-                RunLoop.main.run(until: Date().addingTimeInterval(0.01))
-                let secondProjectRow = expanded ? 3 : 1
-                let animation = sidebar.outline.rowView(atRow: secondProjectRow, makeIfNecessary: false)?
-                    .layer?.animation(forKey: "sidebar.rowPosition") as? CABasicAnimation
-                let start = (animation?.fromValue as? NSValue)?.pointValue
-                let end = (animation?.toValue as? NSValue)?.pointValue
-                precondition(start != nil && end != nil && abs(start!.y - end!.y) > 1,
-                             "Following project rows must visibly slide when a folder changes height")
-                RunLoop.main.run(until: Date().addingTimeInterval(0.22))
-            }
+        for expanded in [false, true] {
+            sidebar.toggleProject(at: 0)
+            checkDisclosureState(sidebar.outline, expanding: expanded)
+            let secondProjectRow = expanded ? 3 : 1
+            let cell = sidebar.outline.view(atColumn: 0, row: secondProjectRow, makeIfNecessary: true)!
+            let title = descendants(cell).first { $0.identifier?.rawValue == "rules.sidebarTitle" } as! NSTextField
+            precondition(title.stringValue == second.name, "Following projects retain their correct row after disclosure")
         }
         model.document.projects[1].name = String(repeating: "很长的规则组名称", count: 8)
         sidebar.refresh(); sidebar.view.layoutSubtreeIfNeeded()

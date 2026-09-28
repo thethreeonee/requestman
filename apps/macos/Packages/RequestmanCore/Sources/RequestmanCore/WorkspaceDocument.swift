@@ -279,18 +279,28 @@ public struct WorkflowProject: Codable, Equatable, Identifiable, Sendable {
     public var id = UUID()
     public var name: String
     public var workflows: [RequestWorkflow] = []
-    public var enabled = true
     public var symbol = "folder"
     public init(name: String = "新规则组") { self.name = name }
-    private enum CodingKeys: String, CodingKey { case id, name, workflows, enabled, symbol }
+    private enum CodingKeys: String, CodingKey { case id, name, workflows, symbol }
+    private enum LegacyCodingKeys: String, CodingKey { case enabled }
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(UUID.self, forKey: .id)
         name = try values.decode(String.self, forKey: .name)
         workflows = try values.decode([RequestWorkflow].self, forKey: .workflows)
-        enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         symbol = try values.decodeIfPresent(String.self, forKey: .symbol) ?? "folder"
+        // Flatten the old group gate once, preserving the effective disabled
+        // state on each rule. New documents encode no group-level switch.
+        let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
+        if try legacy.decodeIfPresent(Bool.self, forKey: .enabled) == false {
+            setWorkflowsEnabled(false)
+        }
     }
+    /// A whole-group action explicitly applies the same state to every rule.
+    public mutating func setWorkflowsEnabled(_ enabled: Bool) {
+        for index in workflows.indices { workflows[index].enabled = enabled }
+    }
+
     public func duplicated() -> WorkflowProject {
         var copy = self
         copy.id = UUID()

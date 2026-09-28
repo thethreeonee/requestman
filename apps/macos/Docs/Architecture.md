@@ -44,7 +44,7 @@ HTTP/1.1 顺序请求复用下游连接，每条下游最多保留一个同目�
 
 主窗口和独立日志窗口分别由 `WorkspaceWindowController` 创建 `NSWindow`，直接将各自固定为 `.rules` / `.requests` 的 `WorkspaceSplitController` 作为 contentViewController；两个窗口共享 `WorkspaceModel` 与 `ExecutionHistoryModel`，保留各自的分栏、详情状态和窗口位置。日志窗口延迟创建并复用，关闭不停止捕获或清空记录；`WorkspaceModel.selection` 作为打开目标窗口的导航请求，经 App delegate 唤起对应窗口，菜单命令按当前 key window 分发，新建规则先唤起主窗口；窗口与分栏尺寸全部由 AppKit 管理。规则组侧栏、主内容和 Inspector 使用保留的 `NSViewController`，交互内容约束到各栏的系统 safe area；macOS 26+ 请求日志的滚动视图延伸到主栏顶部，由系统自动为标题栏和筛选附件留出内容 inset。规则编辑页同样延伸到标题栏背后，并铺满到底部预览附件栏下方；`RulesViewController` 持有底部原生附件，`FlowEditorViewController` 将预览按钮放入附件内容视图，切换规则时替换内容，无规则时隐藏附件。顶部沿用工具栏默认滚动边缘，底部在 macOS 26.1+ 使用 `.soft`；系统内容 inset 保持首尾字段可达。两侧均使用 `NSSplitViewItem(sidebarWithViewController:)`，启用 `allowsFullHeightLayout` 与窗口 `.fullSizeContentView`，由系统提供贯穿窗口高度的侧栏材质。右侧工具栏使用自定义标识的原生 `NSTrackingSeparatorToolbarItem` 明确跟踪第二条分隔线，避免系统预留 Inspector 标识按角色定位。左右工具栏按钮分别直接切换对应分栏的 `isCollapsed`，通过原生 animator 保留动画，不依赖按角色查找分栏的系统 toggle 实现。左栏范围 260–400 pt，初始 320 pt；主内容最小 420 pt；右栏范围 400–760 pt，初始 520 pt。之后由分栏保留用户宽度，拖动分隔线不改变工作区外框。`ObservedViewController` 用 `withObservationTracking` 注册一次性依赖并在变更后重新注册，在主线程更新既有控件；不轮询模型，不因每次输入重建编辑器。窗口工具栏使用独立 `WorkspaceToolbarSnapshot` 跳过相同状态的重复更新。
 
-规则组树使用 `ProjectOutlineView` 原生选择与展开事件，`RulesSidebarCell` 分别约束箭头后的图标、名称、数量和固定操作栏，文件夹与规则同为 30 pt，名称对齐到同一竖线。底部恢复左加号、右搜索的原有布局。单击选择、双击文件夹整行展开收起；双击使用原生 `doubleAction`；鼠标和键盘展开同步更新原生状态，再用显式 Core Animation 处理行位移、淡入淡出与固定 SF Symbol 的居中箭头旋转，减少动态效果时直接切换。过时动画按代次取消，结束、reload 和脱离窗口时清理快照。步骤列表复用未变更的卡片并保留 `NSBox` 自有内容视图，切换规则时停止旧编辑器观察。`ProjectIconMenu` 以原生 palette 菜单组成六列图标网格，仅展示预览并保留辅助功能名称。`ProjectSidebarRowView` 仅为用户指定的悬停反馈增加浅灰装饰层，用 `CABasicAnimation` 动画 `opacity`（移入 120 ms、移出 160 ms）；model layer 保存终值、presentation layer 用于中途反转，选中、移除与窗口失焦时清理反馈，颜色随有效外观更新。选择、焦点、展开箭头和右键菜单继续由 AppKit 提供。设计与验收范围见 [规则组侧栏](Design/project-sidebar.md)。
+规则组树使用 `ProjectOutlineView` 原生选择与展开事件，`RulesSidebarCell` 分别约束箭头后的图标、名称、数量和固定操作栏，文件夹与规则同为 30 pt，名称对齐到同一竖线。底部恢复左加号、右搜索的原有布局。单击选择、双击文件夹整行展开收起；双击使用原生 `doubleAction`；展开按钮与行增删统一由 AppKit 管理；双击经原生 animator 执行展开收起，减少动态效果时直接切换，不再叠加行快照和箭头旋转。数据刷新复用已有节点对象，保留展开状态。步骤列表复用未变更的卡片并保留 `NSBox` 自有内容视图，切换规则时停止旧编辑器观察。`ProjectIconMenu` 以原生 palette 菜单组成六列图标网格，仅展示预览并保留辅助功能名称。`ProjectSidebarRowView` 仅为用户指定的悬停反馈增加浅灰装饰层，用 `CABasicAnimation` 动画 `opacity`（移入 120 ms、移出 160 ms）；model layer 保存终值、presentation layer 用于中途反转，选中、移除与窗口失焦时清理反馈，颜色随有效外观更新。选择、焦点、展开箭头和右键菜单继续由 AppKit 提供。设计与验收范围见 [规则组侧栏](Design/project-sidebar.md)。
 
 请求修改和日志窗口各安装一条 `.unified` 原生 `NSToolbar`，移除请求修改 / 请求日志分段切换。两者分别使用 `Requestman.RulesToolbar` 与 `Requestman.RequestLogsToolbar` 标识；AppKit 会在同标识工具栏之间同步条目和显示状态，即使关闭 `autosavesConfiguration` 也会同步，因此不同窗口布局不能共用标识。`WorkspaceSettingsWindowController` 持有独立设置窗口，使用 `ToolbarSectionControl` 原生分段控件切换“通用 / 环境管理”，保留 `.large` 尺寸与系统胶囊形状。各窗口隐藏标题文字，设置内容固定 800 × 540 pt，切换页面不改变窗口大小。通用页在同一个 `NSScrollView` 中用系统 `NSBox` 分组，收纳启动方式、浏览器、本地代理、上游代理、协议支持和 HTTPS 证书。浏览器使用带应用图标的 `NSPopUpButton`；设置内的环境列表与编辑页采用 `NSSplitViewController`、`NSTableView` 和 AppKit 字段。设置不另装第二条导航栏。
 
@@ -169,7 +169,7 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 ## AppKit 界面迁移（2026-09-26）
 
-`FlowEditorViewController` 的匹配条件首行提供“测试匹配”，通过 `WorkflowMatchTestViewController` 原生 Sheet 输入请求方法、URL 和示例 Header。`WorkflowMatchTest` 在独立后台任务中复用 Core 匹配器，输出条件级诊断及首次匹配范围；不触发代理、步骤或脚本执行。规则摘要是打开时的快照，示例不持久化，输入变更及关闭对话框使旧任务结果失效。匹配测试只检查条件，启用状态、规则组状态及规则顺序仍由实际捕获处理。
+`FlowEditorViewController` 的匹配条件首行提供“测试匹配”，通过 `WorkflowMatchTestViewController` 原生 Sheet 输入请求方法、URL 和示例 Header。`WorkflowMatchTest` 在独立后台任务中复用 Core 匹配器，输出条件级诊断及首次匹配范围；不触发代理、步骤或脚本执行。规则摘要是打开时的快照，示例不持久化，输入变更及关闭对话框使旧任务结果失效。匹配测试只检查条件，规则启用状态及规则顺序仍由实际捕获处理。
 
 `RequestmanEntry` 在处理脚本 worker 参数后创建 `NSApplication`。`WorkspaceAppDelegate` 安装系统菜单、持有主窗口和设置窗口，负责启动加载、前台证书状态刷新、后台保存及退出前恢复代理。所有界面与测试替身移除 SwiftUI 和 Hosting 桥接，核心 Observation 模型、代理、证书及脚本契约保留。`check-native-sources.py` 同时检查工程源引用及 AppKit-only 约束，阻止重新引入声明式桥接。工作区、请求详情、筛选、Header、规则编辑和设置使用隐藏 AppKit 窗口回归；完整 App 的系统外观、真实鼠标体验与浏览器网络验收仍单独报告。
 
@@ -182,13 +182,13 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 ## 规则组与配置归档（2026-09-26）
 
-`WorkflowProject` 增加持久化的 `enabled` 和 SF Symbol 名称 `symbol`，旧工作区默认启用并使用文件夹图标。`RuleMatchingEngine.match` 跳过禁用规则组，不修改请求自身的启用状态。规则组树使用原生 `NSOutlineView` 和 `NSMenu`，规则组/请求统一 40 pt；规则组鼠标点击整行切换展开，名称通过菜单编辑，请求行不展示匹配摘要。右键菜单交给 `NSOutlineView.menu(for:)` 的系统实现跟踪目标行，为未选中项显示原生边框并在菜单关闭后清理，不改变当前请求选择。
+`WorkflowProject` 保存规则组名称、SF Symbol 名称 `symbol` 与规则列表，不再具有启用状态。`RuleMatchingEngine.match` 只检查每条规则的启用状态；组菜单通过 `WorkflowProject.setWorkflowsEnabled` 批量写入所有请求修改的启用状态。旧配置中的组禁用在解码时一次性转换为每条规则禁用，新保存数据不再包含组开关。规则组树使用原生 `NSOutlineView` 和 `NSMenu`，规则组/请求统一 30 pt；单击选择、双击整行展开收起，名称通过菜单编辑，请求行不展示匹配摘要。禁用规则的行内容使用 45% 透明度并显示停用标记，规则组保持正常外观，菜单保持可操作。右键菜单交给 `NSOutlineView.menu(for:)` 的系统实现跟踪目标行，为未选中项显示原生边框并在菜单关闭后清理，不改变当前请求选择。
 
 `WorkspaceArchive` 定义 `requestman.archive` v1，区分 workspace/rules/project/workflow 四种范围；单条保留完整 `RequestWorkflow`，两阶段步骤、脚本选项及 Header 匹配均按原数据编码。全量保存 `WorkspaceDocument` 与应用 UserDefaults 持久域的二进制 plist，JSON 以 Base64 承载该 plist。仅归档配置，不读取证书、钥匙串、浏览器 profile 或系统代理恢复文件。核心合并逻辑为所有导入规则组及后代重新生成 ID，再追加到当前规则组；仅设置页导入全量范围时替换环境和代理配置。文件菜单的独立分组提供“导入规则…”与“导出全部规则…”，`rules` 范围保存所有规则组（包括空组）及完整规则，不保存应用偏好；文件菜单导入完整备份时先转换为规则范围，沿原持久化通道追加，保留当前环境、代理与偏好。单条 `workflow` 导入创建使用本地导入时间命名的“导入 yyyy/MM/dd HH:mm:ss”规则组，整组和全部规则保留组名与顺序。
 
 `WorkspaceTransfer` 使用原生文件面板和后台文件 I/O。宿主完成校验后暂时禁用编辑、取消待保存任务，先通过串行 `WorkspaceDocumentStore` 保存合并快照，再发布模型和恢复偏好；文件写入失败保留原模型。偏好恢复通知使已有 `RequestRecordsTable` 立即重新读取列宽。捕获服务收到新工作区快照，代理配置变化仍走现有串行重配，不复制捕获运行状态或触发证书操作。
 
-`WorkspaceArchiveTests` 覆盖完整内容往返、三种导出范围、重复追加和 ID 隔离、环境覆盖、未知版本/坏文件拒绝、旧规则组默认值与规则组禁用匹配。规则 UI 检查覆盖行高、隐藏副标题、空白区/箭头整行点击与菜单动作；请求列表检查覆盖已存在表格的列宽恢复。隐藏窗口回归与完整 App 的文件面板和视觉验收分别报告。
+`WorkspaceArchiveTests` 覆盖完整内容往返、三种导出范围、重复追加和 ID 隔离、环境覆盖、未知版本/坏文件拒绝、旧规则组默认值与批量禁用规则后的匹配与旧组开关迁移。规则 UI 检查覆盖行高、隐藏副标题、空白区/箭头整行点击与菜单动作；请求列表检查覆盖已存在表格的列宽恢复。隐藏窗口回归与完整 App 的文件面板和视觉验收分别报告。
 
 带边框的单行表单输入框由 `ActionTextField` 统一使用原生 `.squareBezel`、浅色控件外观和白底黑字；`HeaderNameField` 可编辑组合框不绘制背景，不固定外观和文字颜色，跟随系统原生样式。不添加背景容器或自绘控件。JSON 路径框保留系统原生凹槽边框，跟随所在窗口的外观并使用系统文字与背景颜色，不强制白底。普通单行表单输入框与 Header 组合框统一使用 32 pt 固有高度；文字与 field editor 垂直居中，标题编辑保留独立布局。请求名称平时显示无边框标题，仅在编辑时显示原生圆角输入框；按系统文字内边距补偿布局，使两种状态的文字都与下方条件标题左对齐。文字布局宽度优先为 450 pt、窄窗口可收缩，编辑框高度至少 40 pt，跟随窗口外观；编辑前后保留文字位置；单行文字与原生 field editor 使用同一块按字体实际行高垂直居中的区域。规则隐藏窗口回归对匹配值、查询参数、URL 查找、状态码、延迟及脚本备注进行聚焦前后像素与输入检查，Header 组合框和 JSON 路径框保留编辑行为检查，不断言白色填充；Inspector 字段放入真实分栏层级检查，缓存像素检查不能替代屏幕合成效果验收。
 

@@ -36,6 +36,7 @@ import RequestmanCore
         outline.indentationPerLevel = 20
         outline.intercellSpacing = NSSize(width: 0, height: 2)
         outline.dataSource = self; outline.delegate = self
+        outline.stronglyReferencesItems = true
         outline.setAccessibilityLabel("规则组与请求修改")
         outline.contextMenu = { [weak self] row in self?.menu(forRow: row) }
         outline.target = self; outline.doubleAction = #selector(doubleClickProject)
@@ -86,8 +87,7 @@ import RequestmanCore
     override func refresh() {
         let focusedItemID = (outline.item(atRow: outline.selectedRow) as? Item)?.id
         synchronizing = true
-        outline.animatesDisclosure = false
-        defer { synchronizing = false; outline.animatesDisclosure = true }
+        defer { synchronizing = false }
         let projects = model.document.projects
         let selectionChanged = displayedWorkflowID != model.selectedWorkflowID || (model.selection == .rules && displayedSection != .rules)
         displayedSection = model.selection
@@ -103,14 +103,22 @@ import RequestmanCore
         let ids = filtered.flatMap { [$0.0.id] + $0.1.map(\.id) }
         if structure != ids || displayedSearch != search {
             structure = ids; displayedSearch = search
-            roots = filtered.map { Item(id: $0.0.id, projectID: $0.0.id, isProject: true) }
-            workflowItems = Dictionary(uniqueKeysWithValues: filtered.map { project, workflows in (project.id, workflows.map { Item(id: $0.id, projectID: project.id, isProject: false) }) })
+            // Preserve identity for surviving nodes: NSOutlineView associates its
+            // expansion state and reusable rows with the item objects themselves.
+            let existing = Dictionary(uniqueKeysWithValues: (roots + workflowItems.values.flatMap { $0 }).map { ($0.id, $0) })
+            roots = filtered.map { existing[$0.0.id] ?? Item(id: $0.0.id, projectID: $0.0.id, isProject: true) }
+            workflowItems = Dictionary(uniqueKeysWithValues: filtered.map { project, workflows in
+                (project.id, workflows.map { existing[$0.id] ?? Item(id: $0.id, projectID: project.id, isProject: false) })
+            })
+            collapsedProjects.formIntersection(Set(projects.map(\.id)))
             outline.reloadData()
-            for root in roots where !collapsedProjects.contains(root.id) { outline.expandItem(root) }
+            for root in roots {
+                outline.setExpanded(!collapsedProjects.contains(root.id), for: root, animated: false)
+            }
         }
         if selectionChanged, let root = roots.first(where: { root in
             workflowItems[root.id]?.contains { $0.id == model.selectedWorkflowID } == true
-        }) { outline.expandItem(root) }
+        }) { outline.setExpanded(true, for: root, animated: false) }
         for row in 0..<outline.numberOfRows {
             guard let item = outline.item(atRow: row) as? Item, let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? RulesSidebarCell else { continue }
             configure(cell, item: item)
@@ -142,9 +150,10 @@ import RequestmanCore
     private func configure(_ cell: RulesSidebarCell, item: Item) {
         guard let project = model.document.projects.first(where: { $0.id == item.projectID }) else { return }
         if item.isProject {
-            cell.configure(title: project.name, symbol: project.symbol, suffix: "\(project.workflows.count)", enabled: project.enabled, project: true)
+            cell.configure(title: project.name, symbol: project.symbol, suffix: "\(project.workflows.count)", enabled: true, project: true)
         } else if let workflow = project.workflows.first(where: { $0.id == item.id }) {
-            cell.configure(title: workflow.name, symbol: nil, suffix: workflow.enabled ? "" : "⏸", enabled: project.enabled && workflow.enabled, project: false)
+            let enabled = workflow.enabled
+            cell.configure(title: workflow.name, symbol: nil, suffix: enabled ? "" : "⏸", enabled: enabled, project: false)
         }
         cell.showMenu = { [weak self, weak cell] button in
             guard let self, let cell, let row = cell.superview as? ProjectSidebarRowView,
@@ -163,8 +172,7 @@ import RequestmanCore
         guard model.loaded, let item = outline.item(atRow: row) as? Item, item.isProject else { return false }
         outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         view.window?.makeFirstResponder(outline)
-        if outline.isItemExpanded(item) { outline.collapseItem(item) }
-        else { outline.expandItem(item) }
+        outline.setExpanded(!outline.isItemExpanded(item), for: item, animated: true)
         return true
     }
 
@@ -191,7 +199,7 @@ import RequestmanCore
                 model.duplicateWorkflow(workflow, projectID: item.projectID)
             }
         case .toggleEnabled:
-            if item.isProject { updateProject(item.id) { $0.enabled.toggle() } }
+            if item.isProject { updateProject(item.id) { $0.setWorkflowsEnabled(!$0.workflows.contains(where: \.enabled)) } }
             else if var workflow = project.workflows.first(where: { $0.id == item.id }) {
                 workflow.enabled.toggle(); model.updateWorkflow(workflow)
             }
@@ -258,7 +266,7 @@ import RequestmanCore
                 search = ""; collapsedProjects.remove(item.id); model.addWorkflow(projectID: item.id)
             })
             menu.addItem(.separator())
-            menu.addItem(RulesMenuItem(project.enabled ? "禁用整个规则组" : "启用整个规则组") { [weak self] in
+            menu.addItem(RulesMenuItem(project.workflows.contains(where: \.enabled) ? "全部禁用" : "全部启用") { [weak self] in
                 self?.perform(.toggleEnabled, item: item)
             })
             menu.addItem(RulesMenuItem("复制整个规则组") { [weak self] in self?.perform(.duplicate, item: item) })

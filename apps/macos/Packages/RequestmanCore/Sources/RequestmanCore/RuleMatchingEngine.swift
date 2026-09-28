@@ -15,7 +15,7 @@ public struct WorkflowMatch: Sendable {
 public enum RuleMatchingEngine {
     /// First enabled match in project order wins, keeping rule composition deterministic.
     public static func match(_ document: WorkspaceDocument, method: String, url: String, headers: [HTTPField] = []) -> WorkflowMatch? {
-        for project in document.projects where project.enabled {
+        for project in document.projects {
             for workflow in project.workflows {
                 if let match = match(workflow, projectID: project.id, project: project.name,
                                      environment: document.environment, method: method, url: url, headers: headers) {
