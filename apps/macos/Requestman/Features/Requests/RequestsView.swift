@@ -7,6 +7,8 @@ final class RequestsViewController: ObservedViewController {
     private let model: WorkspaceModel
     private let filters = RequestFilterControls()
     private let table = RequestRecordsTable()
+    private var displayOptions = RequestLogDisplayOptions.load()
+    private var displayPopover: NSPopover?
     private let status = NativeUI.label("", size: 11, secondary: true)
     private let replayStatus = NativeUI.label("", size: 12)
     private lazy var showReplay = ActionButton(title: "查看重放结果") { [weak self] in
@@ -24,13 +26,18 @@ final class RequestsViewController: ObservedViewController {
     private let empty = RequestEmptyStateView()
     private var filterAccessory: NSViewController?
     private weak var filterAccessoryItem: NSSplitViewItem?
-    init(model: WorkspaceModel) { self.model = model; super.init() }
+    init(model: WorkspaceModel) {
+        self.model = model; super.init()
+        NotificationCenter.default.addObserver(self, selector: #selector(restoreDisplayOptions),
+                                               name: WorkspaceTransfer.preferencesRestored, object: nil)
+    }
     required init?(coder: NSCoder) { nil }
     override func loadView() {
         view = FlippedView()
         filters.onFilterChange = { [weak model] in model?.history.filter = $0 }
         filters.toggleRecording = { [weak model] in guard let model else { return }; model.setRecordingPaused(!model.history.paused) }
         filters.clear = { [weak model] in model?.clearHistory() }
+        filters.showDisplayOptions = { [weak self] in self?.showDisplayOptions(relativeTo: $0) }
         table.onDeviceAliasChange = { [weak model] source, alias in model?.document.deviceAliases[source] = alias.isEmpty ? nil : alias }
         table.onSelectionChange = { [weak model] in model?.history.selectedID = $0 }
         table.replayUnavailableReason = { [weak model] in model?.replayUnavailableReason }
@@ -97,6 +104,28 @@ final class RequestsViewController: ObservedViewController {
     }
     func focusList() { table.focusList() }
     func showFilters() { filters.showFilters() }
+    private func showDisplayOptions(relativeTo anchor: NSView) {
+        if displayPopover?.isShown == true { displayPopover?.performClose(nil); return }
+        let controller = RequestLogDisplayOptionsController(options: displayOptions, allowLAN: model.document.proxy.allowLAN) { [weak self] options in
+            guard let self else { return }
+            displayOptions = options
+            options.save()
+            refresh()
+        }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = controller
+        displayPopover = popover
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+    }
+    @objc private func restoreDisplayOptions() {
+        displayOptions = .load()
+        if isViewLoaded { refresh() }
+    }
+    override func viewWillDisappear() {
+        displayPopover?.performClose(nil)
+        super.viewWillDisappear()
+    }
     override func refresh() {
         let history = model.history, records = model.history.filtered
         fileBar.isHidden = !history.isViewingFile
@@ -112,7 +141,11 @@ final class RequestsViewController: ObservedViewController {
         status.isHidden = history.isViewingFile || status.stringValue.isEmpty
         let workflowNames = Dictionary(model.document.projects.flatMap(\.workflows).map { ($0.id, $0.name) },
                                        uniquingKeysWith: { first, _ in first })
-        table.update(records: records, selectedID: history.selectedID, workflowNames: workflowNames, deviceAliases: model.document.deviceAliases)
+        table.update(records: records, selectedID: history.selectedID, workflowNames: workflowNames,
+                     deviceAliases: model.document.deviceAliases, showsDeviceSource: model.document.proxy.allowLAN,
+                     displayOptions: displayOptions)
+        (displayPopover?.contentViewController as? RequestLogDisplayOptionsController)?
+            .update(options: displayOptions, allowLAN: model.document.proxy.allowLAN)
         empty.isHidden = !records.isEmpty
         empty.update(title: history.records.isEmpty ? (history.isViewingFile ? "日志文件为空" : "等待请求") : "没有符合条件的记录", description: history.records.isEmpty ? (history.isViewingFile ? "该文件没有保存请求。" : "启动捕获，将浏览器或手机连接到代理后，请求会显示在这里。") : "调整搜索或筛选条件。", symbol: "clock")
     }

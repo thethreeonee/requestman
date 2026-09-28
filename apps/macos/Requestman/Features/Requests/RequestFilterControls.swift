@@ -7,6 +7,7 @@ final class RequestFilterControls: NSView {
     var onFilterChange: (CaptureRecordFilter) -> Void = { _ in }
     var toggleRecording: () -> Void = {}
     var clear: () -> Void = {}
+    var showDisplayOptions: (NSView) -> Void = { _ in }
     private var filter = CaptureRecordFilter()
     private var records: [CaptureRecord] = []
     private let pause = RequestFilterActionButton(symbol: "pause", label: "暂停记录")
@@ -14,6 +15,7 @@ final class RequestFilterControls: NSView {
     private let separator = NSBox()
     private let primary = NSSegmentedControl(labels: CaptureResourceType.allCases.map(\.rawValue), trackingMode: .selectOne, target: nil, action: nil)
     private let filterButton = RequestFilterActionButton(symbol: "line.3.horizontal.decrease", label: "筛选")
+    private let displayButton = RequestFilterActionButton(symbol: "tablecells", label: "显示选项")
     private(set) var isExpanded = false
     private let toolbar = NSView()
     private let panelClip = FlippedView()
@@ -51,8 +53,12 @@ final class RequestFilterControls: NSView {
         }
         if #available(macOS 27.0, *) { primary.role = .tabs }
         filterButton.handler = { [weak self] in self?.showFilters() }
+        displayButton.toolTip = "显示选项"
+        displayButton.handler = { [weak self] in
+            guard let self else { return }; showDisplayOptions(displayButton)
+        }
         updateFilterButton()
-        for child in [pause, clearButton, separator, primary, filterButton] { toolbar.addSubview(child) }
+        for child in [pause, clearButton, separator, primary, displayButton, filterButton] { toolbar.addSubview(child) }
         addSubview(toolbar)
         translatesAutoresizingMaskIntoConstraints = false
         heightConstraint = heightAnchor.constraint(equalToConstant: toolbarHeight)
@@ -81,7 +87,7 @@ final class RequestFilterControls: NSView {
     private func updateRowPlacement() {
         guard heightConstraint != nil, bounds.width > 0 else { return }
         let width = primary.intrinsicContentSize.width
-        let nextUsesSecondRow = bounds.width < width + controlHeight * 3 + 73
+        let nextUsesSecondRow = bounds.width < width + controlHeight * 4 + 83
         let rowChanged = usesSecondRow != nextUsesSecondRow
         usesSecondRow = nextUsesSecondRow
         let desiredHeight = isExpanded ? panelHeight : 0
@@ -121,6 +127,7 @@ final class RequestFilterControls: NSView {
         separator.isHidden = usesSecondRow
         separator.frame = NSRect(x: 32 + height * 2, y: 8 + (height - 20) / 2, width: 1, height: 20)
         filterButton.frame = NSRect(x: bounds.width - 12 - height, y: actionY, width: height, height: height)
+        displayButton.frame = NSRect(x: filterButton.frame.minX - 10 - height, y: actionY, width: height, height: height)
         let origin: CGFloat = usesSecondRow ? 10 : 43 + height * 2
         // Keep the native drawing scale so labels and the bezel retain their proportions.
         primary.frame = NSRect(origin: NSPoint(x: origin, y: 8), size: size)

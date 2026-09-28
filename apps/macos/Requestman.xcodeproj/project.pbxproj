@@ -5,6 +5,8 @@
 	};
 	"objectVersion" = "60";
 	"objects" = {
+        "A10928D10000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestLogDisplayOptions.swift"; "sourceTree" = "<group>"; };
+        "A10928D10000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10928D10000000000000001"; };
         "A10927F10000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Workspace/NativeInputs.swift"; "sourceTree" = "<group>"; };
         "A10927F10000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10927F10000000000000001"; };
         "A10927AC0000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestLogTransfer.swift"; "sourceTree" = "<group>"; };
@@ -407,6 +409,7 @@
 				"A10D78910B42E56000000001",
                 "A10A99000000000000000001",
                 "A10927F10000000000000001",
+                "A10928D10000000000000001",
                 "A10926D00000000000000001",
                 "A10926D00000000000000003",
                 "A10A99000000000000000051",
@@ -489,6 +492,7 @@
 				"A10D78910B42E56000000002",
                 "A10A99000000000000000002",
                 "A10927F10000000000000002",
+                "A10928D10000000000000002",
                 "A10926D00000000000000002",
                 "A10926D00000000000000004",
                 "A10A99000000000000000052",

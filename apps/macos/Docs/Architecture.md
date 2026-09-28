@@ -278,4 +278,10 @@ WebSocket、加密隧道、未完整采集的请求及 CONNECT/TRACE 不提供 H
 
 `MobileSetupHandler` 仅在局域网开启时处理发往本机监听地址的 `/requestman` 路径，提供引导页、公开 DER 和 iOS CA 描述文件；处理器在 CONNECT / WebSocket 升级前退出，避免接收解码器移除时释放的原始字节。下载不经过规则、日志或上游。`LocalCertificateService.publicCertificateDER` 只读取、解码并校验证书有效期，不访问私钥或修改信任。
 
-`CaptureRecord.deviceSource` 保存规范化的客户端 IP（回环归为 `local`），贯穿 HTTP、HTTPS、隧道、SSE、WebSocket 与日志归档；旧记录缺省 nil。`WorkspaceDocument.deviceAliases` 保存别名；表格与详情从同一映射读取，修改后由 Observation 刷新已有记录，不改写历史请求和环境快照。设备列接替环境列，旧环境列宽迁移到设备列。连接与使用边界见[局域网手机抓取](Design/mobile-capture.md)。
+`CaptureRecord.deviceSource` 保存规范化的客户端 IP（回环归为 `local`），贯穿 HTTP、HTTPS、隧道、SSE、WebSocket 与日志归档；旧记录缺省 nil。`WorkspaceDocument.deviceAliases` 保存别名；表格与详情从同一映射读取，修改后由 Observation 刷新已有记录，不改写历史请求和环境快照。设备列接替环境列，仅在 `document.proxy.allowLAN` 开启且用户勾选该列时显示，并随设置即时刷新；列宽分配和拖动仅计算可见列，隐藏时保留设备列宽偏好，旧环境列宽迁移到设备列。连接与使用边界见[局域网手机抓取](Design/mobile-capture.md)。
+
+## 请求日志显示选项
+
+筛选按钮左侧的“显示选项”通过原生 Popover 提供列勾选和单个 Header 列配置。`RequestLogDisplayOptions` 将列选择、Header 名称、启用状态和来源保存到应用偏好，配置导入后同步恢复；至少保留一个不依赖局域网的标准列。所有列保留稳定标识，隐藏列不参与宽度分配及拖动，旧六列宽度继续恢复，新增 Header 列使用默认宽度。
+
+Header 列紧接请求（URL）列，标题使用配置的 Header 名称；来源可选原始请求、发出的请求、原始响应、返回的响应，分别读取 `requestHeaders`、`sentHeaders`、`receivedHeaders`、`responseHeaders`，不回退到其他阶段。名称按 HTTP 字段名校验并忽略大小写匹配；缺少值显示“—”，重复字段按捕获顺序显示，悬停提示逐行保留值。修改配置即时刷新已有和打开文件中的日志，不改变捕获与筛选。
