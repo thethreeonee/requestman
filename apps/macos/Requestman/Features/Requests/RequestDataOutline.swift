@@ -219,7 +219,8 @@ final class RequestDataOutline: NSView {
         }
 
         private func saveState() {
-            guard let outline, let stateKey else { return }
+            // Loading starts with no nodes; do not cache that as a collapsed tree.
+            guard let outline, let stateKey, !roots.isEmpty else { return }
             let expandedIDs = Set(itemsByID.values.filter { outline.isItemExpanded($0) }.map { $0.node.id })
             states[stateKey] = OutlineState(
                 expandedIDs: expandedIDs,
