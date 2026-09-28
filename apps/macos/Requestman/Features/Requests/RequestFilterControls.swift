@@ -146,13 +146,8 @@ final class RequestFilterControls: NSView {
     private func updateFilterButton() {
         let active = filter.hasCriteria
         let count = filter.activeConditionCount + (filter.search.isEmpty ? 0 : 1) + (filter.resource == .all ? 0 : 1)
-        // Color the SF Symbol's disc, leaving the native glass bezel untouched.
-        let symbol = active ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease"
-        // At 28 pt the circular symbol fits the 36 pt bezel and renders centered.
-        let configuration = NSImage.SymbolConfiguration(pointSize: active ? 28 : 16, weight: .semibold)
-            .applying(NSImage.SymbolConfiguration(paletteColors: active ? [.white, .systemBlue] : [.labelColor]))
-        filterButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(configuration)
+        filterButton.updateSymbol("line.3.horizontal.decrease",
+                                  activeSymbol: "line.3.horizontal.decrease.circle.fill", active: active)
         filterButton.setAccessibilityValue((isExpanded ? "已展开，" : "已收起，") + (active ? "\(count) 个筛选条件" : "无筛选条件"))
         filterButton.toolTip = (active ? "筛选（\(count) 个条件）" : "筛选状态码、URL、域名、请求方法、环境和请求 Header") + "（⌘⌥F）"
     }
@@ -160,9 +155,8 @@ final class RequestFilterControls: NSView {
         guard customColumnCount != count else { return }
         customColumnCount = count
         let active = count > 0
-        // Keep list.dash and use the native bezel tint; no custom background layer.
-        displayButton.bezelColor = active ? .systemBlue : nil
-        displayButton.contentTintColor = active ? .white : nil
+        // list.dash has no circle.fill variant; use the native circular list symbol when active.
+        displayButton.updateSymbol("list.dash", activeSymbol: "list.bullet.circle.fill", active: active)
         displayButton.toolTip = active ? "显示选项（\(count) 个自定义列）" : "显示选项"
         displayButton.setAccessibilityValue(active ? "\(count) 个自定义列" : "无自定义列")
     }
@@ -260,6 +254,14 @@ private final class RequestFilterActionButton: NSButton {
         target = self; action = #selector(performAction(_:))
     }
     required init?(coder: NSCoder) { nil }
+    func updateSymbol(_ symbol: String, activeSymbol: String, active: Bool) {
+        // Color only the SF Symbol's disc, leaving the native glass bezel untouched.
+        // At 28 pt the circular symbol fits the 36 pt bezel and renders centered.
+        let configuration = NSImage.SymbolConfiguration(pointSize: active ? 28 : 16, weight: .semibold)
+            .applying(NSImage.SymbolConfiguration(paletteColors: active ? [.white, .systemBlue] : [.labelColor]))
+        image = NSImage(systemSymbolName: active ? activeSymbol : symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(configuration)
+    }
     @objc private func performAction(_ sender: NSButton) { guard isEnabled else { return }; handler() }
 }
 
