@@ -2,6 +2,7 @@ import Foundation
 
 /// Immutable phase input. The mutable message and execution trace remain separate.
 public struct ModificationExecutionContext: Sendable {
+    public let regexCaptures: [String]
     public let phase: FlowPhase
     public let environment: [String: String]
     public let environmentTypes: [String: EnvironmentValueType]
@@ -15,7 +16,8 @@ public struct ModificationExecutionContext: Sendable {
                 environmentTypes: [String: EnvironmentValueType] = [:],
                 templateContext: WorkflowTemplateContext, originalResponseStatus: Int? = nil,
                 request: HTTPMessageDraft? = nil, control: ScriptExecutionControl = ScriptExecutionControl(),
-                scriptRuntime: any ScriptRuntime = IsolatedScriptRuntime()) {
+                scriptRuntime: any ScriptRuntime = IsolatedScriptRuntime(), regexCaptures: [String] = []) {
+        self.regexCaptures = regexCaptures
         self.phase = phase
         self.environment = environment
         self.environmentTypes = environmentTypes
@@ -29,6 +31,7 @@ public struct ModificationExecutionContext: Sendable {
     func resolve(_ value: String, step: ModificationStep) throws -> String {
         if step.literalValues == true { return value }
         return try TemplateResolver.resolve(value, environment: environment, context: templateContext,
-                                            responseStatus: originalResponseStatus)
+                                            responseStatus: originalResponseStatus,
+                                            regexCaptures: step.kind == .rewriteURL ? regexCaptures : nil)
     }
 }

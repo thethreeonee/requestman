@@ -616,22 +616,22 @@ struct ProxyIntegrationTests {
     }
 
     @Test(arguments: [false, true])
-    func componentRewritesRouteToNewHostAndPreserveQuery(scripted: Bool) async throws {
+    func componentRewritesUseRegexCapturesAndPreserveQuery(scripted: Bool) async throws {
         try await withHarness { h in
             var workflow = RequestWorkflow()
-            workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: "http://unresolved.test/")
+            workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .regex, value: #"^http://unresolved\.test/(before)/([^?]+)"#)
             var host = ModificationStep(kind: .rewriteURL); host.urlRewriteTarget = .host
             host.value = "127.0.0.1:\(h.originPort)"
-            var path = ModificationStep(kind: .rewriteURL); path.urlRewriteTarget = .path; path.value = "/after%2fpart"
+            var path = ModificationStep(kind: .rewriteURL); path.urlRewriteTarget = .path; path.value = "/after/$1/$2"
             workflow.requestSteps = [host, path]
             if scripted {
                 var script = ModificationStep(kind: .script); script.value = "return request;"
                 workflow.requestSteps.insert(script, at: 0)
             }
             try await h.start(workflow: workflow)
-            let reply = try await h.exchange("POST http://unresolved.test/before?keep=%2f+%20&flag HTTP/1.1\r\nHost: unresolved.test\r\nContent-Length: 7\r\n\r\npayload")
+            let reply = try await h.exchange("POST http://unresolved.test/before/a%2fpart?keep=%2f+%20&flag HTTP/1.1\r\nHost: unresolved.test\r\nContent-Length: 7\r\n\r\npayload")
             #expect(reply.contains("origin-body"))
-            #expect(h.observation.withLock { $0.uri } == "/after%2fpart?keep=%2f+%20&flag")
+            #expect(h.observation.withLock { $0.uri } == "/after/before/a%2fpart?keep=%2f+%20&flag")
             #expect(h.observation.withLock { $0.bodyBytes } == 7)
             let record = try #require(h.proxy.records.drain().records.first)
             #expect(record.error == nil && record.method == "POST")

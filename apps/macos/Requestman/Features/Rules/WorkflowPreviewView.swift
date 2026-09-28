@@ -48,9 +48,10 @@ import RequestmanCore
             let output = await Task.detached(priority: .userInitiated) {
                 do {
                     var request = try input.request()
-                    guard RuleMatchingEngine.matches(workflow, method: request.method, url: request.url, headers: request.headers) else { return "此输入未命中匹配条件。" }
+                    guard let match = RuleMatchingEngine.match(workflow, project: "预览", environment: environment,
+                        method: request.method, url: request.url, headers: request.headers) else { return "此输入未命中匹配条件。" }
                     let context = TransactionContext(id: UUID(), date: Date(), originalRequest: request,
-                        match: WorkflowMatch(project: "预览", workflow: workflow, environment: environment), control: control)
+                        match: match, control: control)
                     let outgoing = try await ModificationExecutionEngine.executeAsync(workflow.requestSteps,
                         to: &request, context: context.executionContext(for: .request))
                     var response = outgoing.disposition == .localResponse ? request : try input.response()

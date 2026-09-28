@@ -35,18 +35,18 @@ public enum WorkflowMatcher {
             let expression = "\\A" + needle.map { character in
                 character == "*" ? ".*" : character == "?" ? "." : NSRegularExpression.escapedPattern(for: String(character))
             }.joined() + "\\z"
-            return regexRange(expression, value: value, ignoreCase: ignoreCase)
-        case .regex: return regexRange(needle, value: value, ignoreCase: ignoreCase)
+            return regexMatch(expression, value: value, ignoreCase: ignoreCase)?.range
+        case .regex: return regexMatch(needle, value: value, ignoreCase: ignoreCase)?.range
         }
     }
 
-    private static func regexRange(_ pattern: String, value: String, ignoreCase: Bool) -> NSRange? {
+    static func regexMatch(_ pattern: String, value: String, ignoreCase: Bool) -> NSTextCheckingResult? {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: ignoreCase ? [.caseInsensitive] : []) else { return nil }
         let deadline = ContinuousClock.now.advanced(by: .milliseconds(20))
-        var found: NSRange?
+        var found: NSTextCheckingResult?
         regex.enumerateMatches(in: value, options: [.reportProgress], range: NSRange(value.startIndex..., in: value)) { result, _, stop in
             if ContinuousClock.now >= deadline { stop.pointee = true; return }
-            if let result { found = result.range; stop.pointee = true }
+            if let result { found = result; stop.pointee = true }
         }
         return found
     }

@@ -27,6 +27,7 @@ public struct TransactionContext: Sendable {
                                  originalResponseStatus: Int? = nil) -> ModificationExecutionContext {
         ModificationExecutionContext(phase: phase, environment: plan.environment.values,
             environmentTypes: match?.environment?.valueTypes ?? [:], templateContext: templateContext,
-            originalResponseStatus: originalResponseStatus, request: request, control: control)
+            originalResponseStatus: originalResponseStatus, request: request, control: control,
+            regexCaptures: match?.regexCaptures ?? [])
     }
 }

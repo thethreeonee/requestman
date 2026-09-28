@@ -458,10 +458,11 @@ import RequestmanEditor
         }
     }
     private func urlRewriteInputDescription(_ target: URLRewriteTarget) -> String? {
-        switch target {
-        case .fullURL: nil
-        case .host: "修改当前 URL 的主机，保留协议、路径和查询参数。不填端口时保留当前端口；可填写 example.com:8080，IPv6 使用 [::1]。"
-        case .path: "修改当前 URL 的路径，保留协议、主机、端口和查询参数。路径以 / 开头，支持中文及百分号编码；字面 ? 和 # 使用 %3F 和 %23。"
+        let captures = "支持 $1、$2 引用首个命中且含捕获组的正则条件；$$ 表示字面 $。"
+        return switch target {
+        case .fullURL: captures
+        case .host: captures + "\n修改当前 URL 的主机，保留协议、路径和查询参数。不填端口时保留当前端口；可填写 example.com:8080，IPv6 使用 [::1]。"
+        case .path: captures + "\n修改当前 URL 的路径，保留协议、主机、端口和查询参数。路径以 / 开头，支持中文及百分号编码；字面 ? 和 # 使用 %3F 和 %23。"
         }
     }
     private func fieldBox(_ content: NSView) -> NSBox {
