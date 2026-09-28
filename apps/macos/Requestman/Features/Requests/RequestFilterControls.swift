@@ -426,17 +426,21 @@ private final class FilterConditionRow: NSView {
     let conditionID: UUID
     private var condition: CaptureFilterCondition
     private let onChange: (CaptureFilterCondition) -> Void
-    private let field = NSPopUpButton(), operation = NSPopUpButton(), source = NSPopUpButton()
+    private let field = NSPopUpButton(), operation = NSPopUpButton()
+    private let originalRequest = NSButton(checkboxWithTitle: "原始请求", target: nil, action: nil)
     private let name = ActionComboBox(), value = ActionComboBox()
-    private var headerRow: NSStackView!
+    private var headerWidths: [NSLayoutConstraint] = []
     private var records: [CaptureRecord] = []
     init(condition: CaptureFilterCondition, onChange: @escaping (CaptureFilterCondition) -> Void, remove: @escaping () -> Void) {
         self.condition = condition; conditionID = condition.id; self.onChange = onChange
         super.init(frame: .zero)
         field.addItems(withTitles: CaptureFilterField.allCases.map(\.rawValue))
         field.target = self; field.action = #selector(selectField); field.setAccessibilityLabel("筛选字段")
-        source.addItems(withTitles: CaptureHeaderSource.allCases.map(\.rawValue))
-        source.target = self; source.action = #selector(selectSource); source.setAccessibilityLabel("Header 来源")
+        originalRequest.target = self; originalRequest.action = #selector(selectSource)
+        originalRequest.setAccessibilityLabel("匹配原始请求 Header")
+        originalRequest.toolTip = "勾选：匹配原始请求 Header；取消勾选：匹配修改后发出的请求 Header"
+        originalRequest.setContentHuggingPriority(.required, for: .horizontal)
+        originalRequest.setContentCompressionResistancePriority(.required, for: .horizontal)
         operation.target = self; operation.action = #selector(selectOperation); operation.setAccessibilityLabel("匹配方式")
         name.placeholderString = "Header 名称"; name.setAccessibilityLabel("Header 名称")
         for control in [name, value] {
@@ -455,12 +459,19 @@ private final class FilterConditionRow: NSView {
         }
         field.widthAnchor.constraint(equalToConstant: 112).isActive = true
         operation.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        let row = NativeUI.stack([field, operation, value, filterRemoveButton(label: "移除条件", action: remove)], vertical: false, spacing: 8)
-        headerRow = NativeUI.stack([source, name], vertical: false, spacing: 8)
-        source.widthAnchor.constraint(equalToConstant: 148).isActive = true
-        let stack = NativeUI.stack([row, headerRow], spacing: 4)
-        NativeUI.pin(stack, to: self, insets: NSEdgeInsets(top: 3, left: 0, bottom: 3, right: 0))
-        for child in [row, headerRow!] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        let row = NativeUI.stack([field, name, operation, value, originalRequest,
+                                  filterRemoveButton(label: "移除条件", action: remove)], vertical: false, spacing: 6)
+        row.detachesHiddenViews = true
+        NativeUI.pin(row, to: self, insets: NSEdgeInsets(top: 3, left: 0, bottom: 3, right: 0))
+        // Share available input space without letting long drafts crowd out the other field.
+        let balancedWidth = name.widthAnchor.constraint(equalTo: value.widthAnchor)
+        balancedWidth.priority = .defaultHigh
+        headerWidths = [balancedWidth]
+        for control in [name, value] {
+            let preferredWidth = control.widthAnchor.constraint(greaterThanOrEqualToConstant: 120)
+            preferredWidth.priority = .defaultLow
+            headerWidths.append(preferredWidth)
+        }
         update(condition, records: [])
     }
     required init?(coder: NSCoder) { nil }
@@ -472,11 +483,15 @@ private final class FilterConditionRow: NSView {
         }
         if operation.itemTitles != operations { operation.removeAllItems(); operation.addItems(withTitles: operations) }
         operation.selectItem(at: condition.field.operations.firstIndex(of: condition.operation) ?? 0)
-        source.selectItem(withTitle: condition.headerSource.rawValue)
-        headerRow.isHidden = condition.field != .header
+        let isHeader = condition.field == .header
+        originalRequest.state = condition.headerSource == .original ? .on : .off
+        name.isHidden = !isHeader
+        originalRequest.isHidden = !isHeader
+        for constraint in headerWidths { constraint.isActive = isHeader }
         value.isEnabled = condition.operation.needsValue
         value.setAccessibilityLabel(condition.field == .header ? "Header 值" : condition.field.rawValue)
-        value.placeholderString = condition.field.supportsMultipleValues ? "多个值，-值 排除" : "输入或选择\(condition.field.rawValue)"
+        value.placeholderString = isHeader ? (condition.operation.needsValue ? "Header 值" : "无需填写值") :
+            condition.field.supportsMultipleValues ? "多个值，-值 排除" : "输入或选择\(condition.field.rawValue)"
         value.toolTip = condition.field == .domain ? "原始 URL 域名精确匹配，不自动包含子域名" :
             (condition.field == .header ? "完整文本匹配，保留空格、逗号和大小写" : value.placeholderString)
         var suggestions: [String] = []
@@ -509,5 +524,8 @@ private final class FilterConditionRow: NSView {
     @objc private func selectOperation() {
         condition.operation = condition.field.operations[operation.indexOfSelectedItem]; onChange(condition)
     }
-    @objc private func selectSource() { condition.headerSource = CaptureHeaderSource.allCases[source.indexOfSelectedItem]; onChange(condition) }
+    @objc private func selectSource() {
+        condition.headerSource = originalRequest.state == .on ? .original : .sent
+        onChange(condition)
+    }
 }

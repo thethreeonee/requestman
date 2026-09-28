@@ -415,7 +415,9 @@ private enum RequestFilterChecks {
         precondition(name.numberOfItems > 0)
         try! saveSnapshot(host.controls, name: "request-filter-form-header")
         precondition(model.filter.conditionGroup?.groups[0].conditions[0].headerName == "Content-Type")
-        select(popups("Header 来源").last!, "修改后请求")
+        let originalRequest = descendants(host.controls).compactMap { $0 as? NSButton }
+            .first { $0.accessibilityLabel() == "匹配原始请求 Header" && !$0.isHiddenOrHasHiddenAncestor }!
+        originalRequest.performClick(nil); settle(host.view)
         precondition(model.filter.conditionGroup?.groups[0].conditions[0].headerSource == .sent)
         let remove = descendants(host.controls).compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "移除条件组" }!
         precondition(remove.bounds.width == remove.bounds.height && remove.bounds.height >= 28)
