@@ -251,6 +251,7 @@ private final class RequestStreamView: NSView, NSTableViewDataSource, NSTableVie
         search.placeholderString = "搜索当前页"; search.delegate = self; search.sendsSearchStringImmediately = true
         follow.state = .on; follow.target = self; follow.action = #selector(changePageMode)
         format.selectedSegment = 0; format.target = self; format.action = #selector(changePageMode)
+        if #available(macOS 26.0, *) { format.borderShape = .capsule }
         previous.target = self; previous.action = #selector(previousPage)
         next.target = self; next.action = #selector(nextPage)
         let navigation = NativeUI.stack([previous, next, follow], vertical: false, spacing: 8)
@@ -321,16 +322,31 @@ private final class RequestStreamView: NSView, NSTableViewDataSource, NSTableVie
     }
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard rows.indices.contains(row) else { return nil }
+        guard let tableColumn, rows.indices.contains(row) else { return nil }
         let item = rows[row], value: String
-        switch tableColumn?.identifier.rawValue {
+        switch tableColumn.identifier.rawValue {
         case "time": value = item.date.formatted(date: .omitted, time: .standard)
         case "direction": value = item.direction.rawValue
         case "kind": value = item.kind + (item.eventID.flatMap { $0.isEmpty ? nil : " / \($0)" } ?? "")
         default: value = ByteCountFormatter.string(fromByteCount: Int64(item.data.count), countStyle: .file)
         }
-        let label = NSTextField(labelWithString: value); label.lineBreakMode = .byTruncatingTail; label.toolTip = value
-        return label
+        let cell = (tableView.makeView(withIdentifier: tableColumn.identifier, owner: self) as? NSTableCellView) ?? NSTableCellView()
+        cell.identifier = tableColumn.identifier
+        if cell.textField == nil {
+            let label = NSTextField(labelWithString: "")
+            label.lineBreakMode = .byTruncatingTail
+            label.translatesAutoresizingMaskIntoConstraints = false
+            cell.textField = label
+            cell.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
+                label.trailingAnchor.constraint(equalTo: cell.trailingAnchor),
+                label.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+            ])
+        }
+        cell.textField?.stringValue = value
+        cell.textField?.toolTip = value
+        return cell
     }
     func tableViewSelectionDidChange(_ notification: Notification) { if !selecting { follow.state = .off }; showSelection() }
     private func showSelection() {
