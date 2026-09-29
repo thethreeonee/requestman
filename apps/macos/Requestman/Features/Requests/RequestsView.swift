@@ -36,6 +36,7 @@ final class RequestsViewController: ObservedViewController {
     required init?(coder: NSCoder) { nil }
     override func loadView() {
         view = FlippedView()
+        filters.onSaveFilterChange = { [weak model] in model?.history.savesFilter = $0 }
         filters.onFilterChange = { [weak model] in model?.history.filter = $0 }
         filters.toggleRecording = { [weak model] in guard let model else { return }; model.setRecordingPaused(!model.history.paused) }
         filters.clear = { [weak model] in model?.clearHistory() }
@@ -153,7 +154,8 @@ final class RequestsViewController: ObservedViewController {
         replayStatus.toolTip = replayStatus.stringValue
         cancelReplay.isHidden = replay?.connectionState.isActive != true
         filters.update(filter: history.filter, records: history.records, paused: history.paused,
-                       viewingFile: history.isViewingFile, customColumnCount: displayOptions.extraColumns.count)
+                       viewingFile: history.isViewingFile, customColumnCount: displayOptions.extraColumns.count,
+                       savesFilter: history.savesFilter)
         status.stringValue = [history.paused ? "记录已暂停，代理继续工作；手动重放仍记录结果" : "", history.dropped > 0 ? "高负载下已丢弃 \(history.dropped) 条待显示记录" : ""].filter { !$0.isEmpty }.joined(separator: "    ")
         status.isHidden = history.isViewingFile || status.stringValue.isEmpty
         let workflowNames = Dictionary(model.document.projects.flatMap(\.workflows).map { ($0.id, $0.name) },

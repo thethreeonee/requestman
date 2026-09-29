@@ -4,6 +4,23 @@ import RequestmanCore
 
 @MainActor @Observable
 final class ExecutionHistoryModel {
+    @ObservationIgnored private let filterDefaults: UserDefaults
+    @ObservationIgnored private var isSwitchingLog = false
+    var savesFilter: Bool {
+        didSet {
+            guard savesFilter != oldValue else { return }
+            persistFilter()
+        }
+    }
+    init(filterDefaults: UserDefaults = .standard) {
+        self.filterDefaults = filterDefaults
+        let saved = RequestLogFilterPreferences.load(from: filterDefaults)
+        savesFilter = saved != nil
+        filter = saved ?? CaptureRecordFilter()
+    }
+    private func persistFilter() {
+        RequestLogFilterPreferences.save(savesFilter ? filter : nil, to: filterDefaults)
+    }
     var displayOptions = RequestLogDisplayOptions.load()
     var searchContext: () -> RequestLogSearchContext = { .init() }
     private(set) var displayGeneration = 0
@@ -17,6 +34,8 @@ final class ExecutionHistoryModel {
     /// Export obeys the actual filter, excluding temporary reveal exceptions used by replay navigation.
     var recordsForSaving: [CaptureRecord] { matchingRecords(includingRevealed: false) }
     func openLog(_ records: [CaptureRecord], name: String) {
+        isSwitchingLog = true
+        defer { isSwitchingLog = false }
         if !isViewingFile { liveSelection = selectedID; liveFilter = filter }
         displayGeneration += 1
         openedRecords = records; openedFileName = name
@@ -24,6 +43,8 @@ final class ExecutionHistoryModel {
     }
     func returnToLive() {
         guard isViewingFile else { return }
+        isSwitchingLog = true
+        defer { isSwitchingLog = false }
         displayGeneration += 1
         openedRecords = nil; openedFileName = nil
         filter = liveFilter; revealedID = nil
@@ -33,7 +54,13 @@ final class ExecutionHistoryModel {
     private(set) var dropped = 0
     var paused = false
     var selectedID: UUID?
-    var filter = CaptureRecordFilter() { didSet { if filter != oldValue { revealedID = nil } } }
+    var filter = CaptureRecordFilter() {
+        didSet {
+            guard filter != oldValue else { return }
+            revealedID = nil
+            if savesFilter && !isSwitchingLog { persistFilter() }
+        }
+    }
     private var revealedID: UUID?
     private var latestReplayID: UUID?
     var latestReplay: CaptureRecord? { isViewingFile ? nil : liveRecords.first { $0.id == latestReplayID } }

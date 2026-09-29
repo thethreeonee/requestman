@@ -5,6 +5,8 @@ import RequestmanCore
 @MainActor
 final class RequestFilterControls: NSView {
     var onFilterChange: (CaptureRecordFilter) -> Void = { _ in }
+    var onSaveFilterChange: (Bool) -> Void = { _ in }
+    private var savesFilter = false
     var toggleRecording: () -> Void = {}
     var clear: () -> Void = {}
     var showDisplayOptions: (NSView) -> Void = { _ in }
@@ -104,8 +106,8 @@ final class RequestFilterControls: NSView {
     }
 
     func update(filter: CaptureRecordFilter, records: [CaptureRecord], paused: Bool, viewingFile: Bool = false,
-                customColumnCount: Int = 0) {
-        self.filter = filter; self.records = records
+                customColumnCount: Int = 0, savesFilter: Bool = false) {
+        self.filter = filter; self.records = records; self.savesFilter = savesFilter
         pause.image = NSImage(systemSymbolName: paused ? "play" : "pause", accessibilityDescription: nil)
         pause.setAccessibilityLabel(paused ? "继续记录" : "暂停记录")
         pause.toolTip = (paused ? "继续记录" : "暂停记录（代理继续工作）") + "（⌘⇧R）"
@@ -115,7 +117,7 @@ final class RequestFilterControls: NSView {
         primary.selectedSegment = primaryTypes.firstIndex(of: filter.resource) ?? -1
         updateFilterButton()
         updateDisplayButton(customColumnCount: customColumnCount)
-        panel?.update(filter: filter, records: records)
+        panel?.update(filter: filter, records: records, savesFilter: savesFilter)
         needsLayout = true
     }
     override func layout() {
@@ -173,6 +175,8 @@ final class RequestFilterControls: NSView {
                 updateFilterButton()
                 onFilterChange(value)
             }
+            panel.onSaveFilterChange = { [weak self] in self?.onSaveFilterChange($0) }
+            panel.update(filter: filter, records: records, savesFilter: savesFilter)
             self.panel = panel
             panelClip.addSubview(panel.view)
             panel.onHeightChange = { [weak self] in self?.resizeForm(animated: false) }
@@ -273,6 +277,9 @@ final class RequestFilterPanel: NSViewController {
     var onHeightChange: () -> Void = {}
     private let scroll = NSScrollView()
     private let document = FlippedView()
+    var onSaveFilterChange: (Bool) -> Void = { _ in }
+    private var savesFilter = false
+    private let saveFilter = NSButton(checkboxWithTitle: "保存筛选项", target: nil, action: nil)
     private let inverse = NSButton(checkboxWithTitle: "反向匹配", target: nil, action: nil)
     private lazy var reset = ActionButton(title: "重置") { [weak self] in
         guard let self else { return }
@@ -308,7 +315,10 @@ final class RequestFilterPanel: NSViewController {
         let hint = NativeUI.label("URL 等多值字段：空格或逗号分隔，-值 排除", size: 11, secondary: true)
         hint.lineBreakMode = .byTruncatingTail
         hint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let footer = NativeUI.stack([inverse, hint, NSView(), reset], vertical: false, spacing: 12)
+        saveFilter.target = self; saveFilter.action = #selector(toggleSaveFilter)
+        saveFilter.toolTip = "保存当前筛选条件及后续修改，下次启动时自动应用；取消勾选会清除已保存条件"
+        saveFilter.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let footer = NativeUI.stack([inverse, hint, NSView(), saveFilter, reset], vertical: false, spacing: 12)
         footer.edgeInsets = NSEdgeInsets(top: 6, left: 12, bottom: 8, right: 12)
         self.footer = footer
         let stack = NativeUI.stack([divider, scroll, footer], spacing: 0)
@@ -317,17 +327,22 @@ final class RequestFilterPanel: NSViewController {
         scroll.setContentHuggingPriority(.defaultLow, for: .vertical)
         refreshControls()
     }
-    func update(filter: CaptureRecordFilter, records: [CaptureRecord]) {
-        self.filter = filter; self.records = records
+    func update(filter: CaptureRecordFilter, records: [CaptureRecord], savesFilter: Bool = false) {
+        self.filter = filter; self.records = records; self.savesFilter = savesFilter
         if isViewLoaded { refreshControls() }
     }
     private func refreshControls() {
         groupView.update(filter.conditionGroup ?? draft, records: records)
         inverse.state = filter.inverted ? .on : .off
+        saveFilter.state = savesFilter ? .on : .off
         reset.isEnabled = filter != CaptureRecordFilter()
         onHeightChange()
     }
     private func changed() { refreshControls(); onChange(filter) }
+    @objc private func toggleSaveFilter() {
+        savesFilter = saveFilter.state == .on
+        onSaveFilterChange(savesFilter)
+    }
     @objc private func invert() { filter.inverted = inverse.state == .on; changed() }
 }
 

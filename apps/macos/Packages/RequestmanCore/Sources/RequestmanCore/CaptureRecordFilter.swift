@@ -1,6 +1,6 @@
 import Foundation
 
-public enum CaptureResourceType: String, CaseIterable, Sendable {
+public enum CaptureResourceType: String, CaseIterable, Sendable, Codable {
     case all = "全部", json = "JSON", document = "文档", css = "CSS", script = "JS"
     case sse = "SSE", webSocket = "WS"
     case image = "图片", font = "字体", media = "媒体", other = "其他"
@@ -35,13 +35,13 @@ public enum CaptureResourceType: String, CaseIterable, Sendable {
     }
 }
 
-public enum CaptureHeaderSource: String, CaseIterable, Sendable { case original = "原始请求", sent = "修改后请求" }
-public enum CaptureHeaderCombination: String, CaseIterable, Sendable { case all = "满足全部条件", any = "满足任一条件" }
-public enum CaptureHeaderOperator: String, CaseIterable, Sendable {
+public enum CaptureHeaderSource: String, CaseIterable, Sendable, Codable { case original = "原始请求", sent = "修改后请求" }
+public enum CaptureHeaderCombination: String, CaseIterable, Sendable, Codable { case all = "满足全部条件", any = "满足任一条件" }
+public enum CaptureHeaderOperator: String, CaseIterable, Sendable, Codable {
     case contains = "包含", equals = "等于", exists = "存在", absent = "不存在"
     public var needsValue: Bool { self == .contains || self == .equals }
 }
-public struct CaptureHeaderCondition: Identifiable, Equatable, Sendable {
+public struct CaptureHeaderCondition: Identifiable, Equatable, Sendable, Codable {
     public let id: UUID
     public var name: String
     public var operation: CaptureHeaderOperator
@@ -86,7 +86,7 @@ public struct CaptureFilterTerms: Equatable, Sendable {
     }
 }
 
-public enum CaptureFilterField: String, CaseIterable, Sendable {
+public enum CaptureFilterField: String, CaseIterable, Sendable, Codable {
     case url = "URL", domain = "域名", method = "请求方法", status = "状态码"
     case project = "命中规则组", workflow = "命中规则", environment = "环境", outcome = "结果"
     case active = "活动连接", header = "请求 Header"
@@ -100,7 +100,7 @@ public enum CaptureFilterField: String, CaseIterable, Sendable {
     }
 }
 
-public struct CaptureFilterCondition: Identifiable, Equatable, Sendable {
+public struct CaptureFilterCondition: Identifiable, Equatable, Sendable, Codable {
     public let id: UUID
     public var field: CaptureFilterField
     public var operation: CaptureHeaderOperator
@@ -153,7 +153,7 @@ public struct CaptureFilterCondition: Identifiable, Equatable, Sendable {
     }
 }
 
-public struct CaptureFilterGroup: Identifiable, Equatable, Sendable {
+public struct CaptureFilterGroup: Identifiable, Equatable, Sendable, Codable {
     public let id: UUID
     public var combination: CaptureHeaderCombination
     public var conditions: [CaptureFilterCondition]
@@ -185,7 +185,7 @@ extension CaptureHeaderCombination {
     }
 }
 
-public struct CaptureRecordFilter: Equatable, Sendable {
+public struct CaptureRecordFilter: Equatable, Sendable, Codable {
     public var conditionGroup: CaptureFilterGroup?
     public var search = ""
     public var resource: CaptureResourceType = .all
