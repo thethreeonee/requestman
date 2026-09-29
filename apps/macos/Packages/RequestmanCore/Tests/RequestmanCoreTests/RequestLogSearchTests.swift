@@ -100,4 +100,23 @@ struct RequestLogSearchTests {
         options.columns = []
         #expect(filter.matches(record, displayOptions: options))
     }
+    @Test func mergedFieldSearchFollowsDestinationAndIndependentURLStatusSwitches() {
+        var record = CaptureRecord(method: "GET", url: "https://example.test")
+        record.status = 204
+        record.requestHeaders = [.init("X-ID", "trace-value")]
+        var field = RequestLogExtraColumn(name: "X-ID", mergedInto: "request")
+        #expect(matches("trace-value", record, columns: [.status], extras: [field]))
+        #expect(!matches("example.test", record, columns: [.status], extras: [field]))
+        #expect(!matches("204", record, columns: [.request], extras: [field]))
+        #expect(!matches("trace-value", record, columns: [.time], extras: [field]))
+        field.mergedInto = "device"
+        #expect(!matches("trace-value", record, columns: [.device], extras: [field]))
+        #expect(matches("trace-value", record, columns: [.device], extras: [field], context: .init(allowLAN: true)))
+        let host = RequestLogExtraColumn(field: .host, isEnabled: false)
+        field.mergedInto = host.identifier
+        #expect(!matches("trace-value", record, columns: [.time], extras: [host, field]))
+        field.mergedInto = nil
+        #expect(matches("trace-value", record, columns: [.time], extras: [field]))
+    }
+
 }

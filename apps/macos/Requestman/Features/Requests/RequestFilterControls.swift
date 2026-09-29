@@ -157,8 +157,8 @@ final class RequestFilterControls: NSView {
         let active = count > 0
         // list.dash has no circle.fill variant; use the native circular list symbol when active.
         displayButton.updateSymbol("list.dash", activeSymbol: "list.bullet.circle.fill", active: active)
-        displayButton.toolTip = active ? "显示选项（\(count) 个自定义列）" : "显示选项"
-        displayButton.setAccessibilityValue(active ? "\(count) 个自定义列" : "无自定义列")
+        displayButton.toolTip = active ? "显示选项（\(count) 个额外字段）" : "显示选项"
+        displayButton.setAccessibilityValue(active ? "\(count) 个额外字段" : "无额外字段")
     }
     @objc private func selectPrimary() {
         guard primaryTypes.indices.contains(primary.selectedSegment) else { return }

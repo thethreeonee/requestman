@@ -6,7 +6,7 @@ public enum RequestLogStandardColumn: String, CaseIterable, Sendable {
         switch self {
         case .time: "时间"
         case .status: "状态码"
-        case .request: "请求"
+        case .request: "URL"
         case .rules: "命中的规则"
         case .device: "设备来源"
         case .duration: "耗时"
@@ -56,6 +56,7 @@ public struct RequestLogExtraColumn: Identifiable, Equatable, Codable, Sendable 
     public var name: String
     public var title: String
     public var isEnabled: Bool
+    public var mergedInto: String?
     public var identifier: String { "extra." + id.uuidString }
     public var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     public var displayTitle: String {
@@ -74,9 +75,9 @@ public struct RequestLogExtraColumn: Identifiable, Equatable, Codable, Sendable 
     }
 
     public init(id: UUID = UUID(), field: Field = .header, stage: Stage = .originalRequest,
-                name: String = "", title: String = "", isEnabled: Bool = true) {
+                name: String = "", title: String = "", isEnabled: Bool = true, mergedInto: String? = nil) {
         self.id = id; self.field = field; self.stage = stage
-        self.name = name; self.title = title; self.isEnabled = isEnabled
+        self.name = name; self.title = title; self.isEnabled = isEnabled; self.mergedInto = mergedInto
     }
 
     /// nil denotes an unavailable field; an empty string remains a captured empty value.
@@ -128,6 +129,50 @@ public struct RequestLogDisplayOptions: Equatable, Sendable {
         columns.contains(column) && (column != .device || allowLAN)
     }
 
+    /// Resolve merged fields to a physical column. Invalid or cyclic references stay standalone.
+    public func displayColumnID(for extra: RequestLogExtraColumn) -> String {
+        var current = extra
+        var visited: Set<String> = [extra.identifier]
+        while let target = current.mergedInto {
+            if let standard = RequestLogStandardColumn(rawValue: target) {
+                return standard == .status ? "request" : target
+            }
+            guard let next = extraColumns.first(where: { $0.identifier == target }),
+                  visited.insert(target).inserted else { return extra.identifier }
+            current = next
+        }
+        return current.identifier
+    }
+
+    public func isColumnVisible(_ id: String, allowLAN: Bool) -> Bool {
+        if id == "status" { return false }
+        if id == "request" { return columns.contains(.request) || columns.contains(.status) }
+        if let standard = RequestLogStandardColumn(rawValue: id) {
+            return isVisible(standard, allowLAN: allowLAN)
+        }
+        guard let extra = extraColumns.first(where: { $0.identifier == id }) else { return false }
+        return extra.isEnabled && extra.validationError == nil && displayColumnID(for: extra) == id
+    }
+
+    public func visibleColumnIDs(allowLAN: Bool) -> [String] {
+        orderedColumnIDs.filter { isColumnVisible($0, allowLAN: allowLAN) }
+    }
+
+    public func mergedFields(in id: String) -> [RequestLogExtraColumn] {
+        orderedColumnIDs.compactMap { fieldID in
+            extraColumns.first { $0.identifier == fieldID && $0.identifier != id && $0.isEnabled
+                && $0.validationError == nil && displayColumnID(for: $0) == id }
+        }
+    }
+
+    public func title(forColumnID id: String) -> String {
+        if id == "request" {
+            return columns.contains(.request) ? "URL" : "状态码"
+        }
+        return RequestLogStandardColumn(rawValue: id)?.title
+            ?? extraColumns.first(where: { $0.identifier == id })?.displayTitle ?? id
+    }
+
     /// Stable identities keep ordering independent of titles, visibility and widths.
     public var orderedColumnIDs: [String] {
         let extraIDs = extraColumns.map(\.identifier)
@@ -151,7 +196,6 @@ public struct RequestLogDisplayOptions: Equatable, Sendable {
         self.init()
         if let names = preferences["columns"] as? [String] {
             columns = Set(names.compactMap(RequestLogStandardColumn.init(rawValue:)))
-            if columns.subtracting([.device]).isEmpty { columns.insert(.request) }
         }
         if let saved = preferences["extraColumns"] as? [[String: Any]] {
             var seen = Set<UUID>()

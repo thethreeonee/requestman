@@ -13,16 +13,15 @@ enum RequestLogDisplayOptionsMenu {
                      editColumn: @escaping (RequestLogExtraColumn?) -> Void) -> NSMenu {
         let menu = NSMenu(title: "显示选项")
         menu.autoenablesItems = false
-        let available = options.columns.subtracting([.device])
         for column in RecordColumn.allCases {
-            let item = RequestActionsMenu.item(column == .request ? "请求（URL）" : column.title) {
+            let item = RequestActionsMenu.item(column.title) {
                 var next = options
                 if next.columns.contains(column) { next.columns.remove(column) }
                 else { next.columns.insert(column) }
                 onChange(next)
             }
             item.state = options.columns.contains(column) ? .on : .off
-            item.isEnabled = column == .device ? allowLAN : !(available.count == 1 && available.contains(column))
+            item.isEnabled = column != .device || allowLAN
             if column == .device && !allowLAN { item.toolTip = "开启允许局域网设备连接后可显示" }
             menu.addItem(item)
         }
@@ -33,7 +32,7 @@ enum RequestLogDisplayOptionsMenu {
             item.state = column.isEnabled ? .on : .off
             item.toolTip = column.summary
             let submenu = NSMenu(title: title); submenu.autoenablesItems = false
-            let visible = RequestActionsMenu.item("显示此列") {
+            let visible = RequestActionsMenu.item("显示此字段") {
                 var next = options
                 guard let index = next.extraColumns.firstIndex(where: { $0.id == column.id }) else { return }
                 next.extraColumns[index].isEnabled.toggle()
@@ -41,6 +40,23 @@ enum RequestLogDisplayOptionsMenu {
             }
             visible.state = column.isEnabled ? .on : .off
             submenu.addItem(visible)
+            let merge = NSMenuItem(title: "合并显示到", action: nil, keyEquivalent: "")
+            let targets = NSMenu(title: "合并显示到")
+            let destinations: [String?] = [nil] + options.visibleColumnIDs(allowLAN: allowLAN)
+                .filter { $0 != column.identifier }.map { Optional($0) }
+            for destination in destinations {
+                let choice = RequestActionsMenu.item(destination.map { options.title(forColumnID: $0) } ?? "独立列") {
+                    var next = options
+                    guard let index = next.extraColumns.firstIndex(where: { $0.id == column.id }) else { return }
+                    next.extraColumns[index].mergedInto = destination
+                    onChange(next)
+                }
+                choice.state = (destination == nil ? options.displayColumnID(for: column) == column.identifier
+                    : column.mergedInto != nil && options.displayColumnID(for: column) == destination) ? .on : .off
+                targets.addItem(choice)
+            }
+            merge.submenu = targets
+            submenu.addItem(merge)
             submenu.addItem(RequestActionsMenu.item("编辑…") { editColumn(column) })
             submenu.addItem(RequestActionsMenu.item("删除") {
                 var next = options
@@ -52,7 +68,7 @@ enum RequestLogDisplayOptionsMenu {
             menu.addItem(item)
         }
         if !options.extraColumns.isEmpty { menu.addItem(.separator()) }
-        menu.addItem(RequestActionsMenu.item("添加额外列…") { editColumn(nil) })
+        menu.addItem(RequestActionsMenu.item("添加额外字段…") { editColumn(nil) })
         return menu
     }
 }
@@ -85,16 +101,16 @@ final class RequestLogExtraColumnEditor: NSViewController {
         field.target = self; field.action = #selector(changeField)
         stage.target = self; stage.action = #selector(changeStage)
         field.setAccessibilityLabel("字段类型"); stage.setAccessibilityLabel("阶段")
-        customTitle.setAccessibilityLabel("列标题")
+        customTitle.setAccessibilityLabel("字段标题")
         customTitle.onSubmit = { [weak self] in self?.submit() }
         let cancel = ActionButton(title: "取消") { [weak self] in self?.dismiss(nil) }
         cancel.keyEquivalent = "\u{1b}"
         let actions = NativeUI.stack([cancel, save], vertical: false)
         let stack = NativeUI.stack([
-            NativeUI.label(isNew ? "添加额外列" : "编辑额外列", size: 18, weight: .semibold),
+            NativeUI.label(isNew ? "添加额外字段" : "编辑额外字段", size: 18, weight: .semibold),
             NativeUI.label("字段类型", size: 12, secondary: true), field,
             NativeUI.label("阶段", size: 12, secondary: true), stage,
-            nameLabel, name, NativeUI.label("列标题（可选）", size: 12, secondary: true), customTitle, error, actions
+            nameLabel, name, NativeUI.label("字段标题（可选）", size: 12, secondary: true), customTitle, error, actions
         ], spacing: 8)
         NativeUI.pin(stack, to: view, insets: NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20))
         for control in [field, stage, name, customTitle, error] {

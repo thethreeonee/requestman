@@ -98,7 +98,7 @@ struct RequestLogColumnsTests {
         #expect(!options.orderedColumnIDs.contains("unknown"))
     }
 
-    @Test func invalidPreferencesKeepAtLeastOneStandardColumnAndDeduplicateExtras() {
+    @Test func invalidPreferencesDiscardUnknownColumnsAndDeduplicateExtras() {
         let extra = RequestLogExtraColumn(name: "X-ID")
         var options = RequestLogDisplayOptions(); options.extraColumns = [extra]
         var saved = options.preferences
@@ -106,7 +106,55 @@ struct RequestLogColumnsTests {
         saved["columns"] = ["device", "unknown"]
         saved["extraColumns"] = [item, item, ["id": "broken"]]
         let restored = RequestLogDisplayOptions(preferences: saved)
-        #expect(restored.columns.contains(.request))
+        #expect(restored.columns == [.device])
         #expect(restored.extraColumns == [extra])
     }
+    @Test func urlAndStatusShareOneColumnWithIndependentVisibility() {
+        for columns: Set<RequestLogStandardColumn> in [[], [.request], [.status], [.request, .status]] {
+            var options = RequestLogDisplayOptions()
+            options.columns = columns
+            #expect(options.visibleColumnIDs(allowLAN: false) == (columns.isEmpty ? [] : ["request"]))
+            let restored = RequestLogDisplayOptions(preferences: options.preferences)
+            #expect(restored.columns == columns)
+            #expect(restored.visibleColumnIDs(allowLAN: false) == options.visibleColumnIDs(allowLAN: false))
+        }
+    }
+
+    @Test func mergedFieldsPersistAndFollowTargetVisibilityAndOrder() throws {
+        var options = RequestLogDisplayOptions()
+        let header = RequestLogExtraColumn(name: "X-ID", mergedInto: "request")
+        let query = RequestLogExtraColumn(field: .queryParameter, name: "page", mergedInto: "request")
+        options.extraColumns = [header, query]
+        options.columnOrder = [query.identifier, "request", header.identifier]
+        #expect(options.mergedFields(in: "request").map(\.id) == [query.id, header.id])
+        #expect(!options.visibleColumnIDs(allowLAN: false).contains(header.identifier))
+        let restored = RequestLogDisplayOptions(preferences: options.preferences)
+        #expect(restored.extraColumns == options.extraColumns)
+        options.columns = [.time]
+        #expect(!options.isColumnVisible(options.displayColumnID(for: header), allowLAN: false))
+        options.extraColumns[0].mergedInto = nil
+        #expect(options.isColumnVisible(header.identifier, allowLAN: false))
+        // Pre-merge preferences omit the new optional key.
+        var legacy = try #require((options.preferences["extraColumns"] as? [[String: Any]])?.first)
+        legacy.removeValue(forKey: "mergedInto")
+        #expect(RequestLogDisplayOptions(preferences: ["extraColumns": [legacy]]).extraColumns.first?.mergedInto == nil)
+    }
+
+    @Test func mergingIntoExtraColumnsHandlesChainsDeletionAndCycles() {
+        var options = RequestLogDisplayOptions()
+        let target = RequestLogExtraColumn(field: .host)
+        let child = RequestLogExtraColumn(name: "X-ID", mergedInto: target.identifier)
+        options.extraColumns = [target, child]
+        #expect(options.displayColumnID(for: child) == target.identifier)
+        #expect(options.mergedFields(in: target.identifier) == [child])
+        options.extraColumns[0].mergedInto = "duration"
+        #expect(options.displayColumnID(for: child) == "duration")
+        #expect(options.mergedFields(in: "duration").count == 2)
+        options.extraColumns[0].mergedInto = child.identifier
+        #expect(options.displayColumnID(for: child) == child.identifier)
+        #expect(options.displayColumnID(for: options.extraColumns[0]) == target.identifier)
+        options.extraColumns.removeFirst()
+        #expect(options.isColumnVisible(child.identifier, allowLAN: false))
+    }
+
 }

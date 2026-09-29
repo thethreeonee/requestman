@@ -76,7 +76,10 @@ public struct RequestLogRow: Equatable, Sendable {
             }
             if values.contains(where: { $0.localizedCaseInsensitiveContains(query) }) { return true }
         }
-        return extraValues.values.contains {
+        return displayOptions.extraColumns.filter {
+            $0.isEnabled && $0.validationError == nil
+                && displayOptions.isColumnVisible(displayOptions.displayColumnID(for: $0), allowLAN: allowLAN)
+        }.compactMap { extraValues[$0.identifier] }.contains {
             $0.localizedCaseInsensitiveContains(query)
                 || $0.replacingOccurrences(of: "\n", with: " · ").localizedCaseInsensitiveContains(query)
         }

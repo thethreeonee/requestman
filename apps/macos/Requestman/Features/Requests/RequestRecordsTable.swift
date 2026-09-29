@@ -120,6 +120,7 @@ final class RequestRecordsTable: NSView {
         private var displayOptions = RequestLogDisplayOptions()
         private var lastAllowLAN: Bool?
         private var configuringColumns = false
+        private var displayOptionsChanged = false
 
         init(defaults: UserDefaults) {
             self.defaults = defaults
@@ -155,10 +156,16 @@ final class RequestRecordsTable: NSView {
                 RecordRow(record: $0, displayOptions: displayOptions,
                           context: .init(workflowNames: workflowNames, deviceAliases: deviceAliases))
             }
-            requiredRequestWidth = (Set(records.map(\.method)).map { RequestMethodTag.requiredWidth(for: $0) }.max() ?? 0) + 24
+            requiredRequestWidth = displayOptions.columns.contains(.request)
+                ? (Set(nextRows.map(\.method)).map { RequestMethodTag.requiredWidth(for: $0) }.max() ?? 0) + 24 : 0
             updating = true
             defer { updating = false }
 
+            if displayOptionsChanged {
+                rows = nextRows
+                table.reloadData()
+                displayOptionsChanged = false
+            }
             if nextRows != rows {
                 let previous = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
                 let difference = nextRows.map(\.id).difference(from: rows.map(\.id))
@@ -198,6 +205,7 @@ final class RequestRecordsTable: NSView {
         func setDisplayOptions(_ options: RequestLogDisplayOptions, allowLAN: Bool) {
             guard options != displayOptions || lastAllowLAN != allowLAN else { return }
             displayOptions = options; lastAllowLAN = allowLAN
+            displayOptionsChanged = true
             guard let table else { return }
             configuringColumns = true; applyingWidths = true
             defer { configuringColumns = false; applyingWidths = false }
@@ -216,12 +224,10 @@ final class RequestRecordsTable: NSView {
                 if current >= 0 && current != index { table.moveColumn(current, toColumn: index) }
             }
             for item in table.tableColumns {
-                if let column = RecordColumn(rawValue: item.identifier.rawValue) {
-                    item.isHidden = !options.isVisible(column, allowLAN: allowLAN)
-                } else if let extra = options.extraColumns.first(where: { $0.identifier == item.identifier.rawValue }) {
-                    item.title = extra.displayTitle; item.headerToolTip = extra.summary
-                    item.isHidden = !extra.isEnabled || extra.validationError != nil
-                }
+                let id = item.identifier.rawValue
+                item.title = options.title(forColumnID: id)
+                item.isHidden = !options.isColumnVisible(id, allowLAN: allowLAN)
+                item.headerToolTip = options.extraColumns.first(where: { $0.identifier == id })?.summary
             }
             availableWidth = 0
         }
@@ -384,7 +390,7 @@ final class RequestRecordsTable: NSView {
             let cell = (tableView.makeView(withIdentifier: identifier, owner: nil) as? RecordCell)
                 ?? RecordCell(column: column, identifier: identifier)
             cell.device.onRename = { [weak self] in self?.onDeviceAliasChange($0, $1) }
-            cell.configure(rows[row])
+            cell.configure(rows[row], options: displayOptions)
             return cell
         }
 
@@ -450,69 +456,67 @@ private final class RecordCell: NSTableCellView {
     let device = DeviceSourceButton()
     private let column: RecordColumn?
     private let primary = NSTextField(labelWithString: "")
-    private let secondary = NSTextField(labelWithString: "")
     private let methodTag = RequestMethodTag()
+    private var tags: [RequestMethodTag] = []
     private var primaryColor = NSColor.labelColor
-    private var secondaryColor = NSColor.secondaryLabelColor
 
     init(column: RecordColumn?, identifier: NSUserInterfaceItemIdentifier) {
         self.column = column
         super.init(frame: .zero)
         self.identifier = identifier
-        for label in [primary, secondary] {
-            label.maximumNumberOfLines = 1
-            label.lineBreakMode = .byTruncatingTail
-            label.cell?.usesSingleLineMode = true
-            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            addSubview(label)
-        }
+        primary.maximumNumberOfLines = 1
+        primary.lineBreakMode = column == .request ? .byTruncatingMiddle : .byTruncatingTail
+        primary.cell?.usesSingleLineMode = true
+        primary.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         primary.font = .systemFont(ofSize: 13)
-        secondary.font = .systemFont(ofSize: column == .rules ? 13 : 12)
-        secondary.isHidden = column != .request && column != .rules
-        if column == .request {
-            primary.lineBreakMode = .byTruncatingMiddle
-            addSubview(methodTag)
-        }
+        addSubview(primary)
+        if column == .request { addSubview(methodTag) }
         if column == .duration { primary.alignment = .right }
-        if column == .time || column == .status || column == .duration {
-            primary.font = .monospacedDigitSystemFont(ofSize: 13, weight: column == .status ? .medium : .regular)
+        if column == .time || column == .duration {
+            primary.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
         }
-        if column == .status { primary.font = RequestStatusStyle.font }
-        if column == .device { primary.isHidden = true; addSubview(device) }
+        if column == .device { addSubview(device) }
         textField = primary
     }
 
-    required init?(coder: NSCoder) { return nil }
+    required init?(coder: NSCoder) { nil }
     override var isFlipped: Bool { true }
-
     override var backgroundStyle: NSView.BackgroundStyle {
         didSet { updateColors() }
     }
 
-    func configure(_ row: RecordRow) {
+    func configure(_ row: RecordRow, options: RequestLogDisplayOptions) {
         primaryColor = .labelColor
-        secondaryColor = .secondaryLabelColor
+        primary.isHidden = column == .device
+        var badges: [(value: String, tint: NSColor, tooltip: String)] = []
+        func append(_ value: String, tint: NSColor = .secondaryLabelColor, tooltip: String? = nil) {
+            badges.append((value.replacingOccurrences(of: "\n", with: " · "), tint, tooltip ?? value))
+        }
         switch column {
         case .time:
             primary.stringValue = row.time
             primaryColor = .secondaryLabelColor
         case .status:
-            primary.stringValue = row.status.map(String.init) ?? "—"
-            primaryColor = RequestStatusStyle.color(row.status)
+            primary.stringValue = ""
         case .request:
-            primary.stringValue = row.url
-            secondary.stringValue = row.replay ?? row.failure ?? ""
-            secondary.isHidden = row.replay == nil && row.failure == nil
-            secondaryColor = row.failure == nil ? .secondaryLabelColor : .systemRed
+            let showsURL = options.columns.contains(.request)
+            primary.stringValue = showsURL ? row.url : ""
+            primary.isHidden = !showsURL
+            methodTag.isHidden = !showsURL
             methodTag.setMethod(row.method)
+            if options.columns.contains(.status) {
+                append(row.status.map(String.init) ?? "—", tint: RequestStatusStyle.color(row.status))
+            }
+            if showsURL, let detail = row.replay ?? row.failure {
+                append(detail, tint: row.failure == nil ? .secondaryLabelColor : .systemRed)
+            }
         case .rules:
             primary.stringValue = row.project
-            secondary.stringValue = row.workflow ?? ""
             primaryColor = .secondaryLabelColor
-            secondaryColor = .labelColor
-            secondary.isHidden = row.workflow == nil
+            if let workflow = row.workflow { append(workflow) }
         case nil:
-            primary.stringValue = (row.extraValues[identifier?.rawValue ?? ""] ?? "—").replacingOccurrences(of: "\n", with: " · ")
+            primary.stringValue = (row.extraValues[identifier?.rawValue ?? ""] ?? "—")
+                .replacingOccurrences(of: "\n", with: " · ")
         case .device:
             device.update(source: row.deviceSource, alias: row.deviceAlias)
             primary.stringValue = device.title
@@ -520,21 +524,27 @@ private final class RecordCell: NSTableCellView {
             primary.stringValue = row.duration
             primaryColor = .secondaryLabelColor
         }
-        primary.toolTip = primary.stringValue
-        secondary.toolTip = secondary.stringValue
-        toolTip = column == .request
-            ? "\(row.method) \(row.url)\n\(row.result)"
-            : (secondary.isHidden ? primary.stringValue : "\(primary.stringValue)\n\(secondary.stringValue)")
-        if column == .rules {
-            toolTip = [row.project, row.workflow ?? "未命中规则"].joined(separator: "\n")
-            setAccessibilityLabel("命中的规则")
-            setAccessibilityValue(toolTip)
+        for field in options.mergedFields(in: identifier?.rawValue ?? "") {
+            let value = row.extraValues[field.identifier] ?? "—"
+            let tint = field.field == .status ? RequestStatusStyle.color(Int(value)) : NSColor.secondaryLabelColor
+            append(value, tint: tint, tooltip: field.displayTitle + " · " + field.stage.title + "\n" + value)
         }
-        if column == nil {
-            let value = row.extraValues[identifier?.rawValue ?? ""] ?? "—"
-            primary.toolTip = value; toolTip = value
-            setAccessibilityLabel("额外字段值"); setAccessibilityValue(value)
+        while tags.count > badges.count { tags.removeLast().removeFromSuperview() }
+        while tags.count < badges.count {
+            let tag = RequestMethodTag(); tags.append(tag); addSubview(tag)
         }
+        for (tag, badge) in zip(tags, badges) {
+            tag.setTag(badge.value, tint: badge.tint, tooltip: badge.tooltip)
+        }
+        primary.toolTip = column == nil ? row.extraValues[identifier?.rawValue ?? ""] : primary.stringValue
+        var details = primary.isHidden ? [] : [primary.toolTip ?? primary.stringValue]
+        if column == .device { details = [device.title] }
+        if column == .request && !primary.isHidden { details = [row.method + " " + row.url, row.result] }
+        if column == .rules && row.workflow == nil { details.append("未命中规则") }
+        details += badges.map(\.tooltip)
+        toolTip = details.joined(separator: "\n")
+        setAccessibilityLabel(options.title(forColumnID: identifier?.rawValue ?? ""))
+        setAccessibilityValue(toolTip)
         updateColors()
         needsLayout = true
     }
@@ -543,32 +553,41 @@ private final class RecordCell: NSTableCellView {
         super.layout()
         let inset = min(12, bounds.width / 2)
         let width = max(0, bounds.width - inset * 2)
-        let lineHeight: CGFloat = 20
-        if column == .device { device.frame = NSRect(x: inset, y: (bounds.height - 28) / 2, width: width, height: 28) }
-        if column == .request {
-            let tagWidth = methodTag.intrinsicContentSize.width
+        let top = tags.isEmpty ? (bounds.height - 24) / 2 : 4
+        if column == .device {
+            device.frame = NSRect(x: inset, y: top, width: width, height: 24)
+        }
+        if column == .request && !methodTag.isHidden {
+            let tagWidth = min(width, methodTag.intrinsicContentSize.width)
             let gap = min(10, max(0, width - tagWidth))
-            let top = secondary.isHidden ? (bounds.height - 24) / 2 : 6
             methodTag.frame = NSRect(x: inset, y: top, width: tagWidth, height: 24)
-            let textX = inset + tagWidth + gap
-            let textWidth = max(0, width - tagWidth - gap)
-            primary.frame = NSRect(x: textX, y: top + 2, width: textWidth, height: lineHeight)
-            secondary.frame = NSRect(x: textX, y: 32, width: textWidth, height: 18)
-        } else if column == .rules && !secondary.isHidden {
-            primary.frame = NSRect(x: inset, y: 7, width: width, height: lineHeight)
-            secondary.frame = NSRect(x: inset, y: 30, width: width, height: lineHeight)
+            primary.frame = NSRect(x: inset + tagWidth + gap, y: top + 2,
+                                   width: max(0, width - tagWidth - gap), height: 20)
         } else {
-            primary.frame = NSRect(x: inset, y: (bounds.height - lineHeight) / 2, width: width, height: lineHeight)
+            primary.frame = NSRect(x: inset, y: top + 2, width: width, height: 20)
+        }
+        // Keep every secondary value on the same line; truncate within each tag when space is limited.
+        let gap = tags.count > 1 ? min(6, width / CGFloat(tags.count * 2)) : 0
+        let space = max(0, width - gap * CGFloat(max(0, tags.count - 1)))
+        let desired = tags.map { $0.intrinsicContentSize.width }
+        let total = desired.reduce(0, +)
+        let minimum = min(36, space / CGFloat(max(1, tags.count)))
+        let flexible = desired.reduce(CGFloat.zero) { $0 + max(0, $1 - minimum) }
+        var x = inset
+        for (tag, desiredWidth) in zip(tags, desired) {
+            let tagWidth = total <= space ? desiredWidth
+                : minimum + max(0, space - minimum * CGFloat(tags.count)) * max(0, desiredWidth - minimum) / max(1, flexible)
+            tag.frame = NSRect(x: x, y: 30, width: tagWidth, height: 22)
+            x += tagWidth + gap
         }
     }
 
     private func updateColors() {
         let selected = backgroundStyle == .emphasized
         primary.textColor = selected ? .alternateSelectedControlTextColor : primaryColor
-        secondary.textColor = selected ? .alternateSelectedControlTextColor : secondaryColor
         methodTag.selected = selected
+        for tag in tags { tag.selected = selected }
     }
-
 }
 
 @MainActor
@@ -601,6 +620,7 @@ final class RequestMethodTag: NSView {
 
     private let label = NSTextField(labelWithString: "")
     private var tint = NSColor.systemBlue
+    private var usesNeutralText = false
     var selected = false {
         didSet { updateColor() }
     }
@@ -618,6 +638,7 @@ final class RequestMethodTag: NSView {
     required init?(coder: NSCoder) { return nil }
 
     func setMethod(_ method: String) {
+        usesNeutralText = false
         label.stringValue = method
         toolTip = method
         label.toolTip = method
@@ -628,6 +649,16 @@ final class RequestMethodTag: NSView {
         case "HEAD", "OPTIONS": tint = .secondaryLabelColor
         default: tint = .systemBlue
         }
+        invalidateIntrinsicContentSize()
+        updateColor()
+    }
+
+    func setTag(_ value: String, tint: NSColor, tooltip: String) {
+        label.stringValue = value
+        self.tint = tint
+        usesNeutralText = true
+        toolTip = tooltip; label.toolTip = tooltip
+        setAccessibilityLabel(tooltip)
         invalidateIntrinsicContentSize()
         updateColor()
     }
@@ -645,7 +676,8 @@ final class RequestMethodTag: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let color: NSColor = selected ? .alternateSelectedControlTextColor : tint
+        guard bounds.width > 1, bounds.height > 1 else { return }
+        let color: NSColor = selected && !usesNeutralText ? .alternateSelectedControlTextColor : tint
         let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
         color.withAlphaComponent(selected ? 0.18 : 0.10).setFill()
         path.fill()
@@ -660,7 +692,7 @@ final class RequestMethodTag: NSView {
     }
 
     private func updateColor() {
-        label.textColor = selected ? .alternateSelectedControlTextColor : tint
+        label.textColor = selected ? .alternateSelectedControlTextColor : (usesNeutralText ? .labelColor : tint)
         needsDisplay = true
     }
 }
