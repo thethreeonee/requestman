@@ -14,6 +14,15 @@ enum RequestLogDisplayOptionsMenu {
         let menu = NSMenu(title: "显示选项")
         menu.autoenablesItems = false
         for column in RecordColumn.allCases {
+            if column == .request {
+                let method = RequestActionsMenu.item("请求方法") {
+                    var next = options
+                    next.showsMethod.toggle()
+                    onChange(next)
+                }
+                method.state = options.showsMethod ? .on : .off
+                menu.addItem(method)
+            }
             let item = RequestActionsMenu.item(column.title) {
                 var next = options
                 if next.columns.contains(column) { next.columns.remove(column) }

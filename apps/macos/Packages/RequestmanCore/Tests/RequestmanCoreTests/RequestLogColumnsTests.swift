@@ -109,15 +109,29 @@ struct RequestLogColumnsTests {
         #expect(restored.columns == [.device])
         #expect(restored.extraColumns == [extra])
     }
-    @Test func urlAndStatusShareOneColumnWithIndependentVisibility() {
+    @Test func methodURLAndStatusShareOneColumnWithIndependentVisibility() {
         for columns: Set<RequestLogStandardColumn> in [[], [.request], [.status], [.request, .status]] {
-            var options = RequestLogDisplayOptions()
-            options.columns = columns
-            #expect(options.visibleColumnIDs(allowLAN: false) == (columns.isEmpty ? [] : ["request"]))
-            let restored = RequestLogDisplayOptions(preferences: options.preferences)
-            #expect(restored.columns == columns)
-            #expect(restored.visibleColumnIDs(allowLAN: false) == options.visibleColumnIDs(allowLAN: false))
+            for showsMethod in [false, true] {
+                var options = RequestLogDisplayOptions()
+                options.columns = columns; options.showsMethod = showsMethod
+                let visible = showsMethod || !columns.isEmpty
+                #expect(options.visibleColumnIDs(allowLAN: false) == (visible ? ["request"] : []))
+                let restored = RequestLogDisplayOptions(preferences: options.preferences)
+                #expect(restored.columns == columns)
+                #expect(restored.showsMethod == showsMethod)
+                #expect(restored.visibleColumnIDs(allowLAN: false) == options.visibleColumnIDs(allowLAN: false))
+            }
         }
+        var methodOnly = RequestLogDisplayOptions()
+        methodOnly.columns = []
+        #expect(methodOnly.title(forColumnID: "request") == "请求方法")
+    }
+
+    @Test func legacyMethodVisibilityFollowsPreviousURLVisibility() {
+        #expect(RequestLogDisplayOptions(preferences: [:]).showsMethod)
+        #expect(RequestLogDisplayOptions(preferences: ["columns": ["request"]]).showsMethod)
+        #expect(!RequestLogDisplayOptions(preferences: ["columns": ["status"]]).showsMethod)
+        #expect(!RequestLogDisplayOptions(preferences: ["columns": [String]()]).showsMethod)
     }
 
     @Test func mergedFieldsPersistAndFollowTargetVisibilityAndOrder() throws {
@@ -130,7 +144,7 @@ struct RequestLogColumnsTests {
         #expect(!options.visibleColumnIDs(allowLAN: false).contains(header.identifier))
         let restored = RequestLogDisplayOptions(preferences: options.preferences)
         #expect(restored.extraColumns == options.extraColumns)
-        options.columns = [.time]
+        options.columns = [.time]; options.showsMethod = false
         #expect(!options.isColumnVisible(options.displayColumnID(for: header), allowLAN: false))
         options.extraColumns[0].mergedInto = nil
         #expect(options.isColumnVisible(header.identifier, allowLAN: false))

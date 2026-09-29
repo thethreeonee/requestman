@@ -4,9 +4,9 @@ import Testing
 
 struct RequestLogSearchTests {
     private func matches(_ query: String, _ record: CaptureRecord, columns: Set<RequestLogStandardColumn>,
-                         extras: [RequestLogExtraColumn] = [], context: RequestLogSearchContext = .init()) -> Bool {
+                         showsMethod: Bool = false, extras: [RequestLogExtraColumn] = [], context: RequestLogSearchContext = .init()) -> Bool {
         var filter = CaptureRecordFilter(); filter.search = query
-        var options = RequestLogDisplayOptions(); options.columns = columns; options.extraColumns = extras
+        var options = RequestLogDisplayOptions(); options.columns = columns; options.showsMethod = showsMethod; options.extraColumns = extras
         return filter.matches(record, displayOptions: options, searchContext: context)
     }
 
@@ -16,7 +16,7 @@ struct RequestLogSearchTests {
         record.status = 418; record.duration = 1.234
         record.project = "商城调试组"; record.matchedWorkflowID = UUID(); record.workflow = "添加追踪"
         let queries: [(RequestLogStandardColumn, String)] = [
-            (.time, "12:34:56"), (.status, "418"), (.request, "post"), (.request, "EXAMPLE.TEST/items"),
+            (.time, "12:34:56"), (.status, "418"), (.request, "EXAMPLE.TEST/items"),
             (.rules, "商城"), (.rules, "添加追踪"), (.duration, "1.2 s")
         ]
         for (column, query) in queries {
@@ -76,8 +76,8 @@ struct RequestLogSearchTests {
     @Test func requestAndDurationSearchVisibleProtocolErrorAndConnectionText() {
         var record = CaptureRecord(method: "GET", url: "https://example.test")
         record.captureProtocol = .sse; record.error = "连接超时"
-        #expect(matches("SSE", record, columns: [.request]))
-        #expect(!matches("GET", record, columns: [.request]))
+        #expect(matches("SSE", record, columns: [.request], showsMethod: true))
+        #expect(!matches("GET", record, columns: [.request], showsMethod: true))
         #expect(matches("连接超时", record, columns: [.request]))
         record.connectionState = .connecting
         #expect(matches(record.connectionSummary, record, columns: [.duration]))
@@ -117,6 +117,18 @@ struct RequestLogSearchTests {
         #expect(!matches("trace-value", record, columns: [.time], extras: [host, field]))
         field.mergedInto = nil
         #expect(matches("trace-value", record, columns: [.time], extras: [field]))
+    }
+
+    @Test func methodSearchIsIndependentOfURLAndKeepsMergedFieldsVisible() {
+        let record = CaptureRecord(method: "POST", url: "https://example.test")
+        #expect(matches("post", record, columns: [], showsMethod: true))
+        #expect(!matches("post", record, columns: [.request], showsMethod: false))
+        #expect(matches("example.test", record, columns: [.request], showsMethod: false))
+        #expect(!matches("example.test", record, columns: [], showsMethod: true))
+        #expect(matches("POST https://example.test", record, columns: [.request], showsMethod: true))
+        let field = RequestLogExtraColumn(field: .host, mergedInto: "request")
+        #expect(matches("example.test", record, columns: [], showsMethod: true, extras: [field]))
+        #expect(!matches("example.test", record, columns: [], showsMethod: false, extras: [field]))
     }
 
 }

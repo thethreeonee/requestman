@@ -121,6 +121,7 @@ public struct RequestLogExtraColumn: Identifiable, Equatable, Codable, Sendable 
 public struct RequestLogDisplayOptions: Equatable, Sendable {
     public static let defaultsKey = "requestLog.displayOptions.v1"
     public var columns = Set(RequestLogStandardColumn.allCases)
+    public var showsMethod = true
     public var extraColumns: [RequestLogExtraColumn] = []
     public var columnOrder: [String] = []
     public init() {}
@@ -146,7 +147,7 @@ public struct RequestLogDisplayOptions: Equatable, Sendable {
 
     public func isColumnVisible(_ id: String, allowLAN: Bool) -> Bool {
         if id == "status" { return false }
-        if id == "request" { return columns.contains(.request) || columns.contains(.status) }
+        if id == "request" { return showsMethod || columns.contains(.request) || columns.contains(.status) }
         if let standard = RequestLogStandardColumn(rawValue: id) {
             return isVisible(standard, allowLAN: allowLAN)
         }
@@ -167,7 +168,7 @@ public struct RequestLogDisplayOptions: Equatable, Sendable {
 
     public func title(forColumnID id: String) -> String {
         if id == "request" {
-            return columns.contains(.request) ? "URL" : "状态码"
+            return columns.contains(.request) ? "URL" : columns.contains(.status) ? "状态码" : "请求方法"
         }
         return RequestLogStandardColumn(rawValue: id)?.title
             ?? extraColumns.first(where: { $0.identifier == id })?.displayTitle ?? id
@@ -197,6 +198,7 @@ public struct RequestLogDisplayOptions: Equatable, Sendable {
         if let names = preferences["columns"] as? [String] {
             columns = Set(names.compactMap(RequestLogStandardColumn.init(rawValue:)))
         }
+        showsMethod = preferences["showsMethod"] as? Bool ?? columns.contains(.request)
         if let saved = preferences["extraColumns"] as? [[String: Any]] {
             var seen = Set<UUID>()
             extraColumns = saved.compactMap { item in
@@ -221,7 +223,8 @@ public struct RequestLogDisplayOptions: Equatable, Sendable {
             guard let data = try? JSONEncoder().encode(column) else { return nil }
             return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         }
-        return ["columns": columns.map(\.rawValue).sorted(), "extraColumns": extra, "columnOrder": orderedColumnIDs]
+        return ["columns": columns.map(\.rawValue).sorted(), "showsMethod": showsMethod,
+                "extraColumns": extra, "columnOrder": orderedColumnIDs]
     }
     public static func load(from defaults: UserDefaults = .standard) -> Self {
         Self(preferences: defaults.dictionary(forKey: defaultsKey) ?? [:])

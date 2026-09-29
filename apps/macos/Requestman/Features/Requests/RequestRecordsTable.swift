@@ -156,8 +156,11 @@ final class RequestRecordsTable: NSView {
                 RecordRow(record: $0, displayOptions: displayOptions,
                           context: .init(workflowNames: workflowNames, deviceAliases: deviceAliases))
             }
-            requiredRequestWidth = displayOptions.columns.contains(.request)
-                ? (Set(nextRows.map(\.method)).map { RequestMethodTag.requiredWidth(for: $0) }.max() ?? 0) + 24 : 0
+            let methodWidth = displayOptions.showsMethod
+                ? (Set(nextRows.map(\.method)).map { RequestMethodTag.requiredWidth(for: $0) }.max() ?? 0) + 8 : 0
+            let statusWidth = displayOptions.columns.contains(.status)
+                ? RequestMethodTag.requiredWidth(for: "599", font: RequestMethodTag.statusFont) + 8 : 0
+            requiredRequestWidth = methodWidth + statusWidth + 24
             updating = true
             defer { updating = false }
 
@@ -457,6 +460,7 @@ private final class RecordCell: NSTableCellView {
     private let column: RecordColumn?
     private let primary = NSTextField(labelWithString: "")
     private let methodTag = RequestMethodTag()
+    private let statusTag = RequestMethodTag()
     private var tags: [RequestMethodTag] = []
     private var primaryColor = NSColor.labelColor
 
@@ -470,7 +474,7 @@ private final class RecordCell: NSTableCellView {
         primary.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         primary.font = .systemFont(ofSize: 13)
         addSubview(primary)
-        if column == .request { addSubview(methodTag) }
+        if column == .request { addSubview(statusTag); addSubview(methodTag) }
         if column == .duration { primary.alignment = .right }
         if column == .time || column == .duration {
             primary.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
@@ -502,11 +506,10 @@ private final class RecordCell: NSTableCellView {
             let showsURL = options.columns.contains(.request)
             primary.stringValue = showsURL ? row.url : ""
             primary.isHidden = !showsURL
-            methodTag.isHidden = !showsURL
+            methodTag.isHidden = !options.showsMethod
             methodTag.setMethod(row.method)
-            if options.columns.contains(.status) {
-                append(row.status.map(String.init) ?? "—", tint: RequestStatusStyle.color(row.status))
-            }
+            statusTag.isHidden = !options.columns.contains(.status)
+            statusTag.setStatus(row.status)
             if showsURL, let detail = row.replay ?? row.failure {
                 append(detail, tint: row.failure == nil ? .secondaryLabelColor : .systemRed)
             }
@@ -539,7 +542,14 @@ private final class RecordCell: NSTableCellView {
         primary.toolTip = column == nil ? row.extraValues[identifier?.rawValue ?? ""] : primary.stringValue
         var details = primary.isHidden ? [] : [primary.toolTip ?? primary.stringValue]
         if column == .device { details = [device.title] }
-        if column == .request && !primary.isHidden { details = [row.method + " " + row.url, row.result] }
+        if column == .request {
+            var firstLine: [String] = []
+            if !statusTag.isHidden { firstLine.append(row.status.map(String.init) ?? "—") }
+            if !methodTag.isHidden { firstLine.append(row.method) }
+            if !primary.isHidden { firstLine.append(row.url) }
+            details = [firstLine.joined(separator: " ")]
+            if !primary.isHidden { details.append(row.result) }
+        }
         if column == .rules && row.workflow == nil { details.append("未命中规则") }
         details += badges.map(\.tooltip)
         toolTip = details.joined(separator: "\n")
@@ -557,12 +567,15 @@ private final class RecordCell: NSTableCellView {
         if column == .device {
             device.frame = NSRect(x: inset, y: top, width: width, height: 24)
         }
-        if column == .request && !methodTag.isHidden {
-            let tagWidth = min(width, methodTag.intrinsicContentSize.width)
-            let gap = min(10, max(0, width - tagWidth))
-            methodTag.frame = NSRect(x: inset, y: top, width: tagWidth, height: 24)
-            primary.frame = NSRect(x: inset + tagWidth + gap, y: top + 2,
-                                   width: max(0, width - tagWidth - gap), height: 20)
+        if column == .request {
+            var textX = inset
+            for tag in [statusTag, methodTag] where !tag.isHidden {
+                let available = max(0, inset + width - textX)
+                let tagWidth = min(available, tag.intrinsicContentSize.width)
+                tag.frame = NSRect(x: textX, y: top, width: tagWidth, height: 24)
+                textX += tagWidth + min(8, max(0, available - tagWidth))
+            }
+            primary.frame = NSRect(x: textX, y: top + 2, width: max(0, inset + width - textX), height: 20)
         } else {
             primary.frame = NSRect(x: inset, y: top + 2, width: width, height: 20)
         }
@@ -585,6 +598,7 @@ private final class RecordCell: NSTableCellView {
     private func updateColors() {
         let selected = backgroundStyle == .emphasized
         primary.textColor = selected ? .alternateSelectedControlTextColor : primaryColor
+        statusTag.selected = selected
         methodTag.selected = selected
         for tag in tags { tag.selected = selected }
     }
@@ -608,7 +622,9 @@ enum RequestStatusStyle {
 final class RequestMethodTag: NSView {
     private static let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
 
-    static func requiredWidth(for method: String) -> CGFloat {
+    static let statusFont = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .bold)
+
+    static func requiredWidth(for method: String, font: NSFont = font) -> CGFloat {
         let cell = NSTextFieldCell(textCell: method)
         cell.font = font
         cell.isBordered = false
@@ -621,6 +637,7 @@ final class RequestMethodTag: NSView {
     private let label = NSTextField(labelWithString: "")
     private var tint = NSColor.systemBlue
     private var usesNeutralText = false
+    private var isSubdued = false
     var selected = false {
         didSet { updateColor() }
     }
@@ -639,6 +656,8 @@ final class RequestMethodTag: NSView {
 
     func setMethod(_ method: String) {
         usesNeutralText = false
+        isSubdued = false
+        label.font = Self.font
         label.stringValue = method
         toolTip = method
         label.toolTip = method
@@ -653,10 +672,22 @@ final class RequestMethodTag: NSView {
         updateColor()
     }
 
+    func setStatus(_ status: Int?) {
+        setTag(status.map(String.init) ?? "—", tint: RequestStatusStyle.color(status),
+               tooltip: "状态码：" + (status.map(String.init) ?? "—"))
+        label.font = Self.statusFont
+        usesNeutralText = false
+        isSubdued = false
+        invalidateIntrinsicContentSize()
+        updateColor()
+    }
+
     func setTag(_ value: String, tint: NSColor, tooltip: String) {
         label.stringValue = value
         self.tint = tint
         usesNeutralText = true
+        isSubdued = true
+        label.font = Self.font
         toolTip = tooltip; label.toolTip = tooltip
         setAccessibilityLabel(tooltip)
         invalidateIntrinsicContentSize()
@@ -665,7 +696,7 @@ final class RequestMethodTag: NSView {
 
     override var intrinsicContentSize: NSSize {
         // Match the drawing cell: NSTextField's intrinsic width can omit truncation padding.
-        NSSize(width: Self.requiredWidth(for: label.stringValue), height: 24)
+        NSSize(width: Self.requiredWidth(for: label.stringValue, font: label.font ?? Self.font), height: 24)
     }
 
     override func layout() {
@@ -679,9 +710,9 @@ final class RequestMethodTag: NSView {
         guard bounds.width > 1, bounds.height > 1 else { return }
         let color: NSColor = selected && !usesNeutralText ? .alternateSelectedControlTextColor : tint
         let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
-        color.withAlphaComponent(selected ? 0.18 : 0.10).setFill()
+        color.withAlphaComponent(isSubdued ? (selected ? 0.08 : 0.04) : (selected ? 0.18 : 0.10)).setFill()
         path.fill()
-        color.withAlphaComponent(selected ? 0.65 : 0.45).setStroke()
+        color.withAlphaComponent(isSubdued ? (selected ? 0.25 : 0.16) : (selected ? 0.65 : 0.45)).setStroke()
         path.lineWidth = 1
         path.stroke()
     }

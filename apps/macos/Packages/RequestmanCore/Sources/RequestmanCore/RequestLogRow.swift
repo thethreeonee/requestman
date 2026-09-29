@@ -64,12 +64,13 @@ public struct RequestLogRow: Equatable, Sendable {
     }()
 
     public func contains(_ query: String, displayOptions: RequestLogDisplayOptions, allowLAN: Bool) -> Bool {
+        if displayOptions.showsMethod && method.localizedCaseInsensitiveContains(query) { return true }
         for column in RequestLogStandardColumn.allCases where displayOptions.isVisible(column, allowLAN: allowLAN) {
             let values: [String]
             switch column {
             case .time: values = [time]
             case .status: values = [status.map(String.init) ?? "—"]
-            case .request: values = [method + " " + url, replay ?? failure ?? ""]
+            case .request: values = [displayOptions.showsMethod ? method + " " + url : url, replay ?? failure ?? ""]
             case .rules: values = [project, workflow ?? ""]
             case .device: values = [DeviceSource.title(deviceSource, aliases: deviceSource.map { [$0: deviceAlias] } ?? [:])]
             case .duration: values = [duration]
