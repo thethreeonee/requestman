@@ -7,6 +7,10 @@ import QuartzCore
     func toggleStepInspector(_ sender: Any?)
 }
 
+@MainActor @objc protocol RequestInspectorPresenting {
+    func toggleRequestInspector(_ sender: Any?)
+}
+
 /// Business commands have explicit targets; standard text editing retains the responder chain.
 @MainActor
 enum WorkspaceCommand: Int, CaseIterable {

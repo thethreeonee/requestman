@@ -76,6 +76,8 @@ final class RequestRecordsTable: NSView {
         }
         table.dataSource = coordinator
         table.delegate = coordinator
+        table.target = coordinator
+        table.action = #selector(Coordinator.activateRequest(_:))
         scrollView.documentView = table
         coordinator.table = table
         (scrollView as! RecordsScrollView).contentWidthChanged = { [weak coordinator = coordinator] width in
@@ -397,6 +399,14 @@ final class RequestRecordsTable: NSView {
             return cell
         }
 
+        @objc func activateRequest(_ sender: NSTableView) {
+            guard !updating, let table = sender as? RecordsTableView,
+                  rows.indices.contains(table.clickedRow), table.clickedRow == table.selectedRow,
+                  table.consumeSelectionReactivation() else { return }
+            // Keep the toggle in this log window's responder chain.
+            _ = sender.tryToPerform(#selector(RequestInspectorPresenting.toggleRequestInspector(_:)), with: sender)
+        }
+
         func tableViewSelectionDidChange(_ notification: Notification) {
             guard !updating, let table else { return }
             let selected = rows.indices.contains(table.selectedRow) ? rows[table.selectedRow].id : nil
@@ -408,6 +418,20 @@ final class RequestRecordsTable: NSView {
 @MainActor
 private final class RecordsTableView: NSTableView {
     var menuForRow: (Int) -> NSMenu? = { _ in nil }
+    private var reactivatedRow: Int?
+
+    override func mouseDown(with event: NSEvent) {
+        // Capture selection before AppKit changes it and sends the table action.
+        let clickedRow = row(at: convert(event.locationInWindow, from: nil))
+        reactivatedRow = clickedRow >= 0 && isRowSelected(clickedRow) ? clickedRow : nil
+        defer { reactivatedRow = nil }
+        super.mouseDown(with: event)
+    }
+
+    func consumeSelectionReactivation() -> Bool {
+        defer { reactivatedRow = nil }
+        return reactivatedRow != nil && reactivatedRow == selectedRow
+    }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let clickedRow = row(at: convert(event.locationInWindow, from: nil))

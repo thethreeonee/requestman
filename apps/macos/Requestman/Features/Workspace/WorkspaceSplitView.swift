@@ -42,7 +42,7 @@ struct WorkspaceToolbarSnapshot: Equatable {
 }
 
 @MainActor
-final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, NSToolbarItemValidation, NSMenuDelegate, NSSearchFieldDelegate, NSMenuItemValidation, NSPopoverDelegate, StepInspectorPresenting {
+final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, NSToolbarItemValidation, NSMenuDelegate, NSSearchFieldDelegate, NSMenuItemValidation, NSPopoverDelegate, StepInspectorPresenting, RequestInspectorPresenting {
     private enum Item {
         static let logs = NSToolbarItem.Identifier("workspace.logs")
         static let environment = NSToolbarItem.Identifier("workspace.environment")
@@ -235,6 +235,16 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         guard !isTearingDown, state.section == .rules, model.selectedStep != nil else { return }
         let shouldCollapse = !inspectorItem.isCollapsed
         // Consume pending selection changes before applying the user's explicit toggle.
+        update(snapshot: WorkspaceToolbarSnapshot(model: model, section: section), openSettings: openSettings)
+        if shouldCollapse { releaseFocus(in: inspectorHost.view) }
+        setCollapsed(shouldCollapse, item: inspectorItem)
+        splitItemStateDidChange()
+    }
+
+    func toggleRequestInspector(_ sender: Any?) {
+        guard !isTearingDown, section == .requests, model.history.selected != nil else { return }
+        let shouldCollapse = !inspectorItem.isCollapsed
+        // Consume queued selection updates so they cannot reopen an explicit collapse.
         update(snapshot: WorkspaceToolbarSnapshot(model: model, section: section), openSettings: openSettings)
         if shouldCollapse { releaseFocus(in: inspectorHost.view) }
         setCollapsed(shouldCollapse, item: inspectorItem)
