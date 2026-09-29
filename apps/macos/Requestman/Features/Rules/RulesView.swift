@@ -5,7 +5,7 @@ import RequestmanCore
 @MainActor final class ProjectSidebarViewController: ObservedViewController, NSOutlineViewDataSource, NSOutlineViewDelegate, NSSearchFieldDelegate {
     private final class Item: NSObject {
         let id: UUID
-        let projectID: UUID
+        var projectID: UUID
         let isProject: Bool
         init(id: UUID, projectID: UUID, isProject: Bool) { self.id = id; self.projectID = projectID; self.isProject = isProject }
     }
@@ -24,6 +24,7 @@ import RequestmanCore
     private var displayedSearch = ""
     private var displayedSection: WorkspaceSection?
     private var displayedWorkflowID: UUID?
+    private static let dragType = NSPasteboard.PasteboardType("app.requestman.rule-sidebar-item")
     private lazy var addButton = ActionButton(title: "") { [weak self] in self?.showAddMenu() }
     var search: String = "" { didSet { if isViewLoaded && !synchronizing { refresh() } } }
     init(model: WorkspaceModel) { self.model = model; super.init() }
@@ -37,6 +38,9 @@ import RequestmanCore
         outline.intercellSpacing = NSSize(width: 0, height: 2)
         outline.dataSource = self; outline.delegate = self
         outline.stronglyReferencesItems = true
+        outline.registerForDraggedTypes([Self.dragType])
+        outline.setDraggingSourceOperationMask(.move, forLocal: true)
+        outline.setDraggingSourceOperationMask([], forLocal: false)
         outline.setAccessibilityLabel("规则组与请求修改")
         outline.contextMenu = { [weak self] row in self?.menu(forRow: row) }
         outline.target = self; outline.doubleAction = #selector(doubleClickProject)
@@ -108,7 +112,11 @@ import RequestmanCore
             let existing = Dictionary(uniqueKeysWithValues: (roots + workflowItems.values.flatMap { $0 }).map { ($0.id, $0) })
             roots = filtered.map { existing[$0.0.id] ?? Item(id: $0.0.id, projectID: $0.0.id, isProject: true) }
             workflowItems = Dictionary(uniqueKeysWithValues: filtered.map { project, workflows in
-                (project.id, workflows.map { existing[$0.id] ?? Item(id: $0.id, projectID: project.id, isProject: false) })
+                (project.id, workflows.map { workflow in
+                    let item = existing[workflow.id] ?? Item(id: workflow.id, projectID: project.id, isProject: false)
+                    item.projectID = project.id
+                    return item
+                })
             })
             collapsedProjects.formIntersection(Set(projects.map(\.id)))
             outline.reloadData()
@@ -146,6 +154,108 @@ import RequestmanCore
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         guard let item = item as? Item else { return nil }
         let cell = RulesSidebarCell(); configure(cell, item: item); return cell
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
+        guard model.loaded, let item = item as? Item else { return nil }
+        let writer = NSPasteboardItem()
+        writer.setString(item.id.uuidString, forType: Self.dragType)
+        return writer
+    }
+
+    private struct DropTarget {
+        let parent: Item?
+        let childIndex: Int
+        let insertionIndex: Int
+    }
+
+    private func draggedItem(_ info: any NSDraggingInfo) -> Item? {
+        guard model.loaded, info.draggingSource as? NSOutlineView === outline,
+              info.draggingPasteboard.pasteboardItems?.count == 1,
+              let text = info.draggingPasteboard.string(forType: Self.dragType),
+              let id = UUID(uuidString: text) else { return nil }
+        return (roots + workflowItems.values.flatMap { $0 }).first { $0.id == id }
+    }
+
+    private func dropTarget(for source: Item, proposedItem: Any?, childIndex: Int) -> DropTarget? {
+        let proposed = proposedItem as? Item
+        if source.isProject {
+            // Groups stay at the root. Outdent proposals inside another group.
+            let index: Int
+            if let proposed, let groupIndex = roots.firstIndex(where: { $0.id == proposed.projectID }) {
+                index = groupIndex + (proposed.isProject && childIndex <= 0 ? 0 : 1)
+            } else {
+                guard proposedItem == nil, (0...roots.count).contains(childIndex) else { return nil }
+                index = childIndex
+            }
+            return DropTarget(parent: nil, childIndex: index, insertionIndex: index)
+        }
+
+        let parent: Item
+        let visibleIndex: Int
+        if let proposed {
+            guard let root = roots.first(where: { $0.id == proposed.projectID }) else { return nil }
+            parent = root
+            let children = workflowItems[root.id] ?? []
+            if proposed.isProject {
+                visibleIndex = childIndex == NSOutlineViewDropOnItemIndex ? children.count : childIndex
+            } else {
+                guard let index = children.firstIndex(where: { $0.id == proposed.id }) else { return nil }
+                visibleIndex = index
+            }
+        } else {
+            // Between groups, append to the preceding group; above the tree, prepend.
+            guard (0...roots.count).contains(childIndex), !roots.isEmpty else { return nil }
+            parent = roots[max(0, childIndex - 1)]
+            visibleIndex = childIndex == 0 ? 0 : (workflowItems[parent.id]?.count ?? 0)
+        }
+        let children = workflowItems[parent.id] ?? []
+        guard (0...children.count).contains(visibleIndex),
+              let project = model.document.projects.first(where: { $0.id == parent.id }) else { return nil }
+        // A filtered row index is not a document index. Anchor before the next
+        // visible rule; a drop on the group or after its last result appends.
+        let insertionIndex: Int
+        if visibleIndex < children.count {
+            guard let index = project.workflows.firstIndex(where: { $0.id == children[visibleIndex].id }) else { return nil }
+            insertionIndex = index
+        } else { insertionIndex = project.workflows.count }
+        let dropIndex = proposed?.isProject == true && childIndex == NSOutlineViewDropOnItemIndex
+            ? NSOutlineViewDropOnItemIndex : visibleIndex
+        return DropTarget(parent: parent, childIndex: dropIndex, insertionIndex: insertionIndex)
+    }
+
+    private func move(_ source: Item, to target: DropTarget, in document: inout WorkspaceDocument) -> Bool {
+        if source.isProject { return document.moveProject(source.id, to: target.insertionIndex) }
+        guard let parent = target.parent else { return false }
+        return document.moveWorkflow(source.id, from: source.projectID, to: parent.id, at: target.insertionIndex)
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, validateDrop info: any NSDraggingInfo,
+                     proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation {
+        guard let source = draggedItem(info), let target = dropTarget(for: source, proposedItem: item, childIndex: index) else { return [] }
+        var document = model.document
+        guard move(source, to: target, in: &document) else { return [] }
+        outlineView.setDropItem(target.parent, dropChildIndex: target.childIndex)
+        return .move
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, acceptDrop info: any NSDraggingInfo,
+                     item: Any?, childIndex index: Int) -> Bool {
+        guard let source = draggedItem(info), let target = dropTarget(for: source, proposedItem: item, childIndex: index) else { return false }
+        var document = model.document
+        guard move(source, to: target, in: &document) else { return false }
+        // Publish once so persistence and capture never observe a half-finished move.
+        model.document = document
+        if let parent = target.parent { collapsedProjects.remove(parent.id) }
+        refresh()
+        if let movedItem = (roots + workflowItems.values.flatMap { $0 }).first(where: { $0.id == source.id }) {
+            let row = outline.row(forItem: movedItem)
+            if row >= 0 {
+                outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                outline.scrollRowToVisible(row)
+            }
+        }
+        return true
     }
     private func configure(_ cell: RulesSidebarCell, item: Item) {
         guard let project = model.document.projects.first(where: { $0.id == item.projectID }) else { return }

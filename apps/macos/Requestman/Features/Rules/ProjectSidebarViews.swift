@@ -3,6 +3,10 @@ import AppKit
 /// AppKit retains disclosure hit testing, selection, keyboard navigation and accessibility.
 @MainActor final class ProjectOutlineView: NSOutlineView {
     var contextMenu: (Int) -> NSMenu? = { _ in nil }
+    override func shouldCollapseAutoExpandedItems(forDeposited deposited: Bool) -> Bool {
+        // Keep the destination visible after a move; cancelled drags restore it.
+        !deposited
+    }
     func setExpanded(_ expanded: Bool, for item: Any, animated: Bool) {
         guard isItemExpanded(item) != expanded else { return }
         // AppKit owns row insertion/removal and disclosure state together. Do not
