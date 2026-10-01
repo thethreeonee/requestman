@@ -20,6 +20,11 @@ final class RequestLogDisplayOptionsEditor: NSViewController, NSTableViewDataSou
     private let columns = NSTableView()
     private let lines = RequestLogLayoutTableView()
     private weak var contentDropCell: RequestLogLayoutLineCell?
+    private var contentDropRow: Int?
+    private let contentDragCells = NSHashTable<RequestLogLayoutLineCell>.weakObjects()
+    private var contentDragID: UUID?
+    private var contentDragSize: NSSize?
+    private var contentDragGrabOffsetX: CGFloat?
     private let preview = RequestRecordsTable(isPreview: true)
     private let columnHeading = NativeUI.label("", size: 15, weight: .semibold)
     private let columnTitle = NSTextField(string: "")
@@ -115,6 +120,11 @@ final class RequestLogDisplayOptionsEditor: NSViewController, NSTableViewDataSou
         refresh()
     }
 
+    override func viewWillDisappear() {
+        finishContentDrag()
+        super.viewWillDisappear()
+    }
+
     private var selectedColumnIndex: Int? { draft.layoutColumns.firstIndex { $0.id == selectedColumnID } }
     private var selectedColumn: RequestLogLayoutColumn? { selectedColumnIndex.map { draft.layoutColumns[$0] } }
     private var selectedContent: RequestLogLayoutContent? {
@@ -142,6 +152,7 @@ final class RequestLogDisplayOptionsEditor: NSViewController, NSTableViewDataSou
         lines.style = .plain
         lines.backgroundColor = .white
         lines.selectionHighlightStyle = .none
+        lines.focusRingType = .none
         lines.registerForDraggedTypes([.requestLogLine, .requestLogContent])
         lines.setAccessibilityLabel("列内行及内容")
         lines.clearDropFeedback = { [weak self] in self?.clearContentDropFeedback() }
@@ -288,7 +299,7 @@ final class RequestLogDisplayOptionsEditor: NSViewController, NSTableViewDataSou
         if line?.contents.contains(where: { $0.id == selectedContentID }) != true { selectedContentID = line?.contents.first?.id }
     }
     private func refresh() {
-        clearContentDropFeedback()
+        finishContentDrag()
         normalizeSelection()
         updatingSelection = true
         columns.reloadData(); lines.reloadData()
@@ -350,6 +361,7 @@ final class RequestLogDisplayOptionsEditor: NSViewController, NSTableViewDataSou
               let content = all[column].lines[line].contents.firstIndex(where: { $0.id == selectedContentID }) else { return }
         change(&all[column].lines[line].contents[content])
         draft.layoutColumns = all
+        finishContentDrag()
         columns.reloadData(); lines.reloadData()
         if rebuildInspector { updateInspector() }
         refreshPreview(); validate()
@@ -429,7 +441,8 @@ final class RequestLogDisplayOptionsEditor: NSViewController, NSTableViewDataSou
         }
         let cell = RequestLogLayoutLineCell(line: column.lines[row], index: row,
                                           selectedID: selectedContentID, owner: dragOwner)
-        return ceil(cell.intrinsicContentSize.height)
+        let previewHeight = contentDropRow == row ? contentDropCell?.intrinsicContentSize.height ?? 0 : 0
+        return ceil(max(cell.intrinsicContentSize.height, previewHeight))
     }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         if tableView === columns {
@@ -452,7 +465,15 @@ final class RequestLogDisplayOptionsEditor: NSViewController, NSTableViewDataSou
         cell.addContent = { [weak self] button in self?.showAddContent(lineID: line.id, anchor: button) }
         cell.showActions = { [weak self] button in self?.showLineActions(lineID: line.id, anchor: button) }
         cell.contentActions = { [weak self] id, button in self?.showContentActions(lineID: line.id, contentID: id, anchor: button) }
-        cell.dragEnded = { [weak self] in self?.clearContentDropFeedback() }
+        cell.dragBegan = { [weak self, weak cell] id, size, grabOffsetX in
+            guard let self, let cell else { return }
+            beginContentDrag(id, size: size, grabOffsetX: grabOffsetX, from: cell, lineID: line.id)
+        }
+        cell.dragEnded = { [weak self] in self?.finishContentDrag() }
+        if let contentDragID, line.contents.contains(where: { $0.id == contentDragID }) {
+            cell.setDraggingContent(contentDragID)
+            contentDragCells.add(cell)
+        }
         return cell
     }
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -605,9 +626,50 @@ private extension RequestLogDisplayOptionsEditor {
         return value
     }
 
-    func clearContentDropFeedback() {
-        contentDropCell?.showInsertion(at: nil)
+    func clearContentDropFeedback(animated: Bool = true) {
+        let previousRow = contentDropRow
+        let previousHeight = contentDropCell?.intrinsicContentSize.height
+        contentDropCell?.clearDropPreview(animated: animated)
+        let currentHeight = contentDropCell?.intrinsicContentSize.height
         contentDropCell = nil
+        contentDropRow = nil
+        lines.draggingDestinationFeedbackStyle = .regular
+        if let previousRow, previousHeight != currentHeight { updateDropRowHeight(previousRow) }
+    }
+
+    func beginContentDrag(_ id: UUID, size: NSSize, grabOffsetX: CGFloat, from cell: RequestLogLayoutLineCell, lineID: UUID) {
+        finishContentDrag()
+        guard let row = selectedColumn?.lines.firstIndex(where: { $0.id == lineID }),
+              let line = selectedColumn?.lines[row],
+              let position = line.contents.firstIndex(where: { $0.id == id }) else { return }
+        contentDragID = id
+        contentDragSize = size
+        contentDragGrabOffsetX = grabOffsetX
+        contentDragCells.add(cell)
+        contentDropCell = cell
+        contentDropRow = row
+        cell.beginDragPreview(content: line.contents[position], size: size, at: position)
+    }
+
+    func finishContentDrag() {
+        clearContentDropFeedback(animated: false)
+        contentDragCells.allObjects.forEach { $0.finishDragFeedback() }
+        contentDragCells.removeAllObjects()
+        contentDragID = nil
+        contentDragSize = nil
+        contentDragGrabOffsetX = nil
+    }
+
+    func updateDropRowHeight(_ row: Int) {
+        guard (0..<lines.numberOfRows).contains(row) else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            lines.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
+        }
+    }
+
+    func layoutContent(for id: UUID) -> RequestLogLayoutContent? {
+        draft.layoutColumns.lazy.flatMap(\.lines).flatMap(\.contents).first { $0.id == id }
     }
 
     func rowInsertionIndex(in table: NSTableView, at location: NSPoint) -> Int {
@@ -618,20 +680,22 @@ private extension RequestLogDisplayOptionsEditor {
     }
 
     /// Resolve both hover and release from the actual pointer, not an AppKit row insertion proposal.
-    func contentDropTarget(_ info: any NSDraggingInfo, autoscroll: Bool) -> (row: Int, position: Int)? {
+    func contentDropTarget(_ info: any NSDraggingInfo, autoscroll: Bool) -> (row: Int, position: Int, isNoOp: Bool)? {
         guard let column = selectedColumn, !column.lines.isEmpty,
               let value = drag(from: info.draggingPasteboard, type: .requestLogContent),
-              let contentID = value.contentID else { return nil }
+              let contentID = value.contentID, let size = contentDragSize,
+              let grabOffsetX = contentDragGrabOffsetX else { return nil }
         let point = lines.convert(info.draggingLocation, from: nil)
         var row = lines.row(at: point)
         let belowLastRow = row == -1 && point.y >= lines.rect(ofRow: column.lines.count - 1).maxY
         if belowLastRow { row = column.lines.count - 1 }
         guard column.lines.indices.contains(row),
               let cell = lines.view(atColumn: 0, row: row, makeIfNecessary: true) as? RequestLogLayoutLineCell else { return nil }
-        cell.layoutSubtreeIfNeeded()
+        if cell.needsLayout { cell.layoutSubtreeIfNeeded() }
         let local = cell.convert(info.draggingLocation, from: nil)
         if autoscroll && !belowLastRow { cell.autoscrollContents(at: local) }
-        let position = belowLastRow ? column.lines[row].contents.count : cell.contentInsertionIndex(at: local)
+        let center = NSPoint(x: local.x - grabOffsetX + size.width / 2, y: local.y)
+        let position = belowLastRow ? column.lines[row].contents.count : cell.contentInsertionIndex(at: center, dragging: contentID, size: size)
         var origin: (column: String, line: UUID, index: Int)?
         for sourceColumn in draft.layoutColumns {
             for sourceLine in sourceColumn.lines {
@@ -641,11 +705,9 @@ private extension RequestLogDisplayOptionsEditor {
             }
         }
         guard let origin else { return nil }
-        if origin.column == column.id && origin.line == column.lines[row].id {
-            let destination = position > origin.index ? position - 1 : position
-            guard destination != origin.index else { return nil }
-        }
-        return (row, position)
+        let destination = position > origin.index ? position - 1 : position
+        let isNoOp = origin.column == column.id && origin.line == column.lines[row].id && destination == origin.index
+        return (row, position, isNoOp)
     }
 }
 
@@ -678,30 +740,39 @@ extension RequestLogDisplayOptionsEditor {
             tableView.setDropRow(position, dropOperation: .above)
             return .move
         }
-        clearContentDropFeedback()
-        guard let column = selectedColumn else { return [] }
+        guard let column = selectedColumn else { clearContentDropFeedback(); return [] }
         let position = rowInsertionIndex(in: tableView, at: info.draggingLocation)
         if let value = drag(from: info.draggingPasteboard, type: .requestLogLine),
            value.columnID == column.id, let source = column.lines.firstIndex(where: { $0.id == value.lineID }),
            (0...column.lines.count).contains(position) {
+            clearContentDropFeedback()
             guard (position > source ? position - 1 : position) != source else { return [] }
             tableView.setDropRow(position, dropOperation: .above)
             return .move
         }
         if let target = contentDropTarget(info, autoscroll: true),
-           let cell = lines.view(atColumn: 0, row: target.row, makeIfNecessary: true) as? RequestLogLayoutLineCell {
+           let cell = lines.view(atColumn: 0, row: target.row, makeIfNecessary: true) as? RequestLogLayoutLineCell,
+           let id = drag(from: info.draggingPasteboard, type: .requestLogContent)?.contentID,
+           let content = layoutContent(for: id), let size = contentDragSize {
+            if contentDropCell !== cell { clearContentDropFeedback() }
+            let previousHeight = cell.intrinsicContentSize.height
             contentDropCell = cell
-            cell.showInsertion(at: target.position)
+            contentDropRow = target.row
+            contentDragCells.add(cell)
+            cell.showDropPreview(content: content, size: size, at: target.position)
+            if previousHeight != cell.intrinsicContentSize.height { updateDropRowHeight(target.row) }
+            tableView.draggingDestinationFeedbackStyle = .none
             tableView.setDropRow(target.row, dropOperation: .on)
             return .move
         }
+        clearContentDropFeedback()
         return []
     }
 
     func tableView(_ tableView: NSTableView, acceptDrop info: any NSDraggingInfo,
                    row: Int, dropOperation operation: NSTableView.DropOperation) -> Bool {
         view.window?.makeFirstResponder(nil)
-        defer { clearContentDropFeedback() }
+        defer { finishContentDrag() }
         if tableView === columns {
             var all = draft.layoutColumns
             guard let value = drag(from: info.draggingPasteboard, type: .requestLogColumn),
@@ -721,6 +792,7 @@ extension RequestLogDisplayOptionsEditor {
         guard let target = contentDropTarget(info, autoscroll: false),
               let value = drag(from: info.draggingPasteboard, type: .requestLogContent),
               let content = value.contentID else { return false }
+        if target.isNoOp { return true }
         return moveContent(content, toColumn: column.id, line: column.lines[target.row].id, position: target.position)
     }
 }
