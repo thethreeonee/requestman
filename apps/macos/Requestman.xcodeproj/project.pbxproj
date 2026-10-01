@@ -1,686 +1,474 @@
 // !$*UTF8*$!
 {
-	"archiveVersion" = "1";
-	"classes" = {
+	archiveVersion = 1;
+	classes = {
 	};
-	"objectVersion" = "60";
-	"objects" = {
-        "A110010D0000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestLogLayoutEditorViews.swift"; "sourceTree" = "<group>"; };
-        "A110010D0000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A110010D0000000000000001"; };
-        "A110010E0000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestLogContentAppearanceEditor.swift"; "sourceTree" = "<group>"; };
-        "A110010E0000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A110010E0000000000000001"; };
-        "A10928D10000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestLogDisplayOptions.swift"; "sourceTree" = "<group>"; };
-        "A10928D10000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10928D10000000000000001"; };
-        "A10927F10000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Workspace/NativeInputs.swift"; "sourceTree" = "<group>"; };
-        "A10927F10000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10927F10000000000000001"; };
-        "A10927AC0000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestLogTransfer.swift"; "sourceTree" = "<group>"; };
-        "A10927AC0000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10927AC0000000000000001"; };
-        "A10927AB0000000000000003" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestReplayEditor.swift"; "sourceTree" = "<group>"; };
-        "A10927AB0000000000000004" = { "isa" = "PBXBuildFile"; "fileRef" = "A10927AB0000000000000003"; };
-        "A10927AB0000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestActionsMenu.swift"; "sourceTree" = "<group>"; };
-        "A10927AB0000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10927AB0000000000000001"; };
-        "99C842F8858DB36AE7188F49" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/App/AppComposition.swift"; "sourceTree" = "<group>"; };
-        "C44D9B6189A245003E35886F" = { "isa" = "PBXBuildFile"; "fileRef" = "99C842F8858DB36AE7188F49"; };
-        "028EF8DC4598117C55B92372" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/App/WorkspaceModel+Capture.swift"; "sourceTree" = "<group>"; };
-        "D8FC8813FCB26CAE00624661" = { "isa" = "PBXBuildFile"; "fileRef" = "028EF8DC4598117C55B92372"; };
-        "12E8F317411CCC948AB2089E" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/App/WorkspaceModel+Persistence.swift"; "sourceTree" = "<group>"; };
-        "55AA0D46FD2691834A177EFA" = { "isa" = "PBXBuildFile"; "fileRef" = "12E8F317411CCC948AB2089E"; };
-        "7462B155995E50B320F72A65" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/App/WorkspaceModel+Editing.swift"; "sourceTree" = "<group>"; };
-        "F050DFA43F608FA6C5A97E1F" = { "isa" = "PBXBuildFile"; "fileRef" = "7462B155995E50B320F72A65"; };
-        "5B2309CD972EDCEF3A5E3DAD" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/ExecutionHistoryModel.swift"; "sourceTree" = "<group>"; };
-        "CB7B14A9FE67B6E05AD212CE" = { "isa" = "PBXBuildFile"; "fileRef" = "5B2309CD972EDCEF3A5E3DAD"; };
-        "A10927AA0000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/WorkflowMatchingView.swift"; "sourceTree" = "<group>"; };
-        "A10927AA0000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10927AA0000000000000001"; };
-        "A10927ED0000000000000001" = { "isa" = "XCLocalSwiftPackageReference"; "relativePath" = "Packages/RequestmanEditor"; };
-        "A10927ED0000000000000002" = { "isa" = "XCSwiftPackageProductDependency"; "package" = "A10927ED0000000000000001"; "productName" = "RequestmanEditor"; };
-        "A10927ED0000000000000003" = { "isa" = "PBXBuildFile"; "productRef" = "A10927ED0000000000000002"; };
-        "A10926E01000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Infrastructure/Capture/SystemRuleHitNotifications.swift"; "sourceTree" = "<group>"; };
-        "A10926E01000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10926E01000000000000001"; };
-        "A10926C01000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Workspace/JSONSyntax.swift"; "sourceTree" = "<group>"; };
-        "A10926C01000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10926C01000000000000001"; };
-        "A10926B0D000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/BodyTextEditing.swift"; "sourceTree" = "<group>"; };
-        "A10926B0D000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10926B0D000000000000001"; };
-        "A10A99000000000000000051" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/TemplateValuesView.swift"; "sourceTree" = "<group>"; };
-        "A10A99000000000000000052" = { "isa" = "PBXBuildFile"; "fileRef" = "A10A99000000000000000051"; };
-        "A10926D00000000000000003" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/ProjectIconMenu.swift"; "sourceTree" = "<group>"; };
-        "A10926D00000000000000004" = { "isa" = "PBXBuildFile"; "fileRef" = "A10926D00000000000000003"; };
-        "A10926D00000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/ProjectSidebarViews.swift"; "sourceTree" = "<group>"; };
-        "A10926D00000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10926D00000000000000001"; };
-		"A10926C00000000000000001" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "folder.iconcomposer.icon";
-			"path" = "Requestman/Resources/AppIcon.icon";
-			"sourceTree" = "<group>";
-		};
-		"A10926C00000000000000002" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "A10926C00000000000000001";
-		};
-		"A10A99000000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Workspace/AppKitSupport.swift"; "sourceTree" = "<group>"; };
-		"A10A99000000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10A99000000000000000001"; };
-        "A10926F01000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/WorkflowMatchTestView.swift"; "sourceTree" = "<group>"; };
-        "A10926F01000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10926F01000000000000001"; };
-        "BEB4E525F48603DE12666E8E" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/WorkflowPreviewView.swift"; "sourceTree" = "<group>"; };
-        "3FE625F0ED4E4732804874D9" = { "isa" = "PBXBuildFile"; "fileRef" = "BEB4E525F48603DE12666E8E"; };
-        "F38B4ECE2819FC9E4240EE95" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/StepInspectorView.swift"; "sourceTree" = "<group>"; };
-        "22372EBFC3A8E041A25BF830" = { "isa" = "PBXBuildFile"; "fileRef" = "F38B4ECE2819FC9E4240EE95"; };
-        "1ADC8B696AE5EE9F146362A5" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/ScriptEditorView.swift"; "sourceTree" = "<group>"; };
-        "9AE475B59ADF0ADC61AB8C9E" = { "isa" = "PBXBuildFile"; "fileRef" = "1ADC8B696AE5EE9F146362A5"; };
-        "43FA72838C312E5A373171D3" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/HeaderNameField.swift"; "sourceTree" = "<group>"; };
-        "D05FACDD10ACF1C575F2521E" = { "isa" = "PBXBuildFile"; "fileRef" = "43FA72838C312E5A373171D3"; };
-        "6DEF4499A370158C3E868307" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Rules/FlowEditorView.swift"; "sourceTree" = "<group>"; };
-        "81833207DF5631BF81282D3A" = { "isa" = "PBXBuildFile"; "fileRef" = "6DEF4499A370158C3E868307"; };
-        "A109250F17E2000000000001" = {
-            "isa" = "PBXFileReference";
-            "lastKnownFileType" = "sourcecode.swift";
-            "path" = "Requestman/Features/Requests/RequestFilterControls.swift";
-            "sourceTree" = "<group>";
-        };
-        "A109250F17E2000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A109250F17E2000000000001"; };
-		"A10D78910B42E56000000003" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Requests/RequestInspectionMode.swift";
-			"sourceTree" = "<group>";
-		};
-		"A10D78910B42E56000000004" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "A10D78910B42E56000000003";
-		};
-		"A10D78910B42E56000000001" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Workspace/WorkspaceSplitView.swift";
-			"sourceTree" = "<group>";
-		};
-		"A10D78910B42E56000000002" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "A10D78910B42E56000000001";
-		};
-		"BFDE1824B4D34C994FC8FE42" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Requests/RequestCURL.swift";
-			"sourceTree" = "<group>";
-		};
-		"03FF0AB517F40B032C6E9FF3" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "BFDE1824B4D34C994FC8FE42";
-		};
-		"7F204E0A5D1DF030E714A7A8" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Requests/RequestInspectorView.swift";
-			"sourceTree" = "<group>";
-		};
-		"577A3603A89560D629022EE9" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "7F204E0A5D1DF030E714A7A8";
-		};
-		"C03A3F98383F7D29371F14EB" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Requests/RequestPayloadView.swift";
-			"sourceTree" = "<group>";
-		};
-		"1718487E37C6A8427B363502" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "C03A3F98383F7D29371F14EB";
-		};
-		"2898867DD0244498D419CD10" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Requests/RequestPayloadPresentation.swift";
-			"sourceTree" = "<group>";
-		};
-		"BAB483304DB31FDE384ABD5D" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "2898867DD0244498D419CD10";
-		};
-		"89AA0763FFA829CE08194622" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Requests/RequestDataOutline.swift";
-			"sourceTree" = "<group>";
-		};
-		"BEA8923B3A1CA1C792EC752C" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "89AA0763FFA829CE08194622";
-		};
-		"CCE5CE339BBADE9381EE255D" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Requests/RequestInspectionData.swift";
-			"sourceTree" = "<group>";
-		};
-		"2932191D5B003E1B486FCF29" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "CCE5CE339BBADE9381EE255D";
-		};
-		"BAA4A6B3B435766A95BDD9B2" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Requests/RequestBodyDecoding.swift";
-			"sourceTree" = "<group>";
-		};
-		"CE638D7DCE55082DE2AD07B3" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "BAA4A6B3B435766A95BDD9B2";
-		};
-		"BA694F9319384A679527F801" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Connection/CertificateSetupView.swift";
-			"sourceTree" = "<group>";
-		};
-		"BA694F9319384A679527F802" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "BA694F9319384A679527F801";
-		};
-		"BA694F9319384A679527F803" = {
-			"isa" = "XCSwiftPackageProductDependency";
-			"package" = "582681C2EAE02B3F3D399C0C";
-			"productName" = "RequestmanCertificates";
-		};
-		"BA694F9319384A679527F804" = {
-			"isa" = "PBXBuildFile";
-			"productRef" = "BA694F9319384A679527F803";
-		};
-		"72B120E798F14A638AC32A03" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Settings/GeneralSettingsView.swift";
-			"sourceTree" = "<group>";
-		};
-		"72B120E798F14A638AC32A04" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "72B120E798F14A638AC32A03";
-		};
-		"72B120E798F14A638AC32A01" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Infrastructure/Browser/ChromiumBrowserCatalog.swift";
-			"sourceTree" = "<group>";
-		};
-		"72B120E798F14A638AC32A02" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "72B120E798F14A638AC32A01";
-		};
-		"AC61F3DB56E446B0BA7CD9C1" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Connection/UpstreamProxyPrompt.swift";
-			"sourceTree" = "<group>";
-		};
-		"69AC519681D4411F90021182" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "AC61F3DB56E446B0BA7CD9C1";
-		};
-		"66C777AADFDD9EF77AB46C95" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Workspace/WorkspaceSectionControl.swift";
-			"sourceTree" = "<group>";
-		};
-		"AA723CB28A14D53FFE8683CC" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "66C777AADFDD9EF77AB46C95";
-		};
-		"20862586DEEC23D066F47C31" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Settings/WorkspaceSettingsView.swift";
-			"sourceTree" = "<group>";
-		};
-		"A2D34AF5EAF3073EA4E6CBE8" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "20862586DEEC23D066F47C31";
-		};
-		"F034173E7D712F9B663EF189" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Infrastructure/Browser/BrowserLauncher.swift";
-			"sourceTree" = "<group>";
-		};
-		"E9751C5AF06CE56B082322E9" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "F034173E7D712F9B663EF189";
-		};
-		"3378E8C5B9087F2189A82B77" = {
-			"isa" = "PBXBuildFile";
-			"productRef" = "769C1826843E971C2F135B82";
-		};
-		"769C1826843E971C2F135B82" = {
-			"isa" = "XCSwiftPackageProductDependency";
-			"package" = "582681C2EAE02B3F3D399C0C";
-			"productName" = "RequestmanProxy";
-		};
-		"7C2BDDBDD012B872A8E7AAC1" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "FD72A5DC99C066FA074DEE61";
-		};
-		"FD72A5DC99C066FA074DEE61" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Infrastructure/Capture/LocalCaptureService.swift";
-			"sourceTree" = "<group>";
-		};
-		"E8F774C24B7384DC1464C81F" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "15F71FB09981C1A1D4BBDA4B";
-		};
-		"15F71FB09981C1A1D4BBDA4B" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Environments/EnvironmentsView.swift";
-			"sourceTree" = "<group>";
-		};
-		"67AA01506D96DA364042FF26" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/App/RequestmanApp.swift";
-			"sourceTree" = "<group>";
-		};
-		"B1314B8A4F25E11367CF1680" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "67AA01506D96DA364042FF26";
-		};
-		"A9F286AE72ED88A25448163E" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/App/WorkspaceModel.swift";
-			"sourceTree" = "<group>";
-		};
-		"CCBE6A86B4438F5217413328" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "A9F286AE72ED88A25448163E";
-		};
-		"A03C17A225475B347E26729E" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Connection/ConnectionSettingsView.swift";
-			"sourceTree" = "<group>";
-		};
-		"99927C93F99D4F00D97CC57F" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "A03C17A225475B347E26729E";
-		};
-		"4C3A75160F26468EA29D5061" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Requests/RequestRecordsTable.swift";
-			"sourceTree" = "<group>";
-		};
-		"4C3A75160F26468EA29D5062" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "4C3A75160F26468EA29D5061";
-		};
-		"CF619E3F4441CF542CEC6273" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Requests/RequestsView.swift";
-			"sourceTree" = "<group>";
-		};
-		"65D2437F451A7E298F01615A" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "CF619E3F4441CF542CEC6273";
-		};
-		"A8CE98D3D53D32C769A516B8" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Rules/RulesView.swift";
-			"sourceTree" = "<group>";
-		};
-		"977963FF90440603C012F5DC" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "A8CE98D3D53D32C769A516B8";
-		};
-		"E993CA47D7D0AC8845B4A238" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Workspace/WorkspaceSection.swift";
-			"sourceTree" = "<group>";
-		};
-		"BFC10EFC1AB3448A59D900DC" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "E993CA47D7D0AC8845B4A238";
-		};
-        "B126AABB0000000000000001" = {
-            "isa" = "PBXFileReference";
-            "lastKnownFileType" = "sourcecode.swift";
-            "path" = "Requestman/Features/Workspace/WorkspaceTransfer.swift";
-            "sourceTree" = "<group>";
-        };
-        "B126AABB0000000000000002" = {
-            "isa" = "PBXBuildFile";
-            "fileRef" = "B126AABB0000000000000001";
-        };
-		"7C28A29B34E8034AC7DD0C18" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Features/Workspace/WorkspaceView.swift";
-			"sourceTree" = "<group>";
-		};
-		"3F3F99DF960C01BEA0551DBB" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "7C28A29B34E8034AC7DD0C18";
-		};
-		"B0EAAA525C3106E1DE8CB93D" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Requestman/Infrastructure/Capture/UnavailableCaptureService.swift";
-			"sourceTree" = "<group>";
-		};
-		"32B96703F25DC6C7865528FB" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "B0EAAA525C3106E1DE8CB93D";
-		};
-		"DFBA7AADE0868074C2861C98" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "text.xcconfig";
-			"path" = "Configuration/Base.xcconfig";
-			"sourceTree" = "<group>";
-		};
-		"38A007151ABE87CC01A5B6E9" = {
-			"isa" = "PBXFileReference";
-			"explicitFileType" = "wrapper.application";
-			"includeInIndex" = "0";
-			"path" = "Requestman.app";
-			"sourceTree" = "BUILT_PRODUCTS_DIR";
-		};
-		"FBDC4F23F93125BBEEAE800C" = {
-			"isa" = "PBXGroup";
-			"children" = (
-				"38A007151ABE87CC01A5B6E9",
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		03FF0AB517F40B032C6E9FF3 /* Requestman/Features/Requests/RequestCURL.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFDE1824B4D34C994FC8FE42 /* Requestman/Features/Requests/RequestCURL.swift */; };
+		1718487E37C6A8427B363502 /* Requestman/Features/Requests/RequestPayloadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03A3F98383F7D29371F14EB /* Requestman/Features/Requests/RequestPayloadView.swift */; };
+		22372EBFC3A8E041A25BF830 /* Requestman/Features/Rules/StepInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F38B4ECE2819FC9E4240EE95 /* Requestman/Features/Rules/StepInspectorView.swift */; };
+		2932191D5B003E1B486FCF29 /* Requestman/Features/Requests/RequestInspectionData.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCE5CE339BBADE9381EE255D /* Requestman/Features/Requests/RequestInspectionData.swift */; };
+		32B96703F25DC6C7865528FB /* Requestman/Infrastructure/Capture/UnavailableCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0EAAA525C3106E1DE8CB93D /* Requestman/Infrastructure/Capture/UnavailableCaptureService.swift */; };
+		3378E8C5B9087F2189A82B77 /* RequestmanProxy in Frameworks */ = {isa = PBXBuildFile; productRef = 769C1826843E971C2F135B82 /* RequestmanProxy */; };
+		3F3F99DF960C01BEA0551DBB /* Requestman/Features/Workspace/WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C28A29B34E8034AC7DD0C18 /* Requestman/Features/Workspace/WorkspaceView.swift */; };
+		3FE625F0ED4E4732804874D9 /* Requestman/Features/Rules/WorkflowPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEB4E525F48603DE12666E8E /* Requestman/Features/Rules/WorkflowPreviewView.swift */; };
+		4C3A75160F26468EA29D5062 /* Requestman/Features/Requests/RequestRecordsTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C3A75160F26468EA29D5061 /* Requestman/Features/Requests/RequestRecordsTable.swift */; };
+		55AA0D46FD2691834A177EFA /* Requestman/App/WorkspaceModel+Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12E8F317411CCC948AB2089E /* Requestman/App/WorkspaceModel+Persistence.swift */; };
+		577A3603A89560D629022EE9 /* Requestman/Features/Requests/RequestInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F204E0A5D1DF030E714A7A8 /* Requestman/Features/Requests/RequestInspectorView.swift */; };
+		65D2437F451A7E298F01615A /* Requestman/Features/Requests/RequestsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF619E3F4441CF542CEC6273 /* Requestman/Features/Requests/RequestsView.swift */; };
+		69AC519681D4411F90021182 /* Requestman/Features/Connection/UpstreamProxyPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC61F3DB56E446B0BA7CD9C1 /* Requestman/Features/Connection/UpstreamProxyPrompt.swift */; };
+		72B120E798F14A638AC32A02 /* Requestman/Infrastructure/Browser/ChromiumBrowserCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B120E798F14A638AC32A01 /* Requestman/Infrastructure/Browser/ChromiumBrowserCatalog.swift */; };
+		72B120E798F14A638AC32A04 /* Requestman/Features/Settings/GeneralSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B120E798F14A638AC32A03 /* Requestman/Features/Settings/GeneralSettingsView.swift */; };
+		7C2BDDBDD012B872A8E7AAC1 /* Requestman/Infrastructure/Capture/LocalCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD72A5DC99C066FA074DEE61 /* Requestman/Infrastructure/Capture/LocalCaptureService.swift */; };
+		81833207DF5631BF81282D3A /* Requestman/Features/Rules/FlowEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DEF4499A370158C3E868307 /* Requestman/Features/Rules/FlowEditorView.swift */; };
+		977963FF90440603C012F5DC /* Requestman/Features/Rules/RulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8CE98D3D53D32C769A516B8 /* Requestman/Features/Rules/RulesView.swift */; };
+		99927C93F99D4F00D97CC57F /* Requestman/Features/Connection/ConnectionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A03C17A225475B347E26729E /* Requestman/Features/Connection/ConnectionSettingsView.swift */; };
+		9AE475B59ADF0ADC61AB8C9E /* Requestman/Features/Rules/ScriptEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ADC8B696AE5EE9F146362A5 /* Requestman/Features/Rules/ScriptEditorView.swift */; };
+		A109250F17E2000000000002 /* Requestman/Features/Requests/RequestFilterControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A109250F17E2000000000001 /* Requestman/Features/Requests/RequestFilterControls.swift */; };
+		A10926B0D000000000000002 /* Requestman/Features/Rules/BodyTextEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10926B0D000000000000001 /* Requestman/Features/Rules/BodyTextEditing.swift */; };
+		A10926C00000000000000002 /* Requestman/Resources/AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A10926C00000000000000001 /* Requestman/Resources/AppIcon.icon */; };
+		A10926C01000000000000002 /* Requestman/Features/Workspace/JSONSyntax.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10926C01000000000000001 /* Requestman/Features/Workspace/JSONSyntax.swift */; };
+		A10926D00000000000000002 /* Requestman/Features/Rules/ProjectSidebarViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10926D00000000000000001 /* Requestman/Features/Rules/ProjectSidebarViews.swift */; };
+		A10926D00000000000000004 /* Requestman/Features/Rules/ProjectIconMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10926D00000000000000003 /* Requestman/Features/Rules/ProjectIconMenu.swift */; };
+		A10926E01000000000000002 /* Requestman/Infrastructure/Capture/SystemRuleHitNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10926E01000000000000001 /* Requestman/Infrastructure/Capture/SystemRuleHitNotifications.swift */; };
+		A10926F01000000000000002 /* Requestman/Features/Rules/WorkflowMatchTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10926F01000000000000001 /* Requestman/Features/Rules/WorkflowMatchTestView.swift */; };
+		A10927AA0000000000000002 /* Requestman/Features/Rules/WorkflowMatchingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10927AA0000000000000001 /* Requestman/Features/Rules/WorkflowMatchingView.swift */; };
+		A10927AB0000000000000002 /* Requestman/Features/Requests/RequestActionsMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10927AB0000000000000001 /* Requestman/Features/Requests/RequestActionsMenu.swift */; };
+		A10927AB0000000000000004 /* Requestman/Features/Requests/RequestReplayEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10927AB0000000000000003 /* Requestman/Features/Requests/RequestReplayEditor.swift */; };
+		A10927AC0000000000000002 /* Requestman/Features/Requests/RequestLogTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10927AC0000000000000001 /* Requestman/Features/Requests/RequestLogTransfer.swift */; };
+		A10927ED0000000000000003 /* RequestmanEditor in Frameworks */ = {isa = PBXBuildFile; productRef = A10927ED0000000000000002 /* RequestmanEditor */; };
+		A10927F10000000000000002 /* Requestman/Features/Workspace/NativeInputs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10927F10000000000000001 /* Requestman/Features/Workspace/NativeInputs.swift */; };
+		A10928D10000000000000002 /* Requestman/Features/Requests/RequestLogDisplayOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10928D10000000000000001 /* Requestman/Features/Requests/RequestLogDisplayOptions.swift */; };
+		A10A99000000000000000002 /* Requestman/Features/Workspace/AppKitSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10A99000000000000000001 /* Requestman/Features/Workspace/AppKitSupport.swift */; };
+		A10A99000000000000000052 /* Requestman/Features/Rules/TemplateValuesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10A99000000000000000051 /* Requestman/Features/Rules/TemplateValuesView.swift */; };
+		A10D78910B42E56000000002 /* Requestman/Features/Workspace/WorkspaceSplitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10D78910B42E56000000001 /* Requestman/Features/Workspace/WorkspaceSplitView.swift */; };
+		A10D78910B42E56000000004 /* Requestman/Features/Requests/RequestInspectionMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10D78910B42E56000000003 /* Requestman/Features/Requests/RequestInspectionMode.swift */; };
+		A110010D0000000000000002 /* Requestman/Features/Requests/RequestLogLayoutEditorViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A110010D0000000000000001 /* Requestman/Features/Requests/RequestLogLayoutEditorViews.swift */; };
+		A110010E0000000000000002 /* Requestman/Features/Requests/RequestLogContentAppearanceEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A110010E0000000000000001 /* Requestman/Features/Requests/RequestLogContentAppearanceEditor.swift */; };
+		A2D34AF5EAF3073EA4E6CBE8 /* Requestman/Features/Settings/WorkspaceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20862586DEEC23D066F47C31 /* Requestman/Features/Settings/WorkspaceSettingsView.swift */; };
+		AA723CB28A14D53FFE8683CC /* Requestman/Features/Workspace/WorkspaceSectionControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66C777AADFDD9EF77AB46C95 /* Requestman/Features/Workspace/WorkspaceSectionControl.swift */; };
+		B126AABB0000000000000002 /* Requestman/Features/Workspace/WorkspaceTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B126AABB0000000000000001 /* Requestman/Features/Workspace/WorkspaceTransfer.swift */; };
+		B1314B8A4F25E11367CF1680 /* Requestman/App/RequestmanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67AA01506D96DA364042FF26 /* Requestman/App/RequestmanApp.swift */; };
+		BA694F9319384A679527F802 /* Requestman/Features/Connection/CertificateSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA694F9319384A679527F801 /* Requestman/Features/Connection/CertificateSetupView.swift */; };
+		BA694F9319384A679527F804 /* RequestmanCertificates in Frameworks */ = {isa = PBXBuildFile; productRef = BA694F9319384A679527F803 /* RequestmanCertificates */; };
+		BAB483304DB31FDE384ABD5D /* Requestman/Features/Requests/RequestPayloadPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2898867DD0244498D419CD10 /* Requestman/Features/Requests/RequestPayloadPresentation.swift */; };
+		BEA8923B3A1CA1C792EC752C /* Requestman/Features/Requests/RequestDataOutline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89AA0763FFA829CE08194622 /* Requestman/Features/Requests/RequestDataOutline.swift */; };
+		BFC10EFC1AB3448A59D900DC /* Requestman/Features/Workspace/WorkspaceSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = E993CA47D7D0AC8845B4A238 /* Requestman/Features/Workspace/WorkspaceSection.swift */; };
+		C44D9B6189A245003E35886F /* Requestman/App/AppComposition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99C842F8858DB36AE7188F49 /* Requestman/App/AppComposition.swift */; };
+		CB7B14A9FE67B6E05AD212CE /* Requestman/Features/Requests/ExecutionHistoryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B2309CD972EDCEF3A5E3DAD /* Requestman/Features/Requests/ExecutionHistoryModel.swift */; };
+		CCBE6A86B4438F5217413328 /* Requestman/App/WorkspaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F286AE72ED88A25448163E /* Requestman/App/WorkspaceModel.swift */; };
+		CE638D7DCE55082DE2AD07B3 /* Requestman/Features/Requests/RequestBodyDecoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAA4A6B3B435766A95BDD9B2 /* Requestman/Features/Requests/RequestBodyDecoding.swift */; };
+		D05FACDD10ACF1C575F2521E /* Requestman/Features/Rules/HeaderNameField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43FA72838C312E5A373171D3 /* Requestman/Features/Rules/HeaderNameField.swift */; };
+		D8FC8813FCB26CAE00624661 /* Requestman/App/WorkspaceModel+Capture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 028EF8DC4598117C55B92372 /* Requestman/App/WorkspaceModel+Capture.swift */; };
+		D9F82689E8F760ECED47CA3E /* RequestmanCore in Frameworks */ = {isa = PBXBuildFile; productRef = 94A0426E8D3203DA5468CCF0 /* RequestmanCore */; };
+		E8F774C24B7384DC1464C81F /* Requestman/Features/Environments/EnvironmentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15F71FB09981C1A1D4BBDA4B /* Requestman/Features/Environments/EnvironmentsView.swift */; };
+		E9751C5AF06CE56B082322E9 /* Requestman/Infrastructure/Browser/BrowserLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = F034173E7D712F9B663EF189 /* Requestman/Infrastructure/Browser/BrowserLauncher.swift */; };
+		F050DFA43F608FA6C5A97E1F /* Requestman/App/WorkspaceModel+Editing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7462B155995E50B320F72A65 /* Requestman/App/WorkspaceModel+Editing.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		028EF8DC4598117C55B92372 /* Requestman/App/WorkspaceModel+Capture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Requestman/App/WorkspaceModel+Capture.swift"; sourceTree = "<group>"; };
+		12E8F317411CCC948AB2089E /* Requestman/App/WorkspaceModel+Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Requestman/App/WorkspaceModel+Persistence.swift"; sourceTree = "<group>"; };
+		15F71FB09981C1A1D4BBDA4B /* Requestman/Features/Environments/EnvironmentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Environments/EnvironmentsView.swift; sourceTree = "<group>"; };
+		1ADC8B696AE5EE9F146362A5 /* Requestman/Features/Rules/ScriptEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Rules/ScriptEditorView.swift; sourceTree = "<group>"; };
+		20862586DEEC23D066F47C31 /* Requestman/Features/Settings/WorkspaceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Settings/WorkspaceSettingsView.swift; sourceTree = "<group>"; };
+		2898867DD0244498D419CD10 /* Requestman/Features/Requests/RequestPayloadPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestPayloadPresentation.swift; sourceTree = "<group>"; };
+		38A007151ABE87CC01A5B6E9 /* Requestman.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Requestman.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		43FA72838C312E5A373171D3 /* Requestman/Features/Rules/HeaderNameField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Rules/HeaderNameField.swift; sourceTree = "<group>"; };
+		4C3A75160F26468EA29D5061 /* Requestman/Features/Requests/RequestRecordsTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestRecordsTable.swift; sourceTree = "<group>"; };
+		5B2309CD972EDCEF3A5E3DAD /* Requestman/Features/Requests/ExecutionHistoryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/ExecutionHistoryModel.swift; sourceTree = "<group>"; };
+		66C777AADFDD9EF77AB46C95 /* Requestman/Features/Workspace/WorkspaceSectionControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Workspace/WorkspaceSectionControl.swift; sourceTree = "<group>"; };
+		67AA01506D96DA364042FF26 /* Requestman/App/RequestmanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/App/RequestmanApp.swift; sourceTree = "<group>"; };
+		6DEF4499A370158C3E868307 /* Requestman/Features/Rules/FlowEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Rules/FlowEditorView.swift; sourceTree = "<group>"; };
+		72B120E798F14A638AC32A01 /* Requestman/Infrastructure/Browser/ChromiumBrowserCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Infrastructure/Browser/ChromiumBrowserCatalog.swift; sourceTree = "<group>"; };
+		72B120E798F14A638AC32A03 /* Requestman/Features/Settings/GeneralSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Settings/GeneralSettingsView.swift; sourceTree = "<group>"; };
+		7462B155995E50B320F72A65 /* Requestman/App/WorkspaceModel+Editing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Requestman/App/WorkspaceModel+Editing.swift"; sourceTree = "<group>"; };
+		7C28A29B34E8034AC7DD0C18 /* Requestman/Features/Workspace/WorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Workspace/WorkspaceView.swift; sourceTree = "<group>"; };
+		7F204E0A5D1DF030E714A7A8 /* Requestman/Features/Requests/RequestInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestInspectorView.swift; sourceTree = "<group>"; };
+		89AA0763FFA829CE08194622 /* Requestman/Features/Requests/RequestDataOutline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestDataOutline.swift; sourceTree = "<group>"; };
+		99C842F8858DB36AE7188F49 /* Requestman/App/AppComposition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/App/AppComposition.swift; sourceTree = "<group>"; };
+		A03C17A225475B347E26729E /* Requestman/Features/Connection/ConnectionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Connection/ConnectionSettingsView.swift; sourceTree = "<group>"; };
+		A109250F17E2000000000001 /* Requestman/Features/Requests/RequestFilterControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestFilterControls.swift; sourceTree = "<group>"; };
+		A10926B0D000000000000001 /* Requestman/Features/Rules/BodyTextEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Rules/BodyTextEditing.swift; sourceTree = "<group>"; };
+		A10926C00000000000000001 /* Requestman/Resources/AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Requestman/Resources/AppIcon.icon; sourceTree = "<group>"; };
+		A10926C01000000000000001 /* Requestman/Features/Workspace/JSONSyntax.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Workspace/JSONSyntax.swift; sourceTree = "<group>"; };
+		A10926D00000000000000001 /* Requestman/Features/Rules/ProjectSidebarViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Rules/ProjectSidebarViews.swift; sourceTree = "<group>"; };
+		A10926D00000000000000003 /* Requestman/Features/Rules/ProjectIconMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Rules/ProjectIconMenu.swift; sourceTree = "<group>"; };
+		A10926E01000000000000001 /* Requestman/Infrastructure/Capture/SystemRuleHitNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Infrastructure/Capture/SystemRuleHitNotifications.swift; sourceTree = "<group>"; };
+		A10926F01000000000000001 /* Requestman/Features/Rules/WorkflowMatchTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Rules/WorkflowMatchTestView.swift; sourceTree = "<group>"; };
+		A10927AA0000000000000001 /* Requestman/Features/Rules/WorkflowMatchingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Rules/WorkflowMatchingView.swift; sourceTree = "<group>"; };
+		A10927AB0000000000000001 /* Requestman/Features/Requests/RequestActionsMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestActionsMenu.swift; sourceTree = "<group>"; };
+		A10927AB0000000000000003 /* Requestman/Features/Requests/RequestReplayEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestReplayEditor.swift; sourceTree = "<group>"; };
+		A10927AC0000000000000001 /* Requestman/Features/Requests/RequestLogTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestLogTransfer.swift; sourceTree = "<group>"; };
+		A10927F10000000000000001 /* Requestman/Features/Workspace/NativeInputs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Workspace/NativeInputs.swift; sourceTree = "<group>"; };
+		A10928D10000000000000001 /* Requestman/Features/Requests/RequestLogDisplayOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestLogDisplayOptions.swift; sourceTree = "<group>"; };
+		A10A99000000000000000001 /* Requestman/Features/Workspace/AppKitSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Workspace/AppKitSupport.swift; sourceTree = "<group>"; };
+		A10A99000000000000000051 /* Requestman/Features/Rules/TemplateValuesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Rules/TemplateValuesView.swift; sourceTree = "<group>"; };
+		A10D78910B42E56000000001 /* Requestman/Features/Workspace/WorkspaceSplitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Workspace/WorkspaceSplitView.swift; sourceTree = "<group>"; };
+		A10D78910B42E56000000003 /* Requestman/Features/Requests/RequestInspectionMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestInspectionMode.swift; sourceTree = "<group>"; };
+		A110010D0000000000000001 /* Requestman/Features/Requests/RequestLogLayoutEditorViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestLogLayoutEditorViews.swift; sourceTree = "<group>"; };
+		A110010E0000000000000001 /* Requestman/Features/Requests/RequestLogContentAppearanceEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestLogContentAppearanceEditor.swift; sourceTree = "<group>"; };
+		A8CE98D3D53D32C769A516B8 /* Requestman/Features/Rules/RulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Rules/RulesView.swift; sourceTree = "<group>"; };
+		A9F286AE72ED88A25448163E /* Requestman/App/WorkspaceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/App/WorkspaceModel.swift; sourceTree = "<group>"; };
+		AC61F3DB56E446B0BA7CD9C1 /* Requestman/Features/Connection/UpstreamProxyPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Connection/UpstreamProxyPrompt.swift; sourceTree = "<group>"; };
+		B0EAAA525C3106E1DE8CB93D /* Requestman/Infrastructure/Capture/UnavailableCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Infrastructure/Capture/UnavailableCaptureService.swift; sourceTree = "<group>"; };
+		B126AABB0000000000000001 /* Requestman/Features/Workspace/WorkspaceTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Workspace/WorkspaceTransfer.swift; sourceTree = "<group>"; };
+		BA694F9319384A679527F801 /* Requestman/Features/Connection/CertificateSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Connection/CertificateSetupView.swift; sourceTree = "<group>"; };
+		BAA4A6B3B435766A95BDD9B2 /* Requestman/Features/Requests/RequestBodyDecoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestBodyDecoding.swift; sourceTree = "<group>"; };
+		BEB4E525F48603DE12666E8E /* Requestman/Features/Rules/WorkflowPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Rules/WorkflowPreviewView.swift; sourceTree = "<group>"; };
+		BFDE1824B4D34C994FC8FE42 /* Requestman/Features/Requests/RequestCURL.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestCURL.swift; sourceTree = "<group>"; };
+		C03A3F98383F7D29371F14EB /* Requestman/Features/Requests/RequestPayloadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestPayloadView.swift; sourceTree = "<group>"; };
+		CCE5CE339BBADE9381EE255D /* Requestman/Features/Requests/RequestInspectionData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestInspectionData.swift; sourceTree = "<group>"; };
+		CF619E3F4441CF542CEC6273 /* Requestman/Features/Requests/RequestsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Requests/RequestsView.swift; sourceTree = "<group>"; };
+		DFBA7AADE0868074C2861C98 /* Configuration/Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Configuration/Base.xcconfig; sourceTree = "<group>"; };
+		E993CA47D7D0AC8845B4A238 /* Requestman/Features/Workspace/WorkspaceSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Workspace/WorkspaceSection.swift; sourceTree = "<group>"; };
+		F034173E7D712F9B663EF189 /* Requestman/Infrastructure/Browser/BrowserLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Infrastructure/Browser/BrowserLauncher.swift; sourceTree = "<group>"; };
+		F38B4ECE2819FC9E4240EE95 /* Requestman/Features/Rules/StepInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Features/Rules/StepInspectorView.swift; sourceTree = "<group>"; };
+		FD72A5DC99C066FA074DEE61 /* Requestman/Infrastructure/Capture/LocalCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Requestman/Infrastructure/Capture/LocalCaptureService.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		69680EDE0CF9B24DB8DBFE04 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3378E8C5B9087F2189A82B77 /* RequestmanProxy in Frameworks */,
+				D9F82689E8F760ECED47CA3E /* RequestmanCore in Frameworks */,
+				BA694F9319384A679527F804 /* RequestmanCertificates in Frameworks */,
+				A10927ED0000000000000003 /* RequestmanEditor in Frameworks */,
 			);
-			"name" = "Products";
-			"sourceTree" = "<group>";
+			runOnlyForDeploymentPostprocessing = 0;
 		};
-		"BCE16DD0260827ECF338C787" = {
-			"isa" = "PBXGroup";
-			"children" = (
-                "A10926E01000000000000001",
-				"A10926C00000000000000001",
-				"BFDE1824B4D34C994FC8FE42",
-				"7F204E0A5D1DF030E714A7A8",
-				"C03A3F98383F7D29371F14EB",
-				"2898867DD0244498D419CD10",
-				"89AA0763FFA829CE08194622",
-				"CCE5CE339BBADE9381EE255D",
-				"A10D78910B42E56000000003",
-				"BAA4A6B3B435766A95BDD9B2",
-				"66C777AADFDD9EF77AB46C95",
-				"A10D78910B42E56000000001",
-                "A10A99000000000000000001",
-                "A10927F10000000000000001",
-                "A10928D10000000000000001",
-                "A110010D0000000000000001",
-                "A110010E0000000000000001",
-                "A10926D00000000000000001",
-                "A10926D00000000000000003",
-                "A10A99000000000000000051",
-				"20862586DEEC23D066F47C31",
-				"72B120E798F14A638AC32A01",
-				"72B120E798F14A638AC32A03",
-				"BA694F9319384A679527F801",
-				"F034173E7D712F9B663EF189",
-				"FD72A5DC99C066FA074DEE61",
-				"15F71FB09981C1A1D4BBDA4B",
-				"67AA01506D96DA364042FF26",
-				"A9F286AE72ED88A25448163E",
-				"A03C17A225475B347E26729E",
-				"AC61F3DB56E446B0BA7CD9C1",
-				"CF619E3F4441CF542CEC6273",
-                "A109250F17E2000000000001",
-				"4C3A75160F26468EA29D5061",
-				"A8CE98D3D53D32C769A516B8",
-                "A10926F01000000000000001",
-                "A10927AA0000000000000001",
-                "99C842F8858DB36AE7188F49",
-                "028EF8DC4598117C55B92372",
-                "12E8F317411CCC948AB2089E",
-                "7462B155995E50B320F72A65",
-                "5B2309CD972EDCEF3A5E3DAD",
-                "A10927AB0000000000000003",
-                "A10927AC0000000000000001",
-                "A10927AB0000000000000001",
-                "BEB4E525F48603DE12666E8E",
-                "F38B4ECE2819FC9E4240EE95",
-                "A10926B0D000000000000001",
-                "A10926C01000000000000001",
-                "1ADC8B696AE5EE9F146362A5",
-                "43FA72838C312E5A373171D3",
-                "6DEF4499A370158C3E868307",
-				"E993CA47D7D0AC8845B4A238",
-				"7C28A29B34E8034AC7DD0C18",
-                "B126AABB0000000000000001",
-				"B0EAAA525C3106E1DE8CB93D",
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		B28B7AF69320201D1CF206EB = {
+			isa = PBXGroup;
+			children = (
+				BCE16DD0260827ECF338C787 /* Requestman */,
+				DFBA7AADE0868074C2861C98 /* Configuration/Base.xcconfig */,
+				FBDC4F23F93125BBEEAE800C /* Products */,
 			);
-			"name" = "Requestman";
-			"sourceTree" = "<group>";
+			sourceTree = "<group>";
 		};
-		"B28B7AF69320201D1CF206EB" = {
-			"isa" = "PBXGroup";
-			"children" = (
-				"BCE16DD0260827ECF338C787",
-				"DFBA7AADE0868074C2861C98",
-				"FBDC4F23F93125BBEEAE800C",
+		BCE16DD0260827ECF338C787 /* Requestman */ = {
+			isa = PBXGroup;
+			children = (
+				A10926E01000000000000001 /* Requestman/Infrastructure/Capture/SystemRuleHitNotifications.swift */,
+				A10926C00000000000000001 /* Requestman/Resources/AppIcon.icon */,
+				BFDE1824B4D34C994FC8FE42 /* Requestman/Features/Requests/RequestCURL.swift */,
+				7F204E0A5D1DF030E714A7A8 /* Requestman/Features/Requests/RequestInspectorView.swift */,
+				C03A3F98383F7D29371F14EB /* Requestman/Features/Requests/RequestPayloadView.swift */,
+				2898867DD0244498D419CD10 /* Requestman/Features/Requests/RequestPayloadPresentation.swift */,
+				89AA0763FFA829CE08194622 /* Requestman/Features/Requests/RequestDataOutline.swift */,
+				CCE5CE339BBADE9381EE255D /* Requestman/Features/Requests/RequestInspectionData.swift */,
+				A10D78910B42E56000000003 /* Requestman/Features/Requests/RequestInspectionMode.swift */,
+				BAA4A6B3B435766A95BDD9B2 /* Requestman/Features/Requests/RequestBodyDecoding.swift */,
+				66C777AADFDD9EF77AB46C95 /* Requestman/Features/Workspace/WorkspaceSectionControl.swift */,
+				A10D78910B42E56000000001 /* Requestman/Features/Workspace/WorkspaceSplitView.swift */,
+				A10A99000000000000000001 /* Requestman/Features/Workspace/AppKitSupport.swift */,
+				A10927F10000000000000001 /* Requestman/Features/Workspace/NativeInputs.swift */,
+				A10928D10000000000000001 /* Requestman/Features/Requests/RequestLogDisplayOptions.swift */,
+				A110010D0000000000000001 /* Requestman/Features/Requests/RequestLogLayoutEditorViews.swift */,
+				A110010E0000000000000001 /* Requestman/Features/Requests/RequestLogContentAppearanceEditor.swift */,
+				A10926D00000000000000001 /* Requestman/Features/Rules/ProjectSidebarViews.swift */,
+				A10926D00000000000000003 /* Requestman/Features/Rules/ProjectIconMenu.swift */,
+				A10A99000000000000000051 /* Requestman/Features/Rules/TemplateValuesView.swift */,
+				20862586DEEC23D066F47C31 /* Requestman/Features/Settings/WorkspaceSettingsView.swift */,
+				72B120E798F14A638AC32A01 /* Requestman/Infrastructure/Browser/ChromiumBrowserCatalog.swift */,
+				72B120E798F14A638AC32A03 /* Requestman/Features/Settings/GeneralSettingsView.swift */,
+				BA694F9319384A679527F801 /* Requestman/Features/Connection/CertificateSetupView.swift */,
+				F034173E7D712F9B663EF189 /* Requestman/Infrastructure/Browser/BrowserLauncher.swift */,
+				FD72A5DC99C066FA074DEE61 /* Requestman/Infrastructure/Capture/LocalCaptureService.swift */,
+				15F71FB09981C1A1D4BBDA4B /* Requestman/Features/Environments/EnvironmentsView.swift */,
+				67AA01506D96DA364042FF26 /* Requestman/App/RequestmanApp.swift */,
+				A9F286AE72ED88A25448163E /* Requestman/App/WorkspaceModel.swift */,
+				A03C17A225475B347E26729E /* Requestman/Features/Connection/ConnectionSettingsView.swift */,
+				AC61F3DB56E446B0BA7CD9C1 /* Requestman/Features/Connection/UpstreamProxyPrompt.swift */,
+				CF619E3F4441CF542CEC6273 /* Requestman/Features/Requests/RequestsView.swift */,
+				A109250F17E2000000000001 /* Requestman/Features/Requests/RequestFilterControls.swift */,
+				4C3A75160F26468EA29D5061 /* Requestman/Features/Requests/RequestRecordsTable.swift */,
+				A8CE98D3D53D32C769A516B8 /* Requestman/Features/Rules/RulesView.swift */,
+				A10926F01000000000000001 /* Requestman/Features/Rules/WorkflowMatchTestView.swift */,
+				A10927AA0000000000000001 /* Requestman/Features/Rules/WorkflowMatchingView.swift */,
+				99C842F8858DB36AE7188F49 /* Requestman/App/AppComposition.swift */,
+				028EF8DC4598117C55B92372 /* Requestman/App/WorkspaceModel+Capture.swift */,
+				12E8F317411CCC948AB2089E /* Requestman/App/WorkspaceModel+Persistence.swift */,
+				7462B155995E50B320F72A65 /* Requestman/App/WorkspaceModel+Editing.swift */,
+				5B2309CD972EDCEF3A5E3DAD /* Requestman/Features/Requests/ExecutionHistoryModel.swift */,
+				A10927AB0000000000000003 /* Requestman/Features/Requests/RequestReplayEditor.swift */,
+				A10927AC0000000000000001 /* Requestman/Features/Requests/RequestLogTransfer.swift */,
+				A10927AB0000000000000001 /* Requestman/Features/Requests/RequestActionsMenu.swift */,
+				BEB4E525F48603DE12666E8E /* Requestman/Features/Rules/WorkflowPreviewView.swift */,
+				F38B4ECE2819FC9E4240EE95 /* Requestman/Features/Rules/StepInspectorView.swift */,
+				A10926B0D000000000000001 /* Requestman/Features/Rules/BodyTextEditing.swift */,
+				A10926C01000000000000001 /* Requestman/Features/Workspace/JSONSyntax.swift */,
+				1ADC8B696AE5EE9F146362A5 /* Requestman/Features/Rules/ScriptEditorView.swift */,
+				43FA72838C312E5A373171D3 /* Requestman/Features/Rules/HeaderNameField.swift */,
+				6DEF4499A370158C3E868307 /* Requestman/Features/Rules/FlowEditorView.swift */,
+				E993CA47D7D0AC8845B4A238 /* Requestman/Features/Workspace/WorkspaceSection.swift */,
+				7C28A29B34E8034AC7DD0C18 /* Requestman/Features/Workspace/WorkspaceView.swift */,
+				B126AABB0000000000000001 /* Requestman/Features/Workspace/WorkspaceTransfer.swift */,
+				B0EAAA525C3106E1DE8CB93D /* Requestman/Infrastructure/Capture/UnavailableCaptureService.swift */,
 			);
-			"sourceTree" = "<group>";
+			name = Requestman;
+			sourceTree = "<group>";
 		};
-		"582681C2EAE02B3F3D399C0C" = {
-			"isa" = "XCLocalSwiftPackageReference";
-			"relativePath" = "Packages/RequestmanCore";
-		};
-		"94A0426E8D3203DA5468CCF0" = {
-			"isa" = "XCSwiftPackageProductDependency";
-			"package" = "582681C2EAE02B3F3D399C0C";
-			"productName" = "RequestmanCore";
-		};
-		"D9F82689E8F760ECED47CA3E" = {
-			"isa" = "PBXBuildFile";
-			"productRef" = "94A0426E8D3203DA5468CCF0";
-		};
-		"F612CD2E22E187AC48B5913C" = {
-			"isa" = "PBXSourcesBuildPhase";
-			"buildActionMask" = "2147483647";
-			"files" = (
-                "A10926E01000000000000002",
-				"03FF0AB517F40B032C6E9FF3",
-				"577A3603A89560D629022EE9",
-				"1718487E37C6A8427B363502",
-				"BAB483304DB31FDE384ABD5D",
-				"BEA8923B3A1CA1C792EC752C",
-				"2932191D5B003E1B486FCF29",
-				"A10D78910B42E56000000004",
-				"CE638D7DCE55082DE2AD07B3",
-				"AA723CB28A14D53FFE8683CC",
-				"A10D78910B42E56000000002",
-                "A10A99000000000000000002",
-                "A10927F10000000000000002",
-                "A10928D10000000000000002",
-                "A110010D0000000000000002",
-                "A110010E0000000000000002",
-                "A10926D00000000000000002",
-                "A10926D00000000000000004",
-                "A10A99000000000000000052",
-				"A2D34AF5EAF3073EA4E6CBE8",
-				"72B120E798F14A638AC32A02",
-				"72B120E798F14A638AC32A04",
-				"BA694F9319384A679527F802",
-				"E9751C5AF06CE56B082322E9",
-				"7C2BDDBDD012B872A8E7AAC1",
-				"E8F774C24B7384DC1464C81F",
-				"B1314B8A4F25E11367CF1680",
-				"CCBE6A86B4438F5217413328",
-				"99927C93F99D4F00D97CC57F",
-				"69AC519681D4411F90021182",
-				"65D2437F451A7E298F01615A",
-                "A109250F17E2000000000002",
-				"4C3A75160F26468EA29D5062",
-				"977963FF90440603C012F5DC",
-                "A10926F01000000000000002",
-                "A10927AA0000000000000002",
-                "C44D9B6189A245003E35886F",
-                "D8FC8813FCB26CAE00624661",
-                "55AA0D46FD2691834A177EFA",
-                "F050DFA43F608FA6C5A97E1F",
-                "CB7B14A9FE67B6E05AD212CE",
-                "A10927AB0000000000000004",
-                "A10927AC0000000000000002",
-                "A10927AB0000000000000002",
-                "3FE625F0ED4E4732804874D9",
-                "22372EBFC3A8E041A25BF830",
-                "A10926B0D000000000000002",
-                "A10926C01000000000000002",
-                "9AE475B59ADF0ADC61AB8C9E",
-                "D05FACDD10ACF1C575F2521E",
-                "81833207DF5631BF81282D3A",
-				"BFC10EFC1AB3448A59D900DC",
-				"3F3F99DF960C01BEA0551DBB",
-                "B126AABB0000000000000002",
-				"32B96703F25DC6C7865528FB",
+		FBDC4F23F93125BBEEAE800C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				38A007151ABE87CC01A5B6E9 /* Requestman.app */,
 			);
-			"runOnlyForDeploymentPostprocessing" = "0";
+			name = Products;
+			sourceTree = "<group>";
 		};
-		"69680EDE0CF9B24DB8DBFE04" = {
-			"isa" = "PBXFrameworksBuildPhase";
-			"buildActionMask" = "2147483647";
-			"files" = (
-				"3378E8C5B9087F2189A82B77",
-				"D9F82689E8F760ECED47CA3E",
-				"BA694F9319384A679527F804",
-                "A10927ED0000000000000003",
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0E8A3AD980EC179856012B7E /* Requestman */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DC55407B0565717C06CE10A3 /* Build configuration list for PBXNativeTarget "Requestman" */;
+			buildPhases = (
+				F612CD2E22E187AC48B5913C /* Sources */,
+				69680EDE0CF9B24DB8DBFE04 /* Frameworks */,
+				86F6FE2DD6E869C1842A14B3 /* Resources */,
 			);
-			"runOnlyForDeploymentPostprocessing" = "0";
-		};
-		"86F6FE2DD6E869C1842A14B3" = {
-			"isa" = "PBXResourcesBuildPhase";
-			"buildActionMask" = "2147483647";
-			"files" = (
-				"A10926C00000000000000002",
+			buildRules = (
 			);
-			"runOnlyForDeploymentPostprocessing" = "0";
+			dependencies = (
+			);
+			name = Requestman;
+			packageProductDependencies = (
+				A10927ED0000000000000002 /* RequestmanEditor */,
+				769C1826843E971C2F135B82 /* RequestmanProxy */,
+				94A0426E8D3203DA5468CCF0 /* RequestmanCore */,
+				BA694F9319384A679527F803 /* RequestmanCertificates */,
+			);
+			productName = Requestman;
+			productReference = 38A007151ABE87CC01A5B6E9 /* Requestman.app */;
+			productType = "com.apple.product-type.application";
 		};
-		"4D8F54E7CBAF670D9F6C230D" = {
-			"isa" = "XCBuildConfiguration";
-			"name" = "Debug";
-			"buildSettings" = {
-				"SDKROOT" = "macosx";
-				"SUPPORTED_PLATFORMS" = "macosx";
-				"CLANG_ENABLE_MODULES" = "YES";
-				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
-				"LD_RUNPATH_SEARCH_PATHS" = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "$(inherited) DEBUG";
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		98F54143AB4E86B28C3AFEE0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2600;
 			};
-			"baseConfigurationReference" = "DFBA7AADE0868074C2861C98";
-		};
-		"1A6EFC2CD0AF63DD14BE0438" = {
-			"isa" = "XCBuildConfiguration";
-			"name" = "Release";
-			"buildSettings" = {
-				"SDKROOT" = "macosx";
-				"SUPPORTED_PLATFORMS" = "macosx";
-				"CLANG_ENABLE_MODULES" = "YES";
-				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
-				"LD_RUNPATH_SEARCH_PATHS" = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-			};
-			"baseConfigurationReference" = "DFBA7AADE0868074C2861C98";
-		};
-		"DC55407B0565717C06CE10A3" = {
-			"isa" = "XCConfigurationList";
-			"buildConfigurations" = (
-				"4D8F54E7CBAF670D9F6C230D",
-				"1A6EFC2CD0AF63DD14BE0438",
-			);
-			"defaultConfigurationIsVisible" = "0";
-			"defaultConfigurationName" = "Release";
-		};
-		"0E8A3AD980EC179856012B7E" = {
-			"isa" = "PBXNativeTarget";
-			"buildConfigurationList" = "DC55407B0565717C06CE10A3";
-			"buildPhases" = (
-				"F612CD2E22E187AC48B5913C",
-				"69680EDE0CF9B24DB8DBFE04",
-				"86F6FE2DD6E869C1842A14B3",
-			);
-			"buildRules" = (
-			);
-			"dependencies" = (
-			);
-			"name" = "Requestman";
-			"packageProductDependencies" = (
-                "A10927ED0000000000000002",
-				"769C1826843E971C2F135B82",
-				"94A0426E8D3203DA5468CCF0",
-				"BA694F9319384A679527F803",
-			);
-			"productName" = "Requestman";
-			"productReference" = "38A007151ABE87CC01A5B6E9";
-			"productType" = "com.apple.product-type.application";
-		};
-		"ED8772ADEC3A6C25161BC957" = {
-			"isa" = "XCBuildConfiguration";
-			"name" = "Debug";
-			"buildSettings" = {
-				"ONLY_ACTIVE_ARCH" = "YES";
-				"SDKROOT" = "macosx";
-				"SUPPORTED_PLATFORMS" = "macosx";
-				"CLANG_ENABLE_MODULES" = "YES";
-			};
-		};
-		"00F209874A1F7309F6DCEAA7" = {
-			"isa" = "XCBuildConfiguration";
-			"name" = "Release";
-			"buildSettings" = {
-				"ONLY_ACTIVE_ARCH" = "NO";
-				"SDKROOT" = "macosx";
-				"SUPPORTED_PLATFORMS" = "macosx";
-				"CLANG_ENABLE_MODULES" = "YES";
-			};
-		};
-		"90061A5F4E19D1411B425E01" = {
-			"isa" = "XCConfigurationList";
-			"buildConfigurations" = (
-				"ED8772ADEC3A6C25161BC957",
-				"00F209874A1F7309F6DCEAA7",
-			);
-			"defaultConfigurationIsVisible" = "0";
-			"defaultConfigurationName" = "Release";
-		};
-		"98F54143AB4E86B28C3AFEE0" = {
-			"isa" = "PBXProject";
-			"attributes" = {
-				"BuildIndependentTargetsInParallel" = "YES";
-				"LastUpgradeCheck" = "2600";
-			};
-			"buildConfigurationList" = "90061A5F4E19D1411B425E01";
-			"compatibilityVersion" = "Xcode 15.0";
-			"developmentRegion" = "zh-Hans";
-			"hasScannedForEncodings" = "0";
-			"knownRegions" = (
+			buildConfigurationList = 90061A5F4E19D1411B425E01 /* Build configuration list for PBXProject "Requestman" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = "zh-Hans";
+			hasScannedForEncodings = 0;
+			knownRegions = (
 				"zh-Hans",
-				"en",
-				"Base",
+				en,
+				Base,
 			);
-			"mainGroup" = "B28B7AF69320201D1CF206EB";
-			"packageReferences" = (
-                "A10927ED0000000000000001",
-				"582681C2EAE02B3F3D399C0C",
+			mainGroup = B28B7AF69320201D1CF206EB;
+			packageReferences = (
+				A10927ED0000000000000001 /* XCLocalSwiftPackageReference "Packages/RequestmanEditor" */,
+				582681C2EAE02B3F3D399C0C /* XCLocalSwiftPackageReference "Packages/RequestmanCore" */,
 			);
-			"productRefGroup" = "FBDC4F23F93125BBEEAE800C";
-			"projectDirPath" = "";
-			"projectRoot" = "";
-			"targets" = (
-				"0E8A3AD980EC179856012B7E",
+			productRefGroup = FBDC4F23F93125BBEEAE800C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0E8A3AD980EC179856012B7E /* Requestman */,
 			);
 		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		86F6FE2DD6E869C1842A14B3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10926C00000000000000002 /* Requestman/Resources/AppIcon.icon in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		F612CD2E22E187AC48B5913C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10926E01000000000000002 /* Requestman/Infrastructure/Capture/SystemRuleHitNotifications.swift in Sources */,
+				03FF0AB517F40B032C6E9FF3 /* Requestman/Features/Requests/RequestCURL.swift in Sources */,
+				577A3603A89560D629022EE9 /* Requestman/Features/Requests/RequestInspectorView.swift in Sources */,
+				1718487E37C6A8427B363502 /* Requestman/Features/Requests/RequestPayloadView.swift in Sources */,
+				BAB483304DB31FDE384ABD5D /* Requestman/Features/Requests/RequestPayloadPresentation.swift in Sources */,
+				BEA8923B3A1CA1C792EC752C /* Requestman/Features/Requests/RequestDataOutline.swift in Sources */,
+				2932191D5B003E1B486FCF29 /* Requestman/Features/Requests/RequestInspectionData.swift in Sources */,
+				A10D78910B42E56000000004 /* Requestman/Features/Requests/RequestInspectionMode.swift in Sources */,
+				CE638D7DCE55082DE2AD07B3 /* Requestman/Features/Requests/RequestBodyDecoding.swift in Sources */,
+				AA723CB28A14D53FFE8683CC /* Requestman/Features/Workspace/WorkspaceSectionControl.swift in Sources */,
+				A10D78910B42E56000000002 /* Requestman/Features/Workspace/WorkspaceSplitView.swift in Sources */,
+				A10A99000000000000000002 /* Requestman/Features/Workspace/AppKitSupport.swift in Sources */,
+				A10927F10000000000000002 /* Requestman/Features/Workspace/NativeInputs.swift in Sources */,
+				A10928D10000000000000002 /* Requestman/Features/Requests/RequestLogDisplayOptions.swift in Sources */,
+				A110010D0000000000000002 /* Requestman/Features/Requests/RequestLogLayoutEditorViews.swift in Sources */,
+				A110010E0000000000000002 /* Requestman/Features/Requests/RequestLogContentAppearanceEditor.swift in Sources */,
+				A10926D00000000000000002 /* Requestman/Features/Rules/ProjectSidebarViews.swift in Sources */,
+				A10926D00000000000000004 /* Requestman/Features/Rules/ProjectIconMenu.swift in Sources */,
+				A10A99000000000000000052 /* Requestman/Features/Rules/TemplateValuesView.swift in Sources */,
+				A2D34AF5EAF3073EA4E6CBE8 /* Requestman/Features/Settings/WorkspaceSettingsView.swift in Sources */,
+				72B120E798F14A638AC32A02 /* Requestman/Infrastructure/Browser/ChromiumBrowserCatalog.swift in Sources */,
+				72B120E798F14A638AC32A04 /* Requestman/Features/Settings/GeneralSettingsView.swift in Sources */,
+				BA694F9319384A679527F802 /* Requestman/Features/Connection/CertificateSetupView.swift in Sources */,
+				E9751C5AF06CE56B082322E9 /* Requestman/Infrastructure/Browser/BrowserLauncher.swift in Sources */,
+				7C2BDDBDD012B872A8E7AAC1 /* Requestman/Infrastructure/Capture/LocalCaptureService.swift in Sources */,
+				E8F774C24B7384DC1464C81F /* Requestman/Features/Environments/EnvironmentsView.swift in Sources */,
+				B1314B8A4F25E11367CF1680 /* Requestman/App/RequestmanApp.swift in Sources */,
+				CCBE6A86B4438F5217413328 /* Requestman/App/WorkspaceModel.swift in Sources */,
+				99927C93F99D4F00D97CC57F /* Requestman/Features/Connection/ConnectionSettingsView.swift in Sources */,
+				69AC519681D4411F90021182 /* Requestman/Features/Connection/UpstreamProxyPrompt.swift in Sources */,
+				65D2437F451A7E298F01615A /* Requestman/Features/Requests/RequestsView.swift in Sources */,
+				A109250F17E2000000000002 /* Requestman/Features/Requests/RequestFilterControls.swift in Sources */,
+				4C3A75160F26468EA29D5062 /* Requestman/Features/Requests/RequestRecordsTable.swift in Sources */,
+				977963FF90440603C012F5DC /* Requestman/Features/Rules/RulesView.swift in Sources */,
+				A10926F01000000000000002 /* Requestman/Features/Rules/WorkflowMatchTestView.swift in Sources */,
+				A10927AA0000000000000002 /* Requestman/Features/Rules/WorkflowMatchingView.swift in Sources */,
+				C44D9B6189A245003E35886F /* Requestman/App/AppComposition.swift in Sources */,
+				D8FC8813FCB26CAE00624661 /* Requestman/App/WorkspaceModel+Capture.swift in Sources */,
+				55AA0D46FD2691834A177EFA /* Requestman/App/WorkspaceModel+Persistence.swift in Sources */,
+				F050DFA43F608FA6C5A97E1F /* Requestman/App/WorkspaceModel+Editing.swift in Sources */,
+				CB7B14A9FE67B6E05AD212CE /* Requestman/Features/Requests/ExecutionHistoryModel.swift in Sources */,
+				A10927AB0000000000000004 /* Requestman/Features/Requests/RequestReplayEditor.swift in Sources */,
+				A10927AC0000000000000002 /* Requestman/Features/Requests/RequestLogTransfer.swift in Sources */,
+				A10927AB0000000000000002 /* Requestman/Features/Requests/RequestActionsMenu.swift in Sources */,
+				3FE625F0ED4E4732804874D9 /* Requestman/Features/Rules/WorkflowPreviewView.swift in Sources */,
+				22372EBFC3A8E041A25BF830 /* Requestman/Features/Rules/StepInspectorView.swift in Sources */,
+				A10926B0D000000000000002 /* Requestman/Features/Rules/BodyTextEditing.swift in Sources */,
+				A10926C01000000000000002 /* Requestman/Features/Workspace/JSONSyntax.swift in Sources */,
+				9AE475B59ADF0ADC61AB8C9E /* Requestman/Features/Rules/ScriptEditorView.swift in Sources */,
+				D05FACDD10ACF1C575F2521E /* Requestman/Features/Rules/HeaderNameField.swift in Sources */,
+				81833207DF5631BF81282D3A /* Requestman/Features/Rules/FlowEditorView.swift in Sources */,
+				BFC10EFC1AB3448A59D900DC /* Requestman/Features/Workspace/WorkspaceSection.swift in Sources */,
+				3F3F99DF960C01BEA0551DBB /* Requestman/Features/Workspace/WorkspaceView.swift in Sources */,
+				B126AABB0000000000000002 /* Requestman/Features/Workspace/WorkspaceTransfer.swift in Sources */,
+				32B96703F25DC6C7865528FB /* Requestman/Infrastructure/Capture/UnavailableCaptureService.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		00F209874A1F7309F6DCEAA7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				ONLY_ACTIVE_ARCH = NO;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Release;
+		};
+		1A6EFC2CD0AF63DD14BE0438 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = DFBA7AADE0868074C2861C98 /* Configuration/Base.xcconfig */;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		4D8F54E7CBAF670D9F6C230D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = DFBA7AADE0868074C2861C98 /* Configuration/Base.xcconfig */;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		ED8772ADEC3A6C25161BC957 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		90061A5F4E19D1411B425E01 /* Build configuration list for PBXProject "Requestman" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				ED8772ADEC3A6C25161BC957 /* Debug */,
+				00F209874A1F7309F6DCEAA7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DC55407B0565717C06CE10A3 /* Build configuration list for PBXNativeTarget "Requestman" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4D8F54E7CBAF670D9F6C230D /* Debug */,
+				1A6EFC2CD0AF63DD14BE0438 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		582681C2EAE02B3F3D399C0C /* XCLocalSwiftPackageReference "Packages/RequestmanCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/RequestmanCore;
+		};
+		A10927ED0000000000000001 /* XCLocalSwiftPackageReference "Packages/RequestmanEditor" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/RequestmanEditor;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		769C1826843E971C2F135B82 /* RequestmanProxy */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 582681C2EAE02B3F3D399C0C /* XCLocalSwiftPackageReference "Packages/RequestmanCore" */;
+			productName = RequestmanProxy;
+		};
+		94A0426E8D3203DA5468CCF0 /* RequestmanCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 582681C2EAE02B3F3D399C0C /* XCLocalSwiftPackageReference "Packages/RequestmanCore" */;
+			productName = RequestmanCore;
+		};
+		A10927ED0000000000000002 /* RequestmanEditor */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10927ED0000000000000001 /* XCLocalSwiftPackageReference "Packages/RequestmanEditor" */;
+			productName = RequestmanEditor;
+		};
+		BA694F9319384A679527F803 /* RequestmanCertificates */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 582681C2EAE02B3F3D399C0C /* XCLocalSwiftPackageReference "Packages/RequestmanCore" */;
+			productName = RequestmanCertificates;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
-	"rootObject" = "98F54143AB4E86B28C3AFEE0";
+	rootObject = 98F54143AB4E86B28C3AFEE0 /* Project object */;
 }
