@@ -17,7 +17,7 @@ final class RequestInspectorViewController: ObservedViewController {
     private var panes: [RequestDetailTab: RequestPayloadViewController] = [:]
     private let url = NativeUI.label("", size: 17, weight: .semibold)
     private let copyURLButton = NSButton(title: "", target: nil, action: nil)
-    private let method = RequestMethodTag()
+    private let method = RequestMethodLabel()
     private let status = NativeUI.label("", size: 12)
     private let duration = NativeUI.label("", size: 12, secondary: true)
     private let protocolLabel = NativeUI.label("", size: 12, secondary: true)
@@ -62,7 +62,8 @@ final class RequestInspectorViewController: ObservedViewController {
         status.font = RequestStatusStyle.font
         method.setContentHuggingPriority(.required, for: .horizontal)
         method.setContentCompressionResistancePriority(.required, for: .horizontal)
-        method.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        method.setContentHuggingPriority(.required, for: .vertical)
+        method.setContentCompressionResistancePriority(.required, for: .vertical)
         rule.pathStyle = .standard; rule.isEditable = false
         rule.focusRingType = .none
         rule.backgroundColor = .clear; rule.font = .systemFont(ofSize: 14)

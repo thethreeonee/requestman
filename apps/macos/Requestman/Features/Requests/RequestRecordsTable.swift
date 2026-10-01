@@ -17,8 +17,8 @@ final class RequestRecordsTable: NSView {
     private let coordinator: Coordinator
     private let scrollView: NSScrollView
 
-    init(columnDefaults: UserDefaults = .standard) {
-        coordinator = Coordinator(defaults: columnDefaults)
+    init(columnDefaults: UserDefaults = .standard, isPreview: Bool = false) {
+        coordinator = Coordinator(defaults: columnDefaults, isPreview: isPreview)
         scrollView = RecordsScrollView()
         super.init(frame: .zero)
         coordinator.onDeviceAliasChange = { [weak self] in self?.onDeviceAliasChange($0, $1) }
@@ -45,6 +45,7 @@ final class RequestRecordsTable: NSView {
         scrollView.borderType = .noBorder
 
         let table = RecordsTableView()
+        table.isPreview = coordinator.isPreview
         table.menuForRow = { [weak coordinator = coordinator] in coordinator?.menu(forRow: $0) }
         table.rowHeight = 56
         table.intercellSpacing = .zero
@@ -52,28 +53,11 @@ final class RequestRecordsTable: NSView {
         table.allowsMultipleSelection = false
         table.allowsEmptySelection = true
         table.allowsColumnSelection = false
-        table.allowsColumnReordering = true
-        table.allowsColumnResizing = true
+        table.allowsColumnReordering = !coordinator.isPreview
+        table.allowsColumnResizing = !coordinator.isPreview
         table.columnAutoresizingStyle = .noColumnAutoresizing
         table.style = .plain
-        table.setAccessibilityLabel("请求日志")
-        for column in RecordColumn.allCases {
-            let item = RecordsTableColumn(identifier: column.identifier)
-            if column == .time || column == .duration {
-                item.headerCell = RecordsEdgeHeaderCell(textCell: column.title)
-            }
-            item.title = column.title
-            item.minWidth = 0
-            item.maxWidth = .greatestFiniteMagnitude
-            item.resizingMask = .userResizingMask
-            item.isEditable = false
-            item.isHidden = column == .device
-            item.headerCell.alignment = column == .duration ? .right : .left
-            table.addTableColumn(item)
-            item.widthChanged = { [weak coordinator = coordinator] column in
-                coordinator?.resizeColumn(column)
-            }
-        }
+        table.setAccessibilityLabel(coordinator.isPreview ? "日志布局预览" : "请求日志")
         table.dataSource = coordinator
         table.delegate = coordinator
         table.target = coordinator
@@ -114,22 +98,26 @@ final class RequestRecordsTable: NSView {
         private var capturedRecords: [UUID: CaptureRecord] = [:]
         private var updating = false
         private let defaults: UserDefaults
+        let isPreview: Bool
         private var preferredWidths: [String: CGFloat] = [:]
         private var availableWidth: CGFloat = 0
-        private var requiredRequestWidth: CGFloat = 0
-        private var fittedRequestWidth: CGFloat = -1
+        private var rowHeights: [CGFloat] = []
+        private var measuredColumnWidths: [String: CGFloat] = [:]
         private var applyingWidths = false
         private var displayOptions = RequestLogDisplayOptions()
         private var lastAllowLAN: Bool?
         private var configuringColumns = false
         private var displayOptionsChanged = false
 
-        init(defaults: UserDefaults) {
+        init(defaults: UserDefaults, isPreview: Bool = false) {
             self.defaults = defaults
+            self.isPreview = isPreview
             super.init()
-            reloadPreferences()
-            NotificationCenter.default.addObserver(self, selector: #selector(preferencesRestored),
-                                                   name: .init("Requestman.preferencesRestored"), object: nil)
+            if !isPreview {
+                reloadPreferences()
+                NotificationCenter.default.addObserver(self, selector: #selector(preferencesRestored),
+                                                       name: .init("Requestman.preferencesRestored"), object: nil)
+            }
         }
 
         @objc private func preferencesRestored() {
@@ -158,21 +146,26 @@ final class RequestRecordsTable: NSView {
                 RecordRow(record: $0, displayOptions: displayOptions,
                           context: .init(workflowNames: workflowNames, deviceAliases: deviceAliases))
             }
-            let methodWidth = displayOptions.showsMethod
-                ? (Set(nextRows.map(\.method)).map { RequestMethodTag.requiredWidth(for: $0) }.max() ?? 0) + 8 : 0
-            let statusWidth = displayOptions.columns.contains(.status)
-                ? RequestMethodTag.requiredWidth(for: "599", font: RequestMethodTag.statusFont) + 8 : 0
-            requiredRequestWidth = methodWidth + statusWidth + 24
+            let previousRows = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+            let previousHeights = Dictionary(uniqueKeysWithValues: zip(rows, rowHeights).map { ($0.id, $1) })
+            let widths = currentColumnWidths
+            let layoutChanged = displayOptionsChanged || widths != measuredColumnWidths
+            let nextHeights = nextRows.map { row in
+                if !layoutChanged, previousRows[row.id] == row, let height = previousHeights[row.id] { return height }
+                return measureHeight(for: row, widths: widths)
+            }
+            rowHeights = nextHeights
+            measuredColumnWidths = widths
             updating = true
             defer { updating = false }
 
             if displayOptionsChanged {
                 rows = nextRows
                 table.reloadData()
+                table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: rows.indices))
                 displayOptionsChanged = false
             }
             if nextRows != rows {
-                let previous = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
                 let difference = nextRows.map(\.id).difference(from: rows.map(\.id))
                 var removed = IndexSet()
                 var inserted = IndexSet()
@@ -192,14 +185,18 @@ final class RequestRecordsTable: NSView {
                 // Completed records normally only prepend. Reload retained rows only if
                 // their displayed values changed, keeping native cell reuse and selection.
                 let changed = IndexSet(rows.indices.filter {
-                    !inserted.contains($0) && previous[rows[$0].id] != rows[$0]
+                    !inserted.contains($0) && previousRows[rows[$0].id] != rows[$0]
                 })
                 if !changed.isEmpty {
                     table.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integersIn: table.tableColumns.indices))
                 }
+                let changedHeights = IndexSet(rows.indices.filter {
+                    !inserted.contains($0) && previousHeights[rows[$0].id] != rowHeights[$0]
+                })
+                if !changedHeights.isEmpty { table.noteHeightOfRows(withIndexesChanged: changedHeights) }
             }
 
-            let selectedRow = selection.flatMap { id in rows.firstIndex { $0.id == id } }
+            let selectedRow = isPreview ? nil : selection.flatMap { id in rows.firstIndex { $0.id == id } }
             let indexes = selectedRow.map { IndexSet(integer: $0) } ?? IndexSet()
             if table.selectedRowIndexes != indexes {
                 table.selectRowIndexes(indexes, byExtendingSelection: false)
@@ -217,10 +214,11 @@ final class RequestRecordsTable: NSView {
             let identifiers = options.orderedColumnIDs
             let valid = Set(identifiers)
             for item in table.tableColumns where !valid.contains(item.identifier.rawValue) { table.removeTableColumn(item) }
-            for extra in options.extraColumns where table.tableColumn(withIdentifier: .init(extra.identifier)) == nil {
-                let item = RecordsTableColumn(identifier: .init(extra.identifier))
+            for id in identifiers where table.tableColumn(withIdentifier: .init(id)) == nil {
+                let item = RecordsTableColumn(identifier: .init(id))
+                item.headerCell = NSTableHeaderCell(textCell: options.title(forColumnID: id))
                 item.minWidth = 0; item.maxWidth = .greatestFiniteMagnitude
-                item.resizingMask = .userResizingMask; item.isEditable = false
+                item.resizingMask = isPreview ? [] : .userResizingMask; item.isEditable = false
                 item.widthChanged = { [weak self] in self?.resizeColumn($0) }
                 table.addTableColumn(item)
             }
@@ -231,14 +229,20 @@ final class RequestRecordsTable: NSView {
             for item in table.tableColumns {
                 let id = item.identifier.rawValue
                 item.title = options.title(forColumnID: id)
-                item.isHidden = !options.isColumnVisible(id, allowLAN: allowLAN)
-                item.headerToolTip = options.extraColumns.first(where: { $0.identifier == id })?.summary
+                item.isHidden = !isPreview && !options.isColumnVisible(id, allowLAN: allowLAN)
+                let contents = options.layoutColumns.first(where: { $0.id == id })?.lines.flatMap(\.contents) ?? []
+                item.headerToolTip = contents.map(\.displayTitle).joined(separator: " · ")
+                switch contents.first?.horizontalAlignment {
+                case .center: item.headerCell.alignment = .center
+                case .right: item.headerCell.alignment = .right
+                default: item.headerCell.alignment = .left
+                }
             }
             availableWidth = 0
         }
 
         func tableViewColumnDidMove(_ notification: Notification) {
-            guard !configuringColumns, let table else { return }
+            guard !isPreview, !configuringColumns, let table else { return }
             let order = table.tableColumns.map { $0.identifier.rawValue }
             displayOptions.columnOrder = order
             onColumnOrderChange(order)
@@ -249,29 +253,41 @@ final class RequestRecordsTable: NSView {
             return table.tableColumns.indices.filter { !table.tableColumns[$0].isHidden }
         }
 
+        private var currentColumnWidths: [String: CGFloat] {
+            guard let table else { return [:] }
+            return Dictionary(uniqueKeysWithValues: table.tableColumns.filter { !$0.isHidden }
+                .map { ($0.identifier.rawValue, $0.width) })
+        }
+
+        private func measureHeight(for row: RecordRow, widths: [String: CGFloat]) -> CGFloat {
+            displayOptions.layoutColumns.compactMap { column -> CGFloat? in
+                guard let width = widths[column.id] else { return nil }
+                return RecordCell.height(for: row.renderedLines(in: column, allowLAN: lastAllowLAN ?? false),
+                                         row: row, columnWidth: width)
+            }.max() ?? 56
+        }
+
+        private func refreshRowHeights() {
+            guard let table else { return }
+            let widths = currentColumnWidths
+            guard widths != measuredColumnWidths else { return }
+            let next = rows.map { measureHeight(for: $0, widths: widths) }
+            let changed = IndexSet(next.indices.filter { !rowHeights.indices.contains($0) || abs(next[$0] - rowHeights[$0]) > 0.1 })
+            rowHeights = next
+            measuredColumnWidths = widths
+            if !changed.isEmpty { table.noteHeightOfRows(withIndexesChanged: changed) }
+            table.needsLayout = true
+        }
+
         func fitColumns(to width: CGFloat) {
             guard let table, !configuringColumns, width > 0,
-                  abs(width - availableWidth) > 0.1 || requiredRequestWidth != fittedRequestWidth else { return }
+                  abs(width - availableWidth) > 0.1 else { return }
             availableWidth = width
-            fittedRequestWidth = requiredRequestWidth
             // Record updates never overwrite a manual resize. Only viewport changes
             // adapt the saved proportions, without persisting the temporary layout.
-            let compactScale = min(1, width / 900)
-            let time: CGFloat = max(60, 104 * compactScale)
-            let status: CGFloat = max(48, 76 * compactScale)
-            let duration: CGFloat = max(64, 92 * compactScale)
-            let flexible = max(0, width - time - status - duration)
             let weights = table.tableColumns.map { column -> CGFloat in
                 if let preferred = preferredWidths[column.identifier.rawValue] { return preferred }
-                switch RecordColumn(rawValue: column.identifier.rawValue) {
-                case .time: return time
-                case .status: return status
-                case .duration: return duration
-                case .request: return max(1, flexible * 0.52)
-                case .rules: return max(1, flexible * 0.36)
-                case .device: return max(1, flexible * 0.12)
-                case nil: return max(1, flexible * 0.22)
-                }
+                return layoutWidth(for: column.identifier.rawValue, minimum: false)
             }
             let minimums = minimumWidths
             var widths = Array(repeating: CGFloat.zero, count: weights.count)
@@ -296,22 +312,33 @@ final class RequestRecordsTable: NSView {
             guard let table else { return [] }
             let widths = table.tableColumns.map { column -> CGFloat in
                 guard !column.isHidden else { return 0 }
-                switch RecordColumn(rawValue: column.identifier.rawValue) {
-                case .time: return 60
-                case .status, .device: return 48
-                case .request: return 120
-                case .duration: return 64
-                case .rules, nil: return 80
-                }
+                return layoutWidth(for: column.identifier.rawValue, minimum: true)
             }
             let scale = min(1, availableWidth / max(1, widths.reduce(0, +) * 1.5))
-            var minimums = widths.map { $0 * scale }
-            if let index = table.tableColumns.firstIndex(where: { $0.identifier == RecordColumn.request.identifier }),
-               !table.tableColumns[index].isHidden {
-                let otherMinimums = minimums.reduce(0, +) - minimums[index]
-                minimums[index] = min(max(minimums[index], requiredRequestWidth), max(0, availableWidth - otherMinimums))
+            return widths.map { $0 * scale }
+        }
+
+        private func layoutWidth(for id: String, minimum: Bool) -> CGFloat {
+            guard let column = displayOptions.layoutColumns.first(where: { $0.id == id }) else { return 80 }
+            let widths = column.lines.map { line in
+                let contents = line.contents.filter { $0.field != .device || lastAllowLAN == true }
+                let width = contents.reduce(CGFloat.zero) { total, content in
+                    let value: CGFloat
+                    switch content.field {
+                    case .time: value = minimum ? 60 : 104
+                    case .status: value = minimum ? 34 : 56
+                    case .method: value = minimum ? 36 : 64
+                    case .duration: value = minimum ? 56 : 92
+                    case .device: value = minimum ? 48 : 120
+                    case .url: value = minimum ? 80 : 340
+                    case .rule, .ruleGroup, .rules: value = minimum ? 72 : 190
+                    case .host, .path, .detail, .header, .queryParameter: value = minimum ? 72 : 220
+                    }
+                    return total + value
+                }
+                return width + CGFloat(max(0, contents.count - 1)) * 8 + 24
             }
-            return minimums
+            return max(minimum ? 24 : 80, widths.max() ?? 0)
         }
 
         private func apply(_ widths: [CGFloat]) {
@@ -326,10 +353,11 @@ final class RequestRecordsTable: NSView {
                 column.width = widths[index]
             }
             table.setFrameSize(NSSize(width: availableWidth, height: table.frame.height))
+            refreshRowHeights()
         }
 
         func resizeColumn(_ column: NSTableColumn) {
-            guard !applyingWidths, !column.isHidden, availableWidth > 0, let table,
+            guard !isPreview, !applyingWidths, !column.isHidden, availableWidth > 0, let table,
                   let index = table.tableColumns.firstIndex(of: column) else { return }
             var widths = table.tableColumns.map { $0.isHidden ? 0 : $0.width }
             let minimums = minimumWidths
@@ -353,7 +381,7 @@ final class RequestRecordsTable: NSView {
         }
 
         func tableViewColumnDidResize(_ notification: Notification) {
-            guard !applyingWidths, !configuringColumns, let table else { return }
+            guard !isPreview, !applyingWidths, !configuringColumns, let table else { return }
             for column in table.tableColumns where !column.isHidden {
                 preferredWidths[column.identifier.rawValue] = column.width
             }
@@ -362,8 +390,14 @@ final class RequestRecordsTable: NSView {
 
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
+        func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+            rowHeights.indices.contains(row) ? rowHeights[row] : 56
+        }
+
+        func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { !isPreview }
+
         func menu(forRow row: Int) -> NSMenu? {
-            guard rows.indices.contains(row) else { return nil }
+            guard !isPreview, rows.indices.contains(row) else { return nil }
             guard let record = capturedRecords[rows[row].id] else { return nil }
             let menu = NSMenu(); menu.autoenablesItems = false
             let item = NSMenuItem(title: "Mock 当前请求", action: #selector(mockRequest(_:)), keyEquivalent: "")
@@ -390,17 +424,17 @@ final class RequestRecordsTable: NSView {
         }
 
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-            guard rows.indices.contains(row), let identifier = tableColumn?.identifier else { return nil }
-            let column = RecordColumn(rawValue: identifier.rawValue)
+            guard rows.indices.contains(row), let identifier = tableColumn?.identifier,
+                  let column = displayOptions.layoutColumns.first(where: { $0.id == identifier.rawValue }) else { return nil }
             let cell = (tableView.makeView(withIdentifier: identifier, owner: nil) as? RecordCell)
-                ?? RecordCell(column: column, identifier: identifier)
-            cell.device.onRename = { [weak self] in self?.onDeviceAliasChange($0, $1) }
-            cell.configure(rows[row], options: displayOptions)
+                ?? RecordCell(identifier: identifier)
+            cell.onDeviceAliasChange = { [weak self] in self?.onDeviceAliasChange($0, $1) }
+            cell.configure(rows[row], column: column, allowLAN: lastAllowLAN ?? false, isPreview: isPreview)
             return cell
         }
 
         @objc func activateRequest(_ sender: NSTableView) {
-            guard !updating, let table = sender as? RecordsTableView,
+            guard !isPreview, !updating, let table = sender as? RecordsTableView,
                   rows.indices.contains(table.clickedRow), table.clickedRow == table.selectedRow,
                   table.consumeSelectionReactivation() else { return }
             // Keep the toggle in this log window's responder chain.
@@ -408,7 +442,7 @@ final class RequestRecordsTable: NSView {
         }
 
         func tableViewSelectionDidChange(_ notification: Notification) {
-            guard !updating, let table else { return }
+            guard !isPreview, !updating, let table else { return }
             let selected = rows.indices.contains(table.selectedRow) ? rows[table.selectedRow].id : nil
             if selection != selected { selection = selected; onSelectionChange(selected) }
         }
@@ -418,9 +452,11 @@ final class RequestRecordsTable: NSView {
 @MainActor
 private final class RecordsTableView: NSTableView {
     var menuForRow: (Int) -> NSMenu? = { _ in nil }
+    var isPreview = false
     private var reactivatedRow: Int?
 
     override func mouseDown(with event: NSEvent) {
+        guard !isPreview else { return }
         // Capture selection before AppKit changes it and sends the table action.
         let clickedRow = row(at: convert(event.locationInWindow, from: nil))
         reactivatedRow = clickedRow >= 0 && isRowSelected(clickedRow) ? clickedRow : nil
@@ -434,6 +470,7 @@ private final class RecordsTableView: NSTableView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
+        guard !isPreview else { return nil }
         let clickedRow = row(at: convert(event.locationInWindow, from: nil))
         return menuForRow(clickedRow)
     }
@@ -449,15 +486,6 @@ private final class RecordsTableColumn: NSTableColumn {
         didSet {
             if abs(width - oldValue) > 0.01 { widthChanged?(self) }
         }
-    }
-}
-
-@MainActor
-private final class RecordsEdgeHeaderCell: NSTableHeaderCell {
-    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
-        // Inset only the title; AppKit still draws the full header and resize borders.
-        let inset = min(12, cellFrame.width / 2)
-        super.drawInterior(withFrame: cellFrame.insetBy(dx: inset, dy: 0), in: controlView)
     }
 }
 
@@ -480,31 +508,27 @@ private final class RecordsScrollView: NSScrollView {
 
 @MainActor
 private final class RecordCell: NSTableCellView {
-    let device = DeviceSourceButton()
-    private let column: RecordColumn?
-    private let primary = NSTextField(labelWithString: "")
-    private let methodTag = RequestMethodTag()
-    private let statusTag = RequestMethodTag()
-    private var tags: [RequestMethodTag] = []
-    private var primaryColor = NSColor.labelColor
+    static let lineSpacing: CGFloat = 2
+    var onDeviceAliasChange: (String, String) -> Void = { _, _ in }
+    private var lineViews: [RecordContentLineView] = []
 
-    init(column: RecordColumn?, identifier: NSUserInterfaceItemIdentifier) {
-        self.column = column
+    static func height(for lines: [RequestLogRenderedLine], row: RecordRow, columnWidth: CGFloat) -> CGFloat {
+        let width = contentWidth(for: columnWidth)
+        let contentHeight = lines.reduce(CGFloat.zero) { total, line in
+            let measurements = line.contents.map { RecordContentMeasurement(content: $0, row: row) }
+            let placements = RecordLineLayout.placements(for: measurements.enumerated().map { $1.layoutItem(index: $0) }, width: width)
+            let lineHeight = placements.map { measurements[$0.index].height(for: $0.width) }.max() ?? 0
+            return total + lineHeight
+        }
+        return max(56, contentHeight + CGFloat(max(0, lines.count - 1)) * lineSpacing + 6)
+    }
+
+    private static func contentInset(for width: CGFloat) -> CGFloat { min(12, max(0, width - 1) / 2) }
+    static func contentWidth(for width: CGFloat) -> CGFloat { max(1, width - contentInset(for: width) * 2) }
+
+    init(identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
         self.identifier = identifier
-        primary.maximumNumberOfLines = 1
-        primary.lineBreakMode = column == .request ? .byTruncatingMiddle : .byTruncatingTail
-        primary.cell?.usesSingleLineMode = true
-        primary.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        primary.font = .systemFont(ofSize: 13)
-        addSubview(primary)
-        if column == .request { addSubview(statusTag); addSubview(methodTag) }
-        if column == .duration { primary.alignment = .right }
-        if column == .time || column == .duration {
-            primary.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
-        }
-        if column == .device { addSubview(device) }
-        textField = primary
     }
 
     required init?(coder: NSCoder) { nil }
@@ -513,71 +537,22 @@ private final class RecordCell: NSTableCellView {
         didSet { updateColors() }
     }
 
-    func configure(_ row: RecordRow, options: RequestLogDisplayOptions) {
-        primaryColor = .labelColor
-        primary.isHidden = column == .device
-        var badges: [(value: String, tint: NSColor, tooltip: String)] = []
-        func append(_ value: String, tint: NSColor = .secondaryLabelColor, tooltip: String? = nil) {
-            badges.append((value.replacingOccurrences(of: "\n", with: " · "), tint, tooltip ?? value))
+    func configure(_ row: RecordRow, column: RequestLogLayoutColumn, allowLAN: Bool, isPreview: Bool) {
+        let lines = row.renderedLines(in: column, allowLAN: allowLAN)
+        while lineViews.count > lines.count { lineViews.removeLast().removeFromSuperview() }
+        while lineViews.count < lines.count {
+            let view = RecordContentLineView()
+            lineViews.append(view); addSubview(view)
         }
-        switch column {
-        case .time:
-            primary.stringValue = row.time
-            primaryColor = .secondaryLabelColor
-        case .status:
-            primary.stringValue = ""
-        case .request:
-            let showsURL = options.columns.contains(.request)
-            primary.stringValue = showsURL ? row.url : ""
-            primary.isHidden = !showsURL
-            methodTag.isHidden = !options.showsMethod
-            methodTag.setMethod(row.method)
-            statusTag.isHidden = !options.columns.contains(.status)
-            statusTag.setStatus(row.status)
-            if showsURL, let detail = row.replay ?? row.failure {
-                append(detail, tint: row.failure == nil ? .secondaryLabelColor : .systemRed)
-            }
-        case .rules:
-            primary.stringValue = row.project
-            primaryColor = .secondaryLabelColor
-            if let workflow = row.workflow { append(workflow) }
-        case nil:
-            primary.stringValue = (row.extraValues[identifier?.rawValue ?? ""] ?? "—")
-                .replacingOccurrences(of: "\n", with: " · ")
-        case .device:
-            device.update(source: row.deviceSource, alias: row.deviceAlias)
-            primary.stringValue = device.title
-        case .duration:
-            primary.stringValue = row.duration
-            primaryColor = .secondaryLabelColor
+        for (index, line) in lines.enumerated() {
+            let view = lineViews[index]
+            view.onDeviceAliasChange = { [weak self] in self?.onDeviceAliasChange($0, $1) }
+            view.configure(line.contents, row: row, isPreview: isPreview)
         }
-        for field in options.mergedFields(in: identifier?.rawValue ?? "") {
-            let value = row.extraValues[field.identifier] ?? "—"
-            let tint = field.field == .status ? RequestStatusStyle.color(Int(value)) : NSColor.secondaryLabelColor
-            append(value, tint: tint, tooltip: field.displayTitle + " · " + field.stage.title + "\n" + value)
-        }
-        while tags.count > badges.count { tags.removeLast().removeFromSuperview() }
-        while tags.count < badges.count {
-            let tag = RequestMethodTag(); tags.append(tag); addSubview(tag)
-        }
-        for (tag, badge) in zip(tags, badges) {
-            tag.setTag(badge.value, tint: badge.tint, tooltip: badge.tooltip)
-        }
-        primary.toolTip = column == nil ? row.extraValues[identifier?.rawValue ?? ""] : primary.stringValue
-        var details = primary.isHidden ? [] : [primary.toolTip ?? primary.stringValue]
-        if column == .device { details = [device.title] }
-        if column == .request {
-            var firstLine: [String] = []
-            if !statusTag.isHidden { firstLine.append(row.status.map(String.init) ?? "—") }
-            if !methodTag.isHidden { firstLine.append(row.method) }
-            if !primary.isHidden { firstLine.append(row.url) }
-            details = [firstLine.joined(separator: " ")]
-            if !primary.isHidden { details.append(row.result) }
-        }
-        if column == .rules && row.workflow == nil { details.append("未命中规则") }
-        details += badges.map(\.tooltip)
-        toolTip = details.joined(separator: "\n")
-        setAccessibilityLabel(options.title(forColumnID: identifier?.rawValue ?? ""))
+        // The extraction layer has already removed empty contents and whole empty
+        // lines. Center only these actual lines, without their configured positions.
+        toolTip = lines.map { $0.contents.map(\.text).joined(separator: " · ") }.joined(separator: "\n")
+        setAccessibilityLabel(column.title)
         setAccessibilityValue(toolTip)
         updateColors()
         needsLayout = true
@@ -585,47 +560,601 @@ private final class RecordCell: NSTableCellView {
 
     override func layout() {
         super.layout()
-        let inset = min(12, bounds.width / 2)
-        let width = max(0, bounds.width - inset * 2)
-        let top = tags.isEmpty ? (bounds.height - 24) / 2 : 4
-        if column == .device {
-            device.frame = NSRect(x: inset, y: top, width: width, height: 24)
-        }
-        if column == .request {
-            var textX = inset
-            for tag in [statusTag, methodTag] where !tag.isHidden {
-                let available = max(0, inset + width - textX)
-                let tagWidth = min(available, tag.intrinsicContentSize.width)
-                tag.frame = NSRect(x: textX, y: top, width: tagWidth, height: 24)
-                textX += tagWidth + min(8, max(0, available - tagWidth))
-            }
-            primary.frame = NSRect(x: textX, y: top + 2, width: max(0, inset + width - textX), height: 20)
-        } else {
-            primary.frame = NSRect(x: inset, y: top + 2, width: width, height: 20)
-        }
-        // Keep every secondary value on the same line; truncate within each tag when space is limited.
-        let gap = tags.count > 1 ? min(6, width / CGFloat(tags.count * 2)) : 0
-        let space = max(0, width - gap * CGFloat(max(0, tags.count - 1)))
-        let desired = tags.map { $0.intrinsicContentSize.width }
-        let total = desired.reduce(0, +)
-        let minimum = min(36, space / CGFloat(max(1, tags.count)))
-        let flexible = desired.reduce(CGFloat.zero) { $0 + max(0, $1 - minimum) }
-        var x = inset
-        for (tag, desiredWidth) in zip(tags, desired) {
-            let tagWidth = total <= space ? desiredWidth
-                : minimum + max(0, space - minimum * CGFloat(tags.count)) * max(0, desiredWidth - minimum) / max(1, flexible)
-            tag.frame = NSRect(x: x, y: 30, width: tagWidth, height: 22)
-            x += tagWidth + gap
+        let inset = Self.contentInset(for: bounds.width)
+        let width = Self.contentWidth(for: bounds.width)
+        let height = lineViews.reduce(CGFloat.zero) { $0 + $1.contentHeight(for: width) }
+            + CGFloat(max(0, lineViews.count - 1)) * Self.lineSpacing
+        let top = (bounds.height - height) / 2
+        var y = top
+        for view in lineViews {
+            let lineHeight = view.contentHeight(for: width)
+            view.frame = NSRect(x: inset, y: y, width: width, height: lineHeight)
+            y += lineHeight + Self.lineSpacing
         }
     }
 
     private func updateColors() {
-        let selected = backgroundStyle == .emphasized
-        primary.textColor = selected ? .alternateSelectedControlTextColor : primaryColor
-        statusTag.selected = selected
-        methodTag.selected = selected
-        for tag in tags { tag.selected = selected }
+        for line in lineViews { line.selected = backgroundStyle == .emphasized }
     }
+}
+
+private struct RecordLineItem {
+    let index: Int
+    let horizontalAlignment: RequestLogHorizontalAlignment
+    let desiredWidth: CGFloat
+    let minimumWidth: CGFloat
+    let fillsAvailable: Bool
+}
+
+private struct RecordLinePlacement {
+    let index: Int
+    let x: CGFloat
+    let width: CGFloat
+}
+
+/// Both row-height measurement and visible cells use this exact width allocation.
+private enum RecordLineLayout {
+    static func placements(for items: [RecordLineItem], width: CGFloat) -> [RecordLinePlacement] {
+        var result: [RecordLinePlacement] = []
+        let left = items.filter { $0.horizontalAlignment == .left }
+        let center = items.filter { $0.horizontalAlignment == .center }
+        let right = items.filter { $0.horizontalAlignment == .right }
+        let groups = [left, center, right].filter { !$0.isEmpty }
+        guard !groups.isEmpty else { return [] }
+        let width = max(CGFloat(items.count), width)
+        let gap = min(8, max(0, (width - CGFloat(items.count)) / CGFloat(max(1, items.count * 2))))
+        if groups.count == 1 {
+            let group = groups[0]
+            let widths = allocatedWidths(group, in: width, gap: gap,
+                                         fillsAvailable: group[0].horizontalAlignment == .left)
+            let total = totalWidth(widths, gap: gap)
+            let x: CGFloat
+            switch group[0].horizontalAlignment {
+            case .left: x = 0
+            case .center: x = (width - total) / 2
+            case .right: x = width - total
+            }
+            place(group, widths: widths, x: x, gap: gap, result: &result)
+            return result
+        }
+        if center.isEmpty {
+            let joined = left + right
+            let widths = allocatedWidths(joined, in: width, gap: gap, fillsAvailable: false)
+            let leftWidths = Array(widths.prefix(left.count))
+            let rightWidths = Array(widths.suffix(right.count))
+            place(left, widths: leftWidths, x: 0, gap: gap, result: &result)
+            place(right, widths: rightWidths, x: width - totalWidth(rightWidths, gap: gap), gap: gap, result: &result)
+            return result
+        }
+        // Keep a centered group anchored to the center whenever the adjacent
+        // groups fit. Text wraps or truncates inside its remaining region.
+        let leftMinimum = minimumWidth(left, gap: gap)
+        let rightMinimum = minimumWidth(right, gap: gap)
+        let outsideGaps = CGFloat((left.isEmpty ? 0 : 1) + (right.isEmpty ? 0 : 1)) * gap
+        let desiredCenter = totalWidth(center.map(\.desiredWidth), gap: gap)
+        let minimumTotal = leftMinimum + rightMinimum + minimumWidth(center, gap: gap) + outsideGaps
+        if minimumTotal > width {
+            let joined = left + center + right
+            let widths = allocatedWidths(joined, in: width, gap: gap, fillsAvailable: false)
+            let leftWidths = Array(widths.prefix(left.count))
+            let centerWidths = Array(widths.dropFirst(left.count).prefix(center.count))
+            let rightWidths = Array(widths.suffix(right.count))
+            let centerX = totalWidth(leftWidths, gap: gap) + (left.isEmpty ? 0 : gap)
+            place(left, widths: leftWidths, x: 0, gap: gap, result: &result)
+            place(center, widths: centerWidths, x: centerX, gap: gap, result: &result)
+            place(right, widths: rightWidths, x: width - totalWidth(rightWidths, gap: gap), gap: gap, result: &result)
+            return result
+        }
+        let centerWidth = min(desiredCenter, max(0, width - leftMinimum - rightMinimum - outsideGaps))
+        let centerX = max(leftMinimum + (left.isEmpty ? 0 : gap),
+                          min((width - centerWidth) / 2,
+                              width - rightMinimum - (right.isEmpty ? 0 : gap) - centerWidth))
+        let leftWidths = allocatedWidths(left, in: max(0, centerX - gap), gap: gap, fillsAvailable: false)
+        let centerWidths = allocatedWidths(center, in: centerWidth, gap: gap, fillsAvailable: false)
+        let rightWidths = allocatedWidths(right, in: max(0, width - centerX - centerWidth - gap),
+                                          gap: gap, fillsAvailable: false)
+        place(left, widths: leftWidths, x: 0, gap: gap, result: &result)
+        place(center, widths: centerWidths, x: centerX, gap: gap, result: &result)
+        place(right, widths: rightWidths, x: width - totalWidth(rightWidths, gap: gap), gap: gap, result: &result)
+        return result
+    }
+
+    private static func minimumWidth(_ views: [RecordLineItem], gap: CGFloat) -> CGFloat {
+        totalWidth(views.map(\.minimumWidth), gap: gap)
+    }
+
+    private static func totalWidth(_ widths: [CGFloat], gap: CGFloat) -> CGFloat {
+        widths.reduce(0, +) + CGFloat(max(0, widths.count - 1)) * gap
+    }
+
+    private static func allocatedWidths(_ views: [RecordLineItem], in width: CGFloat, gap: CGFloat,
+                                 fillsAvailable: Bool) -> [CGFloat] {
+        guard !views.isEmpty else { return [] }
+        let space = max(0, width - CGFloat(max(0, views.count - 1)) * gap)
+        var widths = views.map(\.desiredWidth)
+        let desired = widths.reduce(0, +)
+        if desired <= space {
+            // Extend a trailing text value (the default URL), without pushing
+            // later same-alignment contents apart or stretching a centered group.
+            if fillsAvailable, let index = views.indices.last, views[index].fillsAvailable {
+                widths[index] += space - desired
+            }
+            return widths
+        }
+        let minimums = views.map(\.minimumWidth)
+        let minimumTotal = minimums.reduce(0, +)
+        if minimumTotal >= space {
+            return minimums.map { max(1, $0 * space / max(1, minimumTotal)) }
+        }
+        // Compact status and method tags keep their intrinsic width. Variable
+        // text shares the remaining width by its desired size, rather than an
+        // equal-width grid that squeezes a URL between short values.
+        let flexible = zip(widths, minimums).map { max(0, $0 - $1) }
+        let flexibleTotal = flexible.reduce(0, +)
+        return zip(minimums, flexible).map { $0 + (space - minimumTotal) * $1 / max(1, flexibleTotal) }
+    }
+
+
+    private static func place(_ items: [RecordLineItem], widths: [CGFloat], x: CGFloat, gap: CGFloat,
+                              result: inout [RecordLinePlacement]) {
+        var x = x
+        for (item, width) in zip(items, widths) {
+            let width = max(1, width)
+            result.append(.init(index: item.index, x: x, width: width))
+            x += width + gap
+        }
+    }
+}
+
+@MainActor
+private final class RecordContentLineView: NSView {
+    var onDeviceAliasChange: (String, String) -> Void = { _, _ in }
+    private var contentViews: [RecordContentView] = []
+    var selected = false {
+        didSet { for view in contentViews { view.selected = selected } }
+    }
+    override var isFlipped: Bool { true }
+
+    func contentHeight(for width: CGFloat) -> CGFloat {
+        let placements = RecordLineLayout.placements(for: contentViews.enumerated().map { $1.layoutItem(index: $0) }, width: width)
+        return placements.map { contentViews[$0.index].contentHeight(for: $0.width) }.max() ?? 0
+    }
+
+    func configure(_ contents: [RequestLogRenderedContent], row: RecordRow, isPreview: Bool) {
+        while contentViews.count > contents.count { contentViews.removeLast().removeFromSuperview() }
+        while contentViews.count < contents.count {
+            let view = RecordContentView()
+            contentViews.append(view); addSubview(view)
+        }
+        for (view, content) in zip(contentViews, contents) {
+            view.onDeviceAliasChange = { [weak self] in self?.onDeviceAliasChange($0, $1) }
+            view.configure(content, row: row, isPreview: isPreview)
+            view.selected = selected
+        }
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        let placements = RecordLineLayout.placements(for: contentViews.enumerated().map { $1.layoutItem(index: $0) }, width: bounds.width)
+        for placement in placements {
+            let view = contentViews[placement.index]
+            let height = view.contentHeight(for: placement.width)
+            let y: CGFloat
+            switch view.verticalAlignment {
+            case .top: y = 0
+            case .center: y = (bounds.height - height) / 2
+            case .bottom: y = bounds.height - height
+            }
+            view.frame = NSRect(x: placement.x, y: y, width: placement.width, height: height)
+        }
+    }
+}
+
+@MainActor
+private final class RecordContentView: NSView {
+    var onDeviceAliasChange: (String, String) -> Void = { _, _ in }
+    private var labels: [NSTextField] = []
+    private var tags: [RequestLogValueTag] = []
+    private let device = DeviceSourceButton(usesGlass: false)
+    private var textColor = NSColor.labelColor
+    private var field = RequestLogContentField.url
+    private var displayLines: [String] = []
+    private var font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+    private var hostFont = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+    private var emphasizesHost = false
+    private var usesTags = false
+    private var measurement: RecordContentMeasurement?
+    private var truncation = NSLineBreakMode.byTruncatingTail
+    var horizontalAlignment = RequestLogHorizontalAlignment.left
+    var verticalAlignment = RequestLogVerticalAlignment.center
+    var selected = false {
+        didSet { updateColors() }
+    }
+    override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        clipsToBounds = true
+        addSubview(device)
+        device.onRename = { [weak self] in self?.onDeviceAliasChange($0, $1) }
+    }
+    required init?(coder: NSCoder) { nil }
+
+    private var displayedViews: [NSView] {
+        if !device.isHidden { return [device] }
+        return usesTags ? tags.map { $0 as NSView } : labels.map { $0 as NSView }
+    }
+    func contentHeight(for width: CGFloat) -> CGFloat { measurement?.height(for: width) ?? 0 }
+    func layoutItem(index: Int) -> RecordLineItem {
+        measurement?.layoutItem(index: index) ?? .init(index: index, horizontalAlignment: horizontalAlignment,
+                                                     desiredWidth: 1, minimumWidth: 1, fillsAvailable: false)
+    }
+
+    func configure(_ content: RequestLogRenderedContent, row: RecordRow, isPreview: Bool) {
+        let configuration = content.configuration
+        let appearance = configuration.appearance
+        measurement = RecordContentMeasurement(content: content, row: row)
+        field = configuration.field
+        horizontalAlignment = configuration.horizontalAlignment
+        verticalAlignment = configuration.verticalAlignment
+        displayLines = content.displayText.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+        let presentation = appearance.presentation.effectivePresentation
+        usesTags = presentation == .roundedRectangleTag || presentation == .capsule
+        emphasizesHost = field == .url && appearance.emphasizesHost
+        let status = content.text.split(whereSeparator: { $0.isWhitespace }).first.flatMap { Int($0) }
+        let isError = (field == .status && status.map { $0 >= 400 } == true)
+            || (field == .detail && row.failure != nil)
+        font = Self.resolvedFont(appearance, field: field, emphasizesError: appearance.emphasizesErrors && isError)
+        hostFont = Self.resolvedFont(appearance, field: field, emphasizesError: false, weightOverride: .semibold)
+        switch appearance.truncation {
+        case .automatic: truncation = field == .url ? .byTruncatingMiddle : .byTruncatingTail
+        case .none: truncation = .byCharWrapping
+        case .middle: truncation = .byTruncatingMiddle
+        case .tail: truncation = .byTruncatingTail
+        }
+        switch field {
+        case .time, .ruleGroup, .rules: textColor = .secondaryLabelColor
+        case .duration:
+            textColor = appearance.highlightsSlowRequests
+                && row.durationSeconds * 1000 > Double(appearance.effectiveSlowThresholdMilliseconds)
+                ? .systemOrange : .secondaryLabelColor
+        case .method: textColor = appearance.usesSemanticColors ? RequestMethodLabel.color(for: content.text) : .labelColor
+        case .status: textColor = appearance.usesSemanticColors ? RequestStatusStyle.color(status) : .labelColor
+        case .detail: textColor = appearance.emphasizesErrors && isError ? .systemRed : .labelColor
+        default: textColor = .labelColor
+        }
+        let title = field.needsName ? field.title + "：" + configuration.displayTitle : field.title
+        let tooltip = title + (field.stages.isEmpty ? "" : " · " + configuration.stage.title) + "\n" + content.text
+        synchronizeLabels(count: usesTags ? 0 : displayLines.count)
+        synchronizeTags(count: usesTags ? displayLines.count : 0)
+        device.isHidden = true
+        if field == .device, row.deviceSource != nil {
+            device.update(source: row.deviceSource, alias: row.deviceAlias)
+            device.title = content.displayText
+            device.font = font
+            device.isEnabled = !isPreview
+            device.isHidden = false
+            device.alignment = textAlignment
+            device.cell?.wraps = appearance.truncation == .none
+            device.cell?.usesSingleLineMode = appearance.truncation != .none
+            device.cell?.lineBreakMode = truncation
+            device.setAccessibilityValue(content.text)
+            for label in labels { label.isHidden = true }
+            for tag in tags { tag.isHidden = true }
+        } else {
+            // Close any alias editor when a reused content slot changes fields.
+            device.update(source: nil, alias: "")
+            for (label, text) in zip(labels, displayLines) {
+                label.isHidden = false
+                label.stringValue = text
+                label.font = font
+                label.alignment = textAlignment
+                label.maximumNumberOfLines = appearance.truncation == .none ? 0 : 1
+                label.cell?.wraps = appearance.truncation == .none
+                label.cell?.usesSingleLineMode = appearance.truncation != .none
+                label.lineBreakMode = truncation
+                label.toolTip = tooltip
+            }
+            for (tag, text) in zip(tags, displayLines) {
+                tag.isHidden = false
+                tag.setPresentation(presentation)
+                tag.title = text
+                tag.font = font
+                tag.alignment = textAlignment
+                tag.cell?.wraps = appearance.truncation == .none
+                tag.cell?.usesSingleLineMode = appearance.truncation != .none
+                tag.cell?.lineBreakMode = truncation
+                tag.toolTip = tooltip
+                tag.setAccessibilityLabel(title)
+                tag.setAccessibilityValue(text)
+            }
+        }
+        toolTip = tooltip
+        setAccessibilityLabel(title)
+        setAccessibilityValue(content.text)
+        updateColors()
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        var y: CGFloat = 0
+        let heights = measurement?.heights(for: bounds.width) ?? []
+        for (view, height) in zip(displayedViews, heights) {
+            view.frame = NSRect(x: 0, y: y, width: bounds.width, height: height)
+            y += height + RecordCell.lineSpacing
+        }
+    }
+
+    private var textAlignment: NSTextAlignment {
+        switch horizontalAlignment {
+        case .left: .left
+        case .center: .center
+        case .right: .right
+        }
+    }
+
+    private func synchronizeLabels(count: Int) {
+        while labels.count > count { labels.removeLast().removeFromSuperview() }
+        while labels.count < count {
+            let label = NSTextField(labelWithString: "")
+            label.maximumNumberOfLines = 1
+            label.cell?.usesSingleLineMode = true
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            labels.append(label); addSubview(label)
+        }
+    }
+
+    private func synchronizeTags(count: Int) {
+        while tags.count > count { tags.removeLast().removeFromSuperview() }
+        while tags.count < count {
+            let tag = RequestLogValueTag()
+            tags.append(tag); addSubview(tag)
+        }
+    }
+
+    private func updateColors() {
+        let color = selected ? NSColor.alternateSelectedControlTextColor : textColor
+        for (label, text) in zip(labels, displayLines) {
+            label.attributedStringValue = attributedText(text, color: color)
+        }
+        for (tag, text) in zip(tags, displayLines) {
+            tag.attributedTitle = attributedText(text, color: color)
+        }
+        if !device.isHidden { device.attributedTitle = attributedText(device.title, color: color) }
+    }
+
+    private func attributedText(_ text: String, color: NSColor) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = textAlignment
+        paragraph.lineBreakMode = truncation
+        let result = NSMutableAttributedString(string: text, attributes: [
+            .font: font, .foregroundColor: color, .paragraphStyle: paragraph
+        ])
+        if emphasizesHost, let range = Self.hostRange(in: text) {
+            result.addAttribute(.font, value: hostFont, range: range)
+        }
+        return result
+    }
+
+    fileprivate static func resolvedFont(_ appearance: RequestLogContentAppearance, field: RequestLogContentField,
+                                     emphasizesError: Bool, weightOverride: NSFont.Weight? = nil) -> NSFont {
+        let weight: NSFont.Weight
+        if let weightOverride { weight = weightOverride }
+        else if emphasizesError { weight = .semibold }
+        else {
+            switch appearance.weight {
+            case .automatic:
+                weight = field == .method || field == .status ? .medium : .regular
+            case .regular: weight = .regular
+            case .medium: weight = .medium
+            case .semibold: weight = .semibold
+            }
+        }
+        switch appearance.font {
+        case .system: return .systemFont(ofSize: NSFont.systemFontSize, weight: weight)
+        case .monospaced: return .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: weight)
+        case .automatic:
+            switch field {
+            case .method: return .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: weight)
+            case .status, .time, .duration: return .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: weight)
+            default: return .systemFont(ofSize: NSFont.systemFontSize, weight: weight)
+            }
+        }
+    }
+
+    /// Locate the host inside a parsed authority, never by a substring search
+    /// that could emphasize a matching hostname in the path or query instead.
+    fileprivate static func hostRange(in text: String) -> NSRange? {
+        guard let address = URLComponents(string: text), let scheme = address.scheme,
+              let host = address.host, !host.isEmpty,
+              let prefix = text.range(of: scheme + "://", options: [.anchored, .caseInsensitive]) else { return nil }
+        let authorityStart = prefix.upperBound
+        let authorityEnd = text[authorityStart...].firstIndex { "/?#".contains($0) } ?? text.endIndex
+        var start = authorityStart
+        if let at = text[start..<authorityEnd].lastIndex(of: "@") { start = text.index(after: at) }
+        guard start < authorityEnd else { return nil }
+        let end: String.Index
+        if text[start] == "[" {
+            guard let bracket = text[start..<authorityEnd].firstIndex(of: "]") else { return nil }
+            end = text.index(after: bracket)
+        } else {
+            end = text[start..<authorityEnd].firstIndex(of: ":") ?? authorityEnd
+        }
+        let displayedHost = String(text[start..<end]).removingPercentEncoding ?? String(text[start..<end])
+        let normalizedHost = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        guard displayedHost.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+            .caseInsensitiveCompare(normalizedHost) == .orderedSame else { return nil }
+        return NSRange(start..<end, in: text)
+    }
+}
+
+/// Native cells are measured without constructing a view hierarchy. The same
+/// measurement and width-allocation data also drives the actual content views.
+@MainActor
+private struct RecordContentMeasurement {
+    private struct Entry {
+        let cell: NSCell
+        let naturalSize: NSSize
+    }
+    private let entries: [Entry]
+    private let configuration: RequestLogLayoutContent
+    private let wraps: Bool
+    private let isDevice: Bool
+
+    init(content: RequestLogRenderedContent, row: RecordRow) {
+        let configuration = content.configuration
+        self.configuration = configuration
+        let appearance = configuration.appearance
+        let wraps = appearance.truncation == .none
+        let isDevice = configuration.field == .device && row.deviceSource != nil
+        self.wraps = wraps; self.isDevice = isDevice
+        let presentation = appearance.presentation.effectivePresentation
+        let status = content.text.split(whereSeparator: { $0.isWhitespace }).first.flatMap { Int($0) }
+        let isError = configuration.field == .status && status.map { $0 >= 400 } == true
+            || configuration.field == .detail && row.failure != nil
+        let font = RecordContentView.resolvedFont(appearance, field: configuration.field,
+                                                 emphasizesError: appearance.emphasizesErrors && isError)
+        let hostFont = RecordContentView.resolvedFont(appearance, field: configuration.field,
+                                                     emphasizesError: false, weightOverride: .semibold)
+        let lines = isDevice ? [content.displayText]
+            : content.displayText.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+        let lineBreak: NSLineBreakMode
+        switch appearance.truncation {
+        case .none: lineBreak = .byCharWrapping
+        case .middle: lineBreak = .byTruncatingMiddle
+        case .tail: lineBreak = .byTruncatingTail
+        case .automatic: lineBreak = configuration.field == .url ? .byTruncatingMiddle : .byTruncatingTail
+        }
+        let alignment: NSTextAlignment
+        switch configuration.horizontalAlignment {
+        case .left: alignment = .left
+        case .center: alignment = .center
+        case .right: alignment = .right
+        }
+        entries = lines.map { text in
+            let cell: NSCell
+            if isDevice || presentation == .capsule || presentation == .roundedRectangleTag {
+                let button = RequestLogValueCell(textCell: text)
+                button.bezelStyle = .accessoryBarAction
+                button.controlSize = isDevice ? .small : .regular
+                cell = button
+            } else {
+                let label = NSTextFieldCell(textCell: text)
+                label.isBordered = false; label.isBezeled = false; label.drawsBackground = false
+                label.isEditable = false; label.isSelectable = false
+                cell = label
+            }
+            cell.font = font; cell.alignment = alignment
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = alignment; paragraph.lineBreakMode = lineBreak
+            let attributed = NSMutableAttributedString(string: text, attributes: [
+                .font: font, .paragraphStyle: paragraph
+            ])
+            if configuration.field == .url, appearance.emphasizesHost,
+               let range = RecordContentView.hostRange(in: text) {
+                attributed.addAttribute(.font, value: hostFont, range: range)
+            }
+            if let button = cell as? NSButtonCell { button.attributedTitle = attributed }
+            else { cell.attributedStringValue = attributed }
+            cell.wraps = false; cell.usesSingleLineMode = true
+            let natural = cell.cellSize
+            cell.wraps = wraps; cell.usesSingleLineMode = !wraps
+            cell.lineBreakMode = lineBreak
+            return Entry(cell: cell, naturalSize: natural)
+        }
+    }
+
+    func layoutItem(index: Int) -> RecordLineItem {
+        let desired = max(1, entries.map { ceil($0.naturalSize.width) }.max() ?? 1)
+        let compact = [.method, .status, .time, .duration].contains(configuration.field)
+        let minimum = wraps ? 1 : min(desired, compact ? desired : configuration.field == .url ? 72 : 40)
+        let presentation = configuration.appearance.presentation.effectivePresentation
+        return .init(index: index, horizontalAlignment: configuration.horizontalAlignment,
+                     desiredWidth: desired, minimumWidth: minimum,
+                     fillsAvailable: !isDevice && presentation == .plainText && (!compact || wraps))
+    }
+
+    func heights(for width: CGFloat) -> [CGFloat] {
+        entries.map { entry in
+            let size = wraps ? entry.cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: max(1, width),
+                                                                     height: .greatestFiniteMagnitude))
+                : entry.naturalSize
+            return max(1, ceil(max(entry.naturalSize.height, size.height)))
+        }
+    }
+
+    func height(for width: CGFloat) -> CGFloat {
+        let heights = heights(for: width)
+        return heights.reduce(0, +) + CGFloat(max(0, heights.count - 1)) * RecordCell.lineSpacing
+    }
+}
+
+/// Adjust title layout and sizing while AppKit continues to render the native bezel.
+@MainActor
+private final class RequestLogValueCell: NSButtonCell {
+    private var measuringNativeSize = false
+
+    private var paddingAdjustment: NSSize {
+        NSSize(width: -4, height: -1)
+    }
+
+    override func drawTitle(_ title: NSAttributedString, withFrame frame: NSRect, in controlView: NSView) -> NSRect {
+        super.drawTitle(title, withFrame: contentBounds(frame), in: controlView)
+    }
+
+    override var cellSize: NSSize {
+        guard !measuringNativeSize else { return super.cellSize }
+        measuringNativeSize = true
+        defer { measuringNativeSize = false }
+        return adjustedSize(super.cellSize)
+    }
+
+    override func cellSize(forBounds rect: NSRect) -> NSSize {
+        guard !measuringNativeSize else { return super.cellSize(forBounds: rect) }
+        let bounds = contentBounds(rect)
+        measuringNativeSize = true
+        defer { measuringNativeSize = false }
+        return adjustedSize(super.cellSize(forBounds: bounds))
+    }
+
+    private func contentBounds(_ rect: NSRect) -> NSRect {
+        let padding = paddingAdjustment
+        // Tiny columns still receive a valid text rectangle.
+        let horizontal = min(padding.width, max(0, rect.width - 1) / 2)
+        let vertical = min(padding.height, max(0, rect.height - 1) / 2)
+        return rect.insetBy(dx: horizontal, dy: vertical)
+    }
+
+    private func adjustedSize(_ size: NSSize) -> NSSize {
+        let padding = paddingAdjustment
+        return NSSize(width: max(1, size.width + padding.width * 2),
+                      height: max(1, size.height + padding.height * 2))
+    }
+}
+
+/// Native tag appearance, with the log table retaining selection and actions.
+@MainActor
+private final class RequestLogValueTag: NSButton {
+    init(presentation: RequestLogContentPresentation = .roundedRectangleTag) {
+        super.init(frame: .zero)
+        cell = RequestLogValueCell(textCell: "")
+        setPresentation(presentation)
+        target = nil; action = nil
+        setAccessibilityRole(.staticText)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+    required init?(coder: NSCoder) { nil }
+    func setPresentation(_ presentation: RequestLogContentPresentation) {
+        let capsule = presentation.effectivePresentation == .capsule
+        // Share native metrics and colors; only the border shape changes.
+        bezelStyle = .accessoryBarAction
+        if #available(macOS 26.0, *) { borderShape = capsule ? .capsule : .roundedRectangle }
+        invalidateIntrinsicContentSize()
+    }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func accessibilityPerformPress() -> Bool { false }
 }
 
 @MainActor
@@ -643,112 +1172,33 @@ enum RequestStatusStyle {
 }
 
 @MainActor
-final class RequestMethodTag: NSView {
-    private static let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
-
-    static let statusFont = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .bold)
-
-    static func requiredWidth(for method: String, font: NSFont = font) -> CGFloat {
-        let cell = NSTextFieldCell(textCell: method)
-        cell.font = font
-        cell.isBordered = false
-        cell.usesSingleLineMode = true
-        cell.alignment = .center
-        cell.lineBreakMode = .byTruncatingTail
-        return ceil(cell.cellSize.width) + 12
-    }
-
-    private let label = NSTextField(labelWithString: "")
-    private var tint = NSColor.systemBlue
-    private var usesNeutralText = false
-    private var isSubdued = false
-    var selected = false {
-        didSet { updateColor() }
-    }
-
+final class RequestMethodLabel: NSTextField {
+    static let methodFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .medium)
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        label.font = Self.font
-        label.alignment = .center
-        label.maximumNumberOfLines = 1
-        label.lineBreakMode = .byTruncatingTail
-        label.cell?.usesSingleLineMode = true
-        addSubview(label)
+        isEditable = false; isSelectable = false; isBezeled = false; isBordered = false; drawsBackground = false
+        font = Self.methodFont
+        maximumNumberOfLines = 1
+        lineBreakMode = .byTruncatingTail
+        cell?.usesSingleLineMode = true
     }
-
     required init?(coder: NSCoder) { return nil }
-
     func setMethod(_ method: String) {
-        usesNeutralText = false
-        isSubdued = false
-        label.font = Self.font
-        label.stringValue = method
+        stringValue = method
+        textColor = Self.color(for: method)
         toolTip = method
-        label.toolTip = method
+        setAccessibilityLabel("请求方法")
+        setAccessibilityValue(method)
+    }
+
+    static func color(for method: String) -> NSColor {
         switch method.uppercased() {
-        case "POST": tint = .systemOrange
-        case "PUT", "PATCH": tint = .systemPurple
-        case "DELETE": tint = .systemRed
-        case "HEAD", "OPTIONS": tint = .secondaryLabelColor
-        default: tint = .systemBlue
+        case "POST": .systemOrange
+        case "PUT", "PATCH": .systemPurple
+        case "DELETE": .systemRed
+        case "HEAD", "OPTIONS": .secondaryLabelColor
+        default: .systemBlue
         }
-        invalidateIntrinsicContentSize()
-        updateColor()
-    }
-
-    func setStatus(_ status: Int?) {
-        setTag(status.map(String.init) ?? "—", tint: RequestStatusStyle.color(status),
-               tooltip: "状态码：" + (status.map(String.init) ?? "—"))
-        label.font = Self.statusFont
-        usesNeutralText = false
-        isSubdued = false
-        invalidateIntrinsicContentSize()
-        updateColor()
-    }
-
-    func setTag(_ value: String, tint: NSColor, tooltip: String) {
-        label.stringValue = value
-        self.tint = tint
-        usesNeutralText = true
-        isSubdued = true
-        label.font = Self.font
-        toolTip = tooltip; label.toolTip = tooltip
-        setAccessibilityLabel(tooltip)
-        invalidateIntrinsicContentSize()
-        updateColor()
-    }
-
-    override var intrinsicContentSize: NSSize {
-        // Match the drawing cell: NSTextField's intrinsic width can omit truncation padding.
-        NSSize(width: Self.requiredWidth(for: label.stringValue, font: label.font ?? Self.font), height: 24)
-    }
-
-    override func layout() {
-        super.layout()
-        let textHeight = min(label.intrinsicContentSize.height, bounds.height)
-        label.frame = NSRect(x: min(6, bounds.width / 2), y: (bounds.height - textHeight) / 2,
-                             width: max(0, bounds.width - 12), height: textHeight)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard bounds.width > 1, bounds.height > 1 else { return }
-        let color: NSColor = selected && !usesNeutralText ? .alternateSelectedControlTextColor : tint
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
-        color.withAlphaComponent(isSubdued ? (selected ? 0.08 : 0.04) : (selected ? 0.18 : 0.10)).setFill()
-        path.fill()
-        color.withAlphaComponent(isSubdued ? (selected ? 0.25 : 0.16) : (selected ? 0.65 : 0.45)).setStroke()
-        path.lineWidth = 1
-        path.stroke()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        updateColor()
-    }
-
-    private func updateColor() {
-        label.textColor = selected ? .alternateSelectedControlTextColor : (usesNeutralText ? .labelColor : tint)
-        needsDisplay = true
     }
 }
 
@@ -759,9 +1209,13 @@ final class DeviceSourceButton: NSButton {
     private var source: String?
     private var alias = ""
     private(set) var popover: NSPopover?
-    init() {
+    init(usesGlass: Bool = true) {
         super.init(frame: .zero)
-        bezelStyle = .inline
+        if !usesGlass { cell = RequestLogValueCell(textCell: "") }
+        if #available(macOS 26.0, *) {
+            bezelStyle = usesGlass ? .glass : .accessoryBarAction
+            borderShape = .capsule
+        } else { bezelStyle = usesGlass ? .badge : .accessoryBarAction }
         controlSize = .small
         alignment = .left
         cell?.lineBreakMode = .byTruncatingTail

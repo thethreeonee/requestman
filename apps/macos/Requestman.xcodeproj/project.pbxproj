@@ -5,6 +5,10 @@
 	};
 	"objectVersion" = "60";
 	"objects" = {
+        "A110010D0000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestLogLayoutEditorViews.swift"; "sourceTree" = "<group>"; };
+        "A110010D0000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A110010D0000000000000001"; };
+        "A110010E0000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestLogContentAppearanceEditor.swift"; "sourceTree" = "<group>"; };
+        "A110010E0000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A110010E0000000000000001"; };
         "A10928D10000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Requests/RequestLogDisplayOptions.swift"; "sourceTree" = "<group>"; };
         "A10928D10000000000000002" = { "isa" = "PBXBuildFile"; "fileRef" = "A10928D10000000000000001"; };
         "A10927F10000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "Requestman/Features/Workspace/NativeInputs.swift"; "sourceTree" = "<group>"; };
@@ -410,6 +414,8 @@
                 "A10A99000000000000000001",
                 "A10927F10000000000000001",
                 "A10928D10000000000000001",
+                "A110010D0000000000000001",
+                "A110010E0000000000000001",
                 "A10926D00000000000000001",
                 "A10926D00000000000000003",
                 "A10A99000000000000000051",
@@ -493,6 +499,8 @@
                 "A10A99000000000000000002",
                 "A10927F10000000000000002",
                 "A10928D10000000000000002",
+                "A110010D0000000000000002",
+                "A110010E0000000000000002",
                 "A10926D00000000000000002",
                 "A10926D00000000000000004",
                 "A10A99000000000000000052",

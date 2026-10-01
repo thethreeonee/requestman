@@ -113,28 +113,14 @@ final class RequestsViewController: ObservedViewController {
     func focusList() { table.focusList() }
     func showFilters() { filters.showFilters() }
     private func showDisplayOptions(relativeTo anchor: NSView) {
-        guard anchor.window != nil else { return }
-        let menu = RequestLogDisplayOptionsMenu.make(options: displayOptions, allowLAN: model.document.proxy.allowLAN,
-            onChange: { [weak self] options in
-                guard let self else { return }
-                displayOptions = options
-                options.save()
-                refresh()
-            }, editColumn: { [weak self] column in
-                // Present the sheet after native menu tracking has ended.
-                Task { @MainActor [weak self] in self?.editExtraColumn(column) }
-            })
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.maxY + 3), in: anchor)
-    }
-    private func editExtraColumn(_ column: RequestLogExtraColumn?) {
-        presentAsSheet(RequestLogExtraColumnEditor(column: column) { [weak self] edited in
+        guard let window = anchor.window, window.attachedSheet == nil else { return }
+        let workflowNames = Dictionary(model.document.projects.flatMap(\.workflows).map { ($0.id, $0.name) },
+                                       uniquingKeysWith: { first, _ in first })
+        presentAsSheet(RequestLogDisplayOptionsEditor(options: displayOptions,
+            allowLAN: model.document.proxy.allowLAN, records: model.history.records,
+            workflowNames: workflowNames, deviceAliases: model.document.deviceAliases) { [weak self] edited in
             guard let self else { return }
-            if let index = displayOptions.extraColumns.firstIndex(where: { $0.id == edited.id }) {
-                displayOptions.extraColumns[index] = edited
-            } else {
-                displayOptions.extraColumns.append(edited)
-            }
-            displayOptions.columnOrder = displayOptions.orderedColumnIDs
+            displayOptions = edited
             displayOptions.save()
             refresh()
         })
@@ -154,7 +140,7 @@ final class RequestsViewController: ObservedViewController {
         replayStatus.toolTip = replayStatus.stringValue
         cancelReplay.isHidden = replay?.connectionState.isActive != true
         filters.update(filter: history.filter, records: history.records, paused: history.paused,
-                       viewingFile: history.isViewingFile, customColumnCount: displayOptions.extraColumns.count,
+                       viewingFile: history.isViewingFile, customColumnCount: displayOptions.explicitLayout == nil ? 0 : displayOptions.layoutColumns.count,
                        savesFilter: history.savesFilter)
         status.stringValue = [history.paused ? "记录已暂停，代理继续工作；手动重放仍记录结果" : "", history.dropped > 0 ? "高负载下已丢弃 \(history.dropped) 条待显示记录" : ""].filter { !$0.isEmpty }.joined(separator: "    ")
         status.isHidden = history.isViewingFile || status.stringValue.isEmpty

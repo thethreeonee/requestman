@@ -83,34 +83,65 @@ public struct RequestLogExtraColumn: Identifiable, Equatable, Codable, Sendable 
     /// nil denotes an unavailable field; an empty string remains a captured empty value.
     public func value(in record: CaptureRecord) -> String? {
         guard validationError == nil else { return nil }
+        return RequestLogFieldSnapshot(record: record).value(field: field, stage: stage, name: trimmedName)
+    }
+}
+
+/// Retain the small field sources needed for layout changes without retaining Body or stream stores.
+struct RequestLogFieldSnapshot: Equatable, Sendable {
+    let requestHeaders: [HTTPField]
+    let sentHeaders: [HTTPField]
+    let receivedHeaders: [HTTPField]
+    let responseHeaders: [HTTPField]
+    let originalStatus: Int?
+    let status: Int?
+    let method: String
+    let sentMethod: String
+    let url: String
+    let finalURL: String
+    let hasSentRequestHeaders: Bool
+    let urlWasTruncated: Bool
+    let finalURLWasTruncated: Bool
+
+    init(record: CaptureRecord) {
+        requestHeaders = record.requestHeaders; sentHeaders = record.sentHeaders
+        receivedHeaders = record.receivedHeaders; responseHeaders = record.responseHeaders
+        originalStatus = record.originalStatus; status = record.status
+        method = record.method; sentMethod = record.sentMethod
+        url = record.url; finalURL = record.finalURL
+        hasSentRequestHeaders = record.hasSentRequestHeaders
+        urlWasTruncated = record.urlWasTruncated; finalURLWasTruncated = record.finalURLWasTruncated
+    }
+
+    func value(field: RequestLogExtraColumn.Field, stage: RequestLogExtraColumn.Stage, name: String) -> String? {
         switch field {
         case .header:
             let fields: [HTTPField]
             switch stage {
-            case .originalRequest: fields = record.requestHeaders
-            case .sentRequest: fields = record.sentHeaders
-            case .originalResponse: fields = record.receivedHeaders
-            case .returnedResponse: fields = record.responseHeaders
+            case .originalRequest: fields = requestHeaders
+            case .sentRequest: fields = sentHeaders
+            case .originalResponse: fields = receivedHeaders
+            case .returnedResponse: fields = responseHeaders
             }
-            let values = fields.filter { $0.name.caseInsensitiveCompare(trimmedName) == .orderedSame }.map(\.value)
+            let values = fields.filter { $0.name.caseInsensitiveCompare(name) == .orderedSame }.map(\.value)
             return values.isEmpty ? nil : values.joined(separator: "\n")
         case .status:
-            return (stage == .originalResponse ? record.originalStatus : record.status).map(String.init)
+            return (stage == .originalResponse ? originalStatus : status).map(String.init)
         case .method:
-            guard stage == .originalRequest || record.hasSentRequestHeaders else { return nil }
-            return stage == .originalRequest ? record.method : record.sentMethod
+            guard stage == .originalRequest || hasSentRequestHeaders else { return nil }
+            return stage == .originalRequest ? method : sentMethod
         case .url, .host, .path, .queryParameter:
-            guard stage == .originalRequest || record.hasSentRequestHeaders else { return nil }
+            guard stage == .originalRequest || hasSentRequestHeaders else { return nil }
             // A truncated URL cannot establish complete query values or even a complete path.
-            guard !(stage == .originalRequest ? record.urlWasTruncated : record.finalURLWasTruncated) else { return nil }
-            let url = stage == .originalRequest ? record.url : record.finalURL
-            if field == .url { return url.isEmpty ? nil : url }
-            guard let address = URLComponents(string: url), address.scheme != nil, address.host != nil else { return nil }
+            guard !(stage == .originalRequest ? urlWasTruncated : finalURLWasTruncated) else { return nil }
+            let addressText = stage == .originalRequest ? url : finalURL
+            if field == .url { return addressText.isEmpty ? nil : addressText }
+            guard let address = URLComponents(string: addressText), address.scheme != nil, address.host != nil else { return nil }
             switch field {
             case .host: return address.host
             case .path: return address.percentEncodedPath.isEmpty ? "/" : address.percentEncodedPath
             case .queryParameter:
-                let values = (address.queryItems ?? []).filter { $0.name == trimmedName }.map { $0.value ?? "" }
+                let values = (address.queryItems ?? []).filter { $0.name == name }.map { $0.value ?? "" }
                 return values.isEmpty ? nil : values.joined(separator: "\n")
             default: return nil
             }
@@ -124,10 +155,38 @@ public struct RequestLogDisplayOptions: Equatable, Sendable {
     public var showsMethod = true
     public var extraColumns: [RequestLogExtraColumn] = []
     public var columnOrder: [String] = []
+    public var explicitLayout: [RequestLogLayoutColumn]?
     public init() {}
 
+    public var layoutColumns: [RequestLogLayoutColumn] {
+        get {
+            guard let explicitLayout else { return migratedLayoutColumns }
+            var seen = Set<String>()
+            let columns = explicitLayout.filter { seen.insert($0.id).inserted }
+            return orderedColumnIDs.compactMap { id in columns.first { $0.id == id } }
+        }
+        set {
+            var seen = Set<String>()
+            explicitLayout = newValue.filter { seen.insert($0.id).inserted }
+            columnOrder = explicitLayout?.map(\.id) ?? []
+        }
+    }
+
     public func isVisible(_ column: RequestLogStandardColumn, allowLAN: Bool) -> Bool {
-        columns.contains(column) && (column != .device || allowLAN)
+        if explicitLayout != nil {
+            let fields: Set<RequestLogContentField> = switch column {
+            case .time: [.time]
+            case .status: [.status]
+            case .request: [.url]
+            case .rules: [.ruleGroup, .rule, .rules]
+            case .device: [.device]
+            case .duration: [.duration]
+            }
+            return (column != .device || allowLAN) && layoutColumns.contains { column in
+                column.lines.contains { $0.contents.contains { fields.contains($0.field) && $0.validationError == nil } }
+            }
+        }
+        return columns.contains(column) && (column != .device || allowLAN)
     }
 
     /// Resolve merged fields to a physical column. Invalid or cyclic references stay standalone.
@@ -146,6 +205,11 @@ public struct RequestLogDisplayOptions: Equatable, Sendable {
     }
 
     public func isColumnVisible(_ id: String, allowLAN: Bool) -> Bool {
+        if let explicitLayout {
+            return explicitLayout.first { $0.id == id }?.lines.contains { line in
+                line.contents.contains { $0.validationError == nil && ($0.field != .device || allowLAN) }
+            } ?? false
+        }
         if id == "status" { return false }
         if id == "request" { return showsMethod || columns.contains(.request) || columns.contains(.status) }
         if let standard = RequestLogStandardColumn(rawValue: id) {
@@ -167,6 +231,7 @@ public struct RequestLogDisplayOptions: Equatable, Sendable {
     }
 
     public func title(forColumnID id: String) -> String {
+        if let explicitLayout { return explicitLayout.first { $0.id == id }?.title ?? id }
         if id == "request" {
             return columns.contains(.request) ? "URL" : columns.contains(.status) ? "状态码" : "请求方法"
         }
@@ -176,6 +241,12 @@ public struct RequestLogDisplayOptions: Equatable, Sendable {
 
     /// Stable identities keep ordering independent of titles, visibility and widths.
     public var orderedColumnIDs: [String] {
+        if let explicitLayout {
+            let ids = explicitLayout.map(\.id)
+            let valid = Set(ids)
+            var seen = Set<String>()
+            return (columnOrder + ids).filter { valid.contains($0) && seen.insert($0).inserted }
+        }
         let extraIDs = extraColumns.map(\.identifier)
         let standardIDs = RequestLogStandardColumn.allCases.map(\.rawValue)
         var fallback = standardIDs
@@ -215,6 +286,16 @@ public struct RequestLogDisplayOptions: Equatable, Sendable {
                                   name: name, isEnabled: preferences["headerEnabled"] as? Bool ?? false)]
         }
         columnOrder = preferences["columnOrder"] as? [String] ?? []
+        if let saved = preferences["layoutColumns"] as? [[String: Any]] {
+            var seen = Set<String>()
+            explicitLayout = saved.compactMap { item in
+                guard JSONSerialization.isValidJSONObject(item),
+                      let data = try? JSONSerialization.data(withJSONObject: item),
+                      let column = try? JSONDecoder().decode(RequestLogLayoutColumn.self, from: data),
+                      seen.insert(column.id).inserted else { return nil }
+                return column
+            }
+        }
         columnOrder = orderedColumnIDs
     }
 
@@ -223,8 +304,15 @@ public struct RequestLogDisplayOptions: Equatable, Sendable {
             guard let data = try? JSONEncoder().encode(column) else { return nil }
             return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         }
-        return ["columns": columns.map(\.rawValue).sorted(), "showsMethod": showsMethod,
-                "extraColumns": extra, "columnOrder": orderedColumnIDs]
+        var result: [String: Any] = ["columns": columns.map(\.rawValue).sorted(), "showsMethod": showsMethod,
+                                     "extraColumns": extra, "columnOrder": orderedColumnIDs]
+        if let explicitLayout {
+            result["layoutColumns"] = explicitLayout.compactMap { column -> [String: Any]? in
+                guard let data = try? JSONEncoder().encode(column) else { return nil }
+                return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            }
+        }
+        return result
     }
     public static func load(from defaults: UserDefaults = .standard) -> Self {
         Self(preferences: defaults.dictionary(forKey: defaultsKey) ?? [:])
