@@ -15,6 +15,8 @@ struct WorkspaceToolbarSnapshot: Equatable {
     let loaded: Bool
     let isCapturing: Bool
     let requestSearch: String
+    let hasRequestFilterCriteria: Bool
+    let requestFilterCount: Int
     let captureTitle: String
     let captureHelp: String
     let canConnectMobile: Bool
@@ -34,6 +36,9 @@ struct WorkspaceToolbarSnapshot: Equatable {
         loaded = model.loaded
         isCapturing = model.isCapturing
         requestSearch = model.history.filter.search
+        hasRequestFilterCriteria = model.history.filter.hasCriteria
+        requestFilterCount = model.history.filter.activeConditionCount
+            + (requestSearch.isEmpty ? 0 : 1) + (model.history.filter.resource == .all ? 0 : 1)
         captureTitle = model.captureButtonTitle
         captureHelp = model.captureButtonHelp
         canToggleCapture = model.loaded && !model.isTransitioning
@@ -46,6 +51,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
     private enum Item {
         static let logs = NSToolbarItem.Identifier("workspace.logs")
         static let environment = NSToolbarItem.Identifier("workspace.environment")
+        static let filters = NSToolbarItem.Identifier("workspace.requestFilters")
         static let search = NSToolbarItem.Identifier("workspace.requestSearch")
         static let mobile = NSToolbarItem.Identifier("workspace.mobileConnection")
         static let capture = NSToolbarItem.Identifier("workspace.capture")
@@ -98,6 +104,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
     private var insertedFullSizeContentView = false
     private let environmentButton = NSButton(title: "", target: nil, action: nil)
     private let requestSearchItem = NSSearchToolbarItem(itemIdentifier: Item.search)
+    private let requestFilterItem = NSToolbarItem(itemIdentifier: Item.filters)
     private let captureButton = NSButton(title: "", target: nil, action: nil)
     private var environmentPopover: NSPopover?
     private weak var environmentPreviousFocus: NSResponder?
@@ -337,6 +344,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         switch item.itemIdentifier {
         case Item.toggleInspector: return canToggleInspector
         case Item.toggleSidebar, Item.logs: return section == .rules
+        case Item.filters: return section == .requests
         case Item.mobile: return state.canConnectMobile
         case Item.inspectorMore: return section == .requests && !inspectorItem.isCollapsed && hasInspectorSelection
         default: return true
@@ -392,7 +400,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         case .openLog: RequestLogTransfer.open(model: model, window: view.window)
         case .recording: model.setRecordingPaused(!model.history.paused)
         case .clear: model.clearHistory()
-        case .filters: mainHost.requests.showFilters()
+        case .filters: toggleRequestFilters(sender)
         case .sidebar: toggleSidebar(sender)
         case .inspector: toggleInspector(sender)
         case .environment: toggleEnvironment(environmentButton)
@@ -452,6 +460,12 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         requestSearchItem.label = "筛选请求日志"
         requestSearchItem.preferredWidthForSearchField = 260
         requestSearchItem.visibilityPriority = .high
+        requestFilterItem.image = NSImage(systemSymbolName: "line.3.horizontal.decrease", accessibilityDescription: nil)
+        requestFilterItem.paletteLabel = "筛选"
+        requestFilterItem.target = self
+        requestFilterItem.action = #selector(toggleRequestFilters(_:))
+        requestFilterItem.isBordered = true
+        requestFilterItem.visibilityPriority = .high
         captureButton.target = self
         captureButton.action = #selector(toggleCapture(_:))
         captureButton.bezelStyle = .automatic
@@ -469,6 +483,23 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         model.history.filter.search = sender.stringValue
     }
 
+    @objc private func toggleRequestFilters(_ sender: Any?) {
+        guard !isTearingDown, state.section == .requests else { return }
+        mainHost.requests.showFilters()
+        updateFilterToolbarItem()
+    }
+
+    private func updateFilterToolbarItem() {
+        let expanded = mainHost.requests.filtersExpanded
+        let criteria = state.hasRequestFilterCriteria ? "\(state.requestFilterCount) 个筛选条件" : "无筛选条件"
+        requestFilterItem.label = (expanded ? "收起筛选" : "展开筛选") + "（" + criteria + "）"
+        requestFilterItem.toolTip = (expanded ? "收起筛选表单" : "展开筛选表单") + "，" + criteria + "（⌘⌥F）"
+        requestFilterItem.isEnabled = state.section == .requests
+        if #available(macOS 26.0, *) {
+            requestFilterItem.style = state.hasRequestFilterCriteria ? .prominent : .plain
+        }
+    }
+
     private func updateControls() {
         if requestSearchItem.searchField.stringValue != state.requestSearch {
             requestSearchItem.searchField.stringValue = state.requestSearch
@@ -482,6 +513,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         captureButton.isEnabled = state.canToggleCapture
         captureButton.image = NSImage(systemSymbolName: state.isCapturing ? "stop.fill" : "play.fill", accessibilityDescription: nil)?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [state.isCapturing ? .systemRed : .systemGreen]))
+        updateFilterToolbarItem()
         updateToggleItems()
     }
 
@@ -491,7 +523,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
             identifiers += [Item.toggleSidebar, Item.environment, .sidebarTrackingSeparator]
         }
         identifiers += [Item.capture, .flexibleSpace]
-        if state.section == .requests { identifiers.append(Item.search) }
+        if state.section == .requests { identifiers += [Item.filters, Item.search] }
         if state.section == .rules {
             identifiers.append(Item.logs)
             // Keep the log action separate when the inspector's tracking separator is absent.
@@ -541,6 +573,7 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         window.titleVisibility = .hidden
         window.toolbarStyle = .unified
         window.toolbar = toolbar
+        if state.section == .requests { mainHost.requests.installFilterFormAccessory(on: window) }
         reconcileToolbarItems()
         updateToggleItems()
     }
@@ -585,13 +618,14 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [Item.toggleSidebar, .sidebarTrackingSeparator, Item.logs, Item.environment,
-         Item.search, Item.capture, Item.mobile, Item.inspectorSeparator, Item.inspectorTitle, Item.inspectorMore, Item.stepEnabled,
+         Item.filters, Item.search, Item.capture, Item.mobile, Item.inspectorSeparator, Item.inspectorTitle, Item.inspectorMore, Item.stepEnabled,
          .space, .flexibleSpace, Item.toggleInspector]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         if identifier == Item.search { return requestSearchItem }
+        if identifier == Item.filters { updateFilterToolbarItem(); return requestFilterItem }
         if identifier == .sidebarTrackingSeparator || identifier == Item.inspectorSeparator {
             return NSTrackingSeparatorToolbarItem(identifier: identifier, splitView: splitView,
                                                   dividerIndex: identifier == .sidebarTrackingSeparator ? 0 : 1)
@@ -769,9 +803,11 @@ final class WorkspaceSplitController: NSSplitViewController, NSToolbarDelegate, 
         toolbar.delegate = nil
         requestSearchItem.searchField.delegate = nil
         requestSearchItem.searchField.target = nil
+        requestFilterItem.target = nil
     }
 
     private func restoreWindow() {
+        mainHost.requests.removeFilterFormAccessory()
         if let window = installedWindow, window.toolbar === toolbar {
             window.toolbar = previousToolbar
             window.titleVisibility = previousTitleVisibility

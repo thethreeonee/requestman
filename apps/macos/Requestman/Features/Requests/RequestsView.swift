@@ -4,6 +4,7 @@ import RequestmanCore
 @MainActor
 final class RequestsViewController: ObservedViewController {
     var minimumContentWidth: CGFloat { filters.minimumContentWidth }
+    var filtersExpanded: Bool { filters.isExpanded }
     private let model: WorkspaceModel
     private let filters = RequestFilterControls()
     private let table = RequestRecordsTable()
@@ -111,6 +112,8 @@ final class RequestsViewController: ObservedViewController {
         }
     }
     func focusList() { table.focusList() }
+    func installFilterFormAccessory(on window: NSWindow) { filters.installFormAccessory(on: window) }
+    func removeFilterFormAccessory() { filters.removeFormAccessory() }
     func showFilters() { filters.showFilters() }
     private func showDisplayOptions(relativeTo anchor: NSView) {
         guard let window = anchor.window, window.attachedSheet == nil else { return }

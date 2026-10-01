@@ -6,35 +6,33 @@ import RequestmanCore
 final class RequestFilterControls: NSView {
     var onFilterChange: (CaptureRecordFilter) -> Void = { _ in }
     var onSaveFilterChange: (Bool) -> Void = { _ in }
-    private var savesFilter = false
     var toggleRecording: () -> Void = {}
     var clear: () -> Void = {}
     var showDisplayOptions: (NSView) -> Void = { _ in }
     private var filter = CaptureRecordFilter()
-    private var records: [CaptureRecord] = []
     private let pause = RequestFilterActionButton(symbol: "pause", label: "暂停记录")
     private let clearButton = RequestFilterActionButton(symbol: "trash", label: "清空")
     private let separator = NSBox()
     private let primary = NSSegmentedControl(labels: CaptureResourceType.allCases.map(\.rawValue), trackingMode: .selectOne, target: nil, action: nil)
-    private let filterButton = RequestFilterActionButton(symbol: "line.3.horizontal.decrease", label: "筛选")
-    private let displayButton = RequestFilterActionButton(symbol: "list.dash", label: "显示选项")
+    private let displayButton = RequestFilterActionButton(symbol: "gauge.with.dots.needle.67percent", label: "显示选项")
     private var customColumnCount = -1
-    private(set) var isExpanded = false
+    var isExpanded: Bool { formAccessory.isExpanded }
     private let toolbar = NSView()
-    private let panelClip = FlippedView()
-    private var revealedHeight: CGFloat = 0
-    private var targetHeight: CGFloat = 0
-    private var transition: Task<Void, Never>?
+    private let formAccessory = RequestFilterFormAccessory()
     private var geometryUpdateScheduled = false
 
     override var isFlipped: Bool { true }
-    private var panel: RequestFilterPanel?
     private let primaryTypes = CaptureResourceType.allCases
     private var heightConstraint: NSLayoutConstraint!
     private var usesSecondRow = false
 
     override init(frame: NSRect) {
         super.init(frame: frame)
+        formAccessory.onFilterChange = { [weak self] value in
+            guard let self else { return }
+            filter = value; onFilterChange(value)
+        }
+        formAccessory.onSaveFilterChange = { [weak self] in self?.onSaveFilterChange($0) }
         pause.handler = { [weak self] in self?.toggleRecording() }
         clearButton.handler = { [weak self] in self?.clear() }
         separator.boxType = .separator
@@ -55,19 +53,15 @@ final class RequestFilterControls: NSView {
             primary.borderShape = .capsule
         }
         if #available(macOS 27.0, *) { primary.role = .tabs }
-        filterButton.handler = { [weak self] in self?.showFilters() }
         displayButton.toolTip = "显示选项"
         displayButton.handler = { [weak self] in
             guard let self else { return }; showDisplayOptions(displayButton)
         }
-        updateFilterButton()
-        for child in [pause, clearButton, separator, primary, displayButton, filterButton] { toolbar.addSubview(child) }
+        for child in [pause, clearButton, separator, primary, displayButton] { toolbar.addSubview(child) }
         addSubview(toolbar)
         translatesAutoresizingMaskIntoConstraints = false
-        heightConstraint = heightAnchor.constraint(equalToConstant: toolbarHeight)
+        heightConstraint = heightAnchor.constraint(equalToConstant: barHeight)
         heightConstraint.isActive = true
-        panelClip.wantsLayer = true; panelClip.layer?.masksToBounds = true
-        addSubview(panelClip); panelClip.isHidden = true
         setAccessibilityLabel("请求日志筛选")
     }
     convenience init() { self.init(frame: .zero) }
@@ -75,12 +69,7 @@ final class RequestFilterControls: NSView {
     private var controlHeight: CGFloat { primary.intrinsicContentSize.height }
     var minimumContentWidth: CGFloat { primary.intrinsicContentSize.width + 20 }
     private var barHeight: CGFloat { usesSecondRow ? controlHeight * 2 + 24 : controlHeight + 16 }
-    private var panelHeight: CGFloat {
-        guard let panel else { return 0 }
-        return min(panel.formHeight, max(0, (window?.contentView?.bounds.height ?? 720) * 0.45))
-    }
-    private var toolbarHeight: CGFloat { barHeight + revealedHeight }
-    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: toolbarHeight) }
+    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: barHeight) }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
@@ -90,24 +79,25 @@ final class RequestFilterControls: NSView {
     private func updateRowPlacement() {
         guard heightConstraint != nil, bounds.width > 0 else { return }
         let width = primary.intrinsicContentSize.width
-        let nextUsesSecondRow = bounds.width < width + controlHeight * 4 + 83
+        let nextUsesSecondRow = bounds.width < width + controlHeight * 3 + 73
         let rowChanged = usesSecondRow != nextUsesSecondRow
         usesSecondRow = nextUsesSecondRow
-        let desiredHeight = isExpanded ? panelHeight : 0
-        guard rowChanged || abs(targetHeight - desiredHeight) > 0.5 else { return }
+        guard rowChanged else { return }
         guard !geometryUpdateScheduled else { return }
         // Defer width-dependent sizing until the current parent layout has finished.
         geometryUpdateScheduled = true
         Task { @MainActor [weak self] in
             guard let self else { return }
             geometryUpdateScheduled = false
-            resizeForm(animated: false)
+            heightConstraint.constant = barHeight
+            invalidateIntrinsicContentSize()
+            needsLayout = true
         }
     }
 
     func update(filter: CaptureRecordFilter, records: [CaptureRecord], paused: Bool, viewingFile: Bool = false,
                 customColumnCount: Int = 0, savesFilter: Bool = false) {
-        self.filter = filter; self.records = records; self.savesFilter = savesFilter
+        self.filter = filter
         pause.image = NSImage(systemSymbolName: paused ? "play" : "pause", accessibilityDescription: nil)
         pause.setAccessibilityLabel(paused ? "继续记录" : "暂停记录")
         pause.toolTip = (paused ? "继续记录" : "暂停记录（代理继续工作）") + "（⌘⇧R）"
@@ -115,9 +105,8 @@ final class RequestFilterControls: NSView {
         clearButton.isEnabled = !viewingFile && !records.isEmpty
         clearButton.toolTip = "清空全部请求日志（⌘K）"
         primary.selectedSegment = primaryTypes.firstIndex(of: filter.resource) ?? -1
-        updateFilterButton()
         updateDisplayButton(customColumnCount: customColumnCount)
-        panel?.update(filter: filter, records: records, savesFilter: savesFilter)
+        formAccessory.update(filter: filter, records: records, savesFilter: savesFilter)
         needsLayout = true
     }
     override func layout() {
@@ -131,34 +120,21 @@ final class RequestFilterControls: NSView {
         clearButton.frame = NSRect(x: 22 + height, y: actionY, width: height, height: height)
         separator.isHidden = usesSecondRow
         separator.frame = NSRect(x: 32 + height * 2, y: 8 + (height - 20) / 2, width: 1, height: 20)
-        filterButton.frame = NSRect(x: bounds.width - 12 - height, y: actionY, width: height, height: height)
-        displayButton.frame = NSRect(x: filterButton.frame.minX - 10 - height, y: actionY, width: height, height: height)
+        displayButton.frame = NSRect(x: bounds.width - 12 - height, y: actionY, width: height, height: height)
         let origin: CGFloat = usesSecondRow ? 10 : 43 + height * 2
         // Keep the native drawing scale so labels and the bezel retain their proportions.
         primary.frame = NSRect(origin: NSPoint(x: origin, y: 8), size: size)
-        panelClip.frame = NSRect(x: 0, y: barHeight, width: bounds.width, height: revealedHeight)
-        if let panel {
-            // Keep the form at its full size; only its viewport reveals or clips it.
-            panel.view.frame = NSRect(x: 0, y: 0, width: bounds.width, height: panelHeight)
-        }
     }
     private func changeResource(_ resource: CaptureResourceType) {
-        filter.resource = resource; updateFilterButton(); onFilterChange(filter)
-    }
-    private func updateFilterButton() {
-        let active = filter.hasCriteria
-        let count = filter.activeConditionCount + (filter.search.isEmpty ? 0 : 1) + (filter.resource == .all ? 0 : 1)
-        filterButton.updateSymbol("line.3.horizontal.decrease",
-                                  activeSymbol: "line.3.horizontal.decrease.circle.fill", active: active)
-        filterButton.setAccessibilityValue((isExpanded ? "已展开，" : "已收起，") + (active ? "\(count) 个筛选条件" : "无筛选条件"))
-        filterButton.toolTip = (active ? "筛选（\(count) 个条件）" : "筛选状态码、URL、域名、请求方法、环境和请求 Header") + "（⌘⌥F）"
+        filter.resource = resource; onFilterChange(filter)
     }
     private func updateDisplayButton(customColumnCount count: Int) {
         guard customColumnCount != count else { return }
         customColumnCount = count
         let active = count > 0
-        // list.dash has no circle.fill variant; use the native circular list symbol when active.
-        displayButton.updateSymbol("list.dash", activeSymbol: "list.bullet.circle.fill", active: active)
+        displayButton.updateSymbol("gauge.with.dots.needle.67percent",
+                                   activeSymbol: "gauge.with.dots.needle.67percent", active: active,
+                                   pointSize: 20)
         displayButton.toolTip = active ? "显示选项（\(count) 列）" : "显示选项"
         displayButton.setAccessibilityValue(active ? "\(count) 列" : "默认列布局")
     }
@@ -166,44 +142,135 @@ final class RequestFilterControls: NSView {
         guard primaryTypes.indices.contains(primary.selectedSegment) else { return }
         changeResource(primaryTypes[primary.selectedSegment])
     }
+    func installFormAccessory(on window: NSWindow) { formAccessory.install(on: window) }
+    func removeFormAccessory() { formAccessory.uninstall() }
     @objc func showFilters() {
-        window?.makeFirstResponder(nil)
+        if let window { formAccessory.install(on: window) }
+        formAccessory.toggle()
+    }
+}
+
+@MainActor
+private final class RequestFilterFormAccessory: NSTitlebarAccessoryViewController {
+    var onFilterChange: (CaptureRecordFilter) -> Void = { _ in }
+    var onSaveFilterChange: (Bool) -> Void = { _ in }
+    private var filter = CaptureRecordFilter()
+    private var records: [CaptureRecord] = []
+    private var savesFilter = false
+    private var panel: RequestFilterPanel?
+    private(set) var isExpanded = false
+    private var revealedHeight: CGFloat = 0
+    private var targetHeight: CGFloat = 0
+    private var transition: Task<Void, Never>?
+    private var geometryUpdateScheduled = false
+    private weak var installedWindow: NSWindow?
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        layoutAttribute = .bottom
+        automaticallyAdjustsSize = false
+        if #available(macOS 26.1, *) { preferredScrollEdgeEffectStyle = .soft }
+    }
+    required init?(coder: NSCoder) { nil }
+    deinit { transition?.cancel(); NotificationCenter.default.removeObserver(self) }
+
+    override func loadView() {
+        let clip = RequestFilterFormView(frame: .zero)
+        clip.wantsLayer = true; clip.layer?.masksToBounds = true
+        clip.isHidden = true
+        clip.setAccessibilityLabel("筛选配置")
+        clip.onWidthChange = { [weak self] in self?.scheduleGeometryUpdate() }
+        view = clip
+    }
+
+    func install(on window: NSWindow) {
+        guard installedWindow !== window else { return }
+        uninstall()
+        installedWindow = window
+        view.setFrameSize(NSSize(width: window.contentView?.bounds.width ?? 600, height: revealedHeight))
+        window.addTitlebarAccessoryViewController(self)
+        NotificationCenter.default.addObserver(self, selector: #selector(windowDidResize(_:)),
+                                               name: NSWindow.didResizeNotification, object: window)
+        resizeForm(animated: false)
+        applyRevealedHeight(isExpanded ? panelHeight : 0)
+    }
+
+    func uninstall() {
+        transition?.cancel(); transition = nil
+        guard let window = installedWindow else { return }
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didResizeNotification, object: window)
+        targetHeight = isExpanded ? panelHeight : 0
+        applyRevealedHeight(targetHeight)
+        installedWindow = nil
+        if let index = window.titlebarAccessoryViewControllers.firstIndex(where: { $0 === self }) {
+            window.removeTitlebarAccessoryViewController(at: index)
+        }
+    }
+
+    func update(filter: CaptureRecordFilter, records: [CaptureRecord], savesFilter: Bool) {
+        self.filter = filter; self.records = records; self.savesFilter = savesFilter
+        panel?.update(filter: filter, records: records, savesFilter: savesFilter)
+    }
+
+    func toggle() {
+        installedWindow?.makeFirstResponder(nil)
         if panel == nil {
             let panel = RequestFilterPanel(filter: filter, records: records) { [weak self] value in
-                guard let self else { return }
-                filter = value
-                updateFilterButton()
+                guard let self else { return }; filter = value
                 onFilterChange(value)
             }
-            panel.onSaveFilterChange = { [weak self] in self?.onSaveFilterChange($0) }
+            panel.onSaveFilterChange = { [weak self] value in
+                guard let self else { return }; savesFilter = value
+                onSaveFilterChange(value)
+            }
             panel.update(filter: filter, records: records, savesFilter: savesFilter)
             self.panel = panel
-            panelClip.addSubview(panel.view)
+            view.addSubview(panel.view)
+            (view as? RequestFilterFormView)?.content = panel.view
             panel.onHeightChange = { [weak self] in self?.resizeForm(animated: false) }
         }
         isExpanded.toggle()
-        panelClip.isHidden = false
-        updateFilterButton()
+        view.isHidden = false
         resizeForm(animated: true)
     }
+
+    private var panelHeight: CGFloat {
+        guard let panel else { return 0 }
+        return min(panel.formHeight, max(0, (installedWindow?.contentView?.bounds.height ?? 720) * 0.45))
+    }
+
+    private func scheduleGeometryUpdate() {
+        guard !geometryUpdateScheduled else { return }
+        geometryUpdateScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            geometryUpdateScheduled = false
+            guard installedWindow != nil else { return }
+            resizeForm(animated: false)
+        }
+    }
+
+    @objc private func windowDidResize(_ notification: Notification) { scheduleGeometryUpdate() }
+
     private func resizeForm(animated: Bool) {
+        (view as? RequestFilterFormView)?.contentHeight = panelHeight
+        view.needsLayout = true
+        view.layoutSubtreeIfNeeded()
         let destination = isExpanded ? panelHeight : 0
         // Log refreshes must not interrupt an in-flight transition to the same height.
         if abs(targetHeight - destination) < 0.5, transition != nil { return }
-        if transition == nil, abs(revealedHeight - destination) < 0.5,
-           abs(heightConstraint.constant - toolbarHeight) < 0.5 { return }
+        if transition == nil, abs(revealedHeight - destination) < 0.5 { return }
         transition?.cancel()
         transition = nil
         targetHeight = destination
         let startHeight = revealedHeight
-        guard animated, window != nil,
+        guard animated, installedWindow != nil,
               !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
               abs(startHeight - destination) > 0.5 else {
             applyRevealedHeight(destination)
             return
         }
-        // Animate only the reveal height. An implicit animation on the accessory's
-        // ancestor also animates native toolbar geometry and scroll-edge insets.
+        // Animate the accessory viewport height; AppKit owns the titlebar and its insets.
         let startTime = CACurrentMediaTime()
         transition = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -226,23 +293,31 @@ final class RequestFilterControls: NSView {
             context.duration = 0
             context.allowsImplicitAnimation = false
             revealedHeight = height
-            panelClip.isHidden = height == 0
-            heightConstraint.constant = toolbarHeight
-            invalidateIntrinsicContentSize()
-            needsLayout = true
-            (window?.contentView ?? superview)?.layoutSubtreeIfNeeded()
+            view.isHidden = height == 0
+            view.setFrameSize(NSSize(width: view.frame.width, height: height))
+            fullScreenMinHeight = height
+            view.needsLayout = true
+            view.layoutSubtreeIfNeeded()
+            installedWindow?.contentView?.layoutSubtreeIfNeeded()
         }
         CATransaction.commit()
     }
+}
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        if window == nil {
-            transition?.cancel()
-            transition = nil
-            targetHeight = isExpanded ? panelHeight : 0
-            applyRevealedHeight(targetHeight)
-        }
+@MainActor
+private final class RequestFilterFormView: NSView {
+    var onWidthChange: () -> Void = {}
+    weak var content: NSView?
+    var contentHeight: CGFloat = 0
+    override var isFlipped: Bool { true }
+    override func setFrameSize(_ newSize: NSSize) {
+        let widthChanged = abs(frame.width - newSize.width) > 0.5
+        super.setFrameSize(newSize)
+        if widthChanged { onWidthChange() }
+    }
+    override func layout() {
+        super.layout()
+        content?.frame = NSRect(x: 0, y: 0, width: bounds.width, height: contentHeight)
     }
 }
 
@@ -258,10 +333,10 @@ private final class RequestFilterActionButton: NSButton {
         target = self; action = #selector(performAction(_:))
     }
     required init?(coder: NSCoder) { nil }
-    func updateSymbol(_ symbol: String, activeSymbol: String, active: Bool) {
+    func updateSymbol(_ symbol: String, activeSymbol: String, active: Bool, pointSize: CGFloat? = nil) {
         // Color only the SF Symbol's disc, leaving the native glass bezel untouched.
         // At 28 pt the circular symbol fits the 36 pt bezel and renders centered.
-        let configuration = NSImage.SymbolConfiguration(pointSize: active ? 28 : 16, weight: .semibold)
+        let configuration = NSImage.SymbolConfiguration(pointSize: pointSize ?? (active ? 28 : 16), weight: .semibold)
             .applying(NSImage.SymbolConfiguration(paletteColors: active ? [.white, .systemBlue] : [.labelColor]))
         image = NSImage(systemSymbolName: active ? activeSymbol : symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(configuration)
