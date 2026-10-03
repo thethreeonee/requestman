@@ -232,11 +232,18 @@ public struct ModificationStep: Codable, Equatable, Identifiable, Sendable {
         set { headers = newValue }
     }
     public var scriptOptions: ScriptOptions?
+    /// Archives without options keep the original one-second script limit.
+    public var effectiveScriptOptions: ScriptOptions {
+        if let scriptOptions { return scriptOptions }
+        var legacy = ScriptOptions(); legacy.timeoutMilliseconds = 1000
+        return legacy
+    }
     public init(kind: ModificationKind) {
         self.kind = kind
         if kind == .redirect { status = 302 }
         if kind == .mock { value = "{\n  \"ok\": true\n}" }
         if kind == .delay { value = "1000" }
+        if kind == .script { scriptOptions = ScriptOptions() }
         if kind == .modifyJSON { jsonEdits = [JSONEditEntry()] }
     }
 }

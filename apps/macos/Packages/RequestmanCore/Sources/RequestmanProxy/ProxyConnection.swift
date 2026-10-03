@@ -140,6 +140,9 @@ final class ProxyConnection: ChannelInboundHandler, RemovableChannelHandler, @un
         // A header can span multiple socket reads before the decoder emits its head.
         if record == nil { context.read(); return }
         if scriptRequestHead != nil { context.read(); return }
+        // Darwin cannot reliably report FIN independently of read readiness. A suspended
+        // flow must keep observing the client after the complete request has arrived.
+        if requestEnded, suspendedFlowControl != nil { context.read(); return }
         guard connected else { return }
         flushRequest()
     }

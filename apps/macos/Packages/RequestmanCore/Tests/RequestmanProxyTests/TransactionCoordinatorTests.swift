@@ -4,6 +4,14 @@ import RequestmanCore
 @testable import RequestmanProxy
 
 struct TransactionCoordinatorTests {
+    @Test func previewDoesNotLinkAuxiliaryTrafficToASampleParentRecord() {
+        let id = UUID(), request = HTTPMessageDraft(method: "GET", url: "http://example.test/")
+        let live = TransactionContext(id: id, date: Date(), originalRequest: request, match: nil)
+        let preview = TransactionContext(id: id, date: Date(), originalRequest: request, match: nil, isPreview: true)
+        #expect(live.executionContext(for: .request).transactionID == id)
+        #expect(preview.executionContext(for: .request).transactionID == nil)
+    }
+
     @Test func configurationAndTemplatesStayFrozenAcrossPhasesAndRefreshForNextTransaction() throws {
         var document = workspace()
         var environment = WorkspaceEnvironment(name: "first")

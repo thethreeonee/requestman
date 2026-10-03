@@ -26,15 +26,19 @@ final class ProxySharedState: Sendable {
     let document = OSAllocatedUnfairLock(initialState: WorkspaceDocument())
     private struct Connections {
         var accepting = true
+        var sessionID = UUID()
         var downstream: [ObjectIdentifier: Channel] = [:]
         var upstream: [ObjectIdentifier: Channel] = [:]
     }
     private let connections = OSAllocatedUnfairLock(initialState: Connections())
     var isStopping: Bool { connections.withLock { !$0.accepting } }
-    func prepareForStart() { connections.withLock { $0.accepting = true } }
+    var sessionID: UUID { connections.withLock { $0.sessionID } }
+    func acceptsSession(_ id: UUID) -> Bool { connections.withLock { $0.accepting && $0.sessionID == id } }
+    func prepareForStart() { connections.withLock { $0.accepting = true; $0.sessionID = UUID() } }
     func beginShutdown() -> [Channel] {
         connections.withLock {
             $0.accepting = false
+            $0.sessionID = UUID()
             // Downstream cancellation records incomplete transactions before upstream teardown.
             return Array($0.downstream.values) + Array($0.upstream.values)
         }

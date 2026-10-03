@@ -39,6 +39,11 @@ public struct CaptureRecord: Identifiable, Sendable, Codable {
     public var replayID: UUID?
     public var replaySourceID: UUID?
     public var replayCancelled = false
+    public var auxiliaryParentID: UUID?
+    public var auxiliaryStepID: UUID?
+    public var auxiliaryCallID: UUID?
+    public var auxiliaryExecutionID: UUID?
+    public var isAuxiliary: Bool { auxiliaryCallID != nil }
     public var replaySummary: String? {
         guard replayID != nil else { return nil }
         if replayCancelled { return "重放已取消" }
@@ -98,6 +103,7 @@ public struct CaptureRecord: Identifiable, Sendable, Codable {
     // Stream stores are archived separately; coding covers only immutable message/trace metadata.
     private enum CodingKeys: String, CodingKey {
         case id, archivedAt, replayID, replaySourceID, replayCancelled
+        case auxiliaryParentID, auxiliaryStepID, auxiliaryCallID, auxiliaryExecutionID
         case captureProtocol, connectionState, revision, closeReason, startedAt
         case method, url, finalURL, sentMethod, project, workflow, environment, deviceSource, outcome
         case matchedWorkflowID, matchedRules, executionTrace, hasSentRequestHeaders

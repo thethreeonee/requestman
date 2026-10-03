@@ -4,11 +4,11 @@ import JavaScriptCore
 import os
 
 public struct ScriptOptions: Codable, Equatable, Sendable {
-    public var timeoutMilliseconds = 1000
+    public var timeoutMilliseconds = 10000
     public init() {}
 }
 
-/// Serializable values only: no native object, file, network or process API is exported to JavaScript.
+/// Serializable message values; fetch uses a separate host RPC and never exports native objects.
 public struct ScriptMessage: Codable, Sendable {
     public var method: String?
     public var url: String?
@@ -33,77 +33,65 @@ public struct ScriptMessage: Codable, Sendable {
 
 }
 
-private struct ScriptInput: Codable {
-    let source: String
-    let request: ScriptMessage
-    let response: ScriptMessage?
-    let env: [String: String]
-    let environmentTypes: [String: EnvironmentValueType]
-}
-
-private struct ScriptOutput: Codable {
-    let message: ScriptMessage?
-    let error: String?
-}
-
 private final class ScriptBundleAnchor: NSObject {}
 
 public enum WorkflowScript {
-    private static let slots = DispatchSemaphore(value: 4)
     public static let workerArgument = "--requestman-script-worker"
 
-    /// Synchronous by design; callers execute on a bounded background queue, never on the UI/NIO loop.
+    /// Compatibility boundary for callers already running on a dedicated background thread.
+    /// Production capture and preview use runAsync; no Swift cooperative executor waits on a pipe.
     public static func run(source: String, draft: HTTPMessageDraft, response: Bool,
-                           request: HTTPMessageDraft?, environment: [String: String], timeoutMilliseconds: Int, control: ScriptExecutionControl? = nil,
+                           request: HTTPMessageDraft?, environment: [String: String], timeoutMilliseconds: Int,
+                           control: ScriptExecutionControl? = nil,
                            environmentTypes: [String: EnvironmentValueType] = [:]) throws -> HTTPMessageDraft {
+        let input = try input(source: source, draft: draft, response: response, request: request,
+            environment: environment, environmentTypes: environmentTypes, timeout: timeoutMilliseconds)
+        let completion = SynchronousScriptResult()
+        let session = ScriptWorkerSession(executable: try workerExecutable(), script: input, timeout: timeoutMilliseconds,
+            control: control ?? ScriptExecutionControl(), client: nil, parentID: nil, stepID: nil,
+            completion: { completion.finish($0) })
+        session.start()
+        let result = try completion.wait()
+        return try output(result, draft: draft, response: response)
+    }
+
+    public static func runAsync(source: String, draft: HTTPMessageDraft, response: Bool,
+                                request: HTTPMessageDraft?, environment: [String: String], timeoutMilliseconds: Int,
+                                control: ScriptExecutionControl? = nil,
+                                environmentTypes: [String: EnvironmentValueType] = [:],
+                                httpClient: (any ScriptHTTPClient)? = nil,
+                                parentTransactionID: UUID? = nil, stepID: UUID? = nil) async throws -> HTTPMessageDraft {
+        let input = try input(source: source, draft: draft, response: response, request: request,
+            environment: environment, environmentTypes: environmentTypes, timeout: timeoutMilliseconds)
+        let executable = try workerExecutable(), control = control ?? ScriptExecutionControl()
+        let result: ScriptOutput = try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                let session = ScriptWorkerSession(executable: executable, script: input, timeout: timeoutMilliseconds,
+                    control: control, client: httpClient, parentID: parentTransactionID, stepID: stepID,
+                    completion: { continuation.resume(with: $0) })
+                session.start()
+            }
+        } onCancel: { control.cancel() }
+        try Task.checkCancellation(); try control.check()
+        return try output(result, draft: draft, response: response)
+    }
+
+    private static func input(source: String, draft: HTTPMessageDraft, response: Bool, request: HTTPMessageDraft?,
+                              environment: [String: String], environmentTypes: [String: EnvironmentValueType],
+                              timeout: Int) throws -> ScriptInput {
         guard !source.isEmpty else { throw WorkflowError.invalid("脚本不能为空") }
-        try control?.check()
-        guard (50...5000).contains(timeoutMilliseconds) else { throw WorkflowError.invalid("脚本超时需在 50–5000 ms 之间") }
-        guard slots.wait(timeout: .now()) == .success else { throw WorkflowError.invalid("脚本执行已满，请稍后重试") }
-        defer { slots.signal() }
+        guard (50...60000).contains(timeout) else { throw WorkflowError.invalid("脚本超时需在 50–60000 ms 之间") }
         for (name, value) in environment {
             guard (environmentTypes[name] ?? .string).accepts(value) else {
                 throw WorkflowError.invalid("环境变量 \(name) 的值与数据类型不符")
             }
         }
-        let input = ScriptInput(source: source, request: ScriptMessage(request ?? draft, response: false),
-                                response: response ? ScriptMessage(draft, response: true) : nil, env: environment, environmentTypes: environmentTypes)
-        let data = try JSONEncoder().encode(input)
-        let process = Process()
-        process.executableURL = try workerExecutable()
-        process.arguments = [workerArgument]
-        let stdin = Pipe(), stdout = Pipe()
-        process.standardInput = stdin; process.standardOutput = stdout; process.standardError = FileHandle.nullDevice
-        let completed = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in completed.signal() }
-        try process.run()
-        _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
-        defer {
-            if process.isRunning { kill(process.processIdentifier, SIGKILL); completed.wait() }
-        }
-        let deadline = DispatchWorkItem { if process.isRunning { kill(process.processIdentifier, SIGKILL) } }
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + .milliseconds(timeoutMilliseconds), execute: deadline)
-        let cancellation = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated))
-        cancellation.schedule(deadline: .now(), repeating: .milliseconds(25))
-        cancellation.setEventHandler {
-            if control?.isCancelled == true, process.isRunning { kill(process.processIdentifier, SIGKILL) }
-        }
-        cancellation.resume()
-        defer { deadline.cancel(); cancellation.cancel(); try? stdout.fileHandleForReading.close() }
-        DispatchQueue.global(qos: .userInitiated).async {
-            try? stdin.fileHandleForWriting.write(contentsOf: data)
-            try? stdin.fileHandleForWriting.close()
-        }
-        var output = Data()
-        while let chunk = try stdout.fileHandleForReading.read(upToCount: 16_384), !chunk.isEmpty {
-            output.append(chunk)
-        }
-        completed.wait()
-        try control?.check()
-        guard process.terminationReason == .exit, process.terminationStatus == 0 else {
-            throw WorkflowError.invalid("脚本超时或执行进程已终止")
-        }
-        let result = try JSONDecoder().decode(ScriptOutput.self, from: output)
+        return ScriptInput(source: source, request: ScriptMessage(request ?? draft, response: false),
+            response: response ? ScriptMessage(draft, response: true) : nil, env: environment, environmentTypes: environmentTypes)
+    }
+
+    private static func output(_ result: ScriptOutput, draft: HTTPMessageDraft, response: Bool) throws -> HTTPMessageDraft {
         if let error = result.error { throw WorkflowError.invalid(error) }
         guard let message = result.message else { throw WorkflowError.invalid("脚本必须返回当前阶段的 request 或 response 对象") }
         return try validated(message, original: draft, response: response)
@@ -124,70 +112,20 @@ public enum WorkflowScript {
         throw WorkflowError.invalid("找不到脚本执行进程")
     }
 
-    /// Called before constructing the App. Each invocation handles exactly one script and exits.
+    /// Called before constructing NSApplication. One worker owns one VM until the final Promise settles.
     public static func runWorkerIfRequested() -> Bool {
         guard CommandLine.arguments.contains(workerArgument) else { return false }
-        let result: ScriptOutput
         do {
-            let data = try FileHandle.standardInput.read(upToCount: 16_384) ?? Data()
-            // Drain every chunk: a pipe read may return only part of the JSON message.
-            var inputData = data
-            while let chunk = try FileHandle.standardInput.read(upToCount: 16_384), !chunk.isEmpty {
-                inputData.append(chunk)
+            guard let message = try ScriptIPC.read(from: .standardInput), message.kind == "run", let data = message.data else {
+                throw WorkflowError.invalid("缺少脚本运行输入")
             }
-            let input = try JSONDecoder().decode(ScriptInput.self, from: inputData)
-            result = try evaluate(input)
-        } catch { result = ScriptOutput(message: nil, error: error.localizedDescription) }
-        if let output = try? JSONEncoder().encode(result) { try? FileHandle.standardOutput.write(contentsOf: output) }
+            try ScriptWorker().run(JSONDecoder().decode(ScriptInput.self, from: data))
+        } catch {
+            if let data = try? JSONEncoder().encode(ScriptOutput(message: nil, error: error.localizedDescription)) {
+                try? ScriptIPC.write(.init(kind: "complete", data: data), to: .standardOutput)
+            }
+        }
         return true
-    }
-
-    private static func evaluate(_ input: ScriptInput) throws -> ScriptOutput {
-        guard let context = JSContext() else { throw WorkflowError.invalid("无法创建 JavaScript 环境") }
-        let payload = try JSONSerialization.jsonObject(with: JSONEncoder().encode(input))
-        context.setObject(payload, forKeyedSubscript: "__input" as NSString)
-        // JSON serialization stays inside the disposable process: hostile getters/toJSON cannot hang the host.
-        let wrapper = #"""
-        (() => {
-            const { source, request, response = null, env: rawEnv, environmentTypes } = __input;
-            const env = Object.fromEntries(Object.entries(rawEnv).map(([name, value]) =>
-                [name, !environmentTypes[name] || environmentTypes[name] === 'string' ? value : JSON.parse(value)]));
-            delete globalThis.__input;
-            request.body ??= null;
-            if (response) response.body ??= null;
-            const freeze = value => {
-                if (value && typeof value === 'object') {
-                    Object.values(value).forEach(freeze); Object.freeze(value);
-                }
-                return value;
-            };
-            freeze(env);
-            if (response) freeze(request);
-            const result = new Function('request', 'response', 'env', '"use strict";\n' + source)(request, response, env);
-            if (!result || typeof result !== 'object' || typeof result.then === 'function')
-                throw new Error('请同步返回当前阶段的 request 或 response 对象；不支持 Promise');
-            if (!Array.isArray(result.headers))
-                throw new Error('headers 必须是 { name, value } 数组');
-            if (result.body !== null && typeof result.body !== 'string')
-                throw new Error('body 必须是 UTF-8 文本字符串或 null');
-            for (const header of result.headers) {
-                if (!header || typeof header.name !== 'string' || typeof header.value !== 'string')
-                    throw new Error('每个 Header 必须包含字符串 name 和 value');
-            }
-            if (response) {
-                if (!Number.isInteger(result.status)) throw new Error('response.status 必须是整数');
-            } else if (typeof result.method !== 'string' || typeof result.url !== 'string') {
-                throw new Error('request.method 和 request.url 必须是字符串');
-            }
-            return JSON.stringify(response
-                ? { status: result.status, headers: result.headers, body: result.body }
-                : { method: result.method, url: result.url, headers: result.headers, body: result.body });
-        })()
-        """#
-        let value = context.evaluateScript(wrapper)
-        if let exception = context.exception { return ScriptOutput(message: nil, error: exception.toString()) }
-        guard let text = value?.toString() else { throw WorkflowError.invalid("脚本返回值无效") }
-        return ScriptOutput(message: try JSONDecoder().decode(ScriptMessage.self, from: Data(text.utf8)), error: nil)
     }
 
     private static func validated(_ message: ScriptMessage, original: HTTPMessageDraft, response: Bool) throws -> HTTPMessageDraft {
@@ -225,11 +163,40 @@ public enum WorkflowScript {
     }
 }
 
-/// Cancellation follows the worker even after the socket closes. Each script has its own timeout.
+/// Cancellation callbacks are invoked once, outside the state lock, including late registration.
 public final class ScriptExecutionControl: Sendable {
-    private let cancelled = OSAllocatedUnfairLock(initialState: false)
+    private struct State: Sendable {
+        var cancelled = false
+        var handlers: [UUID: @Sendable () -> Void] = [:]
+    }
+    private let state = OSAllocatedUnfairLock(initialState: State())
     public init() {}
-    public var isCancelled: Bool { cancelled.withLock { $0 } }
-    public func cancel() { cancelled.withLock { $0 = true } }
+    public var isCancelled: Bool { state.withLock { $0.cancelled } }
+    public func cancel() {
+        let callbacks = state.withLock { value -> [@Sendable () -> Void] in
+            guard !value.cancelled else { return [] }
+            value.cancelled = true
+            let callbacks = Array(value.handlers.values); value.handlers.removeAll()
+            return callbacks
+        }
+        for callback in callbacks { callback() }
+    }
+    @discardableResult public func addCancellationHandler(_ handler: @escaping @Sendable () -> Void) -> UUID {
+        let id = UUID()
+        let invoke = state.withLock { value in
+            if value.cancelled { return true }
+            value.handlers[id] = handler; return false
+        }
+        if invoke { handler() }
+        return id
+    }
+    public func removeCancellationHandler(_ id: UUID) { _ = state.withLock { $0.handlers.removeValue(forKey: id) } }
     public func check() throws { if isCancelled { throw WorkflowError.invalid("流程已取消") } }
+}
+
+private final class SynchronousScriptResult: Sendable {
+    private let value = OSAllocatedUnfairLock<Result<ScriptOutput, any Error>?>(initialState: nil)
+    private let completed = DispatchSemaphore(value: 0)
+    func finish(_ result: Result<ScriptOutput, any Error>) { value.withLock { $0 = result }; completed.signal() }
+    func wait() throws -> ScriptOutput { completed.wait(); return try value.withLock { try $0!.get() } }
 }

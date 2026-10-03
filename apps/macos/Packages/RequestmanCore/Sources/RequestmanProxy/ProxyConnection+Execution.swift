@@ -38,6 +38,7 @@ extension ProxyConnection {
         let lease = scriptLease
         let control = transaction.context.control
         suspendedFlowControl = control
+        if requestEnded { client.read() }
         var requestSnapshot = request
         if isResponse, requestSnapshot?.bodyText == nil, let requestBodyCollector, requestEnded {
             let body = requestBodyCollector.snapshot(isComplete: true)

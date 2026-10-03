@@ -138,7 +138,10 @@ import RequestmanEditor
         let content: NSView
         var bodySizingConstraints: [NSLayoutConstraint] = []
         if selected.kind == .script {
-            let controller = ScriptEditorViewController(step: selected, response: model.editingResponse, environment: model.document.environment?.values ?? [:], environmentTypes: model.document.environment?.valueTypes ?? [:]) { [weak self] step in self?.replace(step) }
+            let service = model.captureService
+            let controller = ScriptEditorViewController(step: selected, response: model.editingResponse,
+                environment: model.document.environment?.values ?? [:], environmentTypes: model.document.environment?.valueTypes ?? [:],
+                httpClientFactory: { try await service.makeScriptHTTPClient() }) { [weak self] step in self?.replace(step) }
             controller.isPresented = isPresented; addChild(controller); script = controller; content = controller.view
         } else {
             let fields = NativeUI.stack([], spacing: 14)

@@ -39,7 +39,9 @@ import RequestmanCore
         lanes.alignment = .top; lanes.distribution = .fillEqually
         let preview = ActionButton(title: "预览流程") { [weak self] in
             guard let self, let workflow = model.workflow else { return }
-            presentAsSheet(WorkflowPreviewViewController(workflow: workflow, environment: model.document.environment))
+            let service = model.captureService
+            presentAsSheet(WorkflowPreviewViewController(workflow: workflow, environment: model.document.environment,
+                httpClientFactory: { try await service.makeScriptHTTPClient() }))
         }
         MatchingControls.glass(preview)
         preview.controlSize = .large

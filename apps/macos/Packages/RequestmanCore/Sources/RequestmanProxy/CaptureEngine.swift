@@ -26,6 +26,10 @@ public final class CaptureEngine: CaptureService {
     public var captureEvents: CaptureEventBuffer? { server.events }
     public var recordBuffer: CaptureRecordBuffer? { server.records }
     public var ruleHitNotificationBuffer: RuleHitNotificationBuffer? { server.ruleHitNotifications }
+    public func makeScriptHTTPClient() async throws -> any ScriptHTTPClient {
+        guard state == .running else { throw WorkflowError.invalid("请先启动捕获，再进行脚本真实联调") }
+        return try await server.makeScriptHTTPClient()
+    }
 
     public func checkUpstream(_ endpoint: ProxyEndpoint) async throws {
         try await UpstreamProxyProbe.check(endpoint)
@@ -157,6 +161,7 @@ protocol LocalProxyServing: Sendable {
     func updateConfiguration(_ configuration: ExplicitProxyConfiguration) async throws
     func replay(_ request: RequestReplayDraft) async throws
     func cancelReplay(_ id: UUID) async
+    func makeScriptHTTPClient() async throws -> any ScriptHTTPClient
     func stop() async
 }
 
@@ -169,6 +174,9 @@ extension LocalProxyServer: LocalProxyServing {}
 extension SystemProxyController: SystemProxyManaging {}
 
 extension LocalProxyServing {
+    func makeScriptHTTPClient() async throws -> any ScriptHTTPClient {
+        throw WorkflowError.invalid("此代理不支持脚本真实联调")
+    }
     func cancelReplay(_ id: UUID) async {}
     func replay(_ request: RequestReplayDraft) async throws { throw WorkflowError.invalid("此代理不支持请求重放") }
 }

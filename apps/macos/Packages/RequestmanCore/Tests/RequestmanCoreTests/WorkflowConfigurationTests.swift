@@ -60,7 +60,8 @@ struct WorkflowScriptTests {
     @Test func nullEmptyAndInvalidResults() throws {
         #expect(try run("request.body = null; return request;", body: "unchanged").replacementBody == nil)
         #expect(try run("request.body = ''; return request;", body: "remove").replacementBody == "")
-        for source in ["return 1;", "throw new Error('broken');", "return Promise.resolve(request);", "request.headers = {}; return request;",
+        #expect(try run("return Promise.resolve(request);").method == "POST")
+        for source in ["return 1;", "throw new Error('broken');", "request.headers = {}; return request;",
                        "request.body = {}; return request;", "request.headers.push({name:'Bad Name',value:'x'}); return request;",
                        "request.headers.push({name:'Content-Length',value:'123'}); return request;", "request.url = 'file:///tmp/test'; return request;"] {
             #expect(throws: (any Error).self) { try run(source) }

@@ -896,6 +896,162 @@ struct ProxyIntegrationTests {
             #expect(record.requestBody.isComplete && record.receivedBody.isComplete && record.responseBody.isComplete)
         }
     }
+
+    @Test func scriptFetchModifiesBothLanesWithoutRecursionAndAssociatesAuxiliaryRecords() async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow()
+            // Both auxiliary URLs deliberately match the same rule as the main request.
+            workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
+            var request = ModificationStep(kind: .script)
+            request.value = """
+                await Promise.resolve();
+                const reply = await fetch('\(h.originURL)script-token');
+                if (!reply.ok) throw new Error('token request failed');
+                const token = await reply.json();
+                request.headers.push({name:'X-Key',value:token.token});
+                return request;
+                """
+            var response = ModificationStep(kind: .script)
+            response.value = """
+                const reply = await fetch('\(h.originURL)script-token-response');
+                const token = await reply.json();
+                response.body += ':' + token.token;
+                response.status = 201;
+                return response;
+                """
+            workflow.requestSteps = [request]; workflow.responseSteps = [response]
+            try await h.start(workflow: workflow)
+
+            let reply = try await h.exchange("GET \(h.originURL)script-main HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            #expect(reply.contains("201 Created") && reply.hasSuffix("origin-body:response-token"))
+            #expect(h.observation.withLock { $0.requestURIs } == ["/script-token", "/script-main", "/script-token-response"])
+            #expect(h.observation.withLock { $0.requestKeys["/script-main"] } == "request-token")
+            #expect(h.observation.withLock { $0.requestKeys["/script-token"] } == "")
+            #expect(h.observation.withLock { $0.requestKeys["/script-token-response"] } == "")
+
+            let records = await terminalScriptRecords(h, count: 3)
+            let parent = try #require(records.values.first { !$0.isAuxiliary })
+            #expect(records.count == 3 && parent.error == nil && parent.matchedWorkflowID == workflow.id)
+            #expect(parent.executionTrace.map(\.stepID) == [request.id, response.id])
+            #expect(parent.executionTrace.allSatisfy { $0.status == .applied })
+            #expect(parent.sentHeaders.contains(HTTPField("X-Key", "request-token")))
+            #expect(parent.responseBody.data == Data("origin-body:response-token".utf8))
+            let auxiliaries = records.values.filter(\.isAuxiliary)
+            #expect(auxiliaries.count == 2)
+            #expect(Set(auxiliaries.compactMap(\.auxiliaryStepID)) == Set([request.id, response.id]))
+            #expect(Set(auxiliaries.compactMap(\.auxiliaryCallID)).count == 2)
+            #expect(Set(auxiliaries.compactMap(\.auxiliaryExecutionID)).count == 2)
+            for auxiliary in auxiliaries {
+                #expect(auxiliary.auxiliaryParentID == parent.id && auxiliary.auxiliaryCallID == auxiliary.id)
+                #expect(auxiliary.status == 200 && auxiliary.error == nil)
+                #expect(auxiliary.receivedBody.isComplete && auxiliary.responseBody.isComplete)
+                #expect(auxiliary.matchedWorkflowID == nil && auxiliary.matchedRules.isEmpty && auxiliary.executionTrace.isEmpty)
+            }
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func scriptFetchCancelsPendingTransportOnClientDisconnectOrCaptureStop(stopCapture: Bool) async throws {
+        try await withHarness { h in
+            var workflow = RequestWorkflow()
+            workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
+            var script = ModificationStep(kind: .script)
+            script.value = "await fetch('\(h.originURL)script-pending'); request.headers.push({name:'X-After-Fetch',value:'wrong'}); return request;"
+            var options = ScriptOptions(); options.timeoutMilliseconds = 10_000; script.scriptOptions = options
+            var following = ModificationStep(kind: .setHeader); following.name = "X-After-Script"; following.value = "wrong"
+            workflow.requestSteps = [script, following]
+            try await h.start(workflow: workflow)
+            let collected = h.group.next().makePromise(of: String.self)
+            let client = try await ClientBootstrap(group: h.group).channelInitializer { channel in
+                channel.pipeline.addHandler(RawCollector(result: collected, until: nil))
+            }.connect(host: "127.0.0.1", port: h.proxyPort).get()
+            client.writeAndFlush(client.allocator.buffer(string:
+                "GET \(h.originURL)script-cancel-main HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"), promise: nil)
+            let readyDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+            while !h.observation.withLock({ $0.requestURIs.contains("/script-pending") }) && ContinuousClock.now < readyDeadline {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            #expect(h.observation.withLock { $0.requestURIs } == ["/script-pending"])
+
+            let started = ContinuousClock.now
+            if stopCapture { await h.proxy.stop() } else { try await client.close().get() }
+            let records = await terminalScriptRecords(h, count: 2)
+            let closeDeadline = ContinuousClock.now.advanced(by: .seconds(2))
+            while !h.observation.withLock({ $0.closedURIs.contains("/script-pending") }) && ContinuousClock.now < closeDeadline {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            #expect(started.duration(to: .now) < .seconds(3))
+            #expect(h.observation.withLock { $0.closedURIs.contains("/script-pending") })
+            #expect(h.observation.withLock { $0.requestURIs } == ["/script-pending"])
+            let parent = try #require(records.values.first { !$0.isAuxiliary })
+            let auxiliary = try #require(records.values.first { $0.isAuxiliary })
+            #expect(parent.executionTrace.map(\.stepID) == [script.id])
+            #expect(parent.executionTrace.last?.status == .cancelled && parent.matchedRules.isEmpty)
+            #expect(!parent.connectionState.isActive && !auxiliary.connectionState.isActive)
+            #expect(auxiliary.auxiliaryParentID == parent.id && auxiliary.auxiliaryStepID == script.id)
+            #expect(!auxiliary.receivedBody.isComplete && !auxiliary.responseBody.isComplete)
+            #expect(auxiliary.closeReason != nil)
+            _ = try await collected.futureResult.get()
+            if !stopCapture {
+                // Cancelling this client's script does not close the listener.
+                await h.proxy.update(WorkspaceDocument())
+                let reply = try await h.exchange("GET \(h.originURL)unmatched HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                #expect(reply.contains("200 OK") && !reply.contains("X-After-Fetch") && !reply.contains("X-After-Script"))
+            }
+        }
+    }
+
+    @Test func scriptFetchKeepsTransactionUpstreamSnapshotAcrossConfigurationChange() async throws {
+        let replacement = Harness()
+        do {
+            try await replacement.prepare()
+            try await withHarness { h in
+                var workflow = RequestWorkflow()
+                workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: "http://script-upstream.test/")
+                var script = ModificationStep(kind: .script)
+                script.value = """
+                    const first = await fetch('http://script-upstream.test/script-gated-token');
+                    await first.json();
+                    const second = await fetch('http://script-upstream.test/script-token');
+                    const token = await second.json();
+                    request.headers.push({name:'X-Key',value:token.token});
+                    return request;
+                    """
+                workflow.requestSteps = [script]
+                var configuration = ExplicitProxyConfiguration()
+                configuration.upstream = .httpProxy(ProxyEndpoint(host: "127.0.0.1", port: h.originPort))
+                try await h.start(workflow: workflow, configuration: configuration)
+                let request = Task { try await h.exchange("GET http://script-upstream.test/script-main HTTP/1.1\r\nHost: script-upstream.test\r\n\r\n") }
+                let readyDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+                while h.observation.withLock({ $0.gatedTokenChannels.isEmpty }) && ContinuousClock.now < readyDeadline {
+                    try await Task.sleep(for: .milliseconds(5))
+                }
+                #expect(h.observation.withLock { $0.gatedTokenChannels.count } == 1)
+                configuration.port = h.proxyPort
+                configuration.upstream = .httpProxy(ProxyEndpoint(host: "127.0.0.1", port: replacement.originPort))
+                try await h.proxy.updateConfiguration(configuration)
+                try await h.releaseGatedTokenResponses()
+                let reply = try await request.value
+                #expect(reply.contains("200 OK"))
+                #expect(h.observation.withLock { $0.requestURIs } == [
+                    "http://script-upstream.test/script-gated-token", "http://script-upstream.test/script-token", "http://script-upstream.test/script-main"])
+                #expect(h.observation.withLock { $0.requestKeys["http://script-upstream.test/script-main"] } == "request-token")
+                #expect(replacement.observation.withLock { $0.requests } == 0)
+                let records = await terminalScriptRecords(h, count: 3)
+                #expect(records.count == 3 && records.values.allSatisfy { $0.error == nil })
+                let parent = try #require(records.values.first { !$0.isAuxiliary })
+                // Streaming responses may use chunked framing in the raw TCP collector.
+                #expect(parent.responseBody.data == Data("origin-body".utf8) && parent.responseBody.isComplete)
+
+                let next = try await h.exchange("GET http://next-upstream.test/new HTTP/1.1\r\nHost: next-upstream.test\r\n\r\n")
+                #expect(next.contains("200 OK"))
+                #expect(replacement.observation.withLock { $0.requestURIs } == ["http://next-upstream.test/new"])
+                #expect(h.observation.withLock { $0.requests } == 3)
+            }
+            await replacement.shutdown()
+        } catch { await replacement.shutdown(); throw error }
+    }
+
     @Test func scriptTimeoutFailsBeforeForwardingAndMockScriptsStillRun() async throws {
         try await withHarness { h in
             var workflow = RequestWorkflow(); workflow.matchConditions.conditions[0] = MatchCondition(field: .url, operation: .beginsWith, value: h.originURL)
@@ -1169,7 +1325,13 @@ struct ProxyIntegrationTests {
     }
 }
 
-private struct OriginObservation { var requests = 0; var header = ""; var bodyBytes = 0; var uri = ""; var closedConnections = 0 }
+private struct OriginObservation {
+    var requests = 0; var header = ""; var bodyBytes = 0; var uri = ""; var closedConnections = 0
+    var requestURIs: [String] = []
+    var requestKeys: [String: String] = [:]
+    var closedURIs: [String] = []
+    var gatedTokenChannels: [Channel] = []
+}
 private final class Harness: @unchecked Sendable {
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
     let proxy: LocalProxyServer
@@ -1218,6 +1380,22 @@ private final class Harness: @unchecked Sendable {
         do { let reply = try await promise.futureResult.get(); timeout.cancel(); try? await channel.close().get(); return reply }
         catch { timeout.cancel(); try? await channel.close().get(); throw error }
     }
+    func releaseGatedTokenResponses() async throws {
+        let channels = observation.withLock { state in
+            let channels = state.gatedTokenChannels
+            state.gatedTokenChannels = []
+            return channels
+        }
+        for channel in channels {
+            try await channel.eventLoop.submit {
+                let body = #"{"token":"gated-token"}"#
+                channel.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .ok,
+                    headers: HTTPHeaders([("Content-Type", "application/json"), ("Content-Length", String(body.utf8.count)), ("Connection", "close")]))), promise: nil)
+                channel.write(HTTPServerResponsePart.body(.byteBuffer(channel.allocator.buffer(string: body))), promise: nil)
+                channel.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { _ in channel.close(promise: nil) }
+            }.get()
+        }
+    }
     func shutdown() async { await proxy.stop(); try? await origin?.close().get(); try? await group.shutdownGracefully() }
 }
 private func withHarness(_ body: (Harness) async throws -> Void) async throws {
@@ -1225,28 +1403,53 @@ private func withHarness(_ body: (Harness) async throws -> Void) async throws {
     do { try await h.prepare(); try await body(h); await h.shutdown() }
     catch { await h.shutdown(); throw error }
 }
+private func terminalScriptRecords(_ h: Harness, count: Int) async -> [UUID: CaptureRecord] {
+    var records: [UUID: CaptureRecord] = [:]
+    let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+    repeat {
+        for record in h.proxy.records.drain().records { records[record.id] = record }
+        if records.count >= count && records.values.allSatisfy({
+            !$0.connectionState.isActive && ($0.isAuxiliary || !$0.executionTrace.isEmpty)
+        }) { break }
+        try? await Task.sleep(for: .milliseconds(5))
+    } while ContinuousClock.now < deadline
+    return records
+}
 private final class OriginHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = HTTPServerRequestPart
     let observation: OSAllocatedUnfairLock<OriginObservation>
     var method = HTTPMethod.GET
     var uri = ""
     init(observation: OSAllocatedUnfairLock<OriginObservation>) { self.observation = observation }
-    func channelInactive(context: ChannelHandlerContext) { observation.withLock { $0.closedConnections += 1 } }
+    func channelInactive(context: ChannelHandlerContext) {
+        observation.withLock { $0.closedConnections += 1; $0.closedURIs.append(uri) }
+    }
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         switch unwrapInboundIn(data) {
         case .head(let head):
             method = head.method; uri = head.uri
-            observation.withLock { $0.requests += 1; $0.header = head.headers.first(name: "X-Key") ?? ""; $0.uri = head.uri }
+            observation.withLock {
+                $0.requests += 1; $0.header = head.headers.first(name: "X-Key") ?? ""; $0.uri = head.uri
+                $0.requestURIs.append(head.uri); $0.requestKeys[head.uri] = $0.header
+            }
         case .body(let bytes): observation.withLock { $0.bodyBytes += bytes.readableBytes }
         case .end:
             let channel = context.channel
+            if uri.hasSuffix("/script-pending") { return }
+            if uri.hasSuffix("/script-gated-token") {
+                observation.withLock { $0.gatedTokenChannels.append(channel) }
+                return
+            }
             if uri.hasSuffix("/events") {
                 channel.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .ok,
                     headers: HTTPHeaders([("Content-Type", "text/event-stream"), ("Transfer-Encoding", "chunked")]))), promise: nil)
                 channel.writeAndFlush(HTTPServerResponsePart.body(.byteBuffer(channel.allocator.buffer(string: "data: origin\n\n"))), promise: nil)
                 return
             }
-            let body = uri.hasSuffix("/large") ? String(repeating: "z", count: 1_048_576) : "origin-body"
+            let body: String
+            if uri.hasSuffix("/script-token") { body = #"{"token":"request-token"}"# }
+            else if uri.hasSuffix("/script-token-response") { body = #"{"token":"response-token"}"# }
+            else { body = uri.hasSuffix("/large") ? String(repeating: "z", count: 1_048_576) : "origin-body" }
             let bytes = uri.hasSuffix("/encoded") ? gzipJSONFixture : Array(body.utf8)
             let interrupted = uri.hasSuffix("/interrupted")
             var headers = HTTPHeaders([("Content-Length", String(bytes.count + (interrupted ? 32 : 0))), ("Connection", "close")])
@@ -1259,6 +1462,9 @@ private final class OriginHandler: ChannelInboundHandler, @unchecked Sendable {
             }
             if uri.hasSuffix("/encoded") {
                 headers.add(name: "Content-Encoding", value: "gzip")
+                headers.add(name: "Content-Type", value: "application/json")
+            }
+            if uri.hasSuffix("/script-token") || uri.hasSuffix("/script-token-response") {
                 headers.add(name: "Content-Type", value: "application/json")
             }
             channel.write(HTTPServerResponsePart.head(HTTPResponseHead(version: .http1_1, status: .ok, headers: headers)), promise: nil)

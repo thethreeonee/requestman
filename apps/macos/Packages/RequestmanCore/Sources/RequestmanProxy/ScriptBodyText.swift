@@ -5,6 +5,10 @@ import zlib
 /// Complete bodies only, off the event loop. Never silently replace undecodable bytes.
 enum ScriptBodyText {
     static func decode(_ bytes: Data, headers: [HTTPField], control: ScriptExecutionControl) throws -> String? {
+        do { return String(data: try decodeData(bytes, headers: headers, control: control), encoding: .utf8) }
+        catch is ContentDecodingFailure { return nil }
+    }
+    static func decodeData(_ bytes: Data, headers: [HTTPField], control: ScriptExecutionControl) throws -> Data {
         try control.check()
         var data = bytes
         let encodings = headers.filter { $0.name.lowercased() == "content-encoding" }.flatMap {
@@ -15,12 +19,14 @@ enum ScriptBodyText {
             switch encoding {
             case "identity": break
             case "gzip", "x-gzip", "deflate":
-                guard let decoded = try inflate(data, gzip: encoding != "deflate", control: control) else { return nil }
+                guard let decoded = try inflate(data, gzip: encoding != "deflate", control: control) else {
+                    throw ContentDecodingFailure.damaged
+                }
                 data = decoded
-            default: return nil
+            default: throw ContentDecodingFailure.unsupported(encoding)
             }
         }
-        return String(data: data, encoding: .utf8)
+        return data
     }
     private static func inflate(_ data: Data, gzip: Bool, control: ScriptExecutionControl) throws -> Data? {
         var stream = z_stream()
@@ -45,9 +51,25 @@ enum ScriptBodyText {
                 }
                 let produced = buffer.count - Int(stream.avail_out)
                 output.append(contentsOf: buffer.prefix(produced))
-                if status == Z_STREAM_END { return offset - Int(stream.avail_in) == bytes.count ? output : nil }
+                if status == Z_STREAM_END {
+                    let consumed = offset - Int(stream.avail_in)
+                    if consumed == bytes.count { return output }
+                    guard gzip, inflateReset2(&stream, Int32(MAX_WBITS) + 16) == Z_OK else { return nil }
+                    offset = consumed; stream.avail_in = 0; stream.next_in = nil
+                    continue
+                }
                 guard status == Z_OK, produced > 0 || stream.avail_in < previousInput else { return nil }
             }
+        }
+    }
+}
+
+private enum ContentDecodingFailure: LocalizedError {
+    case damaged, unsupported(String)
+    var errorDescription: String? {
+        switch self {
+        case .damaged: "响应压缩内容损坏"
+        case .unsupported(let encoding): "暂不支持 \(encoding) 内容编码"
         }
     }
 }

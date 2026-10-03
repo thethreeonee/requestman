@@ -165,9 +165,9 @@ Chrome 最小闭环：显式代理接入 → 修改真实 HTTPS 请求 → 受�
 
 本轮代理选用 [SwiftNIO](https://github.com/apple/swift-nio)，使用其 HTTP/1 编解码和 socket/event-loop 实现，不自行解析 HTTP。依赖锁定见 Package.resolved；分发时需要包含 SwiftNIO 及其传递依赖的许可证。CONNECT 回环与上游串联已有集成测试；Chrome/Surge 共存矩阵仍待人工实测。
 
-## 请求修改配置与同步脚本（2026-09-26）
+## 请求修改配置与脚本
 
-匹配配置统一为 `WorkflowMatchGroup`，支持全部 / 任一嵌套组、方法集合、URL / Host / Path、协议、端口、Query、多 Header、Cookie 和 Content-Type。工作区保存版本为 3，不迁移旧匹配配置；真实代理和测试匹配共用组逻辑，保持修改前匹配与首个启用流程优先。步骤详情接入同一个窗口级 Inspector，Header 使用插件候选列表的原生可编辑组合框。同步 JavaScript 通过可终止的独立进程执行，具有脚本的阶段在后台读取完整 Body、解码文本后执行；未带脚本的阶段保留 NIO 流式路径。取消沿脚本流程传递，单次脚本限时独立于无总时限的事务；输入/输出没有新增载荷尺寸上限。完整 API、并发和时限、验收范围见[请求修改配置](Design/request-modification.md)。
+匹配配置统一为 `WorkflowMatchGroup`，支持全部 / 任一嵌套组、方法集合、URL / Host / Path、协议、端口、Query、多 Header、Cookie 和 Content-Type。工作区保存版本为 3，不迁移旧匹配配置；真实代理和测试匹配共用组逻辑，保持修改前匹配与首个启用流程优先。步骤详情接入同一个窗口级 Inspector，Header 使用插件候选列表的原生可编辑组合框。JavaScript 的 await / Promise 通过可终止的独立进程执行，具有脚本的阶段在后台读取完整 Body、解码文本后执行；未带脚本的阶段保留 NIO 流式路径。取消沿脚本流程传递，单次脚本限时独立于无总时限的事务；输入/输出没有新增载荷尺寸上限。fetch 通过分帧双向通信调用宿主 HTTP/1.1 服务，冻结事务出口、复用 CONNECT 与 TLS 校验，跳过规则匹配并关联辅助日志。完整 API、并发和取消边界见[异步脚本与辅助 HTTP](Design/async-scripts.md)。
 
 ## AppKit 界面迁移（2026-09-26）
 

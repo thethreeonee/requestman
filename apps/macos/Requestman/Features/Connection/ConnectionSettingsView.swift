@@ -49,7 +49,7 @@ final class ConnectionSettingsView: NSView {
                 SettingsUI.row("允许局域网设备连接", lanSwitch)], footer: "局域网连接使用 IPv4。开启后，手机可通过 Mac 的局域网 IP 和此端口接入。"),
             SettingsUI.section("连接方式", rows: [SettingsUI.row("使用 HTTP 上游代理", proxySwitch)] + upstreamRows, footer: "本机与手机请求共用此 HTTP 上游代理，可接入 Surge 等。地址从这台 Mac 访问；关闭时使用系统网络路由。"),
             errorLabel,
-            SettingsUI.section("协议支持", rows: [SettingsUI.row("HTTP/1.1 / HTTP/2", NativeUI.label("请求与响应修改、Mock、记录；两端保持同协议", secondary: true)), SettingsUI.row("HTTPS", httpsLabel)], footer: "暂不支持异步脚本、辅助请求、断点及按应用透明接管。")
+            SettingsUI.section("协议支持", rows: [SettingsUI.row("HTTP/1.1 / HTTP/2", NativeUI.label("请求与响应修改、Mock、记录；两端保持同协议", secondary: true)), SettingsUI.row("HTTPS", httpsLabel)], footer: "脚本支持 await 与 fetch。暂不支持断点及按应用透明接管。")
         ]
         let stack = NativeUI.stack(sections, spacing: 18)
         stack.alignment = .leading

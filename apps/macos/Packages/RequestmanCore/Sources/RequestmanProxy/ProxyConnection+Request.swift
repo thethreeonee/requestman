@@ -94,7 +94,10 @@ extension ProxyConnection {
             let document = shared.document.withLock { $0 }
             var draft = HTTPMessageDraft(method: originalMethod, url: head.uri, headers: fields(head.headers))
             if let record {
-                transaction = TransactionCoordinator(document: document, request: draft, id: record.id, date: record.startedAt)
+                let httpClient = ScriptHTTPService(configuration: configuration, shared: shared,
+                    records: records, eventLoop: client.eventLoop)
+                transaction = TransactionCoordinator(document: document, request: draft, id: record.id,
+                    date: record.startedAt, httpClient: httpClient)
             }
             record?.environment = document.environment?.name ?? "无环境"
             if let match {

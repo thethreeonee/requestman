@@ -20,6 +20,8 @@ struct RequestLogArchiveTests {
         record.sentMethod = "PUT"; record.finalURL = "https://example.test/b"
         record.project = "登录"; record.workflow = "修改结果"; record.environment = "开发"
         record.matchedWorkflowID = UUID(); record.status = 201; record.originalStatus = 200
+        record.auxiliaryParentID = UUID(); record.auxiliaryStepID = UUID()
+        record.auxiliaryCallID = UUID(); record.auxiliaryExecutionID = UUID()
         record.outcome = .modified; record.hasSentRequestHeaders = true; record.duration = 0.125
         record.requestHeaders = [.init("X-Item", " one "), .init("X-Item", "two"), .init("Authorization", "Bearer test-token")]
         record.sentHeaders = [.init("X-Item", "changed")]
@@ -54,6 +56,9 @@ struct RequestLogArchiveTests {
         #expect(loaded.receivedBody.unavailableReason == "上游正文不可用")
         #expect(loaded.executionTrace.first?.elapsed == record.executionTrace.first?.elapsed)
         #expect(loaded.executionTrace.first?.status == .failed && loaded.matchedRules == record.matchedRules)
+        #expect(loaded.isAuxiliary && loaded.auxiliaryParentID == record.auxiliaryParentID)
+        #expect(loaded.auxiliaryStepID == record.auxiliaryStepID && loaded.auxiliaryCallID == record.auxiliaryCallID)
+        #expect(loaded.auxiliaryExecutionID == record.auxiliaryExecutionID)
         #expect(loaded.requestHeadersInfo.truncatedNames == ["legacy"])
         var normalized = loaded; normalized.archivedAt = nil
         #expect(try RequestLogArchive.encoder().encode(normalized) == RequestLogArchive.encoder().encode(record))

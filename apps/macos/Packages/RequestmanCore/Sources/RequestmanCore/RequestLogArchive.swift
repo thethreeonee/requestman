@@ -18,7 +18,9 @@ public enum RequestLogArchive {
             "payload.text / payload.base64": "原始正文的 UTF-8 文本或 Base64；两者只保存一种",
             "decodedText": "压缩正文解码后的阅读副本，原始字节仍保存在 payload 中",
             "sharedStream": "为 true 时，receivedStream 与 stream 内容相同",
-            "connectionState": "保存时的连接状态，打开文件不会恢复连接"
+            "connectionState": "保存时的连接状态，打开文件不会恢复连接",
+            "auxiliaryParentID / auxiliaryStepID": "脚本辅助请求关联的父请求与步骤；真实联调可没有父请求",
+            "auxiliaryCallID / auxiliaryExecutionID": "辅助请求调用和脚本执行标识，不参与规则匹配"
         ]
     }
     struct Document: Decodable {

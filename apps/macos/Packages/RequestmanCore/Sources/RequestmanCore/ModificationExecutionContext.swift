@@ -11,12 +11,15 @@ public struct ModificationExecutionContext: Sendable {
     public let request: HTTPMessageDraft?
     public let control: ScriptExecutionControl
     public let scriptRuntime: any ScriptRuntime
+    public let httpClient: (any ScriptHTTPClient)?
+    public let transactionID: UUID?
 
     public init(phase: FlowPhase, environment: [String: String],
                 environmentTypes: [String: EnvironmentValueType] = [:],
                 templateContext: WorkflowTemplateContext, originalResponseStatus: Int? = nil,
                 request: HTTPMessageDraft? = nil, control: ScriptExecutionControl = ScriptExecutionControl(),
-                scriptRuntime: any ScriptRuntime = IsolatedScriptRuntime(), regexCaptures: [String] = []) {
+                scriptRuntime: any ScriptRuntime = IsolatedScriptRuntime(), regexCaptures: [String] = [],
+                httpClient: (any ScriptHTTPClient)? = nil, transactionID: UUID? = nil) {
         self.regexCaptures = regexCaptures
         self.phase = phase
         self.environment = environment
@@ -26,6 +29,8 @@ public struct ModificationExecutionContext: Sendable {
         self.request = request
         self.control = control
         self.scriptRuntime = scriptRuntime
+        self.httpClient = httpClient
+        self.transactionID = transactionID
     }
 
     func resolve(_ value: String, step: ModificationStep) throws -> String {

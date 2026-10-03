@@ -18,6 +18,13 @@ public struct CaptureBodySnapshot: Sendable, Codable {
     public var isComplete: Bool { state == .complete && !isTruncated }
     public static let notCollected = CaptureBodySnapshot(state: .notCollected)
     public static func unavailable(_ reason: String) -> Self { Self(state: .unavailable, unavailableReason: reason) }
+    public static func collected(data: Data, headers: [HTTPField], isComplete: Bool) -> Self {
+        let encodings = headers.filter { $0.name.caseInsensitiveCompare("Content-Encoding") == .orderedSame }.map(\.value)
+        return Self(state: isComplete ? .complete : .incomplete, observedByteCount: data.count,
+            contentType: headers.first { $0.name.caseInsensitiveCompare("Content-Type") == .orderedSame }?.value,
+            contentEncoding: encodings.isEmpty ? nil : encodings.joined(separator: ", "),
+            storage: CaptureBodyStorage(data: data))
+    }
     private enum CodingKeys: String, CodingKey {
         case state, observedByteCount, isTruncated, contentType, contentEncoding, unavailableReason, payload, decodedText
     }

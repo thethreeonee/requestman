@@ -2,12 +2,15 @@ import AppKit
 import RequestmanCore
 import RequestmanEditor
 
+typealias ScriptHTTPClientFactory = @MainActor () async throws -> any ScriptHTTPClient
+
 @MainActor final class ScriptEditorViewController: NSViewController {
     private var step: ModificationStep
     private var response: Bool
     private var environment: [String: String]
     private var environmentTypes: [String: EnvironmentValueType]
     private let onChange: (ModificationStep) -> Void
+    private let httpClientFactory: ScriptHTTPClientFactory?
     private weak var trial: ScriptPreviewInputViewController?
     private var sample = ScriptPreviewInput()
     private let help = NSPopover()
@@ -18,10 +21,12 @@ import RequestmanEditor
     }
     private lazy var runButton = ActionButton(title: "试运行") { [weak self] in self?.showTrial() }
     private lazy var timeout = ActionTextField(placeholder: "毫秒") { [weak self] text in
-        guard let number = Int(text) else { return }; self?.modify { var options = $0.scriptOptions ?? ScriptOptions(); options.timeoutMilliseconds = number; $0.scriptOptions = options }
+        guard let number = Int(text) else { return }; self?.modify { var options = $0.effectiveScriptOptions; options.timeoutMilliseconds = number; $0.scriptOptions = options }
     }
-    init(step: ModificationStep, response: Bool, environment: [String: String], environmentTypes: [String: EnvironmentValueType] = [:], onChange: @escaping (ModificationStep) -> Void) {
+    init(step: ModificationStep, response: Bool, environment: [String: String], environmentTypes: [String: EnvironmentValueType] = [:],
+         httpClientFactory: ScriptHTTPClientFactory? = nil, onChange: @escaping (ModificationStep) -> Void) {
         self.step = step; self.response = response; self.environment = environment; self.environmentTypes = environmentTypes; self.onChange = onChange
+        self.httpClientFactory = httpClientFactory
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -51,7 +56,7 @@ import RequestmanEditor
         guard isViewLoaded else { return }
         if name.stringValue != step.name { name.stringValue = step.name }
         source.string = step.value
-        let milliseconds = (step.scriptOptions ?? ScriptOptions()).timeoutMilliseconds
+        let milliseconds = step.effectiveScriptOptions.timeoutMilliseconds
         if timeout.integerValue != milliseconds { timeout.integerValue = milliseconds }
         updateRunButton()
     }
@@ -65,7 +70,8 @@ import RequestmanEditor
     private func showTrial() {
         guard isPresented, presentedViewControllers?.isEmpty != false else { return }
         view.window?.makeFirstResponder(nil)
-        let controller = ScriptPreviewInputViewController(input: sample, response: response, step: step, environment: environment, environmentTypes: environmentTypes) { [weak self] value in
+        let controller = ScriptPreviewInputViewController(input: sample, response: response, step: step,
+            environment: environment, environmentTypes: environmentTypes, httpClientFactory: httpClientFactory) { [weak self] value in
             self?.sample = value
         }
         trial = controller
@@ -82,7 +88,7 @@ import RequestmanEditor
     private static let text = """
     脚本 API
 
-    脚本是一段同步 JavaScript 函数体。请求阶段 return request；响应阶段 return response。不会展开 {{$env.*}}，请直接读取 env。
+    脚本是一段 JavaScript 函数体，可直接使用 await、Promise 和 Promise.all。请求阶段 return request；响应阶段 return response。不会展开 {{$env.*}}，请直接读取 env。
 
     type Header = { name: string; value: string };
     type Request = {
@@ -106,7 +112,18 @@ import RequestmanEditor
 
     url 必须为完整 HTTP/HTTPS URL。method 不支持 CONNECT、TRACE。status 为 200–599 整数。Host、Content-Length、Transfer-Encoding、Connection、Upgrade、Trailer 由代理维护，可读取但不能修改。
 
-    每个脚本默认 1000 ms（可设 50–5000 ms），同时受请求事务 30 秒时限约束。超时、抛错或返回格式无效会停止流程并记录错误。运行环境不提供 fetch、DOM、Node.js、定时器或 Promise 异步执行。
+    fetch(url, options) 支持 HTTP/HTTPS、method、headers、文本或二进制 body、redirect 和 AbortController 的 signal。返回 status、statusText、ok、url、redirected、headers 和 bodyUsed；text()、json()、arrayBuffer() 异步读取正文，正文只能消费一次。HTTP 4xx/5xx 不会自动抛错，请检查 ok。Cookie 和认证由脚本显式提供，不共享浏览器登录状态。
+
+    每个新脚本默认 10000 ms（可设 50–60000 ms），已有配置保留原值。时限包含网络等待，HTTP 事务不设总时限。超时、取消或返回格式无效会停止流程并记录错误；已发出的辅助请求不会回滚。运行环境不提供 DOM、Node.js、定时器、FormData 或 ReadableStream。
+
+    离线试运行不发送网络请求，遇到 fetch 会提示选择真实联调。真实联调需要先启动捕获，只发送脚本中的辅助请求，主请求与响应仍使用输入数据。
+
+    // 请求阶段：辅助请求获取 Token
+    const res = await fetch(env.tokenURL);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const token = (await res.json()).token;
+    request.headers.push({ name: 'Authorization', value: 'Bearer ' + token });
+    return request;
 
     // 响应阶段：修改 JSON
     const body = JSON.parse(response.body);
@@ -140,15 +157,19 @@ struct ScriptPreviewInput: Equatable, Sendable {
     private let step: ModificationStep?
     private let environment: [String: String]
     private let environmentTypes: [String: EnvironmentValueType]
+    private let httpClientFactory: ScriptHTTPClientFactory?
     private let onChange: (ScriptPreviewInput) -> Void
     private var execution: ScriptExecutionControl?
     private var executionID: UUID?
     private let result = RulesTextArea(editable: false)
     private lazy var runButton = ActionButton(title: "运行") { [weak self] in self?.run() }
+    private lazy var liveButton = ActionButton(title: "真实联调") { [weak self] in self?.run(real: true) }
     init(input: ScriptPreviewInput, response: Bool, step: ModificationStep? = nil,
-         environment: [String: String] = [:], environmentTypes: [String: EnvironmentValueType] = [:], onChange: @escaping (ScriptPreviewInput) -> Void) {
+         environment: [String: String] = [:], environmentTypes: [String: EnvironmentValueType] = [:],
+         httpClientFactory: ScriptHTTPClientFactory? = nil, onChange: @escaping (ScriptPreviewInput) -> Void) {
         self.input = input; self.response = response; self.step = step
         self.environment = environment; self.environmentTypes = environmentTypes; self.onChange = onChange
+        self.httpClientFactory = httpClientFactory
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -227,7 +248,7 @@ struct ScriptPreviewInput: Equatable, Sendable {
             result.setContentHuggingPriority(.defaultLow, for: .vertical)
             content = columns
         } else { content = inputViewport }
-        let note = NativeUI.label("仅使用这些输入和当前环境，不发送网络请求。", size: 11, secondary: true)
+        let note = NativeUI.label(step == nil ? "仅编辑输入，不发送网络请求。" : "运行使用离线输入；真实联调会发送脚本辅助请求，需先启动捕获。", size: 11, secondary: true)
         let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         var actions: [NSView] = [spacer]
         if step != nil {
@@ -235,6 +256,7 @@ struct ScriptPreviewInput: Equatable, Sendable {
             runButton.imagePosition = .imageLeading
             runButton.keyEquivalent = "\r"; runButton.keyEquivalentModifierMask = [.command]
             actions.append(runButton)
+            if httpClientFactory != nil { actions.append(liveButton) }
         }
         actions.append(done)
         let footer = NativeUI.stack(actions, vertical: false)
@@ -249,7 +271,7 @@ struct ScriptPreviewInput: Equatable, Sendable {
     override func viewWillDisappear() { super.viewWillDisappear(); cancelExecution() }
     func cancelExecution() {
         execution?.cancel(); execution = nil; executionID = nil
-        if isViewLoaded { runButton.isEnabled = true; runButton.title = "运行" }
+        if isViewLoaded { runButton.isEnabled = true; liveButton.isEnabled = true; runButton.title = "运行" }
     }
     private func updateInput(_ change: (inout ScriptPreviewInput) -> Void) {
         let previous = input; change(&input)
@@ -260,27 +282,39 @@ struct ScriptPreviewInput: Equatable, Sendable {
             result.string = "输入已更改，请重新运行。"
         }
     }
-    private func run() {
+    private func run(real: Bool = false) {
         view.window?.makeFirstResponder(nil)
         guard let step, executionID == nil else { return }
         let sample = input, environment = environment, environmentTypes = environmentTypes, response = response
         let control = ScriptExecutionControl(), id = UUID()
         execution = control; executionID = id
-        runButton.isEnabled = false; runButton.title = "运行中…"; result.string = "正在运行…"
+        runButton.isEnabled = false; liveButton.isEnabled = false; runButton.title = "运行中…"; result.string = "正在运行…"
         Task { [weak self] in
+            let httpClient: (any ScriptHTTPClient)?
+            do {
+                if real {
+                    guard let factory = self?.httpClientFactory else { throw WorkflowError.invalid("此环境不支持真实联调") }
+                    httpClient = try await factory()
+                } else { httpClient = nil }
+                try control.check()
+            } catch {
+                guard let self, executionID == id else { return }
+                result.string = "执行失败：\(error.localizedDescription)"; cancelExecution(); return
+            }
             let output = await Task.detached(priority: .userInitiated) {
                 do {
                     let request = try sample.request(); let draft = response ? try sample.response() : request
-                    let output = try WorkflowScript.run(source: step.value, draft: draft, response: response,
+                    let output = try await WorkflowScript.runAsync(source: step.value, draft: draft, response: response,
                         request: request, environment: environment,
-                        timeoutMilliseconds: (step.scriptOptions ?? ScriptOptions()).timeoutMilliseconds, control: control, environmentTypes: environmentTypes)
+                        timeoutMilliseconds: step.effectiveScriptOptions.timeoutMilliseconds, control: control,
+                        environmentTypes: environmentTypes, httpClient: httpClient, stepID: step.id)
                     let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
                     return String(decoding: try encoder.encode(ScriptMessage(output, response: response)), as: UTF8.self)
                 } catch { return "执行失败：\(error.localizedDescription)" }
             }.value
             guard let self, executionID == id else { return }
             execution = nil; executionID = nil
-            result.string = output; runButton.isEnabled = true; runButton.title = "运行"
+            result.string = output; runButton.isEnabled = true; liveButton.isEnabled = true; runButton.title = "运行"
         }
     }
     private func addField(_ title: String, keyPath: WritableKeyPath<ScriptPreviewInput, String>, to stack: NSStackView) {

@@ -77,6 +77,14 @@ public actor LocalProxyServer {
         }
     }
     public func cancelReplay(_ id: UUID) async { shared.replays.withLock { $0[id] }?.cancel() }
+    public func makeScriptHTTPClient() throws -> any ScriptHTTPClient {
+        guard let group, let port = listener?.localAddress?.port else {
+            throw WorkflowError.invalid("请先启动捕获，再进行脚本真实联调")
+        }
+        var configuration = shared.configuration.withLock { $0 }
+        configuration.port = port
+        return ScriptHTTPService(configuration: configuration, shared: shared, records: records, eventLoop: group.next())
+    }
 
     public func replay(_ request: RequestReplayDraft) async throws {
         try Task.checkCancellation()

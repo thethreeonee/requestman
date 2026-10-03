@@ -25,10 +25,11 @@ final class RequestInspectorViewController: ObservedViewController {
     private let rule = MatchedRulePathControl()
     private let replayStatus = NativeUI.label("", size: 12)
     private lazy var replaySource = ActionButton(title: "查看原请求") { [weak self] in
-        guard let self, let id = record?.replaySourceID else { return }
+        guard let self, let id = record?.auxiliaryParentID ?? record?.replaySourceID else { return }
         history.reveal(id)
     }
     private lazy var replayRow = NativeUI.stack([replayStatus, replaySource], vertical: false, spacing: 8)
+    private lazy var auxiliaryRequests = ActionButton(title: "辅助请求") { [weak self] in self?.showAuxiliaryRequests() }
     private let error = NativeUI.label("", size: 11)
     private let content = NSView()
     private let streamView = RequestStreamView()
@@ -74,7 +75,7 @@ final class RequestInspectorViewController: ObservedViewController {
                                    NativeUI.label("│", size: 12, secondary: true), bytes], vertical: false, spacing: 10)
         device.onRename = { [weak self] in self?.onDeviceAliasChange($0, $1) }
         let deviceRow = NativeUI.stack([NativeUI.label("设备来源", size: 12, secondary: true), device], vertical: false, spacing: 8)
-        let summary = NativeUI.stack([urlRow, stats, protocolLabel, deviceRow, replayRow, rule, error], spacing: 10)
+        let summary = NativeUI.stack([urlRow, stats, protocolLabel, deviceRow, replayRow, auxiliaryRequests, rule, error], spacing: 10)
         summary.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
         for child in [urlRow, replayRow, rule, error] { child.widthAnchor.constraint(equalTo: summary.widthAnchor, constant: -32).isActive = true }
         let size: NSControl.ControlSize
@@ -110,13 +111,18 @@ final class RequestInspectorViewController: ObservedViewController {
         url.setAccessibilityLabel("请求 URL"); url.setAccessibilityValue(record.url)
         copyURLButton.isEnabled = !record.urlWasTruncated
         copyURLButton.toolTip = record.urlWasTruncated ? "URL 记录已截断，无法复制完整地址" : "复制完整 URL"
-        replayRow.isHidden = record.replayID == nil
-        replayStatus.stringValue = record.replaySummary ?? ""
+        replayRow.isHidden = record.replayID == nil && !record.isAuxiliary
+        replayStatus.stringValue = record.isAuxiliary ? "脚本辅助请求 · " + (record.connectionState.isActive ? "进行中" : record.closeReason != nil ? "已取消" : record.error == nil ? "已完成" : "失败") : record.replaySummary ?? ""
         replayStatus.lineBreakMode = .byTruncatingTail
         replayStatus.toolTip = replayStatus.stringValue
-        replaySource.isHidden = record.replaySourceID == nil
-        replaySource.isEnabled = record.replaySourceID.map { id in history.records.contains { $0.id == id } } ?? false
-        replaySource.toolTip = replaySource.isEnabled ? "查看此次重放基于的原请求" : "原请求已不在日志中"
+        let sourceID = record.auxiliaryParentID ?? record.replaySourceID
+        replaySource.title = record.isAuxiliary ? "查看父请求" : "查看原请求"
+        replaySource.isHidden = sourceID == nil
+        replaySource.isEnabled = sourceID.map { id in history.records.contains { $0.id == id } } ?? false
+        replaySource.toolTip = replaySource.isEnabled ? (record.isAuxiliary ? "查看发起此辅助请求的父请求" : "查看此次重放基于的原请求") : "关联请求已不在日志中"
+        let auxiliaryCount = history.records.filter { $0.auxiliaryParentID == record.id }.count
+        auxiliaryRequests.isHidden = auxiliaryCount == 0
+        auxiliaryRequests.title = "辅助请求（\(auxiliaryCount)）"
         protocolLabel.isHidden = record.clientHTTPVersion == nil
         protocolLabel.stringValue = "客户端 " + (record.clientHTTPVersion ?? "未知") + " · 上游 " + (record.upstreamHTTPVersion ?? "未建立")
         protocolLabel.toolTip = protocolLabel.stringValue
@@ -158,6 +164,16 @@ final class RequestInspectorViewController: ObservedViewController {
         tab = RequestDetailTab.allCases[index]
         if !(view.window?.firstResponder is NSSegmentedControl) { view.window?.makeFirstResponder(nil) }
         refresh()
+    }
+    private func showAuxiliaryRequests() {
+        guard let record else { return }
+        let menu = NSMenu(); menu.autoenablesItems = false
+        for child in history.records.filter({ $0.auxiliaryParentID == record.id }) {
+            menu.addItem(RequestActionsMenu.item("\(child.method) \(child.finalURL)") { [weak self] in
+                self?.history.reveal(child.id)
+            })
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: auxiliaryRequests.bounds.maxY + 3), in: auxiliaryRequests)
     }
     private var currentCopy: RequestPayloadCopyContent? {
         guard isPresented, let record else { return nil }

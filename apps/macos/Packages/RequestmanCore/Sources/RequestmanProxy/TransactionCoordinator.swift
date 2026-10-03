@@ -6,9 +6,10 @@ import RequestmanCore
 struct TransactionCoordinator: Sendable {
     let context: TransactionContext
 
-    init(document: WorkspaceDocument, request: HTTPMessageDraft, id: UUID, date: Date) {
+    init(document: WorkspaceDocument, request: HTTPMessageDraft, id: UUID, date: Date,
+         httpClient: (any ScriptHTTPClient)? = nil) {
         let match = RuleMatchingEngine.match(document, method: request.method, url: request.url, headers: request.headers)
-        context = TransactionContext(id: id, date: date, originalRequest: request, match: match)
+        context = TransactionContext(id: id, date: date, originalRequest: request, match: match, httpClient: httpClient)
     }
 
     var match: WorkflowMatch? { context.match }
