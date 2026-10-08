@@ -12,8 +12,7 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
     private var backgroundRow: NSStackView?
     private var backgroundSourceRow: NSStackView?
     private var backgroundTransparencyRow: NSStackView?
-    private var backgroundTransparencyField: NSTextField?
-    private var backgroundTransparencyStepper: NSStepper?
+    private var backgroundTransparencyValue: NSTextField?
     private var backgroundColorWell: NSColorWell?
     private var borderRows: [NSStackView] = []
     private var borderColorRow: NSStackView?
@@ -31,9 +30,6 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
 
     var validationError: String? {
         guard !isHidden else { return nil }
-        if showsBackgroundControls, draftAppearance.backgroundColorSource == .text, parsedBackgroundTransparency == nil {
-            return "背景透明度须为 0–100%"
-        }
         if draftAppearance.presentation.isOutline, borderWidthField != nil, parsedBorderWidth == nil {
             return "边框粗细须为 0.5–8 pt"
         }
@@ -52,7 +48,7 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
         thresholdField = nil; thresholdRow = nil
         backgroundRow = nil; backgroundColorWell = nil
         backgroundSourceRow = nil; backgroundTransparencyRow = nil
-        backgroundTransparencyField = nil; backgroundTransparencyStepper = nil
+        backgroundTransparencyValue = nil
         borderRows = []; borderColorRow = nil; borderColorWell = nil
         borderWidthField = nil; borderWidthStepper = nil
         isHidden = content == nil
@@ -119,22 +115,21 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
         backgroundColorWell = well; backgroundRow = background
         addFullWidth(background)
 
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal; formatter.allowsFloats = true
-        formatter.minimum = 0; formatter.maximum = 100; formatter.maximumFractionDigits = 2
-        let field = NSTextField()
-        field.formatter = formatter; field.delegate = self
-        field.doubleValue = (1 - draftAppearance.effectiveBackgroundOpacity) * 100
-        field.setAccessibilityLabel("背景透明度，百分比，0 为不透明，100 为完全透明")
-        let stepper = NSStepper()
-        stepper.minValue = 0; stepper.maxValue = 100; stepper.increment = 5
-        stepper.valueWraps = false; stepper.doubleValue = field.doubleValue
-        stepper.target = self; stepper.action = #selector(changeBackgroundTransparency(_:))
-        stepper.setAccessibilityLabel("调整背景透明度")
-        let transparency = row("透明度", NativeUI.stack([field, stepper, NativeUI.label("%", secondary: true)], vertical: false, spacing: 6))
+        let slider = NSSlider(frame: .zero)
+        slider.minValue = 0; slider.maxValue = 100
+        slider.doubleValue = (1 - draftAppearance.effectiveBackgroundOpacity) * 100
+        slider.isContinuous = true
+        slider.target = self; slider.action = #selector(changeBackgroundTransparency(_:))
+        slider.setAccessibilityLabel("背景透明度，百分比，0 为不透明，100 为完全透明")
+        slider.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let value = NativeUI.label("", secondary: true)
+        value.alignment = .right
+        value.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        backgroundTransparencyValue = value
+        updateBackgroundTransparencyValue(slider.doubleValue)
+        let transparency = row("透明度", NativeUI.stack([slider, value], vertical: false, spacing: 8))
         transparency.toolTip = "0% 为不透明，100% 为完全透明；仅调整跟随文本的背景"
-        backgroundTransparencyRow = transparency; backgroundTransparencyField = field
-        backgroundTransparencyStepper = stepper
+        backgroundTransparencyRow = transparency
         addFullWidth(transparency)
     }
 
@@ -152,15 +147,12 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
         if !custom { backgroundColorWell?.deactivate() }
     }
 
-    private var parsedBackgroundTransparency: Double? {
-        guard let field = backgroundTransparencyField, let formatter = field.formatter as? NumberFormatter,
-              let value = formatter.number(from: field.stringValue)?.doubleValue,
-              value.isFinite, (0...100).contains(value) else { return nil }
-        return value
+    private func updateBackgroundTransparencyValue(_ percentage: Double) {
+        backgroundTransparencyValue?.stringValue = percentage.formatted(.number.precision(.fractionLength(0...2))) + "%"
     }
 
-    @objc private func changeBackgroundTransparency(_ sender: NSStepper) {
-        backgroundTransparencyField?.doubleValue = sender.doubleValue
+    @objc private func changeBackgroundTransparency(_ sender: NSSlider) {
+        updateBackgroundTransparencyValue(sender.doubleValue)
         mutate { $0.backgroundOpacity = 1 - sender.doubleValue / 100 }
     }
 
@@ -286,13 +278,6 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
     }
 
     func controlTextDidChange(_ notification: Notification) {
-        if notification.object as? NSTextField === backgroundTransparencyField {
-            if let transparency = parsedBackgroundTransparency {
-                backgroundTransparencyStepper?.doubleValue = transparency
-                mutate { $0.backgroundOpacity = 1 - transparency / 100 }
-            } else { onValidationChange() }
-            return
-        }
         if notification.object as? NSTextField === borderWidthField {
             if let width = parsedBorderWidth {
                 borderWidthStepper?.doubleValue = width
