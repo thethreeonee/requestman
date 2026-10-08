@@ -831,6 +831,7 @@ private final class RecordContentView: NSView {
         device.isHidden = true
         if field == .device, row.deviceSource != nil {
             device.update(source: row.deviceSource, alias: row.deviceAlias)
+            device.bezelColor = appearance.backgroundColor?.appKitColor
             device.title = content.displayText
             device.font = font
             device.isEnabled = !isPreview
@@ -859,6 +860,7 @@ private final class RecordContentView: NSView {
             for (tag, text) in zip(tags, displayLines) {
                 tag.isHidden = false
                 tag.setPresentation(presentation)
+                tag.bezelColor = appearance.backgroundColor?.appKitColor
                 tag.title = text
                 tag.font = font
                 tag.alignment = textAlignment

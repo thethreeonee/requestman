@@ -278,6 +278,37 @@ struct RequestLogLayoutTests {
             == .init(presentation: .roundedRectangleTag))
     }
 
+    @Test func contentBackgroundColorsSurviveLayoutSavingAndPresentationChanges() throws {
+        let color = RequestLogBackgroundColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 0.7)
+        var content = RequestLogLayoutContent(field: .method,
+            appearance: .init(presentation: .roundedRectangleTag, backgroundColor: color))
+        content.appearance.presentation = .plainText
+        content.field = .header
+        content.name = "X-ID"
+        var options = RequestLogDisplayOptions()
+        options.layoutColumns = [column([[content, .init(field: .status)]])]
+        let restored = try JSONDecoder().decode(RequestLogDisplayOptions.self, from: JSONEncoder().encode(options))
+        let contents = restored.layoutColumns[0].lines[0].contents
+        #expect(contents[0].appearance.backgroundColor == color)
+        #expect(contents[0].appearance.presentation == .plainText)
+        #expect(contents[1].appearance.backgroundColor == nil)
+        content.appearance.presentation = .capsule
+        #expect(content.appearance.backgroundColor == color)
+        content.appearance.backgroundColor = nil
+        let reset = try JSONDecoder().decode(RequestLogLayoutContent.self, from: JSONEncoder().encode(content))
+        #expect(reset.appearance.backgroundColor == nil)
+    }
+
+    @Test func backgroundColorDecodingKeepsLegacyDefaultsAndBoundsImportedComponents() throws {
+        let legacy = Data(#"{"presentation":"capsule"}"#.utf8)
+        #expect(try JSONDecoder().decode(RequestLogContentAppearance.self, from: legacy).backgroundColor == nil)
+        let imported = Data(#"{"backgroundColor":{"red":2,"green":-1,"blue":0.5}}"#.utf8)
+        let appearance = try JSONDecoder().decode(RequestLogContentAppearance.self, from: imported)
+        #expect(appearance.backgroundColor == RequestLogBackgroundColor(red: 1, green: 0, blue: 0.5, alpha: 1))
+        let invalid = RequestLogBackgroundColor(red: .nan, green: .infinity, blue: -1, alpha: 2)
+        #expect(invalid == .init(red: 0, green: 0, blue: 0, alpha: 1))
+    }
+
     @Test func everyTypedAppearanceEnumValueSurvivesCodableRoundTrip() throws {
         var appearances: [RequestLogContentAppearance] = []
         appearances += RequestLogFont.allCases.map { .init(font: $0) }

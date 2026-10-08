@@ -108,10 +108,40 @@ public enum RequestLogRepeatedValues: String, CaseIterable, Codable, Sendable {
     }
 }
 
+/// Portable sRGB components; nil on the appearance preserves the native background.
+public struct RequestLogBackgroundColor: Equatable, Codable, Sendable {
+    public let red: Double
+    public let green: Double
+    public let blue: Double
+    public let alpha: Double
+
+    public init(red: Double, green: Double, blue: Double, alpha: Double = 1) {
+        self.red = Self.component(red)
+        self.green = Self.component(green)
+        self.blue = Self.component(blue)
+        self.alpha = Self.component(alpha)
+    }
+
+    private static func component(_ value: Double) -> Double {
+        value.isFinite ? min(max(value, 0), 1) : 0
+    }
+
+    private enum CodingKeys: String, CodingKey { case red, green, blue, alpha }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(red: try values.decode(Double.self, forKey: .red),
+                  green: try values.decode(Double.self, forKey: .green),
+                  blue: try values.decode(Double.self, forKey: .blue),
+                  alpha: try values.decodeIfPresent(Double.self, forKey: .alpha) ?? 1)
+    }
+}
+
 /// Appearance belongs to each content instance and survives changing its field.
 /// Typed options remain saved when their field is not currently selected.
 public struct RequestLogContentAppearance: Equatable, Codable, Sendable {
     public var presentation: RequestLogContentPresentation
+    public var backgroundColor: RequestLogBackgroundColor?
     public var usesSemanticColors: Bool
     public var font: RequestLogFont
     public var weight: RequestLogFontWeight
@@ -138,8 +168,10 @@ public struct RequestLogContentAppearance: Equatable, Codable, Sendable {
                 timePrecision: RequestLogTimePrecision = .seconds, durationUnit: RequestLogDurationUnit = .automatic,
                 durationPrecision: RequestLogDecimalPrecision = .automatic, highlightsSlowRequests: Bool = false,
                 slowThresholdMilliseconds: Int = 1000, ruleSeparator: RequestLogRuleSeparator = .automatic,
-                repeatedValues: RequestLogRepeatedValues = .singleLine, showsValueCount: Bool = false) {
+                repeatedValues: RequestLogRepeatedValues = .singleLine, showsValueCount: Bool = false,
+                backgroundColor: RequestLogBackgroundColor? = nil) {
         self.presentation = presentation; self.usesSemanticColors = usesSemanticColors
+        self.backgroundColor = backgroundColor
         self.font = font; self.weight = weight; self.truncation = truncation
         self.emphasizesHost = emphasizesHost; self.showsStatusDescription = showsStatusDescription
         self.emphasizesErrors = emphasizesErrors; self.timePrecision = timePrecision
@@ -149,7 +181,7 @@ public struct RequestLogContentAppearance: Equatable, Codable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case presentation, usesSemanticColors, font, weight, truncation, emphasizesHost, showsStatusDescription
+        case presentation, backgroundColor, usesSemanticColors, font, weight, truncation, emphasizesHost, showsStatusDescription
         case emphasizesErrors, timePrecision, durationUnit, durationPrecision, highlightsSlowRequests
         case slowThresholdMilliseconds, ruleSeparator, repeatedValues, showsValueCount
     }
@@ -157,6 +189,7 @@ public struct RequestLogContentAppearance: Equatable, Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         presentation = try values.decodeIfPresent(RequestLogContentPresentation.self, forKey: .presentation) ?? .automatic
+        backgroundColor = try values.decodeIfPresent(RequestLogBackgroundColor.self, forKey: .backgroundColor)
         usesSemanticColors = try values.decodeIfPresent(Bool.self, forKey: .usesSemanticColors) ?? true
         font = try values.decodeIfPresent(RequestLogFont.self, forKey: .font) ?? .automatic
         weight = try values.decodeIfPresent(RequestLogFontWeight.self, forKey: .weight) ?? .automatic

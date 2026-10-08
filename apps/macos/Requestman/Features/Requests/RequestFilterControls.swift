@@ -131,12 +131,10 @@ final class RequestFilterControls: NSView {
     private func updateDisplayButton(customColumnCount count: Int) {
         guard customColumnCount != count else { return }
         customColumnCount = count
-        let active = count > 0
-        displayButton.updateSymbol("gauge.with.dots.needle.67percent",
-                                   activeSymbol: "gauge.with.dots.needle.67percent", active: active,
-                                   pointSize: 20)
-        displayButton.toolTip = active ? "显示选项（\(count) 列）" : "显示选项"
-        displayButton.setAccessibilityValue(active ? "\(count) 列" : "默认列布局")
+        displayButton.image = NSImage(systemSymbolName: "gauge.with.dots.needle.67percent", accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 20, weight: .semibold))
+        displayButton.toolTip = count > 0 ? "显示选项（\(count) 列）" : "显示选项"
+        displayButton.setAccessibilityValue(count > 0 ? "\(count) 列" : "默认列布局")
     }
     @objc private func selectPrimary() {
         guard primaryTypes.indices.contains(primary.selectedSegment) else { return }
@@ -333,14 +331,6 @@ private final class RequestFilterActionButton: NSButton {
         target = self; action = #selector(performAction(_:))
     }
     required init?(coder: NSCoder) { nil }
-    func updateSymbol(_ symbol: String, activeSymbol: String, active: Bool, pointSize: CGFloat? = nil) {
-        // Color only the SF Symbol's disc, leaving the native glass bezel untouched.
-        // At 28 pt the circular symbol fits the 36 pt bezel and renders centered.
-        let configuration = NSImage.SymbolConfiguration(pointSize: pointSize ?? (active ? 28 : 16), weight: .semibold)
-            .applying(NSImage.SymbolConfiguration(paletteColors: active ? [.white, .systemBlue] : [.labelColor]))
-        image = NSImage(systemSymbolName: active ? activeSymbol : symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(configuration)
-    }
     @objc private func performAction(_ sender: NSButton) { guard isEnabled else { return }; handler() }
 }
 

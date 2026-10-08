@@ -75,6 +75,9 @@ final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVal
         settingsWindow?.window?.makeKeyAndOrderFront(sender)
     }
     @objc private func showWorkspace(_ sender: Any?) { showSection(.rules) }
+    @objc private func toggleActiveWindowFullScreen(_ sender: Any?) {
+        NSApp.keyWindow?.toggleFullScreen(sender)
+    }
 
     private func showSection(_ section: WorkspaceSection) {
         if section == .requests, logsWindow == nil {
@@ -103,6 +106,12 @@ final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVal
         }
     }
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(toggleActiveWindowFullScreen(_:)) {
+            guard let window = NSApp.keyWindow else { return false }
+            item.title = window.styleMask.contains(.fullScreen) ? "退出全屏" : "进入全屏"
+            return window.styleMask.contains(.resizable) && window.attachedSheet == nil
+                && (window as? RequestLogsPanel)?.isTransitioningFullScreen != true
+        }
         guard item.action == WorkspaceCommand.action else { return true }
         return activeWorkspace?.validateMenuItem(item) ?? false
     }
@@ -161,6 +170,9 @@ final class WorkspaceAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVal
         main.target = self
         windows.addItem(withTitle: "最小化", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         windows.addItem(withTitle: "缩放", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        let fullScreen = windows.addItem(withTitle: "进入全屏", action: #selector(toggleActiveWindowFullScreen(_:)), keyEquivalent: "f")
+        fullScreen.target = self
+        fullScreen.keyEquivalentModifierMask = [.control, .command]
         windows.addItem(withTitle: "关闭窗口", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         NSApp.windowsMenu = windows
         NSApp.mainMenu = menu
@@ -176,7 +188,8 @@ final class WorkspaceWindowController: NSWindowController {
     init(model: WorkspaceModel, section: WorkspaceSection = .rules, openSettings: @escaping () -> Void) {
         self.model = model
         workspace = WorkspaceSplitController(model: model, snapshot: WorkspaceToolbarSnapshot(model: model, section: section), openSettings: openSettings)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
+        let frame = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let window: NSWindow = section == .requests ? RequestLogsPanel(contentRect: frame) : NSWindow(contentRect: frame,
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         super.init(window: window)
@@ -212,5 +225,79 @@ final class WorkspaceWindowController: NSWindowController {
                 self.presentError(self.model.errorMessage)
             }
         }
+    }
+}
+
+/// A keyable, nonactivating log window can inspect a browser without switching to
+/// the rules window's Space. Native full screen uses a separate collection mode.
+@MainActor
+private final class RequestLogsPanel: NSPanel, NSWindowDelegate {
+    private(set) var isTransitioningFullScreen = false
+
+    init(contentRect: NSRect) {
+        super.init(contentRect: contentRect,
+                   styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView, .nonactivatingPanel],
+                   backing: .buffered, defer: false)
+        delegate = self
+        hidesOnDeactivate = false
+        becomesKeyOnlyIfNeeded = false
+        applyOverlayBehavior()
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { styleMask.contains(.fullScreen) || isTransitioningFullScreen }
+
+    override func toggleFullScreen(_ sender: Any?) {
+        guard !isTransitioningFullScreen, attachedSheet == nil else { return }
+        isTransitioningFullScreen = true
+        if !styleMask.contains(.fullScreen) {
+            applyFullScreenBehavior()
+            makeMain()
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        super.toggleFullScreen(sender)
+    }
+
+    // Nonactivating panels retain keyboard focus while the browser's menu bar
+    // stays active, so handle this window command before another app's menu.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        if isKeyWindow, modifiers == [.control, .command], event.charactersIgnoringModifiers?.lowercased() == "f" {
+            toggleFullScreen(nil)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    private func applyOverlayBehavior() {
+        isFloatingPanel = true
+        level = .floating
+        collectionBehavior = [.canJoinAllApplications, .moveToActiveSpace, .fullScreenAuxiliary, .managed]
+    }
+
+    private func applyFullScreenBehavior() {
+        isFloatingPanel = false
+        level = .normal
+        collectionBehavior = [.fullScreenPrimary, .managed]
+    }
+
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        isTransitioningFullScreen = true
+        applyFullScreenBehavior()
+    }
+    func windowDidEnterFullScreen(_ notification: Notification) { isTransitioningFullScreen = false }
+    func windowWillExitFullScreen(_ notification: Notification) { isTransitioningFullScreen = true }
+    func windowDidExitFullScreen(_ notification: Notification) {
+        isTransitioningFullScreen = false
+        applyOverlayBehavior()
+    }
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+        isTransitioningFullScreen = false
+        applyOverlayBehavior()
+    }
+    func windowDidFailToExitFullScreen(_ window: NSWindow) {
+        isTransitioningFullScreen = false
+        applyFullScreenBehavior()
     }
 }

@@ -9,6 +9,9 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
     private var draftAppearance = RequestLogContentAppearance()
     private var thresholdField: NSTextField?
     private var thresholdRow: NSStackView?
+    private var backgroundRow: NSStackView?
+    private var backgroundColorWell: NSColorWell?
+    private var isDevice = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -26,11 +29,14 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
     }
 
     func configure(content: RequestLogLayoutContent?) {
+        backgroundColorWell?.deactivate()
         for child in arrangedSubviews { removeArrangedSubview(child); child.removeFromSuperview() }
         thresholdField = nil; thresholdRow = nil
+        backgroundRow = nil; backgroundColorWell = nil
         isHidden = content == nil
         guard let content else { return }
         draftAppearance = content.appearance
+        isDevice = content.field == .device
         addFullWidth(NativeUI.separator())
         addArrangedSubview(NativeUI.label("外观", size: 14, weight: .semibold))
         if content.field != .device {
@@ -38,6 +44,7 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
                  selected: draftAppearance.presentation.effectivePresentation,
                  title: \.title) { $0.presentation = $1 }
         }
+        makeBackgroundRow()
         menu("字体", values: RequestLogFont.allCases, selected: draftAppearance.font, title: \.title) { $0.font = $1 }
         menu("字重", values: RequestLogFontWeight.allCases, selected: draftAppearance.weight, title: \.title) { $0.weight = $1 }
         menu("省略", values: RequestLogTruncation.allCases, selected: draftAppearance.truncation, title: \.title) { $0.truncation = $1 }
@@ -70,6 +77,39 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
         default: break
         }
         updateThresholdVisibility()
+        updateBackgroundVisibility()
+    }
+
+    private func makeBackgroundRow() {
+        let well = NSColorWell(frame: .zero)
+        well.color = draftAppearance.backgroundColor?.appKitColor ?? .controlColor
+        well.target = self; well.action = #selector(changeBackgroundColor(_:))
+        well.setAccessibilityLabel("内容背景色")
+        let reset = NSButton(title: "恢复默认", target: self, action: #selector(resetBackgroundColor(_:)))
+        let controls = NativeUI.stack([well, reset], vertical: false, spacing: 8)
+        well.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        well.heightAnchor.constraint(equalToConstant: 26).isActive = true
+        let background = row("背景色", controls)
+        backgroundColorWell = well; backgroundRow = background
+        addFullWidth(background)
+    }
+
+    private func updateBackgroundVisibility() {
+        let presentation = draftAppearance.presentation.effectivePresentation
+        let visible = isDevice || presentation == .roundedRectangleTag || presentation == .capsule
+        backgroundRow?.isHidden = !visible
+        if !visible { backgroundColorWell?.deactivate() }
+    }
+
+    @objc private func changeBackgroundColor(_ sender: NSColorWell) {
+        guard let color = RequestLogBackgroundColor(appKitColor: sender.color) else { return }
+        mutate { $0.backgroundColor = color }
+    }
+
+    @objc private func resetBackgroundColor(_ sender: NSButton) {
+        backgroundColorWell?.deactivate()
+        backgroundColorWell?.color = .controlColor
+        mutate { $0.backgroundColor = nil }
     }
 
     private func menu<Value: Equatable>(_ label: String, values: [Value], selected: Value,
@@ -112,6 +152,7 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
     private func mutate(_ change: (inout RequestLogContentAppearance) -> Void) {
         change(&draftAppearance)
         updateThresholdVisibility()
+        updateBackgroundVisibility()
         onChange(draftAppearance)
         onValidationChange()
     }
@@ -139,6 +180,18 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
     private func addFullWidth(_ child: NSView) {
         addArrangedSubview(child)
         child.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
+    }
+}
+
+extension RequestLogBackgroundColor {
+    var appKitColor: NSColor {
+        NSColor(srgbRed: CGFloat(red), green: CGFloat(green), blue: CGFloat(blue), alpha: CGFloat(alpha))
+    }
+
+    init?(appKitColor: NSColor) {
+        guard let rgb = appKitColor.usingColorSpace(.sRGB) else { return nil }
+        self.init(red: Double(rgb.redComponent), green: Double(rgb.greenComponent),
+                  blue: Double(rgb.blueComponent), alpha: Double(rgb.alphaComponent))
     }
 }
 
