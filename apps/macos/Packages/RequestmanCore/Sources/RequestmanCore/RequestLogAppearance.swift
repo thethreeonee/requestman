@@ -20,6 +20,16 @@ public enum RequestLogContentPresentation: String, CaseIterable, Codable, Sendab
     }
 }
 
+public enum RequestLogBackgroundColorSource: String, CaseIterable, Codable, Sendable {
+    case custom, text
+    public var title: String {
+        switch self {
+        case .custom: "自定义"
+        case .text: "跟随文本"
+        }
+    }
+}
+
 public enum RequestLogBorderColorSource: String, CaseIterable, Codable, Sendable {
     case text, custom
     public var title: String {
@@ -155,6 +165,9 @@ public struct RequestLogBackgroundColor: Equatable, Codable, Sendable {
 public struct RequestLogContentAppearance: Equatable, Codable, Sendable {
     public var presentation: RequestLogContentPresentation
     public var backgroundColor: RequestLogBackgroundColor?
+    public var backgroundColorSource: RequestLogBackgroundColorSource
+    /// Applies only when the background follows text; custom RGBA retains its own alpha.
+    public var backgroundOpacity: Double
     public var borderColorSource: RequestLogBorderColorSource
     public var borderColor: RequestLogBackgroundColor?
     public var borderWidth: Double
@@ -177,6 +190,7 @@ public struct RequestLogContentAppearance: Equatable, Codable, Sendable {
     /// Bound the effective value without rewriting imported or saved configuration.
     public var effectiveSlowThresholdMilliseconds: Int { min(max(slowThresholdMilliseconds, 1), 3_600_000) }
     public var effectiveBorderWidth: Double { borderWidth.isFinite ? min(max(borderWidth, 0.5), 8) : 1 }
+    public var effectiveBackgroundOpacity: Double { backgroundOpacity.isFinite ? min(max(backgroundOpacity, 0), 1) : 0.15 }
 
     public init(presentation: RequestLogContentPresentation = .automatic, usesSemanticColors: Bool = true,
                 font: RequestLogFont = .automatic, weight: RequestLogFontWeight = .automatic,
@@ -187,10 +201,12 @@ public struct RequestLogContentAppearance: Equatable, Codable, Sendable {
                 slowThresholdMilliseconds: Int = 1000, ruleSeparator: RequestLogRuleSeparator = .automatic,
                 repeatedValues: RequestLogRepeatedValues = .singleLine, showsValueCount: Bool = false,
                 backgroundColor: RequestLogBackgroundColor? = nil,
+                backgroundColorSource: RequestLogBackgroundColorSource = .custom, backgroundOpacity: Double = 0.15,
                 borderColorSource: RequestLogBorderColorSource = .text,
                 borderColor: RequestLogBackgroundColor? = nil, borderWidth: Double = 1) {
         self.presentation = presentation; self.usesSemanticColors = usesSemanticColors
         self.backgroundColor = backgroundColor
+        self.backgroundColorSource = backgroundColorSource; self.backgroundOpacity = backgroundOpacity
         self.borderColorSource = borderColorSource; self.borderColor = borderColor; self.borderWidth = borderWidth
         self.font = font; self.weight = weight; self.truncation = truncation
         self.emphasizesHost = emphasizesHost; self.showsStatusDescription = showsStatusDescription
@@ -205,12 +221,15 @@ public struct RequestLogContentAppearance: Equatable, Codable, Sendable {
         case emphasizesErrors, timePrecision, durationUnit, durationPrecision, highlightsSlowRequests
         case slowThresholdMilliseconds, ruleSeparator, repeatedValues, showsValueCount
         case borderColorSource, borderColor, borderWidth
+        case backgroundColorSource, backgroundOpacity
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         presentation = try values.decodeIfPresent(RequestLogContentPresentation.self, forKey: .presentation) ?? .automatic
         backgroundColor = try values.decodeIfPresent(RequestLogBackgroundColor.self, forKey: .backgroundColor)
+        backgroundColorSource = try values.decodeIfPresent(RequestLogBackgroundColorSource.self, forKey: .backgroundColorSource) ?? .custom
+        backgroundOpacity = try values.decodeIfPresent(Double.self, forKey: .backgroundOpacity) ?? 0.15
         borderColorSource = try values.decodeIfPresent(RequestLogBorderColorSource.self, forKey: .borderColorSource) ?? .text
         borderColor = try values.decodeIfPresent(RequestLogBackgroundColor.self, forKey: .borderColor)
         borderWidth = try values.decodeIfPresent(Double.self, forKey: .borderWidth) ?? 1

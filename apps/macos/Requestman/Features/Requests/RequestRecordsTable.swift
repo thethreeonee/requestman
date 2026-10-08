@@ -766,6 +766,9 @@ private final class RecordContentView: NSView {
     private var emphasizesHost = false
     private var usesTags = false
     private var usesOutlines = false
+    private var backgroundColorSource = RequestLogBackgroundColorSource.custom
+    private var customBackgroundColor: NSColor?
+    private var backgroundOpacity: CGFloat = 0.15
     private var borderColorSource = RequestLogBorderColorSource.text
     private var customBorderColor: NSColor?
     private var measurement: RecordContentMeasurement?
@@ -807,6 +810,9 @@ private final class RecordContentView: NSView {
         let presentation = appearance.presentation.effectivePresentation
         usesTags = presentation == .roundedRectangleTag || presentation == .capsule
         usesOutlines = field != .device && presentation.isOutline
+        backgroundColorSource = appearance.backgroundColorSource
+        customBackgroundColor = appearance.backgroundColor?.appKitColor
+        backgroundOpacity = CGFloat(appearance.effectiveBackgroundOpacity)
         borderColorSource = appearance.borderColorSource
         customBorderColor = appearance.borderColor?.appKitColor
         emphasizesHost = field == .url && appearance.emphasizesHost
@@ -840,7 +846,6 @@ private final class RecordContentView: NSView {
         device.isHidden = true
         if field == .device, row.deviceSource != nil {
             device.update(source: row.deviceSource, alias: row.deviceAlias)
-            device.bezelColor = appearance.backgroundColor?.appKitColor
             device.title = content.displayText
             device.font = font
             device.isEnabled = !isPreview
@@ -869,7 +874,6 @@ private final class RecordContentView: NSView {
             for (tag, text) in zip(tags, displayLines) {
                 tag.isHidden = false
                 tag.setPresentation(presentation)
-                tag.bezelColor = appearance.backgroundColor?.appKitColor
                 tag.title = text
                 tag.font = font
                 tag.alignment = textAlignment
@@ -940,17 +944,22 @@ private final class RecordContentView: NSView {
 
     private func updateColors() {
         let color = selected ? NSColor.alternateSelectedControlTextColor : textColor
+        let background = backgroundColorSource == .text ? color.withAlphaComponent(backgroundOpacity) : customBackgroundColor
         for (label, text) in zip(labels, displayLines) {
             label.attributedStringValue = attributedText(text, color: color)
         }
         for (tag, text) in zip(tags, displayLines) {
+            tag.bezelColor = background
             tag.attributedTitle = attributedText(text, color: color)
         }
         for (outline, text) in zip(outlines, displayLines) {
             outline.label.attributedStringValue = attributedText(text, color: color)
             outline.borderColor = borderColorSource == .text ? color : customBorderColor ?? .separatorColor
         }
-        if !device.isHidden { device.attributedTitle = attributedText(device.title, color: color) }
+        if !device.isHidden {
+            device.bezelColor = background
+            device.attributedTitle = attributedText(device.title, color: color)
+        }
     }
 
     private func synchronizeOutlines(count: Int) {

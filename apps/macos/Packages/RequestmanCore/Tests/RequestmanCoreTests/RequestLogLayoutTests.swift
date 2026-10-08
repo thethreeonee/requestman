@@ -301,12 +301,51 @@ struct RequestLogLayoutTests {
 
     @Test func backgroundColorDecodingKeepsLegacyDefaultsAndBoundsImportedComponents() throws {
         let legacy = Data(#"{"presentation":"capsule"}"#.utf8)
-        #expect(try JSONDecoder().decode(RequestLogContentAppearance.self, from: legacy).backgroundColor == nil)
+        let legacyAppearance = try JSONDecoder().decode(RequestLogContentAppearance.self, from: legacy)
+        #expect(legacyAppearance.backgroundColor == nil)
+        #expect(legacyAppearance.backgroundColorSource == .custom)
+        #expect(legacyAppearance.backgroundOpacity == 0.15)
         let imported = Data(#"{"backgroundColor":{"red":2,"green":-1,"blue":0.5}}"#.utf8)
         let appearance = try JSONDecoder().decode(RequestLogContentAppearance.self, from: imported)
         #expect(appearance.backgroundColor == RequestLogBackgroundColor(red: 1, green: 0, blue: 0.5, alpha: 1))
+        #expect(appearance.backgroundColorSource == .custom)
         let invalid = RequestLogBackgroundColor(red: .nan, green: .infinity, blue: -1, alpha: 2)
         #expect(invalid == .init(red: 0, green: 0, blue: 0, alpha: 1))
+    }
+
+    @Test func textFollowingBackgroundsPersistWithoutDiscardingCustomColors() throws {
+        let color = RequestLogBackgroundColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 0.7)
+        for style in [RequestLogContentPresentation.roundedRectangleTag, .capsule] {
+            var content = RequestLogLayoutContent(field: .method,
+                appearance: .init(presentation: style, backgroundColor: color,
+                                  backgroundColorSource: .text, backgroundOpacity: 0.25))
+            content.field = .status
+            var options = RequestLogDisplayOptions()
+            options.layoutColumns = [column([[content, .init(field: .method)]])]
+            let restored = RequestLogDisplayOptions(preferences: options.preferences)
+            let contents = restored.layoutColumns[0].lines[0].contents
+            #expect(contents[0] == content)
+            #expect(contents[0].appearance.backgroundColor == color)
+            #expect(contents[0].appearance.backgroundColorSource == .text)
+            #expect(contents[0].appearance.backgroundOpacity == 0.25)
+            #expect(contents[1].appearance.backgroundColorSource == .custom)
+            content.appearance.presentation = .plainText
+            content.appearance.backgroundColorSource = .custom
+            let encoded = try JSONEncoder().encode(content)
+            #expect(try JSONDecoder().decode(RequestLogLayoutContent.self, from: encoded) == content)
+            #expect(content.appearance.backgroundColor?.alpha == 0.7)
+        }
+    }
+
+    @Test func backgroundOpacityBoundsImportedValuesWithoutRewritingConfiguration() throws {
+        for (saved, effective) in [(-1.0, 0.0), (0, 0), (0.15, 0.15), (1, 1), (2, 1)] {
+            let data = try JSONEncoder().encode(RequestLogContentAppearance(backgroundColorSource: .text, backgroundOpacity: saved))
+            let restored = try JSONDecoder().decode(RequestLogContentAppearance.self, from: data)
+            #expect(restored.backgroundOpacity == saved)
+            #expect(restored.effectiveBackgroundOpacity == effective)
+        }
+        #expect(RequestLogContentAppearance(backgroundOpacity: .nan).effectiveBackgroundOpacity == 0.15)
+        #expect(RequestLogContentAppearance(backgroundOpacity: .infinity).effectiveBackgroundOpacity == 0.15)
     }
 
     @Test func everyTypedAppearanceEnumValueSurvivesCodableRoundTrip() throws {
@@ -320,6 +359,7 @@ struct RequestLogLayoutTests {
         appearances += RequestLogRuleSeparator.allCases.map { .init(ruleSeparator: $0) }
         appearances += RequestLogRepeatedValues.allCases.map { .init(repeatedValues: $0) }
         appearances += RequestLogBorderColorSource.allCases.map { .init(borderColorSource: $0) }
+        appearances += RequestLogBackgroundColorSource.allCases.map { .init(backgroundColorSource: $0) }
         let data = try JSONEncoder().encode(appearances)
         #expect(try JSONDecoder().decode([RequestLogContentAppearance].self, from: data) == appearances)
     }
