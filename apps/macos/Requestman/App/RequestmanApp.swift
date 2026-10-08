@@ -241,7 +241,7 @@ private final class RequestLogsPanel: NSPanel, NSWindowDelegate {
         delegate = self
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = false
-        applyOverlayBehavior()
+        applyWindowedBehavior()
     }
     required init?(coder: NSCoder) { nil }
 
@@ -270,9 +270,9 @@ private final class RequestLogsPanel: NSPanel, NSWindowDelegate {
         return super.performKeyEquivalent(with: event)
     }
 
-    private func applyOverlayBehavior() {
-        isFloatingPanel = true
-        level = .floating
+    private func applyWindowedBehavior() {
+        isFloatingPanel = false
+        level = .normal
         collectionBehavior = [.canJoinAllApplications, .moveToActiveSpace, .fullScreenAuxiliary, .managed]
     }
 
@@ -290,11 +290,11 @@ private final class RequestLogsPanel: NSPanel, NSWindowDelegate {
     func windowWillExitFullScreen(_ notification: Notification) { isTransitioningFullScreen = true }
     func windowDidExitFullScreen(_ notification: Notification) {
         isTransitioningFullScreen = false
-        applyOverlayBehavior()
+        applyWindowedBehavior()
     }
     func windowDidFailToEnterFullScreen(_ window: NSWindow) {
         isTransitioningFullScreen = false
-        applyOverlayBehavior()
+        applyWindowedBehavior()
     }
     func windowDidFailToExitFullScreen(_ window: NSWindow) {
         isTransitioningFullScreen = false

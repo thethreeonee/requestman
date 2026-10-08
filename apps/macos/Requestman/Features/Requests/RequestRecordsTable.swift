@@ -758,6 +758,7 @@ private final class RecordContentView: NSView {
     private var tags: [RequestLogValueTag] = []
     private var outlines: [RequestLogValueOutline] = []
     private let device = DeviceSourceButton(usesGlass: false)
+    private lazy var deviceBackground = RequestLogValueBackground(button: device, presentation: .capsule)
     private var textColor = NSColor.labelColor
     private var field = RequestLogContentField.url
     private var displayLines: [String] = []
@@ -783,13 +784,13 @@ private final class RecordContentView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         clipsToBounds = true
-        addSubview(device)
+        addSubview(deviceBackground)
         device.onRename = { [weak self] in self?.onDeviceAliasChange($0, $1) }
     }
     required init?(coder: NSCoder) { nil }
 
     private var displayedViews: [NSView] {
-        if !device.isHidden { return [device] }
+        if !device.isHidden { return [deviceBackground] }
         if usesOutlines { return outlines.map { $0 as NSView } }
         return usesTags ? tags.map { $0 as NSView } : labels.map { $0 as NSView }
     }
@@ -844,12 +845,14 @@ private final class RecordContentView: NSView {
         synchronizeTags(count: usesTags ? displayLines.count : 0)
         synchronizeOutlines(count: usesOutlines ? displayLines.count : 0)
         device.isHidden = true
+        deviceBackground.isHidden = true
         if field == .device, row.deviceSource != nil {
             device.update(source: row.deviceSource, alias: row.deviceAlias)
             device.title = content.displayText
             device.font = font
             device.isEnabled = !isPreview
             device.isHidden = false
+            deviceBackground.isHidden = false
             device.alignment = textAlignment
             device.cell?.wraps = appearance.truncation == .none
             device.cell?.usesSingleLineMode = appearance.truncation != .none
@@ -874,12 +877,12 @@ private final class RecordContentView: NSView {
             for (tag, text) in zip(tags, displayLines) {
                 tag.isHidden = false
                 tag.setPresentation(presentation)
-                tag.title = text
-                tag.font = font
-                tag.alignment = textAlignment
-                tag.cell?.wraps = appearance.truncation == .none
-                tag.cell?.usesSingleLineMode = appearance.truncation != .none
-                tag.cell?.lineBreakMode = truncation
+                tag.button.title = text
+                tag.button.font = font
+                tag.button.alignment = textAlignment
+                tag.button.cell?.wraps = appearance.truncation == .none
+                tag.button.cell?.usesSingleLineMode = appearance.truncation != .none
+                tag.button.cell?.lineBreakMode = truncation
                 tag.toolTip = tooltip
                 tag.setAccessibilityLabel(title)
                 tag.setAccessibilityValue(text)
@@ -949,15 +952,15 @@ private final class RecordContentView: NSView {
             label.attributedStringValue = attributedText(text, color: color)
         }
         for (tag, text) in zip(tags, displayLines) {
-            tag.bezelColor = background
-            tag.attributedTitle = attributedText(text, color: color)
+            tag.backgroundColor = background
+            tag.button.attributedTitle = attributedText(text, color: color)
         }
         for (outline, text) in zip(outlines, displayLines) {
             outline.label.attributedStringValue = attributedText(text, color: color)
             outline.borderColor = borderColorSource == .text ? color : customBorderColor ?? .separatorColor
         }
         if !device.isHidden {
-            device.bezelColor = background
+            deviceBackground.backgroundColor = background
             device.attributedTitle = attributedText(device.title, color: color)
         }
     }
@@ -1085,6 +1088,7 @@ private struct RecordContentMeasurement {
             if isDevice || presentation == .capsule || presentation == .roundedRectangleTag {
                 let button = RequestLogValueCell(textCell: text)
                 button.bezelStyle = .accessoryBarAction
+                button.isBordered = appearance.backgroundColorSource != .text && appearance.backgroundColor == nil
                 button.controlSize = isDevice ? .small : .regular
                 cell = button
             } else {
@@ -1185,13 +1189,15 @@ private final class RequestLogValueOutline: NSBox {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-/// Adjust title layout and sizing while AppKit continues to render the native bezel.
+/// Share title layout and sizing between native bezels and explicit NSBox fills.
 @MainActor
 private final class RequestLogValueCell: NSButtonCell {
     private var measuringNativeSize = false
 
     private var paddingAdjustment: NSSize {
-        NSSize(width: -4, height: -1)
+        // A borderless button has no bezel padding. Supply the text inset used
+        // by the filled container, in both drawing and cell-size measurement.
+        isBordered ? NSSize(width: -4, height: -1) : NSSize(width: 4, height: 2)
     }
 
     override func drawTitle(_ title: NSAttributedString, withFrame frame: NSRect, in controlView: NSView) -> NSRect {
@@ -1228,25 +1234,63 @@ private final class RequestLogValueCell: NSButtonCell {
     }
 }
 
-/// Native tag appearance, with the log table retaining selection and actions.
+/// Explicit backgrounds use NSBox fill rather than a button tint that AppKit
+/// can suppress in inactive windows. The native button keeps its title metrics
+/// and, for device content, its normal action and accessibility behavior.
 @MainActor
-private final class RequestLogValueTag: NSButton {
-    init(presentation: RequestLogContentPresentation = .roundedRectangleTag) {
+private class RequestLogValueBackground: NSBox {
+    let button: NSButton
+    private var capsule = false
+    var backgroundColor: NSColor? {
+        didSet {
+            fillColor = backgroundColor ?? .clear
+            button.isBordered = backgroundColor == nil
+        }
+    }
+
+    init(button: NSButton, presentation: RequestLogContentPresentation) {
+        self.button = button
         super.init(frame: .zero)
-        cell = RequestLogValueCell(textCell: "")
+        boxType = .custom; borderType = .lineBorder; titlePosition = .noTitle
+        contentViewMargins = .zero; borderWidth = 0; borderColor = .clear
+        fillColor = .clear; isTransparent = false
+        contentView = button
+        setAccessibilityElement(false)
         setPresentation(presentation)
-        target = nil; action = nil
-        setAccessibilityRole(.staticText)
-        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     }
     required init?(coder: NSCoder) { nil }
+
     func setPresentation(_ presentation: RequestLogContentPresentation) {
-        let capsule = presentation.effectivePresentation == .capsule
-        // Share native metrics and colors; only the border shape changes.
-        bezelStyle = .accessoryBarAction
-        if #available(macOS 26.0, *) { borderShape = capsule ? .capsule : .roundedRectangle }
-        invalidateIntrinsicContentSize()
+        capsule = presentation.effectivePresentation == .capsule
+        button.bezelStyle = .accessoryBarAction
+        if #available(macOS 26.0, *) { button.borderShape = capsule ? .capsule : .roundedRectangle }
+        button.invalidateIntrinsicContentSize()
+        needsLayout = true
     }
+
+    override func layout() {
+        super.layout()
+        let maximumRadius = max(0, min(bounds.width, bounds.height) / 2)
+        let radius = capsule ? maximumRadius : min(6, maximumRadius)
+        if cornerRadius != radius { cornerRadius = radius }
+        button.frame = bounds
+    }
+}
+
+/// Read-only tags leave selection and actions with the log table.
+@MainActor
+private final class RequestLogValueTag: RequestLogValueBackground {
+    init(presentation: RequestLogContentPresentation = .roundedRectangleTag) {
+        let button = NSButton(frame: .zero)
+        button.cell = RequestLogValueCell(textCell: "")
+        button.target = nil; button.action = nil
+        button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        super.init(button: button, presentation: presentation)
+        button.setAccessibilityElement(false)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+    }
+    required init?(coder: NSCoder) { nil }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func accessibilityPerformPress() -> Bool { false }
 }
