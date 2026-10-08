@@ -1,11 +1,12 @@
 import Foundation
 
 public enum RequestLogContentPresentation: String, CaseIterable, Codable, Sendable {
-    case automatic, plainText, roundedRectangleTag, capsule
+    case automatic, plainText, roundedRectangleTag, capsule, roundedRectangleBorder, capsuleBorder
 
-    public static let selectableCases: [Self] = [.plainText, .roundedRectangleTag, .capsule]
+    public static let selectableCases: [Self] = [.plainText, .roundedRectangleTag, .capsule, .roundedRectangleBorder, .capsuleBorder]
     /// Keep the saved legacy value intact while displaying its existing text style.
     public var effectivePresentation: Self { self == .automatic ? .plainText : self }
+    public var isOutline: Bool { self == .roundedRectangleBorder || self == .capsuleBorder }
 
     public var title: String {
         switch self {
@@ -13,6 +14,18 @@ public enum RequestLogContentPresentation: String, CaseIterable, Codable, Sendab
         case .plainText: "纯文字"
         case .roundedRectangleTag: "圆角标签"
         case .capsule: "胶囊"
+        case .roundedRectangleBorder: "圆角边框"
+        case .capsuleBorder: "胶囊边框"
+        }
+    }
+}
+
+public enum RequestLogBorderColorSource: String, CaseIterable, Codable, Sendable {
+    case text, custom
+    public var title: String {
+        switch self {
+        case .text: "跟随文本"
+        case .custom: "自定义"
         }
     }
 }
@@ -108,7 +121,7 @@ public enum RequestLogRepeatedValues: String, CaseIterable, Codable, Sendable {
     }
 }
 
-/// Portable sRGB components; nil on the appearance preserves the native background.
+/// Portable sRGB components shared by background and border colors.
 public struct RequestLogBackgroundColor: Equatable, Codable, Sendable {
     public let red: Double
     public let green: Double
@@ -142,6 +155,9 @@ public struct RequestLogBackgroundColor: Equatable, Codable, Sendable {
 public struct RequestLogContentAppearance: Equatable, Codable, Sendable {
     public var presentation: RequestLogContentPresentation
     public var backgroundColor: RequestLogBackgroundColor?
+    public var borderColorSource: RequestLogBorderColorSource
+    public var borderColor: RequestLogBackgroundColor?
+    public var borderWidth: Double
     public var usesSemanticColors: Bool
     public var font: RequestLogFont
     public var weight: RequestLogFontWeight
@@ -160,6 +176,7 @@ public struct RequestLogContentAppearance: Equatable, Codable, Sendable {
 
     /// Bound the effective value without rewriting imported or saved configuration.
     public var effectiveSlowThresholdMilliseconds: Int { min(max(slowThresholdMilliseconds, 1), 3_600_000) }
+    public var effectiveBorderWidth: Double { borderWidth.isFinite ? min(max(borderWidth, 0.5), 8) : 1 }
 
     public init(presentation: RequestLogContentPresentation = .automatic, usesSemanticColors: Bool = true,
                 font: RequestLogFont = .automatic, weight: RequestLogFontWeight = .automatic,
@@ -169,9 +186,12 @@ public struct RequestLogContentAppearance: Equatable, Codable, Sendable {
                 durationPrecision: RequestLogDecimalPrecision = .automatic, highlightsSlowRequests: Bool = false,
                 slowThresholdMilliseconds: Int = 1000, ruleSeparator: RequestLogRuleSeparator = .automatic,
                 repeatedValues: RequestLogRepeatedValues = .singleLine, showsValueCount: Bool = false,
-                backgroundColor: RequestLogBackgroundColor? = nil) {
+                backgroundColor: RequestLogBackgroundColor? = nil,
+                borderColorSource: RequestLogBorderColorSource = .text,
+                borderColor: RequestLogBackgroundColor? = nil, borderWidth: Double = 1) {
         self.presentation = presentation; self.usesSemanticColors = usesSemanticColors
         self.backgroundColor = backgroundColor
+        self.borderColorSource = borderColorSource; self.borderColor = borderColor; self.borderWidth = borderWidth
         self.font = font; self.weight = weight; self.truncation = truncation
         self.emphasizesHost = emphasizesHost; self.showsStatusDescription = showsStatusDescription
         self.emphasizesErrors = emphasizesErrors; self.timePrecision = timePrecision
@@ -184,12 +204,16 @@ public struct RequestLogContentAppearance: Equatable, Codable, Sendable {
         case presentation, backgroundColor, usesSemanticColors, font, weight, truncation, emphasizesHost, showsStatusDescription
         case emphasizesErrors, timePrecision, durationUnit, durationPrecision, highlightsSlowRequests
         case slowThresholdMilliseconds, ruleSeparator, repeatedValues, showsValueCount
+        case borderColorSource, borderColor, borderWidth
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         presentation = try values.decodeIfPresent(RequestLogContentPresentation.self, forKey: .presentation) ?? .automatic
         backgroundColor = try values.decodeIfPresent(RequestLogBackgroundColor.self, forKey: .backgroundColor)
+        borderColorSource = try values.decodeIfPresent(RequestLogBorderColorSource.self, forKey: .borderColorSource) ?? .text
+        borderColor = try values.decodeIfPresent(RequestLogBackgroundColor.self, forKey: .borderColor)
+        borderWidth = try values.decodeIfPresent(Double.self, forKey: .borderWidth) ?? 1
         usesSemanticColors = try values.decodeIfPresent(Bool.self, forKey: .usesSemanticColors) ?? true
         font = try values.decodeIfPresent(RequestLogFont.self, forKey: .font) ?? .automatic
         weight = try values.decodeIfPresent(RequestLogFontWeight.self, forKey: .weight) ?? .automatic

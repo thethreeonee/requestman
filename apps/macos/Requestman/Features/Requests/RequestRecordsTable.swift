@@ -756,6 +756,7 @@ private final class RecordContentView: NSView {
     var onDeviceAliasChange: (String, String) -> Void = { _, _ in }
     private var labels: [NSTextField] = []
     private var tags: [RequestLogValueTag] = []
+    private var outlines: [RequestLogValueOutline] = []
     private let device = DeviceSourceButton(usesGlass: false)
     private var textColor = NSColor.labelColor
     private var field = RequestLogContentField.url
@@ -764,6 +765,9 @@ private final class RecordContentView: NSView {
     private var hostFont = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
     private var emphasizesHost = false
     private var usesTags = false
+    private var usesOutlines = false
+    private var borderColorSource = RequestLogBorderColorSource.text
+    private var customBorderColor: NSColor?
     private var measurement: RecordContentMeasurement?
     private var truncation = NSLineBreakMode.byTruncatingTail
     var horizontalAlignment = RequestLogHorizontalAlignment.left
@@ -783,6 +787,7 @@ private final class RecordContentView: NSView {
 
     private var displayedViews: [NSView] {
         if !device.isHidden { return [device] }
+        if usesOutlines { return outlines.map { $0 as NSView } }
         return usesTags ? tags.map { $0 as NSView } : labels.map { $0 as NSView }
     }
     func contentHeight(for width: CGFloat) -> CGFloat { measurement?.height(for: width) ?? 0 }
@@ -801,6 +806,9 @@ private final class RecordContentView: NSView {
         displayLines = content.displayText.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
         let presentation = appearance.presentation.effectivePresentation
         usesTags = presentation == .roundedRectangleTag || presentation == .capsule
+        usesOutlines = field != .device && presentation.isOutline
+        borderColorSource = appearance.borderColorSource
+        customBorderColor = appearance.borderColor?.appKitColor
         emphasizesHost = field == .url && appearance.emphasizesHost
         let status = content.text.split(whereSeparator: { $0.isWhitespace }).first.flatMap { Int($0) }
         let isError = (field == .status && status.map { $0 >= 400 } == true)
@@ -826,8 +834,9 @@ private final class RecordContentView: NSView {
         }
         let title = field.needsName ? field.title + "：" + configuration.displayTitle : field.title
         let tooltip = title + (field.stages.isEmpty ? "" : " · " + configuration.stage.title) + "\n" + content.text
-        synchronizeLabels(count: usesTags ? 0 : displayLines.count)
+        synchronizeLabels(count: usesTags || usesOutlines ? 0 : displayLines.count)
         synchronizeTags(count: usesTags ? displayLines.count : 0)
+        synchronizeOutlines(count: usesOutlines ? displayLines.count : 0)
         device.isHidden = true
         if field == .device, row.deviceSource != nil {
             device.update(source: row.deviceSource, alias: row.deviceAlias)
@@ -870,6 +879,19 @@ private final class RecordContentView: NSView {
                 tag.toolTip = tooltip
                 tag.setAccessibilityLabel(title)
                 tag.setAccessibilityValue(text)
+            }
+            for (outline, text) in zip(outlines, displayLines) {
+                outline.configure(appearance)
+                outline.label.stringValue = text
+                outline.label.font = font
+                outline.label.alignment = textAlignment
+                outline.label.maximumNumberOfLines = appearance.truncation == .none ? 0 : 1
+                outline.label.cell?.wraps = appearance.truncation == .none
+                outline.label.cell?.usesSingleLineMode = appearance.truncation != .none
+                outline.label.lineBreakMode = truncation
+                outline.toolTip = tooltip
+                outline.setAccessibilityLabel(title)
+                outline.setAccessibilityValue(text)
             }
         }
         toolTip = tooltip
@@ -924,7 +946,19 @@ private final class RecordContentView: NSView {
         for (tag, text) in zip(tags, displayLines) {
             tag.attributedTitle = attributedText(text, color: color)
         }
+        for (outline, text) in zip(outlines, displayLines) {
+            outline.label.attributedStringValue = attributedText(text, color: color)
+            outline.borderColor = borderColorSource == .text ? color : customBorderColor ?? .separatorColor
+        }
         if !device.isHidden { device.attributedTitle = attributedText(device.title, color: color) }
+    }
+
+    private func synchronizeOutlines(count: Int) {
+        while outlines.count > count { outlines.removeLast().removeFromSuperview() }
+        while outlines.count < count {
+            let outline = RequestLogValueOutline()
+            outlines.append(outline); addSubview(outline)
+        }
     }
 
     private func attributedText(_ text: String, color: NSColor) -> NSAttributedString {
@@ -999,6 +1033,7 @@ private struct RecordContentMeasurement {
     private struct Entry {
         let cell: NSCell
         let naturalSize: NSSize
+        let insets: NSSize
     }
     private let entries: [Entry]
     private let configuration: RequestLogLayoutContent
@@ -1013,6 +1048,7 @@ private struct RecordContentMeasurement {
         let isDevice = configuration.field == .device && row.deviceSource != nil
         self.wraps = wraps; self.isDevice = isDevice
         let presentation = appearance.presentation.effectivePresentation
+        let insets = configuration.field != .device && presentation.isOutline ? RequestLogValueOutline.insets(for: appearance) : .zero
         let status = content.text.split(whereSeparator: { $0.isWhitespace }).first.flatMap { Int($0) }
         let isError = configuration.field == .status && status.map { $0 >= 400 } == true
             || configuration.field == .detail && row.failure != nil
@@ -1061,17 +1097,19 @@ private struct RecordContentMeasurement {
             if let button = cell as? NSButtonCell { button.attributedTitle = attributed }
             else { cell.attributedStringValue = attributed }
             cell.wraps = false; cell.usesSingleLineMode = true
-            let natural = cell.cellSize
+            let textSize = cell.cellSize
+            let natural = NSSize(width: textSize.width + insets.width * 2, height: textSize.height + insets.height * 2)
             cell.wraps = wraps; cell.usesSingleLineMode = !wraps
             cell.lineBreakMode = lineBreak
-            return Entry(cell: cell, naturalSize: natural)
+            return Entry(cell: cell, naturalSize: natural, insets: insets)
         }
     }
 
     func layoutItem(index: Int) -> RecordLineItem {
         let desired = max(1, entries.map { ceil($0.naturalSize.width) }.max() ?? 1)
         let compact = [.method, .status, .time, .duration].contains(configuration.field)
-        let minimum = wraps ? 1 : min(desired, compact ? desired : configuration.field == .url ? 72 : 40)
+        let padding = entries.first.map { $0.insets.width * 2 } ?? 0
+        let minimum = wraps ? min(desired, padding + 1) : min(desired, compact ? desired : configuration.field == .url ? 72 : 40)
         let presentation = configuration.appearance.presentation.effectivePresentation
         return .init(index: index, horizontalAlignment: configuration.horizontalAlignment,
                      desiredWidth: desired, minimumWidth: minimum,
@@ -1080,10 +1118,11 @@ private struct RecordContentMeasurement {
 
     func heights(for width: CGFloat) -> [CGFloat] {
         entries.map { entry in
-            let size = wraps ? entry.cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: max(1, width),
+            let size = wraps ? entry.cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: max(1, width - entry.insets.width * 2),
                                                                      height: .greatestFiniteMagnitude))
                 : entry.naturalSize
-            return max(1, ceil(max(entry.naturalSize.height, size.height)))
+            let height = wraps ? size.height + entry.insets.height * 2 : size.height
+            return max(1, ceil(max(entry.naturalSize.height, height)))
         }
     }
 
@@ -1091,6 +1130,50 @@ private struct RecordContentMeasurement {
         let heights = heights(for: width)
         return heights.reduce(0, +) + CGFloat(max(0, heights.count - 1)) * RecordCell.lineSpacing
     }
+}
+
+/// Read-only outlined content uses NSBox's native line border and a native label.
+@MainActor
+private final class RequestLogValueOutline: NSBox {
+    let label = NSTextField(labelWithString: "")
+    private var capsule = false
+    private var textInsets = NSSize.zero
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        boxType = .custom; borderType = .lineBorder; titlePosition = .noTitle
+        contentViewMargins = .zero; fillColor = .clear; isTransparent = false
+        contentView = label
+        label.setAccessibilityElement(false)
+        setAccessibilityRole(.staticText)
+        clipsToBounds = true
+    }
+    convenience init() { self.init(frame: .zero) }
+    required init?(coder: NSCoder) { nil }
+
+    static func insets(for appearance: RequestLogContentAppearance) -> NSSize {
+        let width = CGFloat(appearance.effectiveBorderWidth)
+        return NSSize(width: width + 4, height: width + 2)
+    }
+
+    func configure(_ appearance: RequestLogContentAppearance) {
+        capsule = appearance.presentation == .capsuleBorder
+        borderWidth = CGFloat(appearance.effectiveBorderWidth)
+        textInsets = Self.insets(for: appearance)
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        let maximumRadius = max(0, min(bounds.width, bounds.height) / 2)
+        let radius = capsule ? maximumRadius : min(6, maximumRadius)
+        if cornerRadius != radius { cornerRadius = radius }
+        let horizontal = min(textInsets.width, max(0, bounds.width - 1) / 2)
+        let vertical = min(textInsets.height, max(0, bounds.height - 1) / 2)
+        label.frame = bounds.insetBy(dx: horizontal, dy: vertical)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 /// Adjust title layout and sizing while AppKit continues to render the native bezel.

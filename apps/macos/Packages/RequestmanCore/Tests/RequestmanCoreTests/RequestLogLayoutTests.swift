@@ -220,8 +220,8 @@ struct RequestLogLayoutTests {
     }
 
     @Test func selectablePresentationStylesExcludeLegacyAutomaticWithoutRewritingIt() throws {
-        #expect(RequestLogContentPresentation.selectableCases == [.plainText, .roundedRectangleTag, .capsule])
-        #expect(RequestLogContentPresentation.selectableCases.map(\.title) == ["纯文字", "圆角标签", "胶囊"])
+        #expect(RequestLogContentPresentation.selectableCases == [.plainText, .roundedRectangleTag, .capsule, .roundedRectangleBorder, .capsuleBorder])
+        #expect(RequestLogContentPresentation.selectableCases.map(\.title) == ["纯文字", "圆角标签", "胶囊", "圆角边框", "胶囊边框"])
         let restored = try JSONDecoder().decode(RequestLogContentAppearance.self,
                                                from: Data(#"{"presentation":"automatic"}"#.utf8))
         #expect(restored.presentation == .automatic)
@@ -319,8 +319,51 @@ struct RequestLogLayoutTests {
         appearances += RequestLogDecimalPrecision.allCases.map { .init(durationPrecision: $0) }
         appearances += RequestLogRuleSeparator.allCases.map { .init(ruleSeparator: $0) }
         appearances += RequestLogRepeatedValues.allCases.map { .init(repeatedValues: $0) }
+        appearances += RequestLogBorderColorSource.allCases.map { .init(borderColorSource: $0) }
         let data = try JSONEncoder().encode(appearances)
         #expect(try JSONDecoder().decode([RequestLogContentAppearance].self, from: data) == appearances)
+    }
+
+    @Test func outlineStylesAndIndependentBorderOptionsPersistInPreferences() throws {
+        let color = RequestLogBackgroundColor(red: 0.3, green: 0.6, blue: 0.9)
+        for style in [RequestLogContentPresentation.roundedRectangleBorder, .capsuleBorder] {
+            var content = RequestLogLayoutContent(field: .method,
+                appearance: .init(presentation: style, borderColorSource: .custom, borderColor: color, borderWidth: 2.5))
+            // Following text does not discard the custom color chosen for this item.
+            content.appearance.borderColorSource = .text
+            content.field = .status
+            content.stage = .returnedResponse
+            var options = RequestLogDisplayOptions()
+            options.layoutColumns = [column([[content, .init(field: .method)]])]
+            let restored = RequestLogDisplayOptions(preferences: options.preferences)
+            let contents = restored.layoutColumns[0].lines[0].contents
+            #expect(contents[0] == content)
+            #expect(contents[0].appearance.borderColor == color)
+            #expect(contents[0].appearance.borderColorSource == .text)
+            #expect(contents[0].appearance.borderWidth == 2.5)
+            #expect(contents[1].appearance.borderColor == nil)
+            #expect(contents[1].appearance.borderWidth == 1)
+            content.appearance.presentation = .plainText
+            content.appearance.borderColorSource = .custom
+            let encoded = try JSONEncoder().encode(content)
+            #expect(try JSONDecoder().decode(RequestLogLayoutContent.self, from: encoded) == content)
+        }
+    }
+
+    @Test func legacyOutlineDefaultsAndImportedWidthsRemainSafe() throws {
+        let legacy = Data(#"{"presentation":"capsule"}"#.utf8)
+        let appearance = try JSONDecoder().decode(RequestLogContentAppearance.self, from: legacy)
+        #expect(appearance.borderColorSource == .text)
+        #expect(appearance.borderColor == nil)
+        #expect(appearance.borderWidth == 1)
+        for (saved, effective) in [(-1.0, 0.5), (0, 0.5), (0.5, 0.5), (2.75, 2.75), (100, 8)] {
+            let data = try JSONEncoder().encode(RequestLogContentAppearance(borderWidth: saved))
+            let restored = try JSONDecoder().decode(RequestLogContentAppearance.self, from: data)
+            #expect(restored.borderWidth == saved)
+            #expect(restored.effectiveBorderWidth == effective)
+        }
+        #expect(RequestLogContentAppearance(borderWidth: .nan).effectiveBorderWidth == 1)
+        #expect(RequestLogContentAppearance(borderWidth: .infinity).effectiveBorderWidth == 1)
     }
 
     @Test func slowThresholdIsBoundedForUseWithoutRewritingSavedValue() throws {

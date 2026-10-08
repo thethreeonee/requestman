@@ -11,6 +11,11 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
     private var thresholdRow: NSStackView?
     private var backgroundRow: NSStackView?
     private var backgroundColorWell: NSColorWell?
+    private var borderRows: [NSStackView] = []
+    private var borderColorRow: NSStackView?
+    private var borderColorWell: NSColorWell?
+    private var borderWidthField: NSTextField?
+    private var borderWidthStepper: NSStepper?
     private var isDevice = false
 
     override init(frame frameRect: NSRect) {
@@ -21,18 +26,26 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
     required init?(coder: NSCoder) { nil }
 
     var validationError: String? {
-        guard !isHidden, draftAppearance.highlightsSlowRequests, let thresholdField else { return nil }
-        guard let value = Int(thresholdField.stringValue), (1...3_600_000).contains(value) else {
-            return "慢请求阈值须为 1–3600000 毫秒"
+        guard !isHidden else { return nil }
+        if draftAppearance.presentation.isOutline, borderWidthField != nil, parsedBorderWidth == nil {
+            return "边框粗细须为 0.5–8 pt"
+        }
+        if draftAppearance.highlightsSlowRequests, let thresholdField {
+            guard let value = Int(thresholdField.stringValue), (1...3_600_000).contains(value) else {
+                return "慢请求阈值须为 1–3600000 毫秒"
+            }
         }
         return nil
     }
 
     func configure(content: RequestLogLayoutContent?) {
         backgroundColorWell?.deactivate()
+        borderColorWell?.deactivate()
         for child in arrangedSubviews { removeArrangedSubview(child); child.removeFromSuperview() }
         thresholdField = nil; thresholdRow = nil
         backgroundRow = nil; backgroundColorWell = nil
+        borderRows = []; borderColorRow = nil; borderColorWell = nil
+        borderWidthField = nil; borderWidthStepper = nil
         isHidden = content == nil
         guard let content else { return }
         draftAppearance = content.appearance
@@ -45,6 +58,7 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
                  title: \.title) { $0.presentation = $1 }
         }
         makeBackgroundRow()
+        makeBorderRows()
         menu("字体", values: RequestLogFont.allCases, selected: draftAppearance.font, title: \.title) { $0.font = $1 }
         menu("字重", values: RequestLogFontWeight.allCases, selected: draftAppearance.weight, title: \.title) { $0.weight = $1 }
         menu("省略", values: RequestLogTruncation.allCases, selected: draftAppearance.truncation, title: \.title) { $0.truncation = $1 }
@@ -78,6 +92,7 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
         }
         updateThresholdVisibility()
         updateBackgroundVisibility()
+        updateBorderVisibility()
     }
 
     private func makeBackgroundRow() {
@@ -112,8 +127,70 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
         mutate { $0.backgroundColor = nil }
     }
 
+    private func makeBorderRows() {
+        let source = menu("边框颜色", values: RequestLogBorderColorSource.allCases,
+                          selected: draftAppearance.borderColorSource, title: \.title) { $0.borderColorSource = $1 }
+        let well = NSColorWell(frame: .zero)
+        well.color = draftAppearance.borderColor?.appKitColor ?? .separatorColor
+        well.target = self; well.action = #selector(changeBorderColor(_:))
+        well.setAccessibilityLabel("自定义边框颜色")
+        let reset = NSButton(title: "恢复默认", target: self, action: #selector(resetBorderColor(_:)))
+        let picker = row("自定义颜色", NativeUI.stack([well, reset], vertical: false, spacing: 8))
+        well.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        well.heightAnchor.constraint(equalToConstant: 26).isActive = true
+        addFullWidth(picker)
+
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal; formatter.allowsFloats = true
+        formatter.minimum = 0.5; formatter.maximum = 8; formatter.maximumFractionDigits = 2
+        let field = NSTextField()
+        field.formatter = formatter; field.delegate = self
+        field.doubleValue = draftAppearance.effectiveBorderWidth
+        field.setAccessibilityLabel("边框粗细，pt，0.5 到 8")
+        let stepper = NSStepper()
+        stepper.minValue = 0.5; stepper.maxValue = 8; stepper.increment = 0.5
+        stepper.valueWraps = false; stepper.doubleValue = draftAppearance.effectiveBorderWidth
+        stepper.target = self; stepper.action = #selector(changeBorderWidth(_:))
+        stepper.setAccessibilityLabel("调整边框粗细")
+        let width = row("边框粗细", NativeUI.stack([field, stepper, NativeUI.label("pt", secondary: true)], vertical: false, spacing: 6))
+        addFullWidth(width)
+        borderRows = [source, picker, width]; borderColorRow = picker; borderColorWell = well
+        borderWidthField = field; borderWidthStepper = stepper
+    }
+
+    private var parsedBorderWidth: Double? {
+        guard let field = borderWidthField, let formatter = field.formatter as? NumberFormatter,
+              let value = formatter.number(from: field.stringValue)?.doubleValue,
+              value.isFinite, (0.5...8).contains(value) else { return nil }
+        return value
+    }
+
+    private func updateBorderVisibility() {
+        let visible = !isDevice && draftAppearance.presentation.isOutline
+        for row in borderRows { row.isHidden = !visible }
+        let custom = visible && draftAppearance.borderColorSource == .custom
+        borderColorRow?.isHidden = !custom
+        if !custom { borderColorWell?.deactivate() }
+    }
+
+    @objc private func changeBorderColor(_ sender: NSColorWell) {
+        guard let color = RequestLogBackgroundColor(appKitColor: sender.color) else { return }
+        mutate { $0.borderColor = color }
+    }
+
+    @objc private func resetBorderColor(_ sender: NSButton) {
+        borderColorWell?.deactivate(); borderColorWell?.color = .separatorColor
+        mutate { $0.borderColor = nil }
+    }
+
+    @objc private func changeBorderWidth(_ sender: NSStepper) {
+        borderWidthField?.doubleValue = sender.doubleValue
+        mutate { $0.borderWidth = sender.doubleValue }
+    }
+
+    @discardableResult
     private func menu<Value: Equatable>(_ label: String, values: [Value], selected: Value,
-                                        title: KeyPath<Value, String>, change: @escaping (inout RequestLogContentAppearance, Value) -> Void) {
+                                        title: KeyPath<Value, String>, change: @escaping (inout RequestLogContentAppearance, Value) -> Void) -> NSStackView {
         let control = RequestLogAppearancePopUp(titles: values.map { $0[keyPath: title] }) { [weak self] index in
             guard let self, values.indices.contains(index) else { return }
             mutate { change(&$0, values[index]) }
@@ -121,7 +198,9 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
         control.selectItem(at: values.firstIndex(of: selected) ?? 0)
         if #available(macOS 26.0, *) { control.borderShape = .capsule }
         control.setAccessibilityLabel(label)
-        addFullWidth(row(label, control))
+        let result = row(label, control)
+        addFullWidth(result)
+        return result
     }
 
     private func toggle(_ label: String, selected: Bool, change: @escaping (inout RequestLogContentAppearance, Bool) -> Void) {
@@ -153,11 +232,19 @@ final class RequestLogContentAppearanceEditor: NSStackView, NSTextFieldDelegate 
         change(&draftAppearance)
         updateThresholdVisibility()
         updateBackgroundVisibility()
+        updateBorderVisibility()
         onChange(draftAppearance)
         onValidationChange()
     }
 
     func controlTextDidChange(_ notification: Notification) {
+        if notification.object as? NSTextField === borderWidthField {
+            if let width = parsedBorderWidth {
+                borderWidthStepper?.doubleValue = width
+                mutate { $0.borderWidth = width }
+            } else { onValidationChange() }
+            return
+        }
         guard notification.object as? NSTextField === thresholdField, let thresholdField else { return }
         if let value = Int(thresholdField.stringValue), (1...3_600_000).contains(value) {
             mutate { $0.slowThresholdMilliseconds = value }
